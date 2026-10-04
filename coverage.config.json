@@ -1,0 +1,19 @@
+{
+  "roots": [
+    "apps/worker/src",
+    "apps/web/src",
+    "packages/contract/src",
+    "scripts/lib"
+  ],
+  "complexityRoots": [
+    "apps/worker/src",
+    "apps/web/src",
+    "packages/contract/src",
+    "scripts"
+  ],
+  "extensions": [".ts", ".tsx"],
+  "generatedInventory": "docs/verification/generated-components.json",
+  "maximum": 8,
+  "coverage": "own-statements",
+  "complexity": "classic"
+}

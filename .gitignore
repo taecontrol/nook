@@ -3,6 +3,8 @@ dist/
 .wrangler/
 .local/
 coverage/
+.env*
+.dev.vars*
 .work/
 .e2e/artifacts/
 .e2e/sessions/

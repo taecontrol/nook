@@ -1,0 +1,26 @@
+# Deployment configuration
+
+Each installation belongs to one owner in their Cloudflare account. Account IDs, hostnames, Access settings, and credentials stay outside source. `wrangler.jsonc` disables `workers.dev` and preview URLs. Static documents and assets are served by the asset layer; Cloudflare Access must protect the entire hostname, including those paths.
+
+The installation owner supplies the following settings:
+
+| Name | Destination | Source |
+| --- | --- | --- |
+| `CLOUDFLARE_ACCOUNT_ID` | GitHub repository **Settings → Secrets and variables → Actions → Variables** | Cloudflare **Workers & Pages → Account Details → Account ID**, or dashboard search **Copy account ID**. |
+| `NOOK_HOSTNAME` | The same GitHub repository variables | The installation's hostname, without scheme or path. Its DNS zone must be active in the chosen Cloudflare account. |
+| `CLOUDFLARE_API_TOKEN` | GitHub repository **Settings → Secrets and variables → Actions → Secrets** | Create an account API token from the **Edit Cloudflare Workers** permission template, scoped to this account and the hostname's zone. Initial creation requires the Workers product **Admin** role; an **Editor** can maintain an existing Worker. Changing a custom domain also needs **Zone → Workers Routes → Write** for that zone. |
+| `ACCESS_ISSUER` | Worker **nook → Settings → Variables and Secrets**, type **Secret** | `https://<team-name>.cloudflareaccess.com`, with no trailing slash. Find the team name under **Zero Trust → Settings**. |
+| `ACCESS_AUDIENCE` | The same Worker secrets | **Zero Trust → Access controls → Applications → the Nook application → Configure → Additional settings → Application Audience (AUD) Tag**. |
+| `OWNER_EMAIL` | The same Worker secrets | The exact email the owner's identity provider supplies to Access; use the same identity in the application's Allow policy. |
+
+Never paste secret values into an agent conversation, commit them, or put them in command arguments or logs. Set them directly through their dashboards. No local secret file is necessary.
+
+Before the first deployment, create a self-hosted Access application with a public hostname matching the installation's entire hostname, with the path left empty. Choose the owner's identity provider and an Allow policy for the owner's email. Avoid a narrower path application or a bypass policy, because the static shell and hashed assets rely on Access at the edge. The full Access provisioning guide belongs to the installation work.
+
+After merging the change, wait for **Verify** to succeed on the exact `main` commit. In GitHub **Actions → Deploy → Run workflow**, select **main**. The workflow checks that commit's successful Verify run, runs `pnpm verify` again without production credentials, and only then deploys using the repository settings. Dispatches on other branches skip the deployment job.
+
+The first workflow deployment creates the `nook` Worker and custom domain. If the Worker did not already exist, add its three Access secrets through the Worker settings afterwards and apply the secret changes there. Until all three exist, every Worker request returns 401. Later workflow deployments preserve those secrets. The owner can also provision the Worker secrets beforehand through their own Cloudflare administration.
+
+Complete production acceptance by recording a successful main deployment and a skipped non-main dispatch. In a fresh signed-out browser, confirm that `/`, a real hashed JavaScript asset, `/api/whoami`, and `/mcp` redirect to Access or are denied; none may serve the app or asset. Then sign in as the owner and capture the shell showing that identity. Retain outcomes and screenshots without cookies, JWTs, or secret values.
+
+Sources: [Access application](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/), [account ID](https://developers.cloudflare.com/fundamentals/account/find-account-and-zone-ids/), [CI authentication](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/), [Worker permissions](https://developers.cloudflare.com/workers/authorization/workers/), [Access audience and issuer](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/), [Worker secrets](https://developers.cloudflare.com/workers/configuration/secrets/).

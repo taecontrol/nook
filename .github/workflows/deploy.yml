@@ -1,0 +1,43 @@
+name: Deploy
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Require green main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh run list --repo "$GITHUB_REPOSITORY" --workflow verify.yml --branch main --commit "$GITHUB_SHA" --json status,conclusion --jq 'map(select(.status == "completed" and .conclusion == "success")) | length')" -gt 0
+      - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
+        with:
+          version: 12.8.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26.10.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install chromium
+      - run: pnpm verify
+      - name: Deploy the configured installation
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          NOOK_HOSTNAME: ${{ vars.NOOK_HOSTNAME }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$NOOK_HOSTNAME"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          pnpm exec wrangler deploy --domain "$NOOK_HOSTNAME"

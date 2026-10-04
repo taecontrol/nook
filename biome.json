@@ -1,0 +1,23 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  "files": {
+    "includes": [
+      "**",
+      "!!**/node_modules",
+      "!!.local",
+      "!!.work",
+      "!!.git",
+      "!!dist",
+      "!!.wrangler",
+      "!!.e2e",
+      "!apps/web/src/components/ui",
+      "!apps/web/src/hooks/use-mobile.ts"
+    ],
+    "ignoreUnknown": true
+  },
+  "formatter": { "enabled": true, "indentStyle": "space" },
+  "linter": { "enabled": true, "rules": { "preset": "recommended" } },
+  "javascript": { "formatter": { "quoteStyle": "single" } },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "css": { "parser": { "tailwindDirectives": true } }
+}

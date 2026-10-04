@@ -1,0 +1,10 @@
+{
+  "name": "@nook/worker",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@nook/contract": "workspace:*",
+    "effect": "4.0.0",
+    "jose": "6.2.12"
+  }
+}
