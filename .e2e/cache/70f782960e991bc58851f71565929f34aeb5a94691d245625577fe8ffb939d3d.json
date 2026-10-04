@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "trace-1",
+  "createdAt": "2026-10-04T18:48:40.329Z",
+  "payload": {
+    "actions": [
+      {
+        "name": "type",
+        "summary": "type \"work/acme\" into textbox \"New bucket path\" in \"/\"",
+        "target": {
+          "role": "textbox",
+          "name": "New bucket path",
+          "placeholder": "New bucket path",
+          "within": "/"
+        },
+        "value": "work/acme"
+      },
+      {
+        "name": "tap",
+        "summary": "tap button \"Create\"",
+        "target": {
+          "role": "button",
+          "name": "Create"
+        }
+      }
+    ],
+    "executor": {
+      "name": "e2e-default-agent",
+      "version": "2"
+    },
+    "recordedFor": {
+      "testId": "tests/journeys/owner.e2e.ts::E13%3A%20the%20owner%20creates%20work%2Facme%20inside%20work",
+      "targetId": "chromium",
+      "instructionDigest": "d9df9253fe1829f43cfe256694c8aeb8849ee3fce79b801d6f6f665b7827940b"
+    },
+    "summary": "Created work/acme using the New bucket path field and Create button. The bucket outline now shows work with nested acme and an Actions for work/acme button; the path field has cleared.",
+    "startPath": "/buckets",
+    "endPath": "/buckets",
+    "endAnchors": [
+      {
+        "text": "work/acme"
+      },
+      {
+        "text": "work"
+      },
+      {
+        "role": "button",
+        "name": "Expand all"
+      },
+      {
+        "role": "button",
+        "name": "Collapse all"
+      },
+      {
+        "role": "button",
+        "name": "Collapse work"
+      },
+      {
+        "role": "button",
+        "name": "Actions for work"
+      },
+      {
+        "text": "acme"
+      },
+      {
+        "role": "button",
+        "name": "Actions for work/acme"
+      }
+    ],
+    "endWaitMs": 15064
+  }
+}

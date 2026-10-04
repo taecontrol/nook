@@ -30,8 +30,7 @@ in configuration, never in code.
 - Every operation is authorized against the caller's bucket grant and has a
   test proving that it denies a path outside the grant.
 - The web app must feel instant. Preload routes and data on intent, cache
-  queries, apply predictable writes optimistically, and stay within the
-  bundle budget.
+  queries, apply predictable writes optimistically, and stay within the load-time budgets: a cold open shows its first screen within 1 s on a 4G phone network, and navigation after intent within 100 ms.
 - The CLI keeps its token in the operating system keyring, never in a file.
 
 ## Interface

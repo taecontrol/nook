@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import type { FileCoverageData } from 'istanbul-lib-coverage';
@@ -172,10 +172,14 @@ it('coverage inventories original TypeScript, omits unchanged generated primitiv
   expect(paths).toContain('apps/web/src/identity.ts');
   expect(paths).toContain('packages/contract/src/index.ts');
   expect(paths).not.toContain('apps/web/src/components/ui/button.tsx');
+  expect(paths).not.toContain('apps/web/src/components/ui/spinner.tsx');
   const observed = await instrument('apps/worker/src/auth.ts');
   expect(Object.keys(observed.baseline.fnMap).length).toBeGreaterThan(0);
   const source = await sourceIdentity();
   expect(source.files['apps/worker/src/auth.ts']).toBe(observed.hash);
+  expect(source.files['migrations/0001_buckets.sql']).toBe(
+    digest(await readFile('migrations/0001_buckets.sql')),
+  );
   expect(source.digest).toBe(digest(JSON.stringify(source.files)));
 });
 

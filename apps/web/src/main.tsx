@@ -3,9 +3,12 @@ import {
   createRootRouteWithContext,
   createRoute,
   createRouter,
+  lazyRouteComponent,
   RouterProvider,
 } from '@tanstack/react-router';
 import { createRoot } from 'react-dom/client';
+import { preloadBuckets } from './buckets-api';
+import { Home } from './home';
 import { identityOptions } from './identity';
 import { Shell } from './shell';
 import './index.css';
@@ -24,9 +27,21 @@ const root = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   },
   notFoundComponent: () => null,
 });
-const home = createRoute({ getParentRoute: () => root, path: '/' });
+const home = createRoute({
+  getParentRoute: () => root,
+  path: '/',
+  component: Home,
+});
+const buckets = createRoute({
+  getParentRoute: () => root,
+  path: '/buckets',
+  component: lazyRouteComponent(() => import('./buckets-page'), 'BucketsPage'),
+  loader: ({ context }) => {
+    preloadBuckets(context.queryClient);
+  },
+});
 const router = createRouter({
-  routeTree: root.addChildren([home]),
+  routeTree: root.addChildren([home, buckets]),
   context: { queryClient },
   defaultPreload: 'intent',
   defaultPreloadStaleTime: 0,

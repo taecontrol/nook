@@ -1,4 +1,5 @@
-import { Box, Brain, KeyRound, UserRound } from 'lucide-react';
+import { Link, useRouterState } from '@tanstack/react-router';
+import { Box, Brain, KeyRound, ListTree, UserRound } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import {
@@ -12,6 +13,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from '@/components/ui/sidebar';
 import type { Session } from './identity';
 import { OwnerMenu } from './owner-menu';
@@ -28,19 +30,43 @@ const footerText = {
 };
 
 export function AppSidebar({ session }: { session: Session }) {
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  });
+  const { setOpenMobile } = useSidebar();
+  const close = () => setOpenMobile(false);
   return (
     <Sidebar collapsible="offcanvas">
       <SidebarHeader className="px-4 py-6">
-        <div className="flex items-center gap-3">
+        <Link
+          to="/"
+          onClick={close}
+          className="flex items-center gap-3 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+        >
           <Avatar className="size-9 rounded-lg">
             <AvatarFallback className="rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
               <Box className="size-5" />
             </AvatarFallback>
           </Avatar>
           <span className="text-lg font-semibold tracking-tight">Nook</span>
-        </div>
+        </Link>
       </SidebarHeader>
       <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel>Platform</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={pathname === '/buckets'}>
+                  <Link to="/buckets" onClick={close}>
+                    <ListTree />
+                    <span>Buckets</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
         <SidebarGroup>
           <SidebarGroupLabel>Tools</SidebarGroupLabel>
           <SidebarGroupContent>

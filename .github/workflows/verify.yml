@@ -28,6 +28,7 @@ jobs:
       - run: pnpm verify:ui
       - run: pnpm verify:types
       - run: pnpm verify:complexity
+      - run: pnpm verify:migrations
   tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -39,6 +40,8 @@ jobs:
       E2E_TELEMETRY_DISABLED: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
         with:
           version: 12.8.1
@@ -96,4 +99,5 @@ jobs:
       - run: pnpm coverage:merge "$RUNNER_TEMP"/shards/coverage-*
       - run: pnpm verify:crap
       - run: pnpm build
-      - run: pnpm verify:bundle
+      - run: pnpm exec playwright install chromium
+      - run: pnpm verify:load-time

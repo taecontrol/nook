@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { Miniflare } from 'miniflare';
 import { unstable_readConfig } from 'wrangler';
+import { applyMigrations } from './lib/migrations.ts';
 
 export function runtimeOptions(options: {
   port: number;
@@ -32,6 +33,10 @@ export function runtimeOptions(options: {
     compatibilityDate: config.compatibility_date,
     compatibilityFlags: config.compatibility_flags,
     bindings,
+    d1Databases: (config.d1_databases ?? []).map(
+      (database: { binding: string }) => database.binding,
+    ),
+    d1Persist: false,
     outboundService: options.outboundService,
     assets: {
       directory: resolve(options.directory, 'assets'),
@@ -59,6 +64,8 @@ export async function startRuntime(
   const runtime = new Miniflare(settings);
   try {
     await runtime.ready;
+    for (const binding of settings.d1Databases)
+      await applyMigrations(await runtime.getD1Database(binding));
     return { runtime, settings };
   } catch (error) {
     await runtime.dispose();

@@ -1,7 +1,7 @@
 # ADR-0002: Hierarchical buckets as the authorization boundary for every tool
 
 Date: 2026-10-03
-Status: Accepted
+Status: Accepted (similar-name creation feedback superseded by [ADR-0008](0008-delete-empty-buckets-to-correct-mistakes.md))
 
 ## Context
 

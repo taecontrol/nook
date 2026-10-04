@@ -1,5 +1,9 @@
 name: Deploy
 on:
+  workflow_run:
+    workflows: [Verify]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -7,20 +11,46 @@ permissions:
 concurrency:
   group: production-deploy
   cancel-in-progress: false
+env:
+  DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 jobs:
+  latest:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' && vars.NOOK_HOSTNAME != '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      current: ${{ steps.main.outputs.current }}
+    steps:
+      - name: Skip commits that main has moved past
+        id: main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [ "$head" = "$DEPLOY_SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "main is at $head; a later run deploys it."
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
   deploy:
-    if: github.ref == 'refs/heads/main'
+    needs: latest
+    if: needs.latest.outputs.current == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.DEPLOY_SHA }}
           fetch-depth: 0
       - name: Require green main
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "$(gh run list --repo "$GITHUB_REPOSITORY" --workflow verify.yml --branch main --commit "$GITHUB_SHA" --json status,conclusion --jq 'map(select(.status == "completed" and .conclusion == "success")) | length')" -gt 0
+          test "$(gh run list --repo "$GITHUB_REPOSITORY" --workflow verify.yml --branch main --commit "$DEPLOY_SHA" --json status,conclusion --jq 'map(select(.status == "completed" and .conclusion == "success")) | length')" -gt 0
       - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
         with:
           version: 12.8.1
@@ -40,4 +70,9 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           test -n "$NOOK_HOSTNAME"
           test -n "$CLOUDFLARE_API_TOKEN"
+          databases=$(pnpm exec wrangler d1 list --json)
+          if ! printf '%s' "$databases" | node --input-type=module -e 'let input=""; for await (const part of process.stdin) input+=part; process.exit(JSON.parse(input).some(db => db.name === "nook") ? 0 : 1)'; then
+            pnpm exec wrangler d1 create nook
+          fi
+          pnpm exec wrangler d1 migrations apply DB --remote
           pnpm exec wrangler deploy --domain "$NOOK_HOSTNAME"

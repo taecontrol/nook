@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { delimiter, resolve } from 'node:path';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 
 const expression = (value: string) => ['$', '{{ ', value, ' }}'].join('');
@@ -54,6 +54,7 @@ it('E17: PR CI runs static checks, three test shards and a final coverage/build/
     'pnpm verify:ui',
     'pnpm verify:types',
     'pnpm verify:complexity',
+    'pnpm verify:migrations',
   ]);
   expect(ci.jobs.tests.strategy.matrix.shard).toEqual([1, 2, 3]);
   expect(
@@ -70,7 +71,21 @@ it('E17: PR CI runs static checks, three test shards and a final coverage/build/
     .map((step: { run: string }) => step.run);
   expect(commands).toContain('pnpm verify:crap');
   expect(commands).toContain('pnpm build');
-  expect(commands).toContain('pnpm verify:bundle');
+  expect(commands).toContain('pnpm verify:load-time');
+  expect(commands.indexOf('pnpm build')).toBeGreaterThan(
+    commands.indexOf('pnpm verify:crap'),
+  );
+  expect(commands.indexOf('pnpm verify:load-time')).toBeGreaterThan(
+    commands.indexOf('pnpm build'),
+  );
+  for (const job of Object.values(ci.jobs) as {
+    steps: { uses?: string; with?: { 'fetch-depth'?: number } }[];
+  }[]) {
+    expect(
+      job.steps.find((step) => step.uses?.startsWith('actions/checkout@'))
+        ?.with?.['fetch-depth'],
+    ).toBe(0);
+  }
   expect(
     commands.some((command: string) => command.includes('coverage:merge')),
   ).toBe(true);
@@ -79,10 +94,61 @@ it('E17: PR CI runs static checks, three test shards and a final coverage/build/
   );
 });
 
-it('E20 setup: deployment is manual, main-only, verifies first and reads the installation settings from GitHub', async () => {
+it.each([
+  ['1', 'read-only'],
+  ['', 'read-write'],
+])('E13: CI=%s selects %s replay with zero retries', async (ci, mode) => {
+  vi.stubEnv('CI', ci);
+  vi.resetModules();
+  try {
+    // Constructing the model does not read credentials or call it.
+    const { default: configuration } = await import('../e2e.config.ts');
+    expect(configuration.retries).toBe(0);
+    expect(configuration.cache.mode).toBe(mode);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+it('E13: both journey entry points require strict cache replay', async () => {
+  const manifest = JSON.parse(await readFile('package.json', 'utf8'));
+  expect(manifest.scripts['test:journey'].split(/\s+/)).toEqual([
+    'e2e',
+    'run',
+    '--strict-cache',
+  ]);
+  const coverage = await readFile('scripts/coverage.ts', 'utf8');
+  expect(coverage).toMatch(
+    /(['"])e2e\1,\s*(['"])run\2,\s*(['"])--strict-cache\3/,
+  );
+});
+
+it('E20 setup: deployment follows a green Verify push on main or a main dispatch, verifies first and reads the installation settings from GitHub', async () => {
   const deploy = await workflow('deploy');
-  expect(Object.keys(deploy.on)).toEqual(['workflow_dispatch']);
-  expect(deploy.jobs.deploy.if).toBe("github.ref == 'refs/heads/main'");
+  expect(deploy.on).toEqual({
+    workflow_run: {
+      workflows: ['Verify'],
+      types: ['completed'],
+      branches: ['main'],
+    },
+    workflow_dispatch: null,
+  });
+  expect(deploy.env.DEPLOY_SHA).toBe(
+    expression('github.event.workflow_run.head_sha || github.sha'),
+  );
+  const gate = deploy.jobs.latest.if.replace(/\s+/g, ' ');
+  expect(gate).toBe(
+    "(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || " +
+      "(github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && " +
+      "github.event.workflow_run.conclusion == 'success' && vars.NOOK_HOSTNAME != '')",
+  );
+  expect(deploy.jobs.deploy.needs).toBe('latest');
+  expect(deploy.jobs.deploy.if).toBe("needs.latest.outputs.current == 'true'");
+  expect(
+    deploy.jobs.deploy.steps.find((step: { uses?: string }) =>
+      step.uses?.startsWith('actions/checkout@'),
+    ).with.ref,
+  ).toBe(expression('env.DEPLOY_SHA'));
   const steps = deploy.jobs.deploy.steps;
   const commands = steps
     .filter((step: { run?: string }) => step.run)
@@ -123,7 +189,7 @@ it('E20 setup: the real preflight blocks unless Verify succeeded on the exact ma
       PATH: `${directory}${delimiter}${process.env.PATH}`,
       GH_TOKEN: undefined,
       GITHUB_REPOSITORY: 'synthetic/nook',
-      GITHUB_SHA: 'fixture-main-sha',
+      DEPLOY_SHA: 'fixture-main-sha',
       PREFLIGHT_ARGS: argsPath,
     };
     for (const [count, status] of [
@@ -151,6 +217,55 @@ it('E20 setup: the real preflight blocks unless Verify succeeded on the exact ma
         'status,conclusion',
         '--jq',
         'map(select(.status == "completed" and .conclusion == "success")) | length',
+      ]);
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('E20 setup: only the commit main points to deploys, so a slower older Verify never overwrites a newer deployment', async () => {
+  const deploy = await workflow('deploy');
+  const check = deploy.jobs.latest.steps.find(
+    (step: { id?: string }) => step.id === 'main',
+  );
+  expect(check).toBeDefined();
+  const directory = await mkdtemp(resolve('.local', 'latest-main-'));
+  const argsPath = resolve(directory, 'args.json');
+  const outputPath = resolve(directory, 'output');
+  try {
+    const fixture = resolve(directory, 'gh');
+    await writeFile(
+      fixture,
+      '#!/usr/bin/env node\nimport {writeFileSync} from "node:fs"; writeFileSync(process.env.LATEST_ARGS, JSON.stringify(process.argv.slice(2))); console.log(process.env.MAIN_HEAD);\n',
+    );
+    await chmod(fixture, 0o755);
+    for (const [head, current] of [
+      ['fixture-deploy-sha', 'true'],
+      ['fixture-newer-sha', 'false'],
+    ] as const) {
+      await writeFile(outputPath, '');
+      const result = spawnSync('bash', ['-c', check.run], {
+        env: {
+          ...process.env,
+          PATH: `${directory}${delimiter}${process.env.PATH}`,
+          GH_TOKEN: undefined,
+          GITHUB_REPOSITORY: 'synthetic/nook',
+          GITHUB_OUTPUT: outputPath,
+          DEPLOY_SHA: 'fixture-deploy-sha',
+          MAIN_HEAD: head,
+          LATEST_ARGS: argsPath,
+        },
+        encoding: 'utf8',
+        timeout: 5_000,
+      });
+      expect(result.status).toBe(0);
+      expect(await readFile(outputPath, 'utf8')).toBe(`current=${current}\n`);
+      expect(JSON.parse(await readFile(argsPath, 'utf8'))).toEqual([
+        'api',
+        'repos/synthetic/nook/commits/main',
+        '--jq',
+        '.sha',
       ]);
     }
   } finally {

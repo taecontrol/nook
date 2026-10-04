@@ -21,7 +21,15 @@ export async function files(directory: string): Promise<string[]> {
 }
 
 export async function sourceIdentity(): Promise<SourceIdentity> {
-  const roots = ['apps', 'packages', 'scripts', 'tests', 'docs', '.github'];
+  const roots = [
+    'apps',
+    'packages',
+    'scripts',
+    'tests',
+    'docs',
+    '.github',
+    'migrations',
+  ];
   const paths = (await Promise.all(roots.map(files))).flat();
   paths.push(
     'AGENTS.md',
@@ -39,7 +47,6 @@ export async function sourceIdentity(): Promise<SourceIdentity> {
     'biome.json',
     'coverage.config.json',
     'wrangler.jsonc',
-    'bundle-budget.json',
   );
   const hashes: Record<string, string> = {};
   for (const path of paths.sort()) hashes[path] = digest(await readFile(path));

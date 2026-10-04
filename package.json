@@ -19,14 +19,17 @@
     "test:coverage": "node scripts/coverage.ts",
     "test:journey": "e2e run --strict-cache",
     "verify:crap": "node scripts/crap.ts",
-    "verify:bundle": "node scripts/bundle-budget.ts",
-    "coverage:merge": "node scripts/coverage-merge.ts"
+    "coverage:merge": "node scripts/coverage-merge.ts",
+    "verify:migrations": "node scripts/migrations.ts",
+    "verify:load-time": "node scripts/load-time.ts"
   },
   "dependencies": {
+    "@effect/sql-d1": "4.0.0",
     "effect": "4.0.0",
     "jose": "6.2.12"
   },
   "devDependencies": {
+    "@ai-sdk/openai": "4.0.83",
     "@babel/parser": "7.29.9",
     "@biomejs/biome": "2.5.15",
     "@cloudflare/workers-types": "5.20261003.1",
@@ -41,6 +44,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.1",
+    "ai": "7.0.127",
     "class-variance-authority": "0.7.1",
     "cn": "0.4.0",
     "e2e": "0.16.0",

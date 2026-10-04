@@ -3,8 +3,9 @@ export const verificationStages = [
   'verify:ui',
   'verify:types',
   'verify:complexity',
+  'verify:migrations',
   'test:coverage',
   'verify:crap',
   'build',
-  'verify:bundle',
+  'verify:load-time',
 ] as const;

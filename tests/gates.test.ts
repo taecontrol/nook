@@ -1,71 +1,10 @@
-import { createHash, randomBytes } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { gzipSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { expect, it } from 'vitest';
-import {
-  assertBudget,
-  checkBundleBudget,
-  initialScripts,
-  measureInitialJs,
-} from '../scripts/bundle-budget.ts';
 import {
   validateCoverage,
   validateShards,
 } from '../scripts/coverage-evidence.ts';
 import { verificationStages } from '../scripts/verification-stages.ts';
-
-it('E14: the production cold-open scripts fit the committed 200000-byte gzip ceiling', async () => {
-  const budget = JSON.parse(await readFile('bundle-budget.json', 'utf8'));
-  expect(budget.initialJsGzipBytes).toBeLessThanOrEqual(200_000);
-  expect(budget.initialJsGzipBytes).toBeGreaterThan(0);
-  const result = await checkBundleBudget({ assetDirectory: 'dist/assets' });
-  expect(result.files.length).toBeGreaterThan(0);
-  expect(result.gzipBytes).toBeLessThanOrEqual(budget.initialJsGzipBytes);
-  expect(result.passed).toBe(true);
-});
-
-it('E14: counts every script and modulepreload once and refuses an increase to the budget', async () => {
-  const html =
-    '<script type="module" src="/one.js"></script><link href="/two.js" rel="modulepreload"><script src="/one.js"></script><link rel="stylesheet" href="/styles.css">';
-  expect(initialScripts(html)).toEqual(['/one.js', '/two.js']);
-  const directory = await mkdtemp(resolve('.local', 'bundle-'));
-  const one = randomBytes(1_000),
-    two = randomBytes(2_000);
-  try {
-    await writeFile(resolve(directory, 'index.html'), html);
-    await writeFile(resolve(directory, 'one.js'), one);
-    await writeFile(resolve(directory, 'two.js'), two);
-    const result = await measureInitialJs(directory);
-    expect(result.gzipBytes).toBe(gzipSync(one).length + gzipSync(two).length);
-    expect(() => assertBudget(200_001, 200_000)).toThrow(/budget|ceiling/i);
-    expect(() => assertBudget(199_001, 199_000)).toThrow(/budget|ceiling/i);
-    expect(() => assertBudget(199_000, 200_000)).not.toThrow();
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-it('E14: the measured bundle fails when it exceeds a valid ceiling', async () => {
-  const directory = await mkdtemp(resolve('.local', 'over-budget-'));
-  try {
-    await writeFile(
-      resolve(directory, 'index.html'),
-      '<script src="/one.js"></script>',
-    );
-    await writeFile(resolve(directory, 'one.js'), randomBytes(1_000));
-    const budgetPath = resolve(directory, 'budget.json');
-    await writeFile(budgetPath, JSON.stringify({ initialJsGzipBytes: 100 }));
-    const measured = await checkBundleBudget({
-      assetDirectory: directory,
-      budgetPath,
-    });
-    expect(measured.gzipBytes).toBeGreaterThan(100);
-    expect(measured.passed).toBe(false);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
 
 it('E16: verify runs every accepted gate in order', () => {
   expect(verificationStages).toEqual([
@@ -73,10 +12,11 @@ it('E16: verify runs every accepted gate in order', () => {
     'verify:ui',
     'verify:types',
     'verify:complexity',
+    'verify:migrations',
     'test:coverage',
     'verify:crap',
     'build',
-    'verify:bundle',
+    'verify:load-time',
   ]);
 });
 

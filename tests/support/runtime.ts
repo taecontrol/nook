@@ -30,8 +30,12 @@ async function reservePort() {
           .split(/\s+/)
           .map(Number)
       : [32768, 60999];
+  // Fetch's highest blocked port is 10080: https://fetch.spec.whatwg.org/#port-blocking
+  const firstHttpPort = 10081;
   const [minimum, maximum] =
-    ephemeral[0] > 1024 ? [1024, ephemeral[0]] : [ephemeral[1] + 1, 65536];
+    ephemeral[0] > firstHttpPort
+      ? [firstHttpPort, ephemeral[0]]
+      : [Math.max(firstHttpPort, ephemeral[1] + 1), 65536];
   await mkdir(leases, { recursive: true });
   for (let attempt = 0; attempt < 100; attempt++) {
     const port = randomInt(minimum, maximum);
@@ -56,6 +60,7 @@ async function reservePort() {
 export async function runtime(
   options: {
     bindings?: Record<string, string>;
+    directory?: string;
     outboundService?: (request: Request) => Promise<Response>;
     configPath?: string;
   } = {},
@@ -66,7 +71,7 @@ export async function runtime(
   try {
     started = await startRuntime({
       port: lease.port,
-      directory: testBuild,
+      directory: options.directory ?? testBuild,
       configPath: options.configPath,
       bindings: options.bindings,
       outboundService: options.outboundService,

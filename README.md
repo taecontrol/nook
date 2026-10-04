@@ -5,7 +5,7 @@ Tools that AI agents use from any machine, running in your own Cloudflare accoun
 - **Memory:** a general memory organized in buckets (`me`, `work/project`, `personal`) that agents read and write over MCP and you browse in a web UI.
 - **Vault:** secrets agents use through `nook run` without you pasting them into a conversation.
 
-Nook is in early development. The current app confirms the installation owner's Cloudflare Access identity. Memory, Vault, MCP tools, and the CLI follow in later changes.
+Nook is in early development. The current app confirms the installation owner's Cloudflare Access identity and lets them create and browse hierarchical buckets, or delete an empty bucket. Memory, Vault, MCP tools, and the CLI follow in later changes.
 
 ## Run locally
 
@@ -21,7 +21,7 @@ mise exec -- pnpm dev
 
 Open `http://127.0.0.1:4350`. Local development serves the production Worker and assets in workerd, with the fixed synthetic owner `owner@nook.test`. It requires no Cloudflare account, Access login, model credentials, or secret file. The synthetic identity is valid only on the exact loopback origin; `localhost` is a different hostname. Restart `pnpm dev` after changing source; it builds once on startup.
 
-Node and pnpm are pinned in [mise.toml](mise.toml). Use `pnpm dev --port 4351` to choose another unprivileged port. On a minimal Linux installation, Playwright may also need its documented operating-system browser dependencies.
+Local buckets use an in-memory D1 database, seeded with `me` by the migrations, and reset when the runtime restarts. Node and pnpm are pinned in [mise.toml](mise.toml). Use `pnpm dev --port 4351` to choose another unprivileged port. On a minimal Linux installation, Playwright may also need its documented operating-system browser dependencies.
 
 ## Layout
 

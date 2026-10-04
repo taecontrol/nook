@@ -324,15 +324,15 @@ it.each(visualMatrix)(
       ).toBe(theme === 'dark');
       await expectNoOverflow(page);
       if (state.email) {
-        expect(await page.locator('section').innerText()).toContain(
-          state.email,
-        );
+        expect(
+          await page.getByRole('region', { name: 'Owner access' }).innerText(),
+        ).toContain(state.email);
       } else {
         expect(await page.locator('body').textContent()).not.toContain('@');
       }
       if (state.name === 'long-email') {
         const breaks = await page
-          .locator('section')
+          .getByRole('region', { name: 'Owner access' })
           .getByText(String(state.email), { exact: true })
           .evaluate((element) => {
             const characters: { text: string; top: number }[] = [];
