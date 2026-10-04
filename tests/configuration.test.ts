@@ -123,7 +123,7 @@ it('E13: both journey entry points require strict cache replay', async () => {
   );
 });
 
-it('E20 setup: deployment follows a green Verify push on main or a main dispatch, verifies first and reads the installation settings from GitHub', async () => {
+it('E20 setup: deployment follows a green Verify push on main or a main dispatch, builds without repeating verification and reads the installation settings from GitHub', async () => {
   const deploy = await workflow('deploy');
   expect(deploy.on).toEqual({
     workflow_run: {
@@ -153,11 +153,14 @@ it('E20 setup: deployment follows a green Verify push on main or a main dispatch
   const commands = steps
     .filter((step: { run?: string }) => step.run)
     .map((step: { run: string }) => step.run);
-  expect(commands.indexOf('pnpm verify')).toBeGreaterThan(-1);
+  expect(
+    commands.filter((command: string) => command.startsWith('pnpm verify')),
+  ).toEqual([]);
   const publish = commands.findIndex((command: string) =>
     command.includes('wrangler deploy'),
   );
-  expect(publish).toBeGreaterThan(commands.indexOf('pnpm verify'));
+  expect(commands.indexOf('pnpm build')).toBeGreaterThan(-1);
+  expect(publish).toBeGreaterThan(commands.indexOf('pnpm build'));
   expect(commands[publish]).toContain('--domain "$NOOK_HOSTNAME"');
   const env = steps.find((step: { run?: string }) =>
     step.run?.includes('wrangler deploy'),

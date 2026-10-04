@@ -36,7 +36,7 @@ it('E23: D1 is bound by name with migrations and no installation ID', async () =
     },
   ]);
 });
-it('E24: deployment verifies, creates the missing database, migrates, then deploys', async () => {
+it('E24: deployment builds, creates the missing database, migrates, then deploys', async () => {
   const workflow = parse(
     await readFile('.github/workflows/deploy.yml', 'utf8'),
   );
@@ -44,12 +44,12 @@ it('E24: deployment verifies, creates the missing database, migrates, then deplo
     .filter((step: { run?: string }) => step.run)
     .map((step: { run: string }) => step.run)
     .join('\n');
-  const verify = commands.indexOf('pnpm verify');
+  const build = commands.indexOf('pnpm build');
   const create = commands.indexOf('wrangler d1 create nook');
   const migrate = commands.indexOf('wrangler d1 migrations apply DB --remote');
   const deploy = commands.indexOf('wrangler deploy');
-  expect(verify).toBeGreaterThanOrEqual(0);
-  expect(create).toBeGreaterThan(verify);
+  expect(build).toBeGreaterThanOrEqual(0);
+  expect(create).toBeGreaterThan(build);
   expect(migrate).toBeGreaterThan(create);
   expect(deploy).toBeGreaterThan(migrate);
 });

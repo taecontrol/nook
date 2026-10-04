@@ -350,7 +350,9 @@ it.each(['hover', 'focus'])(
           () => requests.filter((r) => r.url.endsWith('/api/buckets')).length,
         )
         .toBe(1);
-      expect(requests.some((r) => /buckets.*\.js/.test(r.url))).toBe(true);
+      await expect
+        .poll(() => requests.some((r) => /buckets.*\.js/.test(r.url)))
+        .toBe(true);
       await link.click();
       await expect.poll(() => row(page, 'me').count()).toBe(1);
       expect(
