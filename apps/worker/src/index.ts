@@ -8,6 +8,7 @@ import { type AuthBindings, authenticate } from './auth.ts';
 import type { BucketGrant } from './authorization.ts';
 import { bucketOperations } from './buckets.ts';
 import { authorizationHandler, machineHandler } from './machine-routes.ts';
+import { machineOperations } from './machines.ts';
 import { mcpHandler } from './mcp.ts';
 
 export function handlerForPrincipal(
@@ -27,8 +28,16 @@ export function handlerForPrincipal(
         .handle('delete', ({ params }) => store.delete(grant, params.path));
     }),
   ).pipe(Layer.provide(D1Client.layer({ db })));
+  const machines = HttpApiBuilder.group(Api, 'machines', (handlers) =>
+    Effect.gen(function* () {
+      const store = yield* machineOperations;
+      return handlers
+        .handle('list', () => store.list(grant))
+        .handle('revoke', ({ params }) => store.revoke(grant, params.id));
+    }),
+  ).pipe(Layer.provide(D1Client.layer({ db })));
   const routes = HttpApiBuilder.layer(Api).pipe(
-    Layer.provide([session, buckets]),
+    Layer.provide([session, buckets, machines]),
     Layer.provide(HttpServer.layerServices),
   );
   const apiHandler = HttpRouter.toWebHandler(routes, {
@@ -67,8 +76,9 @@ function foreignOrigin(request: Request, url: URL) {
 }
 function knownRoute(path: string, method: string) {
   return (
-    ['/api/whoami', '/api/buckets', '/mcp'].includes(path) ||
-    (path.startsWith('/api/buckets/') && method === 'DELETE')
+    ['/api/whoami', '/api/buckets', '/api/machines', '/mcp'].includes(path) ||
+    ((path.startsWith('/api/buckets/') || path.startsWith('/api/machines/')) &&
+      method === 'DELETE')
   );
 }
 let machineRoutes:

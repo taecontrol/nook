@@ -72,6 +72,7 @@ it('E22/E23: Wrangler applies only the numbered migrations and preserves the loc
       { name: '0001_buckets.sql' },
       { name: '0002_reserve_me.sql' },
       { name: '0003_machine_authorizations.sql' },
+      { name: '0004_machine_management.sql' },
     ]);
     expect(first[1].results).toEqual([
       { path: 'me', created_at: expect.any(String) },
@@ -275,10 +276,15 @@ it.each([
 
       const drifting = snapshot.replace('cannot be', 'cannot  be');
       const independent = await mf.getD1Database('Snapshot');
+      // The normalized snapshot sorts by type, so tables must precede indexes
+      // when independently replaying it rather than comparing its schema.
+      const statements = unstable_splitSqlQuery(drifting).toSorted(
+        (left, right) =>
+          Number(/^CREATE TABLE\b/i.test(right)) -
+          Number(/^CREATE TABLE\b/i.test(left)),
+      );
       await independent.batch([
-        ...unstable_splitSqlQuery(drifting).map((sql) =>
-          independent.prepare(sql),
-        ),
+        ...statements.map((sql) => independent.prepare(sql)),
         independent
           .prepare('INSERT INTO buckets VALUES (?, ?)')
           .bind('me', '2026-10-04T00:00:00.000Z'),

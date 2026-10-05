@@ -13,6 +13,7 @@ import {
   InvalidBucketPath,
   ReservedBucket,
 } from './buckets.ts';
+import { Machine } from './machines.ts';
 
 export * from './buckets.ts';
 export * from './machines.ts';
@@ -58,6 +59,22 @@ export const Api = HttpApi.make('nook')
             BucketHasChildren,
             BucketNotFound,
           ],
+        }),
+      ),
+  )
+  .add(
+    HttpApiGroup.make('machines')
+      .add(
+        HttpApiEndpoint.get('list', '/api/machines', {
+          success: Schema.Struct({ machines: Schema.Array(Machine) }),
+          error: errors,
+        }),
+      )
+      .add(
+        HttpApiEndpoint.delete('revoke', '/api/machines/:id', {
+          params: Schema.Struct({ id: Schema.String }),
+          success: Schema.Void.annotate({ httpApiStatus: 204 }),
+          error: errors,
         }),
       ),
   );

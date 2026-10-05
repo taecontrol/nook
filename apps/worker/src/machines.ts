@@ -35,6 +35,13 @@ const TokenRow = Schema.Struct({
   machine_name: Schema.String,
   grant_json: Schema.String,
 });
+const MachineRow = Schema.Struct({
+  id: Schema.String,
+  machine_name: Schema.String,
+  grant_json: Schema.fromJsonString(BucketGrant),
+  created_at: Schema.Number,
+  last_used_at: Schema.NullOr(Schema.Number),
+});
 const unavailable = Effect.mapError(
   () => new HttpApiError.ServiceUnavailable(),
 );
@@ -86,12 +93,17 @@ function pollState(
   return Effect.void;
 }
 function identity(row: typeof TokenRow.Type) {
-  return Schema.decodeUnknownEffect(BucketGrant)(
-    JSON.parse(row.grant_json),
+  return Schema.decodeUnknownEffect(Schema.fromJsonString(BucketGrant))(
+    row.grant_json,
   ).pipe(
     unavailable,
     Effect.map((grant) => ({ machine: row.machine_name, grant })),
   );
+}
+function requireAll(grant: BucketGrant) {
+  return grant === 'all'
+    ? Effect.void
+    : Effect.fail(new HttpApiError.Forbidden());
 }
 export const machineOperations = Effect.gen(function* () {
   const sql = yield* D1Client.D1Client;
@@ -107,11 +119,17 @@ export const machineOperations = Effect.gen(function* () {
     execute: (hash) =>
       sql`SELECT * FROM authorizations WHERE device_hash=${hash}`,
   });
-  const findToken = SqlSchema.findAll({
+  const authenticateToken = SqlSchema.findAll({
     Request: Schema.String,
     Result: TokenRow,
     execute: (hash) =>
-      sql`SELECT token_hash, machine_name, grant_json FROM machine_tokens WHERE token_hash=${hash}`,
+      sql`UPDATE machine_tokens SET last_used_at=unixepoch('subsec')*1000 WHERE token_hash=${hash} RETURNING token_hash, machine_name, grant_json`,
+  });
+  const listRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: MachineRow,
+    execute: () =>
+      sql`SELECT id, machine_name, grant_json, created_at, last_used_at FROM machine_tokens ORDER BY created_at, id`,
   });
   const lookup = (code: string) =>
     findCode(code).pipe(
@@ -125,7 +143,7 @@ export const machineOperations = Effect.gen(function* () {
       )?.[1];
       if (!token) return yield* Effect.fail(new HttpApiError.Unauthorized());
       const hash = yield* hashCode(token);
-      const [row] = yield* findToken(hash).pipe(unavailable);
+      const [row] = yield* authenticateToken(hash).pipe(unavailable);
       if (!row) return yield* Effect.fail(new HttpApiError.Unauthorized());
       return row;
     });
@@ -195,7 +213,7 @@ export const machineOperations = Effect.gen(function* () {
           .batch([
             sql<
               typeof TokenRow.Type
-            >`INSERT INTO machine_tokens(token_hash, machine_name, grant_json, created_at) SELECT ${tokenHash}, machine_name, grant_json, ${Date.now()} FROM authorizations WHERE device_hash=${deviceHash} AND status='approved' AND expires_at>unixepoch('subsec')*1000 RETURNING token_hash, machine_name, grant_json`,
+            >`INSERT INTO machine_tokens(token_hash, machine_name, grant_json, created_at, id) SELECT ${tokenHash}, machine_name, grant_json, ${Date.now()}, ${crypto.randomUUID()} FROM authorizations WHERE device_hash=${deviceHash} AND status='approved' AND expires_at>unixepoch('subsec')*1000 RETURNING token_hash, machine_name, grant_json`,
             sql`DELETE FROM authorizations WHERE device_hash=${deviceHash} AND EXISTS (SELECT 1 FROM machine_tokens WHERE token_hash=${tokenHash})`,
           ])
           .pipe(unavailable);
@@ -206,6 +224,30 @@ export const machineOperations = Effect.gen(function* () {
               : new PollInvalid(),
           );
         return { token, ...(yield* identity(inserted[0])) };
+      }),
+    list: (grant: BucketGrant) =>
+      Effect.gen(function* () {
+        yield* requireAll(grant);
+        const rows = yield* listRows().pipe(unavailable);
+        return {
+          machines: rows.map((row) => ({
+            id: row.id,
+            name: row.machine_name,
+            grant: row.grant_json,
+            approvedAt: new Date(row.created_at).toISOString(),
+            lastUsedAt:
+              row.last_used_at === null
+                ? null
+                : new Date(row.last_used_at).toISOString(),
+          })),
+        };
+      }),
+    revoke: (grant: BucketGrant, id: string) =>
+      Effect.gen(function* () {
+        yield* requireAll(grant);
+        yield* sql
+          .batch([sql`DELETE FROM machine_tokens WHERE id=${id}`])
+          .pipe(unavailable);
       }),
     whoami: (authorization: string) =>
       authenticated(authorization).pipe(Effect.flatMap(identity)),

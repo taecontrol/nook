@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { ChevronRight, ListTree } from 'lucide-react';
+import { ChevronRight, ListTree, MonitorSmartphone } from 'lucide-react';
 import {
   Item,
   ItemActions,
@@ -34,6 +34,22 @@ export function Home() {
               <ItemTitle>Buckets</ItemTitle>
               <ItemDescription>
                 Browse, create, and delete buckets.
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <ChevronRight className="size-4 text-muted-foreground" />
+            </ItemActions>
+          </Link>
+        </Item>
+        <Item variant="outline" className="mt-3" asChild>
+          <Link to="/machines">
+            <ItemMedia variant="icon">
+              <MonitorSmartphone />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Machines</ItemTitle>
+              <ItemDescription>
+                See connected machines and revoke their access.
               </ItemDescription>
             </ItemContent>
             <ItemActions>

@@ -5,6 +5,7 @@ import { runtime, testBuild } from './runtime.ts';
 
 export async function checkpointRuntime(
   onCheckpoint: (label: string) => Promise<void>,
+  options: { principalGrant?: readonly string[] } = {},
 ) {
   await mkdir('.local', { recursive: true });
   const directory = await mkdtemp(resolve('.local', 'd1-checkpoints-'));
@@ -14,7 +15,7 @@ export async function checkpointRuntime(
     });
     await build({
       stdin: {
-        contents: `import worker from ${JSON.stringify(resolve(testBuild, 'worker.js'))}; import { checkpointWorker } from ${JSON.stringify(resolve('tests/support/checkpoint-worker.ts'))}; export default checkpointWorker(worker);`,
+        contents: `import worker${options.principalGrant ? ', { handlerForPrincipal }' : ''} from ${JSON.stringify(resolve(testBuild, 'worker.js'))}; import { checkpointWorker } from ${JSON.stringify(resolve('tests/support/checkpoint-worker.ts'))}; export default checkpointWorker(${options.principalGrant ? `{ fetch(request, env) { if (new URL(request.url).pathname === '/__test/coverage') return worker.fetch(request, env); return handlerForPrincipal('owner@nook.test', env.DB, ${JSON.stringify(options.principalGrant)})(request); } }` : 'worker'});`,
         resolveDir: process.cwd(),
       },
       outfile: resolve(directory, 'worker.js'),

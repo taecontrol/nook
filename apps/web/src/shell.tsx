@@ -18,7 +18,10 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { AppSidebar } from './app-sidebar';
 import { identityOptions, type Session } from './identity';
 
-const titles: Record<string, string> = { '/buckets': 'Buckets' };
+const titles: Record<string, string> = {
+  '/buckets': 'Buckets',
+  '/machines': 'Machines',
+};
 
 export function Shell() {
   const identity = useQuery(identityOptions);

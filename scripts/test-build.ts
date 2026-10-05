@@ -14,7 +14,7 @@ export async function buildTest() {
   const entry = resolve(directory, 'worker-entry.js');
   await writeFile(
     entry,
-    `import worker from ${JSON.stringify(resolve('apps/worker/src/index.ts'))}; export default { fetch(request, env) { if (new URL(request.url).pathname === '/__test/coverage') return Response.json({ seam: 'worker', loaded: globalThis.__authoredModules__ ?? {}, counters: globalThis.__coverage__ ?? {} }); return worker.fetch(request, env); } };`,
+    `import worker from ${JSON.stringify(resolve('apps/worker/src/index.ts'))}; export { handlerForPrincipal } from ${JSON.stringify(resolve('apps/worker/src/index.ts'))}; export default { fetch(request, env) { if (new URL(request.url).pathname === '/__test/coverage') return Response.json({ seam: 'worker', loaded: globalThis.__authoredModules__ ?? {}, counters: globalThis.__coverage__ ?? {} }); return worker.fetch(request, env); } };`,
   );
   const scoped = new Set((await inventory()).map((path) => resolve(path)));
   await build({

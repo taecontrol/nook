@@ -1,3 +1,4 @@
+CREATE UNIQUE INDEX machine_tokens_id ON machine_tokens(id);
 CREATE TABLE authorizations (
   device_hash TEXT PRIMARY KEY NOT NULL,
   user_code TEXT NOT NULL UNIQUE,
@@ -14,6 +15,7 @@ CREATE TABLE machine_tokens (
   token_hash TEXT PRIMARY KEY NOT NULL,
   machine_name TEXT NOT NULL,
   grant_json TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL , id TEXT, last_used_at INTEGER
 );
 CREATE TRIGGER buckets_reserve_me BEFORE DELETE ON buckets WHEN OLD.path = 'me' BEGIN SELECT RAISE(ABORT, 'The me bucket cannot be deleted.'); END;
+CREATE TRIGGER machine_tokens_assign_id AFTER INSERT ON machine_tokens WHEN NEW.id IS NULL BEGIN UPDATE machine_tokens SET id = lower(hex(randomblob(16))) WHERE token_hash = NEW.token_hash; END;

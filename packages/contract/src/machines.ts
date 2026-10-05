@@ -16,6 +16,14 @@ export const MachineIdentity = Schema.Struct({
   grant: BucketGrant,
 });
 export type MachineIdentity = typeof MachineIdentity.Type;
+export const Machine = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  approvedAt: Schema.String,
+  lastUsedAt: Schema.NullOr(Schema.String),
+  grant: BucketGrant,
+});
+export type Machine = typeof Machine.Type;
 export const AuthorizationRequest = Schema.Struct({
   suggestedName: Schema.String,
   client: Schema.String,

@@ -11,6 +11,7 @@ import { createRoot } from 'react-dom/client';
 import { preloadBuckets } from './buckets-api';
 import { Home } from './home';
 import { identityOptions } from './identity';
+import { preloadMachines } from './machines-api';
 import { Shell } from './shell';
 import './index.css';
 
@@ -48,7 +49,21 @@ const buckets = createRoute({
 });
 const router = createRouter({
   routeTree: root.addChildren([
-    owner.addChildren([home, buckets]),
+    owner.addChildren([
+      home,
+      buckets,
+      createRoute({
+        getParentRoute: () => owner,
+        path: '/machines',
+        component: lazyRouteComponent(
+          () => import('./machines-page'),
+          'MachinesPage',
+        ),
+        loader: ({ context }) => {
+          preloadMachines(context.queryClient);
+        },
+      }),
+    ]),
     createRoute({
       getParentRoute: () => root,
       path: '/cli/authorize',

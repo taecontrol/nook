@@ -42,7 +42,8 @@ import {
   InputGroupInput,
 } from '@/components/ui/input-group';
 import { Kbd } from '@/components/ui/kbd';
-import { ApiError, useBuckets } from './buckets-api';
+import { ApiError } from './api-client';
+import { useBuckets } from './buckets-api';
 import {
   buildOutline,
   Outline,

@@ -1,5 +1,12 @@
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Box, Brain, KeyRound, ListTree, UserRound } from 'lucide-react';
+import {
+  Box,
+  Brain,
+  KeyRound,
+  ListTree,
+  MonitorSmartphone,
+  UserRound,
+} from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import {
@@ -61,6 +68,14 @@ export function AppSidebar({ session }: { session: Session }) {
                   <Link to="/buckets" onClick={close}>
                     <ListTree />
                     <span>Buckets</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={pathname === '/machines'}>
+                  <Link to="/machines" onClick={close}>
+                    <MonitorSmartphone />
+                    <span>Machines</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

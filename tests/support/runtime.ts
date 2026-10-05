@@ -4,6 +4,8 @@ import { request as httpRequest } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import type { Readable } from 'node:stream';
+import type { Log } from 'miniflare';
 import type { Observation } from '../../scripts/lib/coverage-evidence.ts';
 import { observe } from '../../scripts/observation.ts';
 import { startRuntime } from '../../scripts/runtime.ts';
@@ -85,8 +87,15 @@ export async function runtime(
   return {
     origin,
     mf,
-    setBindings(bindings: Record<string, string>) {
-      return mf.setOptions({ ...mfOptions, bindings });
+    setBindings(
+      bindings: Record<string, string>,
+      overrides: {
+        outboundService?: (request: Request) => Promise<Response>;
+        log?: Log;
+        handleRuntimeStdio?: (stdout: Readable, stderr: Readable) => void;
+      } = {},
+    ) {
+      return mf.setOptions({ ...mfOptions, bindings, ...overrides });
     },
     async close() {
       try {

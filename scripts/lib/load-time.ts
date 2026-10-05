@@ -18,6 +18,8 @@ export type Measurements = {
   buckets: number[];
   navigation: number[];
   authorize: number[];
+  machines: number[];
+  machinesNavigation: number[];
   gzipBytes?: number;
 };
 export function median(samples: number[]) {
@@ -29,21 +31,23 @@ export function median(samples: number[]) {
   return [...samples].sort((a, b) => a - b)[2];
 }
 export function assertLoadTimes(measured: Measurements) {
-  const screens = ['home', 'buckets', 'authorize', 'navigation'] as const;
-  const labels: Record<string, string> = {
-    home: '/',
-    buckets: '/buckets',
-    authorize: '/cli/authorize',
-  };
-  for (const key of screens) {
-    const budget =
-      key === 'navigation'
-        ? loadTimeBudgets.navigationMs
-        : loadTimeBudgets.coldOpenMs;
+  const screens = [
+    ['home', 'Cold open /', loadTimeBudgets.coldOpenMs],
+    ['buckets', 'Cold open /buckets', loadTimeBudgets.coldOpenMs],
+    ['authorize', 'Cold open /cli/authorize', loadTimeBudgets.coldOpenMs],
+    ['navigation', 'Intent navigation', loadTimeBudgets.navigationMs],
+    ['machines', 'Cold open /machines', loadTimeBudgets.coldOpenMs],
+    [
+      'machinesNavigation',
+      'Intent navigation /machines',
+      loadTimeBudgets.navigationMs,
+    ],
+  ] as const;
+  for (const [key, label, budget] of screens) {
     const actual = median(measured[key] ?? []);
     if (actual > budget)
       throw new Error(
-        `${key === 'navigation' ? 'Intent navigation' : `Cold open ${labels[key]}`} median ${actual.toFixed(1)} ms exceeds ${budget} ms.`,
+        `${label} median ${actual.toFixed(1)} ms exceeds ${budget} ms.`,
       );
   }
 }
@@ -55,6 +59,8 @@ export function formatMeasurements(measured: Measurements) {
         buckets: median(measured.buckets),
         navigation: median(measured.navigation),
         authorize: median(measured.authorize),
+        machines: median(measured.machines),
+        machinesNavigation: median(measured.machinesNavigation),
       },
       samplesMs: measured,
       coldOpenGzipBytes: measured.gzipBytes,
