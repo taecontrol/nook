@@ -246,6 +246,7 @@ it.each(['absent', 'same', 'foreign'])(
       headers,
     );
     const response = await fetch(request);
+    await response.arrayBuffer();
     expect(response.status).toBe(origin === 'foreign' ? 403 : 200);
     expect(response.headers.has('Access-Control-Allow-Origin')).toBe(false);
     if (origin === 'foreign') expect(await snapshot()).toEqual(before);
@@ -267,6 +268,7 @@ it.each(['GET', 'HEAD', 'DELETE', 'OPTIONS'])(
         'Cf-Access-Jwt-Assertion': await issuer.assertion(),
       },
     });
+    await response.arrayBuffer();
     expect(response.status).toBe(403);
     expect(response.headers.has('Access-Control-Allow-Origin')).toBe(false);
     expect((await snapshot()).map((row) => row.path)).toEqual(['me']);
@@ -290,8 +292,9 @@ it.each(['absent', 'other-owner', 'expired', 'wrong-audience'])(
           ...(origin ? { Origin: origin } : {}),
         }),
       );
+      const body = await response.json();
       expect(response.status).toBe(state === 'other-owner' ? 403 : 401);
-      expect(await response.json()).toEqual({
+      expect(body).toEqual({
         _tag: state === 'other-owner' ? 'Forbidden' : 'Unauthorized',
       });
       expect(response.headers.has('Access-Control-Allow-Origin')).toBe(false);

@@ -4,6 +4,7 @@ import {
   createRoute,
   createRouter,
   lazyRouteComponent,
+  Outlet,
   RouterProvider,
 } from '@tanstack/react-router';
 import { createRoot } from 'react-dom/client';
@@ -21,19 +22,24 @@ theme.addEventListener('change', (event) =>
 
 const queryClient = new QueryClient();
 const root = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+  component: Outlet,
+  notFoundComponent: () => null,
+});
+const owner = createRoute({
+  getParentRoute: () => root,
+  id: 'owner',
   component: Shell,
   loader: ({ context }) => {
     void context.queryClient.ensureQueryData(identityOptions);
   },
-  notFoundComponent: () => null,
 });
 const home = createRoute({
-  getParentRoute: () => root,
+  getParentRoute: () => owner,
   path: '/',
   component: Home,
 });
 const buckets = createRoute({
-  getParentRoute: () => root,
+  getParentRoute: () => owner,
   path: '/buckets',
   component: lazyRouteComponent(() => import('./buckets-page'), 'BucketsPage'),
   loader: ({ context }) => {
@@ -41,7 +47,17 @@ const buckets = createRoute({
   },
 });
 const router = createRouter({
-  routeTree: root.addChildren([home, buckets]),
+  routeTree: root.addChildren([
+    owner.addChildren([home, buckets]),
+    createRoute({
+      getParentRoute: () => root,
+      path: '/cli/authorize',
+      component: lazyRouteComponent(
+        () => import('./authorize-page'),
+        'AuthorizePage',
+      ),
+    }),
+  ]),
   context: { queryClient },
   defaultPreload: 'intent',
   defaultPreloadStaleTime: 0,

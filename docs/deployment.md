@@ -15,11 +15,11 @@ The installation owner supplies the following settings:
 
 Never paste secret values into an agent conversation, commit them, or put them in command arguments or logs. Set them directly through their dashboards. No local secret file is necessary.
 
-Before the first deployment, create a self-hosted Access application with a public hostname matching the installation's entire hostname, with the path left empty. Choose the owner's identity provider and an Allow policy for the owner's email. Avoid a narrower path application or a bypass policy, because the static shell and hashed assets rely on Access at the edge. The full Access provisioning guide belongs to the installation work.
+Before the first deployment, create a self-hosted Access application with a public hostname matching the installation's entire hostname, with the path left empty. Choose the owner's identity provider and an Allow policy for the owner's email. The static shell and hashed assets rely on whole-hostname protection at the edge. The only Bypass exception is the separate machine API application below. The full Access provisioning guide belongs to the installation work.
 
 Every push to `main` deploys itself. When **Verify** succeeds on a `main` push, the Deploy workflow starts for that exact commit. It deploys only while `main` still points to that commit; when a later merge has moved `main`, it skips, because the later commit's own run deploys it. It checks the commit's successful Verify run, builds the product from that commit, and only then deploys using the repository settings. An installation without the `NOOK_HOSTNAME` variable, such as a fork that is not configured yet, skips automatic deployment. To redeploy by hand, use **Actions → Deploy → Run workflow** and select **main**; dispatches on other branches skip the deployment job.
 
-The workflow creates the `nook` D1 database when missing, applies its migrations, and then deploys the Worker and custom domain. Its binding resolves by database name; no database ID is committed. If the Worker did not already exist, add its three Access secrets through the Worker settings afterwards and apply the secret changes there. Until all three exist, every Worker request returns 401. Later workflow deployments preserve those secrets. The owner can also provision the Worker secrets beforehand through their own Cloudflare administration.
+The workflow creates the `nook` D1 database when missing, applies its migrations, and then deploys the Worker and custom domain. Its binding resolves by database name; no database ID is committed. If the Worker did not already exist, add its three Access secrets through the Worker settings afterwards and apply the secret changes there. Until all three exist, owner-authenticated Worker requests return 401. Machine API requests use their separate credential boundary. Later workflow deployments preserve those secrets. The owner can also provision the Worker secrets beforehand through their own Cloudflare administration.
 
 Complete production acceptance by recording a successful main deployment. In a fresh signed-out browser, confirm that `/`, a real hashed JavaScript asset, `/api/whoami`, and `/mcp` redirect to Access or are denied; none may serve the app or asset. Then sign in as the owner and capture the shell showing that identity. Retain outcomes and screenshots without cookies, JWTs, or secret values.
 
@@ -29,7 +29,7 @@ For bucket acceptance after this change merges, add **Account → D1 → Edit** 
 
 ## Remote MCP and Access Managed OAuth
 
-Nook serves `list_buckets`, `create_bucket`, and `delete_bucket` at `https://<hostname>/mcp`. The owner authenticates through the existing Access application with access to the whole bucket tree. The Worker verifies the forwarded Access assertion before MCP. Machine tokens and restricted production grants are future work.
+Nook serves `list_buckets`, `create_bucket`, and `delete_bucket` at `https://<hostname>/mcp`. The owner authenticates through the existing Access application with access to the whole bucket tree. The Worker verifies the forwarded Access assertion before MCP. Nook machine tokens do not authenticate this endpoint; restricted machine access is future work.
 
 In **Zero Trust → Access controls → Applications**, edit the existing self-hosted Nook application. Under **Advanced settings**, enable **Managed OAuth**, then save. Keep its whole-hostname protection and owner Allow policy. Access supplies the OAuth flow and forwards the user's JWT in `Cf-Access-Jwt-Assertion`; Nook does not implement an OAuth server. See [Cloudflare Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/).
 
@@ -83,3 +83,49 @@ Expect HTTP 401 and `WWW-Authenticate` pointing to OAuth discovery metadata. Con
 For E14, complete both client connection flows above and record successful `list_buckets` calls. With one client, confirm a bucket creation with the owner and call `create_bucket`. Return to the open `/buckets` tab and confirm that the new bucket appears under its parent without reloading. Returning refetches the tree once, even when its cached data is still fresh.
 
 Record E13 and E14 outcomes on the pull request without tokens, cookies, assertions, or secret values. The owner completes these captures after deployment.
+
+## Linux CLI and the machine API Bypass
+
+Keep the whole-hostname Access application, its owner Allow policy, and Managed OAuth. Create a **second self-hosted Access application** with the same public hostname and the path **`api/machine/*`**. Give it a **Bypass** policy with **Include → Everyone**. Do not broaden it to `api/*` or `api/machine*`, or add owner routes beneath it. `/cli/authorize`, `/api/authorizations/*`, `/api/machines`, `/`, assets, and `/mcp` stay protected by the original application.
+
+The more specific path application wins. The slash before `*` ensures that `api/machine/*` does not cover `/api/machine` or `/api/machines`. Access selects paths, not Nook Authorization headers. The Worker accepts Nook tokens only in this prefix; Access and the synthetic owner never authenticate a machine there. See [ADR-0010](adrs/0010-machine-tokens-only-under-the-machine-api-prefix.md), [Access paths](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/), and [Bypass policies](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/#bypass).
+
+The repository CLI requires pinned Node 26.10, an unlocked Linux Secret Service, `dbus-send` (`dbus`), and `secret-tool` (`libsecret-tools` on Ubuntu, `libsecret` on Arch):
+
+```sh
+pnpm build
+node dist/cli.js login 'https://<hostname>'
+node dist/cli.js whoami
+node dist/cli.js logout
+```
+
+Login prints a code and tries `xdg-open` with the bare `/cli/authorize` URL. Enter the terminal code, name the machine, and approve only a login you started. The Secret Service item has `service=nook` and `url=<origin>`. Its label holds the machine name; its value reaches `secret-tool store` only through stdin. `$XDG_CONFIG_HOME/nook/config.json` (default `~/.config/nook/config.json`) holds only the URL. Logout clears the item only after revocation succeeds or the Worker confirms an invalid token. macOS (#33), machine management (#32), restricted grants (#6), and binaries (#7) are separate work.
+
+An empty or relative `XDG_CONFIG_HOME` uses the default directory. If login cannot save its keyring entry or URL, it revokes the newly issued token and clears any partial keyring entry. If revocation also fails, the CLI keeps any saved keyring entry and gives recovery guidance. Fix the configuration path and keyring, then repeat `login <origin>` to restore the URL when a saved entry exists, without creating another request; `logout` can then revoke the session.
+
+Login and logout coordinate through a Linux abstract socket for the OS user and the actual session bus ID obtained with `dbus-send`. Equivalent bus addresses and different config directories therefore protect the same keyring. A concurrent session command reports that another command is in progress; try again after it finishes. The kernel releases the socket on exit, including a crash. It carries no credential and creates no file.
+
+### E25: owner acceptance after deployment
+
+E25 is pending until the owner configures Bypass and tests production. In a signed-out shell with no cookies or Access assertion, use this intentionally invalid Bearer:
+
+```sh
+curl --silent --show-error --include \
+  --header 'Authorization: Bearer nook-invalid' \
+  'https://<hostname>/api/machine/whoami'
+```
+
+Expect the Worker's **401 JSON** `{"_tag":"Unauthorized"}`. Print only statuses and the discovery header for protected paths:
+
+```sh
+for path in api/machines api/whoami '' mcp; do
+  curl --silent --show-error --output /dev/null \
+    --write-out 'HTTP %{http_code}\nWWW-Authenticate: %header{www-authenticate}\n' \
+    --header 'Authorization: Bearer nook-invalid' \
+    "https://<hostname>/$path"
+done
+```
+
+Access must block these requests (a redirect, denial, or Managed OAuth discovery challenge); `/api/machines` must not produce a Worker 404. Confirm `/` and `/mcp` still require Access in a fresh browser. These captures verify path precedence and the assumption that Managed OAuth intercepts foreign Bearers. If inspecting whether Bypass forwards an assertion through trusted Cloudflare tooling, retain only a presence/absence boolean, never the header value. Its absence remains an assumption until observed; Nook exposes no debug endpoint for it.
+
+Finally, run login, whoami, and logout on the owner's Omarchy machine against production. Capture the approval page, successful identity, and logout. Record E1/E6 behavior and E25 outcomes on the PR without tokens, cookies, JWTs, device codes, keyring contents, or configured secrets. Local tests do not claim these production captures.

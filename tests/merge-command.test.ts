@@ -5,6 +5,7 @@ import { expect, it } from 'vitest';
 import type { Baseline } from '../scripts/lib/coverage-evidence.ts';
 import { digest, sourceIdentity } from '../scripts/lib/identity.ts';
 import { instrument, inventory } from '../scripts/lib/instrument.ts';
+import { testEnvironment } from '../scripts/lib/test-environment.ts';
 
 const command = resolve('scripts/coverage-merge.ts');
 
@@ -66,6 +67,7 @@ it.each(['complete', 'baseline', 'duplicate', 'artifact'] as const)(
       await mkdir(output, { recursive: true });
       await writeFile(resolve(output, 'preserved.txt'), 'previous evidence');
       const result = spawnSync(process.execPath, [command, ...directories], {
+        env: testEnvironment(resolve(directory, 'home')),
         cwd: directory,
         encoding: 'utf8',
         timeout: 10_000,

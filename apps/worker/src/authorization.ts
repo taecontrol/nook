@@ -1,4 +1,7 @@
-export type BucketGrant = 'all' | ReadonlyArray<string>;
+export type { BucketGrant } from '@nook/contract';
+
+import type { BucketGrant } from '@nook/contract';
+
 function inside(path: string, root: string) {
   return path === root || path.startsWith(`${root}/`);
 }

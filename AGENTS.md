@@ -32,6 +32,7 @@ in configuration, never in code.
 - The web app must feel instant. Preload routes and data on intent, cache
   queries, apply predictable writes optimistically, and stay within the load-time budgets: a cold open shows its first screen within 1 s on a 4G phone network, and navigation after intent within 100 ms.
 - The CLI keeps its token in the operating system keyring, never in a file.
+- Tests and local runs never read or write the owner's real home, keyring, session bus, or browser profile; host-touching tests use allowlisted environments and temporary directories, and the host-resource check fails the run if anything changes.
 
 ## Interface
 

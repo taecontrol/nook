@@ -3,6 +3,10 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { expect, it, vi } from 'vitest';
+import {
+  temporaryTestHome,
+  testEnvironment,
+} from '../scripts/lib/test-environment.ts';
 import { startRuntime } from '../scripts/runtime.ts';
 import { runtime } from './support/runtime.ts';
 
@@ -27,6 +31,7 @@ const leasePath = (port: number | string) =>
   resolve(tmpdir(), 'nook-test-ports', String(port));
 
 async function runFixture(fixture: string, file: string, name: string) {
+  const home = await temporaryTestHome();
   const directory = await mkdtemp(resolve('.local', 'runtime-fixture-'));
   const configPath = resolve(directory, 'vitest.config.ts');
   await writeFile(
@@ -42,11 +47,15 @@ export default mergeConfig(base, defineConfig({
     const result = spawnSync(
       'pnpm',
       ['exec', 'vitest', 'run', '--config', configPath, file, '-t', name],
-      { encoding: 'utf8', env: { ...process.env, FORCE_COLOR: '0' } },
+      {
+        encoding: 'utf8',
+        env: testEnvironment(home, { FORCE_COLOR: '0' }),
+      },
     );
     return { status: result.status, output: result.stdout + result.stderr };
   } finally {
     await rm(directory, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
   }
 }
 

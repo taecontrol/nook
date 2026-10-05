@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { closeBrowserPage } from './support/buckets-browser.ts';
+import { observeBrowserPage } from './support/buckets-browser.ts';
 import { expectToolSuccess, mcpDriver } from './support/mcp.ts';
 import { runtime } from './support/runtime.ts';
 import { visibilityBrowser } from './support/visibility-browser.ts';
@@ -59,7 +59,7 @@ it.each([1_000, 31_000])(
       await page.clock.fastForward(1_000);
       expect(lists).toHaveLength(2);
     } finally {
-      await closeBrowserPage(page, context);
+      await observeBrowserPage(page);
       await browser.close();
       await app.close();
     }
@@ -143,7 +143,7 @@ it.each(['POST', 'DELETE'])(
       expect(lists).toHaveLength(2);
     } finally {
       release();
-      await closeBrowserPage(page, context);
+      await observeBrowserPage(page);
       await browser.close();
       await app.close();
     }

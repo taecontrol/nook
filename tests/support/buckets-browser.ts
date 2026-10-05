@@ -29,7 +29,7 @@ export const deepBuckets = [
     'side-projects/memorable',
   ].map((path) => ({ path, createdAt: '2026-10-03T08:00:00.000Z' })),
 ];
-export async function closeBrowserPage(page: Page, context: BrowserContext) {
+export async function observeBrowserPage(page: Page) {
   if (process.env.COVERAGE_RUN)
     await observe(
       await page.evaluate(() => ({
@@ -38,6 +38,9 @@ export async function closeBrowserPage(page: Page, context: BrowserContext) {
         counters: globalThis.__coverage__ ?? {},
       })),
     );
+}
+export async function closeBrowserPage(page: Page, context: BrowserContext) {
+  await observeBrowserPage(page);
   await context.close();
 }
 export async function bucketPage(

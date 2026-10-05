@@ -1,16 +1,18 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type Browser, chromium } from 'playwright';
 import { expect } from 'vitest';
+import { browserEnvironment } from '../../scripts/lib/test-browser.ts';
 
 export async function visibilityBrowser() {
-  const profile = await mkdtemp(join(tmpdir(), 'nook-browser-'));
-  const process = spawn(
+  const environment = await browserEnvironment();
+  const profile = await mkdtemp(join(environment.home, 'profile-'));
+  const child = spawn(
     chromium.executablePath(),
     [
+      ...environment.options.args,
       '--headless=new',
       '--no-sandbox',
       '--remote-debugging-address=127.0.0.1',
@@ -18,25 +20,30 @@ export async function visibilityBrowser() {
       `--user-data-dir=${profile}`,
       'about:blank',
     ],
-    { stdio: 'ignore' },
+    { env: environment.options.env, stdio: 'ignore' },
   );
-  const exited = once(process, 'exit');
+  const exited = once(child, 'exit').catch(() => undefined);
   let browser: Browser | undefined;
   const close = async () => {
     try {
-      await browser?.close();
-    } finally {
-      process.kill();
+      if (browser?.isConnected()) {
+        // Closing a CDP connection only disconnects; shut down Chromium itself.
+        const session = await browser.newBrowserCDPSession();
+        await session.send('Browser.close');
+      } else child.kill();
       await exited;
-      await rm(profile, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 50,
-      });
+    } finally {
+      child.kill();
+      await exited;
+      try {
+        await browser?.close();
+      } finally {
+        await environment.close();
+      }
     }
   };
   try {
+    await once(child, 'spawn');
     const portFile = join(profile, 'DevToolsActivePort');
     await expect.poll(() => readFile(portFile, 'utf8')).toMatch(/^\d+\n/);
     const port = Number((await readFile(portFile, 'utf8')).split('\n')[0]);

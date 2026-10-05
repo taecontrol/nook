@@ -1,0 +1,10 @@
+{
+  "name": "@nook/cli",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@effect/platform-node": "4.0.0",
+    "@nook/contract": "workspace:*",
+    "effect": "4.0.0"
+  }
+}

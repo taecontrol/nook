@@ -1,25 +1,22 @@
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import {
-  type Browser,
-  type BrowserContext,
-  chromium,
-  type Page,
-} from 'playwright';
+import type { Browser, BrowserContext, Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
+import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { observe } from '../scripts/observation.ts';
 import { runtime, type TestRuntime } from './support/runtime.ts';
 
 let browser: Browser;
+let closeBrowser: (() => Promise<void>) | undefined;
 let app: TestRuntime;
 const screenshots = resolve('.local/verification/screenshots');
 beforeAll(async () => {
   await mkdir(screenshots, { recursive: true });
   app = await runtime();
-  browser = await chromium.launch();
+  ({ browser, close: closeBrowser } = await launchTestBrowser());
 });
 afterAll(async () => {
-  await browser?.close();
+  await closeBrowser?.();
   await app?.close();
 });
 

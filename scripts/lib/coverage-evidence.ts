@@ -102,7 +102,7 @@ function mergeObservation(
 ) {
   if (
     !name.startsWith(`${observation.seam}-`) ||
-    !['node', 'worker', 'browser'].includes(observation.seam)
+    !['node', 'worker', 'browser', 'cli'].includes(observation.seam)
   )
     throw new Error('Execution environment label mismatch');
   if (
@@ -127,6 +127,12 @@ function mergeObservation(
   }
 }
 
+function requiredSeams(baseline: Baseline) {
+  const required = ['node', 'worker', 'browser'];
+  if (Object.keys(baseline).some((file) => file.startsWith('apps/cli/src/')))
+    required.push('cli');
+  return required;
+}
 export function validateCoverage(
   manifest: Manifest,
   artifacts: Record<string, string>,
@@ -141,7 +147,7 @@ export function validateCoverage(
       throw new Error(`Stale baseline source ${file}`);
   }
   const names = Object.keys(manifest.outputs).filter((name) =>
-    /^(node|worker|browser)-.+\.json$/.test(name),
+    /^(node|worker|browser|cli)-.+\.json$/.test(name),
   );
   const seen = new Set<string>();
   const executed = new Set<string>();
@@ -153,7 +159,7 @@ export function validateCoverage(
       seen,
       executed,
     );
-  for (const seam of ['node', 'worker', 'browser']) {
+  for (const seam of requiredSeams(baseline)) {
     if (!executed.has(seam))
       throw new Error(`Missing ${seam} execution evidence`);
   }

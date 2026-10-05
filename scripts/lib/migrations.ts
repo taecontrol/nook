@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { D1Database } from '@cloudflare/workers-types';
 import { Miniflare } from 'miniflare';
 import { unstable_splitSqlQuery } from 'wrangler';
+import { testEnvironment } from './test-environment.ts';
 
 const tracking =
   'CREATE TABLE IF NOT EXISTS d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)';
@@ -97,6 +98,7 @@ export async function checkMigrationHistory({
   try {
     execFileSync('git', ['rev-parse', '--verify', baseRef], {
       cwd,
+      env: testEnvironment(process.env.HOME),
       stdio: 'ignore',
     });
   } catch {
@@ -107,7 +109,7 @@ export async function checkMigrationHistory({
   const names = execFileSync(
     'git',
     ['ls-tree', '-r', '--name-only', baseRef, '--', directory],
-    { cwd, encoding: 'utf8' },
+    { cwd, encoding: 'utf8', env: testEnvironment(process.env.HOME) },
   )
     .trim()
     .split('\n')
@@ -115,6 +117,7 @@ export async function checkMigrationHistory({
   for (const path of names) {
     const published = execFileSync('git', ['show', `${baseRef}:${path}`], {
       cwd,
+      env: testEnvironment(process.env.HOME),
     });
     const current = await readFile(join(cwd, path)).catch(() => undefined);
     if (!current?.equals(published))

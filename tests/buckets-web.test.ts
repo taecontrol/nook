@@ -1,5 +1,6 @@
-import { type Browser, chromium, type Page } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
+import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { invalidPaths } from './support/bucket-paths.ts';
 import {
   bucketPage,
@@ -18,6 +19,7 @@ function deferred() {
 }
 
 let browser: Browser;
+let closeBrowser: (() => Promise<void>) | undefined;
 let app: TestRuntime;
 beforeAll(async () => {
   app = await runtime({ bindings: { LOCAL_OWNER: 'synthetic-owner' } });
@@ -25,10 +27,10 @@ beforeAll(async () => {
     LOCAL_OWNER: 'synthetic-owner',
     LOCAL_ORIGIN: app.origin,
   });
-  browser = await chromium.launch();
+  ({ browser, close: closeBrowser } = await launchTestBrowser());
 });
 afterAll(async () => {
-  await browser?.close();
+  await closeBrowser?.();
   await app?.close();
 });
 const row = (page: import('playwright').Page, path: string) =>

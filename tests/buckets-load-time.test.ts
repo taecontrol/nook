@@ -15,6 +15,7 @@ it('E18/E19: cold-open and intent navigation budgets use the median of five samp
       home: [9000, 1000, 999, 700, 1001],
       buckets: [0, 0, 1001, 0, 0],
       navigation: [100, 100, 100, 100, 100],
+      authorize: [1000, 1000, 1000, 1000, 1000],
     }),
   ).not.toThrow();
 });
@@ -58,6 +59,7 @@ it.each([
         home: [500, 500, 500, 500, 500],
         buckets: [600, 600, 600, 600, 600],
         navigation: [20, 20, 20, 20, 20],
+        authorize: [500, 500, 500, 500, 500],
         [String(kind)]: values,
       }),
     ).toThrow(message);
@@ -68,6 +70,7 @@ it('E20: gzip bytes are printed as diagnostics and never used as a budget', asyn
     home: [500, 500, 500, 500, 500],
     buckets: [600, 600, 600, 600, 600],
     navigation: [20, 20, 20, 20, 20],
+    authorize: [500, 500, 500, 500, 500],
     gzipBytes: 900_000,
   };
   expect(() => assertLoadTimes(measured)).not.toThrow();

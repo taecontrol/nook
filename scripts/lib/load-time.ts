@@ -17,6 +17,7 @@ export type Measurements = {
   home: number[];
   buckets: number[];
   navigation: number[];
+  authorize: number[];
   gzipBytes?: number;
 };
 export function median(samples: number[]) {
@@ -28,15 +29,21 @@ export function median(samples: number[]) {
   return [...samples].sort((a, b) => a - b)[2];
 }
 export function assertLoadTimes(measured: Measurements) {
-  for (const key of ['home', 'buckets', 'navigation'] as const) {
+  const screens = ['home', 'buckets', 'authorize', 'navigation'] as const;
+  const labels: Record<string, string> = {
+    home: '/',
+    buckets: '/buckets',
+    authorize: '/cli/authorize',
+  };
+  for (const key of screens) {
     const budget =
       key === 'navigation'
         ? loadTimeBudgets.navigationMs
         : loadTimeBudgets.coldOpenMs;
-    const actual = median(measured[key]);
+    const actual = median(measured[key] ?? []);
     if (actual > budget)
       throw new Error(
-        `${key === 'navigation' ? 'Intent navigation' : `Cold open ${key === 'home' ? '/' : '/buckets'}`} median ${actual.toFixed(1)} ms exceeds ${budget} ms.`,
+        `${key === 'navigation' ? 'Intent navigation' : `Cold open ${labels[key]}`} median ${actual.toFixed(1)} ms exceeds ${budget} ms.`,
       );
   }
 }
@@ -47,6 +54,7 @@ export function formatMeasurements(measured: Measurements) {
         home: median(measured.home),
         buckets: median(measured.buckets),
         navigation: median(measured.navigation),
+        authorize: median(measured.authorize),
       },
       samplesMs: measured,
       coldOpenGzipBytes: measured.gzipBytes,

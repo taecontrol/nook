@@ -4,6 +4,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { delimiter, resolve } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
+import { testEnvironment } from '../scripts/lib/test-environment.ts';
 
 const expression = (value: string) => ['$', '{{ ', value, ' }}'].join('');
 
@@ -113,10 +114,12 @@ it.each([
 it('E13: both journey entry points require strict cache replay', async () => {
   const manifest = JSON.parse(await readFile('package.json', 'utf8'));
   expect(manifest.scripts['test:journey'].split(/\s+/)).toEqual([
-    'e2e',
-    'run',
-    '--strict-cache',
+    'node',
+    'scripts/journey.ts',
   ]);
+  expect(await readFile('scripts/journey.ts', 'utf8')).toMatch(
+    /(['"])e2e\1,\s*(['"])run\2,\s*(['"])--strict-cache\3/,
+  );
   const coverage = await readFile('scripts/coverage.ts', 'utf8');
   expect(coverage).toMatch(
     /(['"])e2e\1,\s*(['"])run\2,\s*(['"])--strict-cache\3/,
@@ -187,20 +190,24 @@ it('E20 setup: the real preflight blocks unless Verify succeeded on the exact ma
       '#!/usr/bin/env node\nimport {writeFileSync} from "node:fs"; writeFileSync(process.env.PREFLIGHT_ARGS, JSON.stringify(process.argv.slice(2))); console.log(process.env.PREFLIGHT_COUNT);\n',
     );
     await chmod(fixture, 0o755);
-    const environment = {
-      ...process.env,
+    const environment = testEnvironment(resolve(directory, 'home'), {
       PATH: `${directory}${delimiter}${process.env.PATH}`,
-      GH_TOKEN: undefined,
       GITHUB_REPOSITORY: 'synthetic/nook',
       DEPLOY_SHA: 'fixture-main-sha',
       PREFLIGHT_ARGS: argsPath,
-    };
+    });
     for (const [count, status] of [
       ['0', 1],
       ['1', 0],
     ] as const) {
       const result = spawnSync('bash', ['-c', preflight.run], {
-        env: { ...environment, PREFLIGHT_COUNT: count },
+        env: testEnvironment(resolve(directory, 'home'), {
+          PATH: environment.PATH,
+          GITHUB_REPOSITORY: 'synthetic/nook',
+          DEPLOY_SHA: 'fixture-main-sha',
+          PREFLIGHT_ARGS: argsPath,
+          PREFLIGHT_COUNT: count,
+        }),
         encoding: 'utf8',
         timeout: 5_000,
       });
@@ -249,16 +256,14 @@ it('E20 setup: only the commit main points to deploys, so a slower older Verify 
     ] as const) {
       await writeFile(outputPath, '');
       const result = spawnSync('bash', ['-c', check.run], {
-        env: {
-          ...process.env,
+        env: testEnvironment(resolve(directory, 'home'), {
           PATH: `${directory}${delimiter}${process.env.PATH}`,
-          GH_TOKEN: undefined,
           GITHUB_REPOSITORY: 'synthetic/nook',
           GITHUB_OUTPUT: outputPath,
           DEPLOY_SHA: 'fixture-deploy-sha',
           MAIN_HEAD: head,
           LATEST_ARGS: argsPath,
-        },
+        }),
         encoding: 'utf8',
         timeout: 5_000,
       });

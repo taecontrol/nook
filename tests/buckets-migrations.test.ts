@@ -8,9 +8,11 @@ import { unstable_splitSqlQuery } from 'wrangler';
 import {
   applyMigrations,
   checkMigrationHistory,
+  migrationFiles,
   normalizeSchema,
   verifyMigrations,
 } from '../scripts/lib/migrations.ts';
+import { testEnvironment } from '../scripts/lib/test-environment.ts';
 
 const execute = promisify(execFile);
 
@@ -48,7 +50,10 @@ it('E22/E23: Wrangler applies only the numbered migrations and preserves the loc
         resolve(root, 'd1'),
       ],
       {
-        env: { ...process.env, CI: '1', WRANGLER_SEND_METRICS: 'false' },
+        env: testEnvironment(resolve(root, 'home'), {
+          CI: '1',
+          WRANGLER_SEND_METRICS: 'false',
+        }),
         timeout: 15_000,
       },
     );
@@ -66,6 +71,7 @@ it('E22/E23: Wrangler applies only the numbered migrations and preserves the loc
     expect(first[0].results).toEqual([
       { name: '0001_buckets.sql' },
       { name: '0002_reserve_me.sql' },
+      { name: '0003_machine_authorizations.sql' },
     ]);
     expect(first[1].results).toEqual([
       { path: 'me', created_at: expect.any(String) },
@@ -127,7 +133,12 @@ it.each(['edited', 'removed', 'missing base'])(
   async (change) => {
     const root = await fixture();
     const git = (...args: string[]) =>
-      execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+      execFileSync('git', ['-C', root, ...args], {
+        encoding: 'utf8',
+        env: testEnvironment(resolve(root, 'home'), {
+          GIT_CONFIG_NOSYSTEM: '1',
+        }),
+      });
     try {
       git('init');
       git('add', 'migrations');
@@ -399,7 +410,8 @@ it.each([
     const root = await fixture();
     const directory = resolve(root, 'migrations');
     try {
-      await rm(resolve(directory, '0002_reserve_me.sql'));
+      for (const name of await migrationFiles(directory))
+        if (name !== '0001_buckets.sql') await rm(resolve(directory, name));
       await writeFile(resolve(directory, '0001_buckets.sql'), String(first));
       await writeFile(resolve(directory, '0002_latest.sql'), String(latest));
       await writeFile(resolve(directory, 'schema.sql'), String(schema));

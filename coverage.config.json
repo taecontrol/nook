@@ -1,11 +1,13 @@
 {
   "roots": [
+    "apps/cli/src",
     "apps/worker/src",
     "apps/web/src",
     "packages/contract/src",
     "scripts/lib"
   ],
   "complexityRoots": [
+    "apps/cli/src",
     "apps/worker/src",
     "apps/web/src",
     "packages/contract/src",

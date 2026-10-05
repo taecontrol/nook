@@ -9,6 +9,7 @@ export default defineConfig({
     hookTimeout: 60_000,
     maxWorkers: 3,
     setupFiles: ['tests/coverage-setup.ts'],
+    globalSetup: ['scripts/lib/host-isolation.ts'],
     expect: { poll: { timeout: 5_000 } },
   },
 });

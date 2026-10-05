@@ -1,7 +1,8 @@
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { type Browser, chromium } from 'playwright';
+import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
+import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import {
   closeBrowserPage,
   deepBuckets,
@@ -10,13 +11,14 @@ import {
 import { runtime } from './support/runtime.ts';
 
 let browser: Browser;
+let closeBrowser: (() => Promise<void>) | undefined;
 const directory = resolve('.local/verification/screenshots');
 beforeAll(async () => {
   await mkdir(directory, { recursive: true });
-  browser = await chromium.launch();
+  ({ browser, close: closeBrowser } = await launchTestBrowser());
 });
 afterAll(async () => {
-  await browser?.close();
+  await closeBrowser?.();
 });
 const states = [
   'typical',
