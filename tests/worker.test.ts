@@ -287,9 +287,9 @@ it('E2: a failed JWKS fetch denies the request and a later healthy fetch recover
   }
 });
 
-it('E3: authenticates the MCP placeholder before returning 404', async () => {
+it('E3: authenticates MCP before rejecting an unsupported GET', async () => {
   expect((await request('/mcp')).status).toBe(401);
-  expect((await request('/mcp', await issuer.assertion())).status).toBe(404);
+  expect((await request('/mcp', await issuer.assertion())).status).toBe(405);
 });
 
 it('E4: authenticates unknown API paths and returns a JSON 404 to the owner', async () => {

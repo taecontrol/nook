@@ -4,6 +4,7 @@ import {
   type JWTVerifyGetKey,
   jwtVerify,
 } from 'jose';
+import type { BucketGrant } from './authorization.ts';
 
 export type AuthBindings = {
   ACCESS_ISSUER?: string;
@@ -13,7 +14,7 @@ export type AuthBindings = {
   LOCAL_ORIGIN?: string;
 };
 
-type Identity = { email: string } | { status: 401 | 403 };
+type Identity = { email: string; grant: BucketGrant } | { status: 401 | 403 };
 
 function syntheticOwner(request: Request, env: AuthBindings) {
   const url = new URL(request.url);
@@ -75,7 +76,8 @@ export async function authenticate(
   request: Request,
   env: AuthBindings,
 ): Promise<Identity> {
-  if (syntheticOwner(request, env)) return { email: 'owner@nook.test' };
+  if (syntheticOwner(request, env))
+    return { email: 'owner@nook.test', grant: 'all' };
   if (!configured(env)) return { status: 401 };
   const token = request.headers.get('Cf-Access-Jwt-Assertion');
   if (!token) return { status: 401 };
@@ -87,7 +89,7 @@ export async function authenticate(
       requiredClaims: ['exp', 'email', 'sub'],
     });
     if (payload.email !== env.OWNER_EMAIL) return { status: 403 };
-    return { email: env.OWNER_EMAIL };
+    return { email: env.OWNER_EMAIL, grant: 'all' };
   } catch {
     // Never log the assertion, configured secrets, or a verifier error.
     return { status: 401 };

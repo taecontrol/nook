@@ -7,6 +7,7 @@ import { HttpApiBuilder } from 'effect/http-api';
 import { type AuthBindings, authenticate } from './auth.ts';
 import type { BucketGrant } from './authorization.ts';
 import { bucketOperations } from './buckets.ts';
+import { mcpHandler } from './mcp.ts';
 
 export function handlerForPrincipal(
   email: string,
@@ -29,31 +30,43 @@ export function handlerForPrincipal(
     Layer.provide([session, buckets]),
     Layer.provide(HttpServer.layerServices),
   );
-  return HttpRouter.toWebHandler(routes, { disableLogger: true }).handler;
+  const apiHandler = HttpRouter.toWebHandler(routes, {
+    disableLogger: true,
+  }).handler;
+  return (request: Request) =>
+    new URL(request.url).pathname === '/mcp'
+      ? mcpHandler(db, grant).fetch(request)
+      : apiHandler(request);
 }
 let cached:
   | {
       email: string;
       db: D1Database;
+      grant: BucketGrant;
       handler: ReturnType<typeof handlerForPrincipal>;
     }
   | undefined;
-function handlerFor(email: string, db: D1Database) {
-  if (cached?.email !== email || cached.db !== db)
-    cached = { email, db, handler: handlerForPrincipal(email, db) };
+function handlerFor(email: string, db: D1Database, grant: BucketGrant) {
+  if (cached?.email !== email || cached.db !== db || cached.grant !== grant)
+    cached = {
+      email,
+      db,
+      grant,
+      handler: handlerForPrincipal(email, db, grant),
+    };
   return cached.handler;
 }
-function foreignWrite(request: Request, url: URL) {
+function foreignOrigin(request: Request, url: URL) {
   const origin = request.headers.get('Origin');
   return (
-    ['POST', 'DELETE'].includes(request.method) &&
+    (url.pathname === '/mcp' || ['POST', 'DELETE'].includes(request.method)) &&
     origin !== null &&
     origin !== url.origin
   );
 }
 function knownRoute(path: string, method: string) {
   return (
-    ['/api/whoami', '/api/buckets'].includes(path) ||
+    ['/api/whoami', '/api/buckets', '/mcp'].includes(path) ||
     (path.startsWith('/api/buckets/') && method === 'DELETE')
   );
 }
@@ -69,10 +82,10 @@ export default {
         { status: identity.status },
       );
     const url = new URL(request.url);
-    if (foreignWrite(request, url))
+    if (foreignOrigin(request, url))
       return Response.json({ _tag: 'Forbidden' }, { status: 403 });
     if (!knownRoute(url.pathname, request.method))
       return Response.json({ error: 'Not found' }, { status: 404 });
-    return handlerFor(identity.email, env.DB)(request);
+    return handlerFor(identity.email, env.DB, identity.grant)(request);
   },
 };

@@ -52,7 +52,7 @@ const bucketsOptions = queryOptions({
   },
   retry: false,
   staleTime: 30_000,
-  refetchOnWindowFocus: false,
+  refetchOnWindowFocus: 'always',
 });
 
 const writeKey = ['buckets', 'write'] as const;
@@ -165,6 +165,7 @@ export function useBuckets() {
     buckets: useQuery({
       ...bucketsOptions,
       staleTime: busy ? Infinity : bucketsOptions.staleTime,
+      refetchOnWindowFocus: busy ? false : bucketsOptions.refetchOnWindowFocus,
     }),
     create: (path: string) => start('create', path),
     remove: (path: string) => start('delete', path),

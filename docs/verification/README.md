@@ -18,6 +18,10 @@ Run `pnpm verify` from the repository root with the pinned Node and pnpm version
 
 All local identities, signing keys, and issuer responses are synthetic. The runtime reads asset routing and compatibility settings from `wrangler.jsonc`, binds only to `127.0.0.1`, and takes explicit test bindings. Test port leases stay above Fetch's blocked-port range and outside Linux's ephemeral range. No test reads production credentials or contacts a Cloudflare account. Coverage endpoints and counters exist only in the test build.
 
+`pnpm test tests/mcp-worker.test.ts tests/mcp-handlers.test.ts tests/mcp-transport.test.ts tests/mcp-web.test.ts` proves the remote bucket tools, grant denial, authentication and Origin ordering, sanitized errors, and both observed client protocol revisions. The fetch driver follows Claude Code 2.1.289's 2026-07-28 discovery and Codex 0.160.0's 2025-06-18 initialization, reading JSON and SSE. The Codex transport test restarts workerd between every step and also calls a tool as the first request of an isolate.
+
+The MCP browser test launches the installed Chromium with its own temporary profile and loopback debugging port, then connects Playwright with `noDefaults`. This preserves native tab visibility, which Playwright's default focus emulation otherwise overrides. It verifies an external MCP creation while the real tab is hidden, then exactly one list request and a nested bucket on return, for both fresh and stale cached data. The fixture closes Chromium and removes its profile. The same test runs locally and in CI without a display server or extra dependency.
+
 ## Coverage and CRAP
 
 The coverage inventory starts from original TypeScript and TSX, including files no test imports. [coverage.config.json](../../coverage.config.json) defines the scope: Worker, web, contract, and the Node policy modules in `scripts/lib`. Script entry points are orchestration and are covered by command and workflow acceptance checks; every authored script function still enters the complexity check. Unconfigured executable extensions fail inventory validation.
