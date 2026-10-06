@@ -6,6 +6,7 @@ export const macosCliSuites = [
   'tests/macos-cli-timeouts.test.ts',
   'tests/cli-platform.test.ts',
   'tests/cli-release.test.ts',
+  'tests/release-archive.test.ts',
   'tests/machines-cli.test.ts',
   'tests/machine-grant-cli.test.ts',
 ];
