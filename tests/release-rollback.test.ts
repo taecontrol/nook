@@ -120,8 +120,9 @@ cd "$RELEASE_REMOTES" && exec sh -c "git \${command#git-}"
 });
 
 afterEach(async () => {
-  expect(await readFile(log, 'utf8')).not.toContain(deployKey);
+  const calls = await readFile(log, 'utf8');
   await rm(directory, { recursive: true, force: true });
+  expect(calls).not.toContain(deployKey);
 });
 
 it('publish pushes the tag for the dispatched commit and publishes the draft release', async () => {
