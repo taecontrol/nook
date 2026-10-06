@@ -16,7 +16,7 @@ export type ToolList = {
   }[];
 };
 
-// Matches the observed Claude Code 2.1.289 and Codex 0.160.0 HTTP traces.
+// Uses the observed MCP headers and bodies of Claude Code 2.1.289 and Codex 0.160.0.
 // Initialization has no version header; Codex does not send Mcp-Method.
 export function mcpRequest(
   origin: string,
@@ -42,6 +42,9 @@ export function mcpRequest(
   return new Request(`${origin}/mcp`, {
     method: 'POST',
     headers: {
+      // A denied POST can leave its body unread and workerd closes the socket.
+      // Explicit close prevents Node's pool from racing that peer shutdown.
+      Connection: 'close',
       Accept: modern
         ? 'application/json, text/event-stream'
         : 'text/event-stream, application/json',

@@ -68,6 +68,8 @@ The race suite decorates the genuine D1 binding used by the built Worker, pausin
 
 Worker coverage capture uses Miniflare's runtime-owned HTTP dispatcher before disposal. It does not share the public test-client connection pool. The lifecycle regression forwards a genuine Worker response through a loopback server that closes reused client sockets and proves that capture still records the real counters. A malformed coverage response still fails the run and releases workerd and its port lease. Collection and acceptance requests have no retries.
 
+The Node MCP fixture closes each HTTP/1 POST connection explicitly. A denied request can return before its body is read, after which workerd closes the connection; native Fetch can otherwise reuse that socket before observing the peer shutdown. This race was reproduced on the base revision during CI diagnosis. The fixture preserves the observed MCP headers and payloads, real HTTP responses, and all authentication and Origin assertions, with no retries or timeout exceptions.
+
 ## Machine bucket grants
 
 `pnpm test tests/machine-grant-approval.test.ts tests/machine-grant-mcp.test.ts tests/machine-grant-cli.test.ts tests/machine-grant-web.test.ts tests/machine-grant-load-time.test.ts` proves issue #6's automated examples E1–E22 and E24–E32. Approval runs through the real owner API, normalizes and persists roots, rejects malformed, empty and nonexistent grants, and leaves failed requests pending. A checkpoint deletes the selected bucket immediately before the approval batch. The conditional write and existence check share that atomic batch.
