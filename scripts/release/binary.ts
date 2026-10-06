@@ -20,7 +20,7 @@ function run(command: string, args: string[]) {
   return result.stdout;
 }
 
-export async function packageVersion() {
+async function packageVersion() {
   const cli = resolve(repository, 'apps/cli/package.json');
   return (JSON.parse(await readFile(cli, 'utf8')) as { version: string })
     .version;
