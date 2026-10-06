@@ -35,7 +35,12 @@ function remoteTags() {
   return git(directory, 'ls-remote', '--tags', remote);
 }
 
-async function runStep(job: string, name: string, fail = '') {
+async function runStep(
+  job: string,
+  name: string,
+  fail = '',
+  extra: NodeJS.ProcessEnv = {},
+) {
   const steps: { name?: string; uses?: string; run?: string }[] =
     release.jobs[job].steps;
   const index = steps.findIndex((step) => step.name === name);
@@ -53,7 +58,7 @@ async function runStep(job: string, name: string, fail = '') {
     ['--noprofile', '--norc', '-eo', 'pipefail', '-c', steps[index].run ?? ''],
     {
       cwd: workspace,
-      env: { ...env, RELEASE_FAIL: fail },
+      env: { ...env, RELEASE_FAIL: fail, ...extra },
       encoding: 'utf8',
       timeout: 20_000,
     },
@@ -168,4 +173,16 @@ it('unpublish deletes the published release and its tag after a failed mise smok
   expect(await readFile(log, 'utf8')).toContain(
     'gh release delete v0.1.0 --repo synthetic/nook --yes',
   );
+});
+
+it('validate refuses to release while either release secret is missing', async () => {
+  const step = 'Require the release secrets';
+  const missing = await runStep('validate', step);
+  expect(missing.status).not.toBe(0);
+  expect(missing.stdout).toContain('The HOMEBREW_TAP_TOKEN secret is not set.');
+  const both = await runStep('validate', step, '', {
+    HOMEBREW_TAP_TOKEN: 'fixture-tap-token-value',
+  });
+  expect(both.status, both.stderr).toBe(0);
+  expect(both.stdout).not.toContain('fixture-tap-token-value');
 });
