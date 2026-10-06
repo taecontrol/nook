@@ -175,10 +175,11 @@ it.each([
 it('E10: grant-root and descendant writes preserve idempotency, nonempty and not-found errors', async () => {
   const { token } = await issueGrant(app, ['work/acme']);
   const driver = machineMcp(app, token);
-  expectToolSuccess(
-    await driver.call('create_bucket', { path: 'work/acme' }),
-    { path: 'work/acme', created: false, createdAncestors: [] },
-  );
+  expectToolSuccess(await driver.call('create_bucket', { path: 'work/acme' }), {
+    path: 'work/acme',
+    created: false,
+    createdAncestors: [],
+  });
   expectToolSuccess(
     await driver.call('create_bucket', { path: 'work/acme/api' }),
     { path: 'work/acme/api', created: false, createdAncestors: [] },

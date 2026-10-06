@@ -30,7 +30,7 @@
     "recordedFor": {
       "testId": "tests/journeys/owner.e2e.ts::E13%3A%20the%20owner%20creates%20work%2Facme%20inside%20work",
       "targetId": "chromium",
-      "instructionDigest": "d9df9253fe1829f43cfe256694c8aeb8849ee3fce79b801d6f6f665b7827940b"
+      "instructionDigest": "dcd69abeccef0f9a4b256e510acb591716e06067d3a9e7aa799fde73cf1d746a"
     },
     "summary": "Created work/acme using the New bucket path field and Create button. The bucket outline now shows work with nested acme and an Actions for work/acme button; the path field has cleared.",
     "startPath": "/buckets",

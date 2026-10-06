@@ -255,9 +255,7 @@ it('E30: failed approval preserves its grant on retry and repeats it in the resu
       Array(2).fill({ machineName: 'omarchy', grant: ['work/acme'] }),
     );
     await page.getByText('Read only: me, work', { exact: true }).waitFor();
-    expect(await page.getByText('work/acme', { exact: true }).count()).toBe(
-      1,
-    );
+    expect(await page.getByText('work/acme', { exact: true }).count()).toBe(1);
     expect(
       (
         await (

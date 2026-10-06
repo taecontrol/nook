@@ -150,14 +150,11 @@ it('E2: discovered descriptions retain explicit buckets, owner choices and write
 });
 it('E3/E4: create adds missing ancestors, returns the API body and repeats change nothing', async () => {
   expect(await listed()).toEqual(['me']);
-  expectToolSuccess(
-    await driver.call('create_bucket', { path: 'work/acme' }),
-    {
-      path: 'work/acme',
-      created: true,
-      createdAncestors: ['work'],
-    },
-  );
+  expectToolSuccess(await driver.call('create_bucket', { path: 'work/acme' }), {
+    path: 'work/acme',
+    created: true,
+    createdAncestors: ['work'],
+  });
   expect(await listed()).toEqual(['me', 'work', 'work/acme']);
   const before = await snapshot();
   for (const path of ['work/acme', 'me'])
@@ -180,10 +177,9 @@ it.each(invalidPaths)(
 );
 it('E6: delete removes only an empty leaf and returns its path', async () => {
   await driver.call('create_bucket', { path: 'work/acme' });
-  expectToolSuccess(
-    await driver.call('delete_bucket', { path: 'work/acme' }),
-    { path: 'work/acme' },
-  );
+  expectToolSuccess(await driver.call('delete_bucket', { path: 'work/acme' }), {
+    path: 'work/acme',
+  });
   expect(await listed()).toEqual(['me', 'work']);
 });
 it.each([

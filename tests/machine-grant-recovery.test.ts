@@ -130,9 +130,7 @@ it.each(['successful', 'failed-then-retried'])(
           .getByRole('button', { name: 'Try again', exact: true })
           .click();
       }
-      await expect
-        .poll(() => bucketCheck(page, 'work/acme').count())
-        .toBe(0);
+      await expect.poll(() => bucketCheck(page, 'work/acme').count()).toBe(0);
       await bucketCheck(page, 'personal/finances').check();
       const approved = page.waitForResponse((response) =>
         response.url().endsWith('/approve'),

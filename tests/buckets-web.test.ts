@@ -177,9 +177,7 @@ it.each([200, 503])(
       const field = page.getByRole('textbox', { name: 'New bucket path' });
       await field.fill('work/acme');
       await field.press('Enter');
-      await expect
-        .poll(() => row(page, 'work/acme').innerText())
-        .toBe('acme');
+      await expect.poll(() => row(page, 'work/acme').innerText()).toBe('acme');
       expect(await field.inputValue()).toBe('');
       expect(
         await page
@@ -424,9 +422,7 @@ it('the outline expands, collapses, previews placement, and exposes reserved/chi
     await page.getByRole('menuitem', { name: 'Create inside' }).click();
     expect(await field.inputValue()).toBe('work/');
     await field.fill('Work/Acme');
-    await page
-      .getByRole('button', { name: 'work/acme', exact: true })
-      .click();
+    await page.getByRole('button', { name: 'work/acme', exact: true }).click();
     expect(await field.inputValue()).toBe('work/acme');
     expect(
       await page.getByRole('list', { name: 'Buckets to create' }).innerText(),
