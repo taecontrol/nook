@@ -90,18 +90,27 @@ Keep the whole-hostname Access application, its owner Allow policy, and Managed 
 
 The more specific path application wins. The slash before `*` ensures that `api/machine/*` does not cover `/api/machine` or `/api/machines`. Access selects paths, not Nook Authorization headers. The Worker accepts Nook tokens only in this prefix; Access and the synthetic owner never authenticate a machine there. See [ADR-0010](adrs/0010-machine-tokens-only-under-the-machine-api-prefix.md), [Access paths](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/), and [Bypass policies](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/#bypass).
 
-The repository CLI requires pinned Node 26.10. On Linux, it uses an unlocked Secret Service, `dbus-send` (`dbus`), and `secret-tool` (`libsecret-tools` on Ubuntu, `libsecret` on Arch). On macOS, it uses the default login Keychain and the system `security` command:
+Install the CLI with mise on Linux or macOS, or with Homebrew on macOS:
 
 ```sh
-pnpm build
-node dist/cli.js login 'https://<hostname>'
-node dist/cli.js whoami
-node dist/cli.js logout
+mise use -g github:taecontrol/nook@latest
+brew install taecontrol/tap/nook
 ```
+
+The mise build is a single executable that needs no Node. The Homebrew formula builds the CLI from source and runs it on Homebrew's Node. On Linux, the CLI uses an unlocked Secret Service, `dbus-send` (`dbus`), and `secret-tool` (`libsecret-tools` on Ubuntu, `libsecret` on Arch). On macOS, it uses the default login Keychain and the system `security` command:
+
+```sh
+nook login 'https://<hostname>'
+nook whoami
+nook logout
+nook version
+```
+
+From a clone, `pnpm build` produces the same CLI as `dist/cli.js` for the pinned Node 26.10.
 
 Login prints a code and tries the platform browser opener with the bare `/cli/authorize` URL. Enter the terminal code, choose its buckets, name the machine, and approve only a login you started. The initial choice is only `me`. Checked buckets permit read and write throughout their current and future descendants. A limited machine can also read `me` and the ancestors of its selected roots; other buckets stay hidden. All buckets includes current and future buckets. To change access, revoke the machine in Machines or run logout, then log in again.
 
-The Secret Service item has `service=nook` and `url=<origin>`. Its label holds the machine name; its value reaches `secret-tool store` only through stdin. `$XDG_CONFIG_HOME/nook/config.json` (default `~/.config/nook/config.json`) holds only the URL. Logout clears the item only after revocation succeeds or the Worker confirms an invalid token. On macOS, a generic password has service `nook`, account `<origin>`, and the same machine-name label. `security -i` receives one quoted command on stdin, including the token; the token never enters argv. Login, identity, and logout wait up to two minutes for Keychain access. Unlock the login keychain when prompted, then try again if the command times out. The CLI opens the approval URL with `open` on macOS and `xdg-open` on Linux. Binaries (#7) remain separate work.
+The Secret Service item has `service=nook` and `url=<origin>`. Its label holds the machine name; its value reaches `secret-tool store` only through stdin. `$XDG_CONFIG_HOME/nook/config.json` (default `~/.config/nook/config.json`) holds only the URL. Logout clears the item only after revocation succeeds or the Worker confirms an invalid token. On macOS, a generic password has service `nook`, account `<origin>`, and the same machine-name label. `security -i` receives one quoted command on stdin, including the token; the token never enters argv. Login, identity, and logout wait up to two minutes for Keychain access. Unlock the login keychain when prompted, then try again if the command times out. The CLI opens the approval URL with `open` on macOS and `xdg-open` on Linux.
 
 An empty or relative `XDG_CONFIG_HOME` uses the default directory. If login cannot save its keyring entry or URL, it revokes the newly issued token and clears any partial keyring entry. If revocation also fails, the CLI keeps any saved keyring entry and gives recovery guidance. Fix the configuration path and keyring, then repeat `login <origin>` to restore the URL when a saved entry exists, without creating another request; `logout` can then revoke the session.
 
@@ -138,13 +147,13 @@ After login and approval, connect clients to `https://<hostname>/api/machine/mcp
 
 `nook mcp-header` reads the keyring locally and emits a single headers JSON line for a client to consume. It does not contact the server or save a credential file. Use it only as a client helper; its stdout contains the credential and must not be captured in a terminal transcript, log, or agent conversation. If there is no usable session, it emits no stdout and gives login guidance on stderr. A stalled keyring lookup is stopped after 5 seconds, leaving time to report the failure before the client's helper deadline. `whoami` displays its grant without a credential. Each authenticated MCP request updates the machine's last use, and web revocation makes the next request unauthorized.
 
-Until standalone CLI binaries ship, use the built CLI with pinned Node. Replace `/absolute/path/to/nook` with this machine's repository path in the helper commands. Keep both Node and the unlocked Secret Service available to the client process.
+A client may not inherit the shell's `PATH`, so give the helper an absolute path: the mise shim, `~/.local/share/mise/shims/nook` by default, or `/opt/homebrew/bin/nook` from Homebrew. Replace `/absolute/path/to/nook` below with it. Keep the unlocked Secret Service available to the client process.
 
 For Claude Code, add a separate user-scope server:
 
 ```sh
 claude mcp add-json --scope user nook-limited \
-  '{"type":"http","url":"https://<hostname>/api/machine/mcp","headersHelper":"node /absolute/path/to/nook/dist/cli.js mcp-header"}'
+  '{"type":"http","url":"https://<hostname>/api/machine/mcp","headersHelper":"/absolute/path/to/nook mcp-header"}'
 ```
 
 The helper supplies authentication on connection. See [Claude Code dynamic headers](https://code.claude.com/docs/en/mcp#use-dynamic-headers-for-custom-authentication).
@@ -154,7 +163,7 @@ For Codex, add a separate entry in the user configuration:
 ```toml
 [mcp_servers.nook_limited]
 url = "https://<hostname>/api/machine/mcp"
-http_headers_helper = "node /absolute/path/to/nook/dist/cli.js mcp-header"
+http_headers_helper = "/absolute/path/to/nook mcp-header"
 ```
 
 Use the helper as this server's credential source and remove any explicit bearer or stored OAuth credentials for the same entry, which take precedence. This helper works for local HTTP MCP connections. See [Codex HTTP MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).

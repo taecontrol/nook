@@ -1,6 +1,7 @@
 import { hostname } from 'node:os';
 import { limitedAccessText, readOnlyText } from '@nook/contract';
 import { Effect } from 'effect';
+import cliPackage from '../package.json' with { type: 'json' };
 import { machineApi } from './api.ts';
 import { installationOrigin, readConfig, writeConfig } from './config.ts';
 import { CliFailure } from './errors.ts';
@@ -133,7 +134,7 @@ export function login(input: string, write: Write) {
         api.machine.authorize({
           payload: {
             suggestedName: hostname().slice(0, 64),
-            client: `nook 0.1.0 · ${process.platform}-${process.arch}`,
+            client: `nook ${cliPackage.version} · ${process.platform}-${process.arch}`,
           },
         }),
       ).pipe(

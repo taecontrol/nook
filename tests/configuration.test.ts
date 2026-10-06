@@ -66,7 +66,12 @@ it('E17/#33 E21: PR CI requires static checks, three Linux shards, macOS CLI and
     ),
   ).toBe(true);
   const final = ci.jobs.verify;
-  expect(final.needs).toEqual(['static-checks', 'tests', 'macos-cli']);
+  expect(final.needs).toEqual([
+    'static-checks',
+    'tests',
+    'macos-cli',
+    'linux-binary',
+  ]);
   const macos = ci.jobs['macos-cli'];
   expect(macos['runs-on']).toBe('macos-latest');
   expect(macos['timeout-minutes']).toBe(15);

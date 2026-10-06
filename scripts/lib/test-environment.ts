@@ -37,6 +37,10 @@ const overrideNames = new Set([
   'PREFLIGHT_ARGS',
   'PREFLIGHT_COUNT',
   'GIT_CONFIG_NOSYSTEM',
+  'VERSION',
+  'RELEASE_TAG_DEPLOY_KEY',
+  'RELEASE_LOG',
+  'RELEASE_REMOTES',
 ]);
 const directories = {
   XDG_CONFIG_HOME: 'config',
