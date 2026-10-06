@@ -121,16 +121,17 @@ jobs:
           cmp "$RUNNER_TEMP/first.tar.gz" "$RUNNER_TEMP/second.tar.gz"
           cp "$RUNNER_TEMP/first.tar.gz" "release-assets/nook-$VERSION.tar.gz"
           (cd release-assets && shasum -a 256 "nook-$VERSION.tar.gz" > "nook-$VERSION.tar.gz.sha256")
-      - name: Install the source formula from the local archive
+      - name: Audit the formula and install it from the local archive
         run: |
           archive="$PWD/release-assets/nook-$VERSION.tar.gz"
           sha=$(awk '{print $1}' "$archive.sha256")
           tap=taecontrol/nook-release
           brew tap-new --no-git "$tap"
           formula="$(brew --repository "$tap")/Formula/nook.rb"
-          sed -e "s/@VERSION@/$VERSION/g" -e "s/@SHA256@/$sha/g" \
-            -e "s|^  url .*|  url \"file://$archive\"|" packaging/nook.rb.template > "$formula"
-          brew install --build-from-source "$tap/nook"
+          sed -e "s/@VERSION@/$VERSION/g" -e "s/@SHA256@/$sha/g" packaging/nook.rb.template > "$formula"
+          brew audit --strict --formula "$tap/nook"
+          sed -i '' "s|^  url .*|  url \"file://$archive\"|" "$formula"
+          brew install --verbose --build-from-source "$tap/nook"
           brew test "$tap/nook"
           test "$("$(brew --prefix)/bin/nook" version)" = "{\"version\":\"$VERSION\"}"
           brew uninstall "$tap/nook"
