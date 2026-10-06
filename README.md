@@ -7,6 +7,15 @@ Tools that AI agents use from any machine, running in your own Cloudflare accoun
 
 Nook is in early development. The owner manages hierarchical buckets and connected machines in the web app. When approving CLI login on Linux or macOS, they choose specific bucket subtrees or all buckets. Agents on that machine connect over MCP using `nook mcp-header`, which reads its credential from the system keyring. The CLI shows the grant with `whoami` and revokes it with `logout`; the owner can also revoke it from Machines. Memory and Vault content follow in later changes.
 
+## Install the CLI
+
+```sh
+mise use -g github:taecontrol/nook@latest   # Linux or macOS
+brew install taecontrol/tap/nook            # macOS
+```
+
+`nook login https://<hostname>` connects a machine to an installation. See [deployment](docs/deployment.md#cli-and-the-machine-api-bypass) for the agent configuration and [releasing](docs/releasing.md) for how versions ship.
+
 ## Run locally
 
 Install [mise](https://mise.jdx.dev/), then run from the repository root:
