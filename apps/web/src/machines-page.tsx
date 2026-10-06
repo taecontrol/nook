@@ -42,6 +42,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { ApiError } from './api-client';
+import { MachineAccess } from './grant-summary';
 import { type MachineRevoke, useMachines } from './machines-api';
 import { approvedText, groupMachines, lastUsedParts } from './machines-model';
 import { formatDate } from './paths';
@@ -211,13 +212,9 @@ function MachineGroups({
                       <ItemDescription>
                         <Facts parts={lastUsedParts(machine, now)} />
                       </ItemDescription>
-                      <ItemDescription>
-                        <Facts
-                          parts={[
-                            approvedText(machine, now),
-                            'Access: All buckets',
-                          ]}
-                        />
+                      <ItemDescription truncate={false}>
+                        <Facts parts={[approvedText(machine, now)]} /> ·{' '}
+                        <MachineAccess grant={machine.grant} />
                       </ItemDescription>
                     </ItemContent>
                     <ItemActions className="self-start sm:self-center">

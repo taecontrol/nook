@@ -11,6 +11,7 @@ const measured = {
   authorize: [500, 500, 500, 500, 500],
   machines: [1000, 1000, 1000, 1000, 1000],
   machinesNavigation: [100, 100, 100, 100, 100],
+  approvalNavigation: [100, 100, 100, 100, 100],
 };
 it.each(['machines', 'machinesNavigation'])(
   'E25: an over-budget %s fails for its own timing',

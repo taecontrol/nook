@@ -20,6 +20,7 @@ export type Measurements = {
   authorize: number[];
   machines: number[];
   machinesNavigation: number[];
+  approvalNavigation: number[];
   gzipBytes?: number;
 };
 export function median(samples: number[]) {
@@ -43,6 +44,11 @@ export function assertLoadTimes(measured: Measurements) {
       loadTimeBudgets.navigationMs,
     ],
   ] as const;
+  const approval = median(measured.approvalNavigation ?? []);
+  if (approval > loadTimeBudgets.navigationMs)
+    throw new Error(
+      `Loaded approval tree median ${approval.toFixed(1)} ms exceeds ${loadTimeBudgets.navigationMs} ms.`,
+    );
   for (const [key, label, budget] of screens) {
     const actual = median(measured[key] ?? []);
     if (actual > budget)
@@ -61,6 +67,7 @@ export function formatMeasurements(measured: Measurements) {
         authorize: median(measured.authorize),
         machines: median(measured.machines),
         machinesNavigation: median(measured.machinesNavigation),
+        approvalNavigation: median(measured.approvalNavigation),
       },
       samplesMs: measured,
       coldOpenGzipBytes: measured.gzipBytes,

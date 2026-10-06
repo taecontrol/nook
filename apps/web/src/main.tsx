@@ -67,6 +67,9 @@ const router = createRouter({
     createRoute({
       getParentRoute: () => root,
       path: '/cli/authorize',
+      loader: ({ context }) => {
+        preloadBuckets(context.queryClient);
+      },
       component: lazyRouteComponent(
         () => import('./authorize-page'),
         'AuthorizePage',

@@ -6,11 +6,11 @@ import {
   HttpApiGroup,
 } from 'effect/http-api';
 
-export const BucketGrant = Schema.Union([
-  Schema.Literal('all'),
-  Schema.Array(Schema.String),
-]);
-export type BucketGrant = typeof BucketGrant.Type;
+import {
+  BucketGrant,
+  GrantBucketNotFound,
+  InvalidBucketGrant,
+} from './grants.ts';
 export const MachineIdentity = Schema.Struct({
   machine: Schema.String,
   grant: BucketGrant,
@@ -106,9 +106,17 @@ export const AuthorizationsApi = HttpApi.make('owner-authorizations').add(
     .add(
       HttpApiEndpoint.post('approve', '/api/authorizations/:userCode/approve', {
         params,
-        payload: Schema.Struct({ machineName: Schema.String }),
+        payload: Schema.Struct({
+          machineName: Schema.String,
+          grant: Schema.Unknown,
+        }),
         success: noContent,
-        error: [...ownerErrors, InvalidMachineName],
+        error: [
+          ...ownerErrors,
+          InvalidMachineName,
+          InvalidBucketGrant,
+          GrantBucketNotFound,
+        ],
       }),
     )
     .add(

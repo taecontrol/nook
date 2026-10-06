@@ -49,7 +49,9 @@ it.each(['pending', 'approved', 'denied'])(
       const response = await jsonRequest(
         app,
         `/api/authorizations/${pending.userCode}/${action}`,
-        action === 'approve' ? { machineName: 'late-machine' } : undefined,
+        action === 'approve'
+          ? { machineName: 'late-machine', grant: 'all' }
+          : undefined,
       );
       expect(response.status).toBe(410);
       expect(await responseHasTag(response, 'Expired', false)).toBe(true);

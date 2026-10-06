@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { BucketGrant } from '@nook/contract';
 import { expect } from 'vitest';
 import { issueToken } from './authorizations.ts';
 import type { TestRuntime } from './runtime.ts';
@@ -8,7 +9,7 @@ export type ListedMachine = {
   name: string;
   approvedAt: string;
   lastUsedAt: string | null;
-  grant: 'all';
+  grant: BucketGrant;
 };
 export type MachineSeed = Omit<ListedMachine, 'id' | 'grant'>;
 export const machinesNow = '2026-10-05T15:00:00.000Z';

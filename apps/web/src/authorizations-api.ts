@@ -4,6 +4,7 @@ import { Effect } from 'effect';
 import { FetchHttpClient } from 'effect/http';
 import { HttpApiClient } from 'effect/http-api';
 import { useEffect, useState } from 'react';
+import { useGrantSelection } from './grant-selection';
 
 class ApprovalError extends Error {
   constructor(readonly tag: string) {
@@ -56,6 +57,7 @@ function approvalFailure(
 }
 export function useAuthorizationFlow() {
   const queries = useQueryClient();
+  const access = useGrantSelection();
   const [phase, setPhase] = useState<AuthorizationPhase>('code');
   const [request, setRequest] = useState<AuthorizationRequest>();
   const [code, setCode] = useState('');
@@ -77,6 +79,7 @@ export function useAuthorizationFlow() {
       });
       setRequest(request);
       setName(request.suggestedName);
+      access.reset();
       setPhase('request');
     } catch (error) {
       const failed = approvalFailure(error, 'code');
@@ -92,7 +95,7 @@ export function useAuthorizationFlow() {
         action === 'approve'
           ? api.authorizations.approve({
               params: { userCode: code },
-              payload: { machineName: name },
+              payload: { machineName: name, grant: access.grant },
             })
           : api.authorizations.deny({ params: { userCode: code } }),
       );
@@ -101,6 +104,14 @@ export function useAuthorizationFlow() {
       setPhase(action === 'approve' ? 'approved' : 'denied');
     } catch (error) {
       queries.removeQueries({ queryKey: ['authorization', code] });
+      if (
+        error instanceof ApprovalError &&
+        error.tag === 'GrantBucketNotFound'
+      ) {
+        setPhase('request');
+        await access.missing();
+        return;
+      }
       const failed = approvalFailure(error, 'request');
       setPhase(failed.phase);
       setFailure(failed.failure);
@@ -121,6 +132,7 @@ export function useAuthorizationFlow() {
     return () => clearTimeout(timer);
   }, [phase, request]);
   return {
+    access,
     phase,
     request,
     code,

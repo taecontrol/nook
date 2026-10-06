@@ -35,6 +35,7 @@ export function AuthorizePage() {
           code={flow.code}
           request={flow.request}
           name={flow.name}
+          access={flow.access}
           onName={flow.setName}
           phase={flow.phase}
           failed={flow.failure === 'network'}
@@ -46,7 +47,12 @@ export function AuthorizePage() {
   if (!resultPhase(flow.phase)) return null;
   return (
     <AuthorizationLayout>
-      <ResultStep kind={flow.phase} code={flow.code} name={flow.name} />
+      <ResultStep
+        kind={flow.phase}
+        code={flow.code}
+        name={flow.name}
+        grant={flow.access.grant}
+      />
     </AuthorizationLayout>
   );
 }

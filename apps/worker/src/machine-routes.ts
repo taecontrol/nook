@@ -5,6 +5,31 @@ import { Effect, Layer } from 'effect';
 import { HttpRouter, HttpServer } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
 import { machineOperations } from './machines.ts';
+import { mcpHandler } from './mcp.ts';
+
+export function machineMcpHandler(db: D1Database, request: Request) {
+  const unavailable = () =>
+    Response.json({ _tag: 'ServiceUnavailable' }, { status: 503 });
+  return Effect.runPromise(
+    machineOperations.pipe(
+      Effect.flatMap((store) =>
+        store.whoami(request.headers.get('Authorization') ?? ''),
+      ),
+      Effect.matchEffect({
+        onFailure: (error) =>
+          Effect.succeed(
+            error._tag === 'Unauthorized'
+              ? Response.json({ _tag: 'Unauthorized' }, { status: 401 })
+              : unavailable(),
+          ),
+        onSuccess: ({ grant }) =>
+          Effect.promise(() => mcpHandler(db, grant).fetch(request)),
+      }),
+      Effect.provide(D1Client.layer({ db })),
+      Effect.catchCause(() => Effect.succeed(unavailable())),
+    ),
+  );
+}
 
 export function machineHandler(db: D1Database, origin: string) {
   const handlers = HttpApiBuilder.group(MachineApi, 'machine', (handlers) =>
@@ -35,7 +60,7 @@ export function authorizationHandler(db: D1Database) {
         return handlers
           .handle('lookup', ({ params }) => store.lookup(params.userCode))
           .handle('approve', ({ params, payload }) =>
-            store.approve(params.userCode, payload.machineName),
+            store.approve(params.userCode, payload.machineName, payload.grant),
           )
           .handle('deny', ({ params }) => store.deny(params.userCode));
       }),

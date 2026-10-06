@@ -7,7 +7,11 @@ import { HttpApiBuilder } from 'effect/http-api';
 import { type AuthBindings, authenticate } from './auth.ts';
 import type { BucketGrant } from './authorization.ts';
 import { bucketOperations } from './buckets.ts';
-import { authorizationHandler, machineHandler } from './machine-routes.ts';
+import {
+  authorizationHandler,
+  machineHandler,
+  machineMcpHandler,
+} from './machine-routes.ts';
 import { machineOperations } from './machines.ts';
 import { mcpHandler } from './mcp.ts';
 
@@ -69,7 +73,8 @@ function handlerFor(email: string, db: D1Database, grant: BucketGrant) {
 function foreignOrigin(request: Request, url: URL) {
   const origin = request.headers.get('Origin');
   return (
-    (url.pathname === '/mcp' || ['POST', 'DELETE'].includes(request.method)) &&
+    (['/mcp', '/api/machine/mcp'].includes(url.pathname) ||
+      ['POST', 'DELETE'].includes(request.method)) &&
     origin !== null &&
     origin !== url.origin
   );
@@ -113,6 +118,8 @@ async function sanitized(response: Promise<Response>) {
         'expired',
         'invalid',
         'InvalidMachineName',
+        'InvalidBucketGrant',
+        'GrantBucketNotFound',
       ].includes(body?._tag ?? '')
     )
       return Response.json({ _tag: 'BadRequest' }, { status: 400 });
@@ -120,6 +127,11 @@ async function sanitized(response: Promise<Response>) {
   return result;
 }
 function machineRequest(request: Request, url: URL, db: D1Database) {
+  if (url.pathname === '/api/machine/mcp') {
+    if (foreignOrigin(request, url))
+      return Response.json({ _tag: 'Forbidden' }, { status: 403 });
+    return machineMcpHandler(db, request);
+  }
   const protectedRoute =
     url.pathname === '/api/machine/whoami' ||
     (url.pathname === '/api/machine/token' && request.method === 'DELETE');

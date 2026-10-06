@@ -85,12 +85,7 @@ it.each(['lowercase', 'spaces', 'no-hyphen'])(
       expect(
         await page.getByRole('button', { name: 'Change', exact: true }).count(),
       ).toBe(1);
-      for (const text of [
-        'Access to all buckets',
-        'Client',
-        'Requested',
-        'Expires',
-      ])
+      for (const text of ['Bucket access', 'Client', 'Requested', 'Expires'])
         expect(await page.getByText(text, { exact: true }).count()).toBe(1);
       expect(lookups).toHaveLength(1);
       await name.press('Enter');

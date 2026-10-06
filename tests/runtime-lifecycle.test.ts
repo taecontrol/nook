@@ -2,12 +2,18 @@ import { spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { setImmediate } from 'node:timers/promises';
 import { expect, it, vi } from 'vitest';
 import {
   temporaryTestHome,
   testEnvironment,
 } from '../scripts/lib/test-environment.ts';
+import * as observation from '../scripts/observation.ts';
 import { startRuntime } from '../scripts/runtime.ts';
+import {
+  closingClientRuntime,
+  coverageRuntime,
+} from './support/coverage-runtime.ts';
 import { runtime } from './support/runtime.ts';
 
 const portSelection = vi.hoisted(() => ({ preferBlocked: false }));
@@ -114,18 +120,43 @@ it('a rejected runtime startup releases the acquired port lease', async () => {
   }
 });
 
-it('a failed coverage capture still closes workerd and releases its port lease', async () => {
-  const app = await runtime();
+it('coverage capture survives a closed public-client connection and records the real Worker counters', async () => {
+  vi.stubEnv('COVERAGE_RUN', 'fixture');
+  vi.mocked(startRuntime).mockImplementationOnce(closingClientRuntime);
+  const captured = vi.spyOn(observation, 'observe');
+  const app = await coverageRuntime();
   const port = new URL(app.origin).port;
   let needsClose = true;
   try {
-    vi.stubEnv('COVERAGE_RUN', 'fixture');
-    const capture = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response('invalid json'));
+    const response = await fetch(`${app.origin}/api/whoami`);
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ _tag: 'Unauthorized' });
+    const expected = await (
+      await app.mf.dispatchFetch(`${app.origin}/__test/coverage`)
+    ).json();
+    await setImmediate();
+    needsClose = false;
+    await app.close();
+    expect(captured).toHaveBeenCalledWith(expected);
+    await expect(stat(leasePath(port))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await expect(fetch(`${app.origin}/api/whoami`)).rejects.toThrow();
+  } finally {
+    if (needsClose) await app.close();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  }
+});
+
+it('a failed coverage capture still closes workerd and releases its port lease', async () => {
+  vi.stubEnv('COVERAGE_RUN', 'fixture');
+  const app = await coverageRuntime(true);
+  const port = new URL(app.origin).port;
+  let needsClose = true;
+  try {
     needsClose = false;
     await expect(app.close()).rejects.toThrow(SyntaxError);
-    capture.mockRestore();
     await expect(fetch(`${app.origin}/api/whoami`)).rejects.toThrow();
     await expect(stat(leasePath(port))).rejects.toMatchObject({
       code: 'ENOENT',

@@ -29,7 +29,7 @@ For bucket acceptance after this change merges, add **Account → D1 → Edit** 
 
 ## Remote MCP and Access Managed OAuth
 
-Nook serves `list_buckets`, `create_bucket`, and `delete_bucket` at `https://<hostname>/mcp`. The owner authenticates through the existing Access application with access to the whole bucket tree. The Worker verifies the forwarded Access assertion before MCP. Nook machine tokens do not authenticate this endpoint; restricted machine access is future work.
+Nook serves `list_buckets`, `create_bucket`, and `delete_bucket` at `https://<hostname>/mcp`. The owner authenticates through the existing Access application with access to the whole bucket tree. The Worker verifies the forwarded Access assertion before MCP. Nook machine tokens use the separate `/api/machine/mcp` endpoint described below.
 
 In **Zero Trust → Access controls → Applications**, edit the existing self-hosted Nook application. Under **Advanced settings**, enable **Managed OAuth**, then save. Keep its whole-hostname protection and owner Allow policy. Access supplies the OAuth flow and forwards the user's JWT in `Cf-Access-Jwt-Assertion`; Nook does not implement an OAuth server. See [Cloudflare Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/).
 
@@ -99,7 +99,9 @@ node dist/cli.js whoami
 node dist/cli.js logout
 ```
 
-Login prints a code and tries `xdg-open` with the bare `/cli/authorize` URL. Enter the terminal code, name the machine, and approve only a login you started. The Secret Service item has `service=nook` and `url=<origin>`. Its label holds the machine name; its value reaches `secret-tool store` only through stdin. `$XDG_CONFIG_HOME/nook/config.json` (default `~/.config/nook/config.json`) holds only the URL. Logout clears the item only after revocation succeeds or the Worker confirms an invalid token. macOS (#33), machine management (#32), restricted grants (#6), and binaries (#7) are separate work.
+Login prints a code and tries `xdg-open` with the bare `/cli/authorize` URL. Enter the terminal code, choose its buckets, name the machine, and approve only a login you started. The initial choice is only `me`. Checked buckets permit read and write throughout their current and future descendants. A limited machine can also read `me` and the ancestors of its selected roots; other buckets stay hidden. All buckets includes current and future buckets. To change access, revoke the machine in Machines or run logout, then log in again.
+
+The Secret Service item has `service=nook` and `url=<origin>`. Its label holds the machine name; its value reaches `secret-tool store` only through stdin. `$XDG_CONFIG_HOME/nook/config.json` (default `~/.config/nook/config.json`) holds only the URL. Logout clears the item only after revocation succeeds or the Worker confirms an invalid token. macOS (#33) and binaries (#7) are separate work.
 
 An empty or relative `XDG_CONFIG_HOME` uses the default directory. If login cannot save its keyring entry or URL, it revokes the newly issued token and clears any partial keyring entry. If revocation also fails, the CLI keeps any saved keyring entry and gives recovery guidance. Fix the configuration path and keyring, then repeat `login <origin>` to restore the URL when a saved entry exists, without creating another request; `logout` can then revoke the session.
 
@@ -129,3 +131,39 @@ done
 Access must block these requests (a redirect, denial, or Managed OAuth discovery challenge); `/api/machines` must not produce a Worker 404. Confirm `/` and `/mcp` still require Access in a fresh browser. These captures verify path precedence and the assumption that Managed OAuth intercepts foreign Bearers. If inspecting whether Bypass forwards an assertion through trusted Cloudflare tooling, retain only a presence/absence boolean, never the header value. Its absence remains an assumption until observed; Nook exposes no debug endpoint for it.
 
 Finally, run login, whoami, and logout on the owner's Omarchy machine against production. Capture the approval page, successful identity, and logout. Record E1/E6 behavior and E25 outcomes on the PR without tokens, cookies, JWTs, device codes, keyring contents, or configured secrets. Local tests do not claim these production captures.
+
+## Connect a machine with limited bucket access
+
+After login and approval, connect clients to `https://<hostname>/api/machine/mcp`. The existing `api/machine/*` Bypass covers this path; no additional Access application is needed. This endpoint accepts only Nook tokens. The owner's `/mcp` still uses Access and never accepts a Nook token, even with all-bucket access. The machine endpoint also rejects foreign Origin headers.
+
+`nook mcp-header` reads the keyring locally and emits a single headers JSON line for a client to consume. It does not contact the server or save a credential file. Use it only as a client helper; its stdout contains the credential and must not be captured in a terminal transcript, log, or agent conversation. If there is no usable session, it emits no stdout and gives login guidance on stderr. A stalled keyring lookup is stopped after 5 seconds, leaving time to report the failure before the client's helper deadline. `whoami` displays its grant without a credential. Each authenticated MCP request updates the machine's last use, and web revocation makes the next request unauthorized.
+
+Until standalone CLI binaries ship, use the built CLI with pinned Node. Replace `/absolute/path/to/nook` with this machine's repository path in the helper commands. Keep both Node and the unlocked Secret Service available to the client process.
+
+For Claude Code, add a separate user-scope server:
+
+```sh
+claude mcp add-json --scope user nook-limited \
+  '{"type":"http","url":"https://<hostname>/api/machine/mcp","headersHelper":"node /absolute/path/to/nook/dist/cli.js mcp-header"}'
+```
+
+The helper supplies authentication on connection. See [Claude Code dynamic headers](https://code.claude.com/docs/en/mcp#use-dynamic-headers-for-custom-authentication).
+
+For Codex, add a separate entry in the user configuration:
+
+```toml
+[mcp_servers.nook_limited]
+url = "https://<hostname>/api/machine/mcp"
+http_headers_helper = "node /absolute/path/to/nook/dist/cli.js mcp-header"
+```
+
+Use the helper as this server's credential source and remove any explicit bearer or stored OAuth credentials for the same entry, which take precedence. This helper works for local HTTP MCP connections. See [Codex HTTP MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+
+### E23: owner capture after deployment (pending)
+
+The owner performs this capture after the PR is merged and its green-main deployment completes. Automated tests reproduce both observed protocols with synthetic credentials; they do not claim this production check.
+
+1. On the owner's machine, run login against production and approve a limited grant, for example `work/acme`. Record the approval choice and the credential-free `whoami` output.
+2. Configure the Claude Code user-scope entry above, open a fresh session, and confirm the server connects. Ask it to call `list_buckets` on `nook-limited`. For that example grant, verify only `me`, `work`, `work/acme`, and its existing descendants appear; siblings and `personal` must be absent.
+3. Configure Codex's `http_headers_helper` entry above, start a fresh local session, and repeat `list_buckets` with the same visible set.
+4. Record both client versions, connection outcomes, selected roots, and visible bucket paths on the PR. Screenshots must exclude helper output, headers, tokens, token hashes, cookies, JWTs, device codes, and keyring contents. Leave E23 pending until both client outcomes are recorded.

@@ -89,7 +89,7 @@ it('E1/E12: Linux login approves in Chromium, stores only in the private keyring
     expect(identity.status).toBe(0);
     expectOutput(
       identity.stdout,
-      `${hostname()} at ${app.origin}\nAccess: all buckets`,
+      `${hostname()} at ${app.origin}\nAccess: me (read/write, including current and future descendants)\nRead only: none\nAll other buckets: hidden`,
       true,
     );
     expect(await configHasOnlyUrl(keyring.config, app.origin)).toBe(true);

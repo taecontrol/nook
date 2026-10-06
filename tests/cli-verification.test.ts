@@ -15,6 +15,7 @@ it('E24: the approval cold-open median is enforced at 1000 ms without changing e
     authorize: [999, 1001, 1002, 1003, 1004],
     machines: [500, 500, 500, 500, 500],
     machinesNavigation: [50, 50, 50, 50, 50],
+    approvalNavigation: [50, 50, 50, 50, 50],
   };
   expect(() => assertLoadTimes(measured)).toThrow(/authorize|approval/i);
   const passing = { ...measured, authorize: [700, 800, 900, 1000, 1001] };
@@ -32,6 +33,7 @@ it('E24: missing approval samples cannot silently skip its cold-open budget', ()
       navigation: [50, 50, 50, 50, 50],
       machines: [500, 500, 500, 500, 500],
       machinesNavigation: [50, 50, 50, 50, 50],
+      approvalNavigation: [50, 50, 50, 50, 50],
     } as Measurements),
   ).toThrow('Expected five finite non-negative timing samples.');
 });

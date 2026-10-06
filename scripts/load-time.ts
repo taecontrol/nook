@@ -1,4 +1,6 @@
 import type { Browser, Page } from 'playwright';
+import { createAuthorization } from '../tests/support/authorizations.ts';
+import { seedGrantTree } from '../tests/support/grants.ts';
 import { runtime } from '../tests/support/runtime.ts';
 import { startHostIsolation } from './lib/host-isolation.ts';
 import {
@@ -12,7 +14,12 @@ import { launchTestBrowser } from './lib/test-browser.ts';
 
 async function phonePage(browser: Browser, kind: string) {
   const context = await browser.newContext({
-    ...(['authorize', 'machines', 'machinesNavigation'].includes(kind)
+    ...([
+      'authorize',
+      'machines',
+      'machinesNavigation',
+      'approvalNavigation',
+    ].includes(kind)
       ? { viewport: { width: 390, height: 844 } }
       : {}),
   });
@@ -65,6 +72,62 @@ async function cold(page: Page, origin: string, kind: ColdScreen) {
   );
   return page.evaluate(
     () => performance.getEntriesByName('nook-first-screen')[0].startTime,
+  );
+}
+async function approvalNavigation(page: Page, origin: string, code: string) {
+  await page.goto(`${origin}/cli/authorize`);
+  await page
+    .getByRole('textbox', { name: 'Code from your terminal' })
+    .waitFor();
+  await page.waitForLoadState('networkidle');
+  await page.evaluate(() => {
+    const resources = new PerformanceObserver((entries) => {
+      const lookup = entries
+        .getEntries()
+        .find((entry) => entry.name.includes('/api/authorizations/'));
+      if (!(lookup instanceof PerformanceResourceTiming)) return;
+      performance.mark('nook-code-accepted', { startTime: lookup.responseEnd });
+      resources.disconnect();
+    });
+    resources.observe({ type: 'resource' });
+    const observer = new MutationObserver(() => {
+      const row = document.querySelector('[data-grant-path="me"] > div');
+      const outline = row
+        ?.closest('[aria-label="Bucket access"]')
+        ?.getBoundingClientRect();
+      if (!row || !outline) return;
+      const box = row.getBoundingClientRect();
+      if (
+        !(
+          Math.min(box.width, box.height) > 0 &&
+          box.top >= Math.max(0, outline.top) &&
+          box.bottom <= Math.min(innerHeight, outline.bottom) &&
+          box.left >= Math.max(0, outline.left) &&
+          box.right <= Math.min(innerWidth, outline.right)
+        )
+      )
+        return;
+      observer.disconnect();
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => performance.mark('nook-tree-shown')),
+      );
+    });
+    observer.observe(document, { childList: true, subtree: true });
+  });
+  await page
+    .getByRole('textbox', { name: 'Code from your terminal' })
+    .fill(code);
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.waitForFunction(
+    () => performance.getEntriesByName('nook-tree-shown').length > 0,
+  );
+  return page.evaluate(
+    () =>
+      performance.measure(
+        'nook-approval-tree',
+        'nook-code-accepted',
+        'nook-tree-shown',
+      ).duration,
   );
 }
 async function navigate(
@@ -122,6 +185,8 @@ try {
     LOCAL_ORIGIN: app.origin,
   });
   const db = await app.mf.getD1Database('DB');
+  await seedGrantTree(app);
+  const pending = await createAuthorization(app);
   await db
     .prepare(
       'INSERT INTO machine_tokens(token_hash, machine_name, grant_json, created_at, id) VALUES (?, ?, ?, ?, ?)',
@@ -143,6 +208,7 @@ try {
       authorize: [],
       machines: [],
       machinesNavigation: [],
+      approvalNavigation: [],
       gzipBytes: (await measureInitialJs('dist/assets')).gzipBytes,
     };
     for (const kind of [
@@ -152,18 +218,21 @@ try {
       'navigation',
       'machines',
       'machinesNavigation',
+      'approvalNavigation',
     ] as const) {
       for (let run = 0; run < loadTimeBudgets.runs; run++) {
         const { context, page } = await phonePage(browser, kind);
         try {
           measured[kind].push(
-            await (kind === 'navigation' || kind === 'machinesNavigation'
-              ? navigate(
-                  page,
-                  app.origin,
-                  kind === 'navigation' ? 'buckets' : 'machines',
-                )
-              : cold(page, app.origin, kind)),
+            await (kind === 'approvalNavigation'
+              ? approvalNavigation(page, app.origin, pending.userCode)
+              : kind === 'navigation' || kind === 'machinesNavigation'
+                ? navigate(
+                    page,
+                    app.origin,
+                    kind === 'navigation' ? 'buckets' : 'machines',
+                  )
+                : cold(page, app.origin, kind)),
           );
         } finally {
           await context.close();

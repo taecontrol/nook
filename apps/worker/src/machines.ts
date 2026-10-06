@@ -4,9 +4,12 @@ import {
   BucketGrant,
   Expired,
   formatUserCode,
+  GrantBucketNotFound,
+  InvalidBucketGrant,
   InvalidMachineName,
   machineNameError,
   NoMatchingRequest,
+  normalizeGrant,
   normalizeUserCode,
   PendingLimit,
   PollDenied,
@@ -151,18 +154,27 @@ export const machineOperations = Effect.gen(function* () {
     code: string,
     status: 'approved' | 'denied',
     name: string | null,
+    grant: BucketGrant,
   ) =>
     Effect.gen(function* () {
       const row = yield* lookup(code);
-      const [updated] = yield* sql
+      const grantJson = JSON.stringify(normalizeGrant(grant));
+      const chosenJson = JSON.stringify(grant);
+      // Validate existence at the same atomic boundary that records the decision.
+      const [updated, remaining] = yield* sql
         .batch([
-          sql`UPDATE authorizations SET status=${status}, machine_name=${name} WHERE device_hash=${row.device_hash} AND status='pending' AND expires_at>unixepoch('subsec')*1000 RETURNING device_hash`,
+          sql`UPDATE authorizations SET status=${status}, machine_name=${name}, grant_json=${grantJson} WHERE device_hash=${row.device_hash} AND status='pending' AND expires_at>unixepoch('subsec')*1000 AND (${chosenJson}='"all"' OR NOT EXISTS (SELECT 1 FROM json_each(${chosenJson}) root WHERE NOT EXISTS (SELECT 1 FROM buckets WHERE path=root.value))) RETURNING device_hash`,
+          sql<RequestRow>`SELECT * FROM authorizations WHERE device_hash=${row.device_hash}`,
         ])
         .pipe(unavailable);
-      if (!updated.length)
+      if (!updated.length) {
+        yield* requirePending(remaining[0]);
         return yield* Effect.fail(
-          row.expires_at <= Date.now() ? new Expired() : new AlreadyHandled(),
+          new GrantBucketNotFound({
+            message: 'Some selected buckets no longer exist. Choose again.',
+          }),
         );
+      }
     });
   return {
     create: (origin: string, suggestedName: string, client: string) =>
@@ -195,13 +207,29 @@ export const machineOperations = Effect.gen(function* () {
           expiresAt: new Date(row.expires_at).toISOString(),
         })),
       ),
-    approve: (code: string, name: string) => {
+    approve: (code: string, name: string, grant: unknown) => {
       const message = machineNameError(name);
       return message
         ? Effect.fail(new InvalidMachineName({ message }))
-        : handle(code, 'approved', name.trim());
+        : Schema.decodeUnknownEffect(BucketGrant)(grant).pipe(
+            Effect.mapError(
+              () =>
+                new InvalidBucketGrant({
+                  message:
+                    'Choose at least one existing bucket, or All buckets.',
+                }),
+            ),
+            Effect.flatMap((grant) =>
+              handle(code, 'approved', name.trim(), grant),
+            ),
+          );
     },
-    deny: (code: string) => handle(code, 'denied', null),
+    deny: (code: string) =>
+      handle(code, 'denied', null, 'all').pipe(
+        Effect.catchTag('GrantBucketNotFound', () =>
+          Effect.fail(new HttpApiError.ServiceUnavailable()),
+        ),
+      ),
     poll: (deviceCode: string) =>
       Effect.gen(function* () {
         const deviceHash = yield* hashCode(deviceCode);

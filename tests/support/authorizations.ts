@@ -43,7 +43,7 @@ export async function approve(
   return jsonRequest(
     app,
     `/api/authorizations/${code}/approve`,
-    { machineName },
+    { machineName, grant: 'all' },
     headers,
   );
 }

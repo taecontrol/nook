@@ -1,4 +1,8 @@
-import { formatUserCode, normalizeUserCode } from '@nook/contract';
+import {
+  type BucketGrant,
+  formatUserCode,
+  normalizeUserCode,
+} from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import {
   ArrowRight,
@@ -27,6 +31,7 @@ import { Field, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
+import { GrantDetails, GrantRoots } from './grant-summary';
 
 export function Cmd({ children }: { children: ReactNode }) {
   return (
@@ -223,10 +228,12 @@ export function ResultStep({
   kind,
   code,
   name,
+  grant,
 }: {
   kind: keyof typeof results;
   code: string;
   name: string;
+  grant: BucketGrant;
 }) {
   const { icon, title, body } = results[kind];
   return (
@@ -249,7 +256,9 @@ export function ResultStep({
             </div>
             <div className="flex justify-between gap-6">
               <dt className="shrink-0 text-muted-foreground">Access</dt>
-              <dd>All buckets</dd>
+              <dd className="min-w-0 text-right wrap-anywhere">
+                <GrantRoots grant={grant} />
+              </dd>
             </div>
             <div className="flex justify-between gap-6">
               <dt className="shrink-0 text-muted-foreground">Code</dt>
@@ -258,6 +267,12 @@ export function ResultStep({
               </dd>
             </div>
           </dl>
+          <div className="mt-4 flex flex-col gap-3 text-xs leading-5 text-muted-foreground">
+            <p>
+              <GrantDetails grant={grant} />
+            </p>
+            <p>To change access later, revoke this machine and log in again.</p>
+          </div>
         </CardContent>
       )}
     </Card>

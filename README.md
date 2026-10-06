@@ -5,7 +5,7 @@ Tools that AI agents use from any machine, running in your own Cloudflare accoun
 - **Memory:** a general memory organized in buckets (`me`, `work/project`, `personal`) that agents read and write over MCP and you browse in a web UI.
 - **Vault:** secrets agents use through `nook run` without you pasting them into a conversation.
 
-Nook is in early development. The current app confirms the installation owner's Cloudflare Access identity and lets them create and browse hierarchical buckets, or delete an empty bucket. Agents manage buckets through MCP. The Linux CLI logs machines in with a keyring-backed Nook token, identifies them, and logs them out. Memory and Vault content follow in later changes.
+Nook is in early development. The owner manages hierarchical buckets and connected machines in the web app. When approving Linux CLI login, they choose specific bucket subtrees or all buckets. Agents on that machine connect over MCP using `nook mcp-header`, which reads its credential from the system keyring. The CLI shows the grant with `whoami` and revokes it with `logout`; the owner can also revoke it from Machines. Memory and Vault content follow in later changes.
 
 ## Run locally
 
@@ -26,7 +26,7 @@ Local buckets use an in-memory D1 database, seeded with `me` by the migrations, 
 ## Layout
 
 - `apps/worker`: Access verification, owner and machine APIs, and MCP.
-- `apps/cli`: Linux login, identity, and logout with Secret Service.
+- `apps/cli`: Linux login, identity, MCP headers, and logout with Secret Service.
 - `apps/web`: React shell, shadcn/ui, TanStack Router and Query.
 - `packages/contract`: the shared Effect `HttpApi` contract.
 - `scripts`: builds, the local runtime, and verification.

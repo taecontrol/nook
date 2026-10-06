@@ -10,7 +10,7 @@ import {
 import { runApi as run } from './api-client';
 import { lineage, sortBuckets } from './paths';
 
-const bucketsOptions = queryOptions({
+export const bucketsOptions = queryOptions({
   queryKey: ['buckets'],
   queryFn: async ({ signal }) => {
     const body = await run((api) => api.buckets.list(), signal);

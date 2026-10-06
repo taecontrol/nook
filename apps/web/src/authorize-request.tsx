@@ -3,9 +3,8 @@ import {
   formatUserCode,
   machineNameError,
 } from '@nook/contract';
-import { CircleCheck, KeyRound, Terminal } from 'lucide-react';
+import { CircleCheck, Terminal } from 'lucide-react';
 import { type RefObject, useEffect, useRef, useState } from 'react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -33,6 +32,8 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
 import { Cmd, ConnectionFailure, Mark } from './authorize-parts';
+import type { GrantSelection } from './grant-selection';
+import { GrantSelector } from './grant-selector';
 
 function relativeTime(timestamp: string, future = false) {
   const minutes = Math.max(
@@ -107,6 +108,7 @@ function decisionLabel(
   return { approve: 'Approve', deny: 'Deny' }[action];
 }
 export function RequestStep({
+  access,
   code,
   request,
   name,
@@ -116,6 +118,7 @@ export function RequestStep({
   decide,
   changeCode,
 }: {
+  access: GrantSelection;
   code: string;
   request: AuthorizationRequest;
   name: string;
@@ -133,7 +136,7 @@ export function RequestStep({
   );
   useEffect(() => {
     if (phase === 'request') {
-      input.current?.focus();
+      input.current?.focus({ preventScroll: true });
       input.current?.select();
     }
   }, [phase]);
@@ -144,7 +147,7 @@ export function RequestStep({
   const approve = () => {
     const message = machineNameError(name);
     setNameError(message);
-    if (!message) choose('approve');
+    if (!message && access.validate()) choose('approve');
   };
   return (
     <Card
@@ -195,16 +198,7 @@ export function RequestStep({
               </Button>
             </ItemActions>
           </Item>
-          <Alert>
-            <KeyRound />
-            <AlertTitle>Access to all buckets</AlertTitle>
-            <AlertDescription>
-              <p>
-                Approving gives this machine access to every bucket in this
-                Nook.
-              </p>
-            </AlertDescription>
-          </Alert>
+          <GrantSelector selection={access} busy={busy} />
           <MachineNameField
             input={input}
             name={name}
@@ -230,7 +224,11 @@ export function RequestStep({
             {phase === 'denying' && <Spinner />}
             {decisionLabel('deny', phase, failed, attemptedAction)}
           </Button>
-          <Button type="submit" disabled={busy} className="w-full md:w-auto">
+          <Button
+            type="submit"
+            disabled={busy || !access.ready}
+            className="w-full md:w-auto"
+          >
             {phase === 'approving' && <Spinner />}
             {decisionLabel('approve', phase, failed, attemptedAction)}
           </Button>

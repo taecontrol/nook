@@ -100,7 +100,9 @@ export async function runtime(
     async close() {
       try {
         if (process.env.COVERAGE_RUN) {
-          const response = await fetch(`${origin}/__test/coverage`);
+          // Control traffic uses this runtime's HTTP dispatcher, independent of
+          // client-test connections that may have closed or rejected a body.
+          const response = await mf.dispatchFetch(`${origin}/__test/coverage`);
           await observe((await response.json()) as Observation);
         }
       } finally {

@@ -129,12 +129,13 @@ function ItemTitle({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
-function ItemDescription({ className, ...props }: React.ComponentProps<"p">) {
+function ItemDescription({ className, truncate = true, ...props }: React.ComponentProps<"p"> & { truncate?: boolean }) {
   return (
     <p
       data-slot="item-description"
       className={cn(
-        "line-clamp-2 text-sm leading-normal font-normal text-balance text-muted-foreground",
+        "text-sm leading-normal font-normal text-balance text-muted-foreground",
+        truncate && "line-clamp-2",
         "[&>a]:underline [&>a]:underline-offset-4 [&>a:hover]:text-primary",
         className
       )}

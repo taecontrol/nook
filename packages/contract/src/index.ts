@@ -16,6 +16,7 @@ import {
 import { Machine } from './machines.ts';
 
 export * from './buckets.ts';
+export * from './grants.ts';
 export * from './machines.ts';
 export const Owner = Schema.Struct({ email: Schema.String });
 export type Owner = typeof Owner.Type;

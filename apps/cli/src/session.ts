@@ -1,4 +1,5 @@
 import { hostname } from 'node:os';
+import { limitedAccessText, readOnlyText } from '@nook/contract';
 import { Effect } from 'effect';
 import { machineApi } from './api.ts';
 import { installationOrigin, readConfig, writeConfig } from './config.ts';
@@ -174,7 +175,23 @@ export function whoami(write: Write) {
           : networkError(url),
       ),
     );
-    write(`${identity.machine} at ${url}\nAccess: all buckets`);
+    const access =
+      identity.grant === 'all'
+        ? 'all buckets (current and future)'
+        : `${identity.grant.join(', ')} (${limitedAccessText})\n${readOnlyText(identity.grant)}\nAll other buckets: hidden`;
+    write(`${identity.machine} at ${url}\nAccess: ${access}`);
+  });
+}
+export function mcpHeader(write: Write) {
+  return Effect.gen(function* () {
+    const url = yield* readConfig;
+    if (!url) return yield* Effect.fail(notLoggedIn());
+    const token = yield* readToken(url).pipe(
+      Effect.timeout('5 seconds'),
+      Effect.mapError(() => notLoggedIn(url)),
+    );
+    if (!token) return yield* Effect.fail(notLoggedIn(url));
+    write(JSON.stringify({ Authorization: `Bearer ${token}` }));
   });
 }
 export function logout(write: Write) {
