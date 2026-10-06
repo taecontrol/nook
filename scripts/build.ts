@@ -1,5 +1,6 @@
 import { build, stop } from 'esbuild';
 import { build as buildWeb } from 'vite';
+import { buildCli } from './build-cli.ts';
 import { startHostIsolation } from './lib/host-isolation.ts';
 
 export async function buildProduct(directory = 'dist') {
@@ -18,19 +19,7 @@ export async function buildProduct(directory = 'dist') {
       target: 'es2023',
       sourcemap: true,
     });
-    await build({
-      entryPoints: ['apps/cli/src/index.ts'],
-      outfile: `${directory}/cli.js`,
-      bundle: true,
-      format: 'esm',
-      platform: 'node',
-      target: 'node26',
-      external: ['node:*'],
-      banner: {
-        js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
-      },
-      sourcemap: true,
-    });
+    await buildCli(`${directory}/cli.js`, true);
   } finally {
     stop();
   }

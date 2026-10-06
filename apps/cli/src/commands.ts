@@ -1,6 +1,7 @@
 import { NodeServices } from '@effect/platform-node';
 import { Effect } from 'effect';
 import { Argument, Command } from 'effect/cli';
+import cliPackage from '../package.json' with { type: 'json' };
 import { CliFailure } from './errors.ts';
 import { login, logout, mcpHeader, whoami } from './session.ts';
 
@@ -31,19 +32,25 @@ export async function execute(
       Command.make('whoami', {}, () => whoami(write)),
       Command.make('logout', {}, () => logout(write)),
       Command.make('mcp-header', {}, () => mcpHeader(write)),
+      Command.make('version', {}, () =>
+        Effect.sync(() =>
+          write(JSON.stringify({ version: cliPackage.version })),
+        ),
+      ),
     ]),
   );
   return Effect.runPromise(
-    Command.runWith(command, { version: '0.1.0', renderErrors: false })(
-      args,
-    ).pipe(
+    Command.runWith(command, {
+      version: cliPackage.version,
+      renderErrors: false,
+    })(args).pipe(
       Effect.provide(NodeServices.layer),
       Effect.as(0),
       Effect.catch((error) => {
         writeError(
           error instanceof CliFailure
             ? error.message
-            : 'Usage: nook login <url> | nook whoami | nook logout | nook mcp-header',
+            : 'Usage: nook login <url> | nook whoami | nook logout | nook mcp-header | nook version',
         );
         return Effect.succeed(1);
       }),
