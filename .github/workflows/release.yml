@@ -1,0 +1,302 @@
+name: Release
+run-name: Release v${{ inputs.version }}
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version in apps/cli/package.json, without v
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release
+  cancel-in-progress: false
+env:
+  VERSION: ${{ inputs.version }}
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Require main
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::Releases publish only from main, not $GITHUB_REF."
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate the version and its commit
+        run: |
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version $VERSION is not X.Y.Z."
+            exit 1
+          fi
+          package=$(jq -r .version apps/cli/package.json)
+          if [ "$package" != "$VERSION" ]; then
+            echo "::error::Version $VERSION differs from apps/cli/package.json ($package)."
+            exit 1
+          fi
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+            echo "::error::main has moved past $GITHUB_SHA."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::Tag v$VERSION already exists."
+            exit 1
+          fi
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release v$VERSION already exists."
+            exit 1
+          fi
+          green=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow verify.yml --branch main --commit "$GITHUB_SHA" --json status,conclusion --jq 'map(select(.status == "completed" and .conclusion == "success")) | length')
+          if [ "$green" -eq 0 ]; then
+            echo "::error::$GITHUB_SHA has no green Verify run on main."
+            exit 1
+          fi
+  binary:
+    needs: validate
+    name: binary (${{ matrix.target }})
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: linux-x64
+          - runner: ubuntu-22.04-arm
+            target: linux-arm64
+          - runner: macos-15-intel
+            target: darwin-x64
+          - runner: macos-15
+            target: darwin-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
+        with:
+          version: 12.8.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26.10.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build natively, check nook version without Node, and archive
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          test "$(node -p 'process.platform + "-" + process.arch')" = "$TARGET"
+          node scripts/release/binary.ts --version "$VERSION" --output release-assets
+          test "$(tar -tzf "release-assets/nook-$VERSION-$TARGET.tar.gz")" = nook
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: binary-${{ matrix.target }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 1
+  source:
+    needs: validate
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the source archive twice and compare
+        run: |
+          mkdir release-assets
+          for copy in first second; do
+            git archive --format=tar.gz --prefix="nook-$VERSION/" --output="$RUNNER_TEMP/$copy.tar.gz" HEAD
+          done
+          cmp "$RUNNER_TEMP/first.tar.gz" "$RUNNER_TEMP/second.tar.gz"
+          cp "$RUNNER_TEMP/first.tar.gz" "release-assets/nook-$VERSION.tar.gz"
+          (cd release-assets && shasum -a 256 "nook-$VERSION.tar.gz" > "nook-$VERSION.tar.gz.sha256")
+      - name: Install the source formula from the local archive
+        run: |
+          archive="$PWD/release-assets/nook-$VERSION.tar.gz"
+          sha=$(awk '{print $1}' "$archive.sha256")
+          tap=taecontrol/nook-release
+          brew tap-new --no-git "$tap"
+          formula="$(brew --repository "$tap")/Formula/nook.rb"
+          sed -e "s/@VERSION@/$VERSION/g" -e "s/@SHA256@/$sha/g" \
+            -e "s|^  url .*|  url \"file://$archive\"|" packaging/nook.rb.template > "$formula"
+          brew install --build-from-source "$tap/nook"
+          brew test "$tap/nook"
+          test "$("$(brew --prefix)/bin/nook" version)" = "{\"version\":\"$VERSION\"}"
+          brew uninstall "$tap/nook"
+          brew untap "$tap"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: source
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 1
+  publish:
+    needs: [binary, source]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Check every archive against its checksum
+        run: |
+          cd release-assets
+          test "$(ls *.tar.gz | wc -l)" -eq 5
+          sha256sum -c *.sha256
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: release-assets/nook-*-*-*.tar.gz
+      - name: Tag and publish, deleting both if either fails
+        env:
+          RELEASE_TAG_DEPLOY_KEY: ${{ secrets.RELEASE_TAG_DEPLOY_KEY }}
+        run: |
+          test -n "$RELEASE_TAG_DEPLOY_KEY"
+          install -d -m 0700 "$HOME/.ssh"
+          (umask 077 && printf '%s\n' "$RELEASE_TAG_DEPLOY_KEY" > "$HOME/.ssh/nook-release")
+          gh api meta --jq '.ssh_keys[] | "github.com " + .' > "$HOME/.ssh/known_hosts"
+          ssh_command="ssh -i $HOME/.ssh/nook-release -o IdentitiesOnly=yes"
+          remote="git@github.com:$GITHUB_REPOSITORY.git"
+          tagged=false
+          released=false
+          rollback() {
+            status=$?
+            if [ "$status" -ne 0 ]; then
+              if [ "$released" = true ]; then gh release delete "v$VERSION" --yes || true; fi
+              if [ "$tagged" = true ]; then git -c core.sshCommand="$ssh_command" push "$remote" ":refs/tags/v$VERSION" || true; fi
+            fi
+            exit "$status"
+          }
+          trap rollback EXIT
+          git tag "v$VERSION" "$GITHUB_SHA"
+          git -c core.sshCommand="$ssh_command" push "$remote" "refs/tags/v$VERSION"
+          tagged=true
+          gh release create "v$VERSION" release-assets/* --draft --verify-tag --title "Nook v$VERSION" \
+            --notes "MIT source release with attested Node single-executable CLI binaries for Linux and macOS on x64 and arm64, for mise. The macOS Homebrew formula builds the CLI from source."
+          released=true
+          gh release edit "v$VERSION" --draft=false
+          trap - EXIT
+  mise:
+    needs: publish
+    name: mise (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: linux-x64
+          - runner: ubuntu-22.04-arm
+            target: linux-arm64
+          - runner: macos-15-intel
+            target: darwin-x64
+          - runner: macos-15
+            target: darwin-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    permissions:
+      attestations: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      MISE_MINIMUM_RELEASE_AGE: '0'
+      MISE_CACHE_DIR: ${{ runner.temp }}/mise-cache
+      MISE_CONFIG_DIR: ${{ runner.temp }}/mise-config
+      MISE_DATA_DIR: ${{ runner.temp }}/mise-data
+      MISE_STATE_DIR: ${{ runner.temp }}/mise-state
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: 2026.10.3
+          install: false
+          cache: false
+      - name: Verify the published archive and its attestation
+        run: |
+          archive="nook-$VERSION-$TARGET.tar.gz"
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern "$archive" --pattern "$archive.sha256"
+          shasum -a 256 -c "$archive.sha256"
+          gh attestation verify "$archive" --repo "$GITHUB_REPOSITORY"
+      - name: Install and run through mise
+        run: |
+          test "$(mise x "github:$GITHUB_REPOSITORY@$VERSION" -- nook version)" = "{\"version\":\"$VERSION\"}"
+          extracted=$(mktemp -d)
+          tar -xzf "nook-$VERSION-$TARGET.tar.gz" -C "$extracted"
+          cmp "$extracted/nook" "$(mise x "github:$GITHUB_REPOSITORY@$VERSION" -- which nook)"
+  unpublish:
+    needs: [publish, mise]
+    if: failure() && needs.publish.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Delete the release and its tag
+        env:
+          RELEASE_TAG_DEPLOY_KEY: ${{ secrets.RELEASE_TAG_DEPLOY_KEY }}
+        run: |
+          test -n "$RELEASE_TAG_DEPLOY_KEY"
+          install -d -m 0700 "$HOME/.ssh"
+          (umask 077 && printf '%s\n' "$RELEASE_TAG_DEPLOY_KEY" > "$HOME/.ssh/nook-release")
+          gh api meta --jq '.ssh_keys[] | "github.com " + .' > "$HOME/.ssh/known_hosts"
+          gh release delete "v$VERSION" --repo "$GITHUB_REPOSITORY" --yes
+          git -c core.sshCommand="ssh -i $HOME/.ssh/nook-release -o IdentitiesOnly=yes" \
+            push "git@github.com:$GITHUB_REPOSITORY.git" ":refs/tags/v$VERSION"
+  homebrew:
+    needs: [publish, mise]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Open the formula update with auto-merge
+        run: |
+          test -n "$HOMEBREW_TAP_TOKEN"
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern "nook-$VERSION.tar.gz.sha256"
+          sha=$(awk '{print $1}' "nook-$VERSION.tar.gz.sha256")
+          tap=$(mktemp -d)
+          # The token reaches git only through environment configuration, never argv or .git/config.
+          authorization=$(printf 'x-access-token:%s' "$HOMEBREW_TAP_TOKEN" | base64 | tr -d '\n')
+          echo "::add-mask::$authorization"
+          tap_git() {
+            GIT_CONFIG_COUNT=1 \
+              GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+              GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $authorization" \
+              git "$@"
+          }
+          tap_git clone https://github.com/taecontrol/homebrew-tap.git "$tap"
+          branch="nook-$VERSION"
+          git -C "$tap" switch -c "$branch"
+          sed -e "s/@VERSION@/$VERSION/g" -e "s/@SHA256@/$sha/g" packaging/nook.rb.template > "$tap/Formula/nook.rb"
+          git -C "$tap" add Formula/nook.rb
+          git -C "$tap" -c user.name='taecontrol release automation' -c user.email='actions@users.noreply.github.com' commit -m "nook $VERSION"
+          tap_git -C "$tap" push origin "$branch"
+          pr=$(GH_TOKEN="$HOMEBREW_TAP_TOKEN" gh pr create --repo taecontrol/homebrew-tap --head "$branch" --base main \
+            --title "nook $VERSION" --body "Source formula for Nook v$VERSION.")
+          GH_TOKEN="$HOMEBREW_TAP_TOKEN" gh pr merge --repo taecontrol/homebrew-tap "$pr" --auto --squash --delete-branch
