@@ -5,6 +5,7 @@ type RequestInfo = { method: string; path: string };
 export async function machineProxy(
   app: TestRuntime,
   fault: (request: RequestInfo) => 'hang' | number | undefined,
+  observe?: (response: Response, request: RequestInfo) => Promise<void>,
 ) {
   const server = createServer(async (request, response) => {
     try {
@@ -31,6 +32,7 @@ export async function machineProxy(
         },
         ...(chunks.length ? { body: Buffer.concat(chunks) } : {}),
       });
+      await observe?.(forwarded.clone(), info);
       response.writeHead(forwarded.status, {
         'Content-Type':
           forwarded.headers.get('Content-Type') ?? 'application/json',

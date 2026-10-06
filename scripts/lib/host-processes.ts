@@ -1,6 +1,8 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import { resolve } from 'node:path';
+import type { MacProcessGroup } from './macos-process-groups.ts';
+import { macProcesses } from './macos-processes.ts';
 
 export type HostProcess = {
   pid: number;
@@ -9,12 +11,16 @@ export type HostProcess = {
   name: string;
   home: string;
   run: string;
+  group?: number;
+  uid?: number;
 };
 
 export async function readHostProcess(
   pid: number,
   proc = '/proc',
 ): Promise<HostProcess | undefined> {
+  if (process.platform === 'darwin' && proc === '/proc')
+    return (await macProcesses()).find((item) => item.pid === pid);
   try {
     const root = resolve(proc, String(pid));
     if ((await stat(root)).uid !== userInfo().uid) return undefined;
@@ -44,6 +50,7 @@ export async function readHostProcess(
 }
 
 export async function snapshotProcesses(proc = '/proc') {
+  if (process.platform === 'darwin' && proc === '/proc') return macProcesses();
   const pids = (await readdir(proc)).filter((name) => /^\d+$/.test(name));
   const processes = await Promise.all(
     pids.map((pid) => readHostProcess(Number(pid), proc)),
@@ -70,12 +77,97 @@ function isParentRun(item: HostProcess, parentId?: string) {
   return parentId !== undefined && item.run === parentId;
 }
 
+export type ProcessRun = {
+  id: string;
+  pid: number;
+  home: string;
+  parentId?: string;
+  groups?: MacProcessGroup[];
+  uid?: number;
+};
+
+function registeredGroups(run: ProcessRun) {
+  return (run.groups ?? []).filter(
+    (record) =>
+      record.root === run.pid && record.uid === (run.uid ?? userInfo().uid),
+  );
+}
+
+function liveGroups(after: HostProcess[], run: ProcessRun) {
+  const current = new Map(after.map((item) => [item.pid, item]));
+  return new Set(
+    registeredGroups(run)
+      .filter((record) => {
+        const item = current.get(record.pid);
+        return (
+          item?.started === record.started &&
+          item.uid === record.uid &&
+          item.group === record.group
+        );
+      })
+      .map((record) => record.group),
+  );
+}
+
+function newMacProcesses(
+  before: HostProcess[],
+  after: HostProcess[],
+  run: ProcessRun,
+) {
+  const baseline = new Set(before.map((item) => `${item.pid}:${item.started}`));
+  return after.filter(
+    (item) =>
+      item.pid !== run.pid &&
+      item.uid === (run.uid ?? userInfo().uid) &&
+      !baseline.has(`${item.pid}:${item.started}`),
+  );
+}
+
+// A fixture's private journal limits cleanup to its groups, without run ancestry.
+export function macGroupProcesses(
+  before: HostProcess[],
+  after: HostProcess[],
+  run: ProcessRun,
+) {
+  const registered = new Set(
+    registeredGroups(run).map((record) => record.group),
+  );
+  const live = liveGroups(after, run);
+  const fresh = newMacProcesses(before, after, run);
+  return {
+    owned: fresh.filter((item) => live.has(item.group ?? -1)),
+    ambiguous: fresh.filter(
+      (item) => registered.has(item.group ?? -1) && !live.has(item.group ?? -1),
+    ),
+  };
+}
+
+// A stale number cannot authorize a signal. Report ambiguity and fail closed.
+export function unverifiedMacProcesses(
+  before: HostProcess[],
+  after: HostProcess[],
+  run: ProcessRun,
+) {
+  return macGroupProcesses(before, after, run).ambiguous.filter(
+    (item) => !belongsToRun(item, after, run.pid),
+  );
+}
+
 export function orphanedProcesses(
   before: HostProcess[],
   after: HostProcess[],
-  run: { id: string; pid: number; home: string; parentId?: string },
+  run: ProcessRun,
+  platform = process.platform,
 ) {
   const baseline = new Set(before.map((item) => `${item.pid}:${item.started}`));
+  if (platform === 'darwin') {
+    const owned = new Set(
+      macGroupProcesses(before, after, run).owned.map((item) => item.pid),
+    );
+    return newMacProcesses(before, after, run).filter(
+      (item) => owned.has(item.pid) || belongsToRun(item, after, run.pid),
+    );
+  }
   return after.filter((item) => {
     if (item.pid === run.pid) return false;
     if (isParentRun(item, run.parentId)) return false;
@@ -101,7 +193,13 @@ export async function killOrphans(
   const messages: string[] = [];
   for (const orphan of orphans) {
     const current = await inspect(orphan.pid);
-    if (!current || current.started !== orphan.started) continue;
+    if (
+      !current ||
+      current.started !== orphan.started ||
+      current.uid !== orphan.uid ||
+      current.group !== orphan.group
+    )
+      continue;
     try {
       kill(orphan.pid, 'SIGKILL');
       messages.push(`orphaned test process PID ${orphan.pid} terminated`);

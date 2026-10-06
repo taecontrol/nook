@@ -139,8 +139,8 @@ export function validateCoverage(
   source: SourceIdentity,
 ) {
   validateArtifacts(manifest, artifacts, source);
-  if (manifest.shards !== undefined && manifest.shards !== 3)
-    throw new Error('Expected all three coverage shards');
+  if (manifest.shards !== undefined && manifest.shards !== 4)
+    throw new Error('Expected all three Linux coverage shards and macOS');
   const baseline = JSON.parse(artifacts['baseline.json']) as Baseline;
   for (const [file, entry] of Object.entries(baseline)) {
     if (entry.hash !== source.files[file])
@@ -167,14 +167,14 @@ export function validateCoverage(
 }
 
 export function validateShards(manifests: Manifest[], source: SourceIdentity) {
-  if (manifests.length !== 3)
-    throw new Error('Expected all three coverage shards');
+  if (manifests.length !== 4)
+    throw new Error('Expected all three Linux coverage shards and macOS');
   const shards = manifests
     .map((manifest) => {
       validateSource(manifest, source);
       return manifest.shard;
     })
     .sort();
-  if (!same(shards, ['1/3', '2/3', '3/3']))
+  if (!same(shards, ['1/3', '2/3', '3/3', 'macos']))
     throw new Error('Missing, repeated or incompatible coverage shard');
 }

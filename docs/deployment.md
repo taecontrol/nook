@@ -84,13 +84,13 @@ For E14, complete both client connection flows above and record successful `list
 
 Record E13 and E14 outcomes on the pull request without tokens, cookies, assertions, or secret values. The owner completes these captures after deployment.
 
-## Linux CLI and the machine API Bypass
+## CLI and the machine API Bypass
 
 Keep the whole-hostname Access application, its owner Allow policy, and Managed OAuth. Create a **second self-hosted Access application** with the same public hostname and the path **`api/machine/*`**. Give it a **Bypass** policy with **Include → Everyone**. Do not broaden it to `api/*` or `api/machine*`, or add owner routes beneath it. `/cli/authorize`, `/api/authorizations/*`, `/api/machines`, `/`, assets, and `/mcp` stay protected by the original application.
 
 The more specific path application wins. The slash before `*` ensures that `api/machine/*` does not cover `/api/machine` or `/api/machines`. Access selects paths, not Nook Authorization headers. The Worker accepts Nook tokens only in this prefix; Access and the synthetic owner never authenticate a machine there. See [ADR-0010](adrs/0010-machine-tokens-only-under-the-machine-api-prefix.md), [Access paths](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/), and [Bypass policies](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/#bypass).
 
-The repository CLI requires pinned Node 26.10, an unlocked Linux Secret Service, `dbus-send` (`dbus`), and `secret-tool` (`libsecret-tools` on Ubuntu, `libsecret` on Arch):
+The repository CLI requires pinned Node 26.10. On Linux, it uses an unlocked Secret Service, `dbus-send` (`dbus`), and `secret-tool` (`libsecret-tools` on Ubuntu, `libsecret` on Arch). On macOS, it uses the default login Keychain and the system `security` command:
 
 ```sh
 pnpm build
@@ -99,13 +99,13 @@ node dist/cli.js whoami
 node dist/cli.js logout
 ```
 
-Login prints a code and tries `xdg-open` with the bare `/cli/authorize` URL. Enter the terminal code, choose its buckets, name the machine, and approve only a login you started. The initial choice is only `me`. Checked buckets permit read and write throughout their current and future descendants. A limited machine can also read `me` and the ancestors of its selected roots; other buckets stay hidden. All buckets includes current and future buckets. To change access, revoke the machine in Machines or run logout, then log in again.
+Login prints a code and tries the platform browser opener with the bare `/cli/authorize` URL. Enter the terminal code, choose its buckets, name the machine, and approve only a login you started. The initial choice is only `me`. Checked buckets permit read and write throughout their current and future descendants. A limited machine can also read `me` and the ancestors of its selected roots; other buckets stay hidden. All buckets includes current and future buckets. To change access, revoke the machine in Machines or run logout, then log in again.
 
-The Secret Service item has `service=nook` and `url=<origin>`. Its label holds the machine name; its value reaches `secret-tool store` only through stdin. `$XDG_CONFIG_HOME/nook/config.json` (default `~/.config/nook/config.json`) holds only the URL. Logout clears the item only after revocation succeeds or the Worker confirms an invalid token. macOS (#33) and binaries (#7) are separate work.
+The Secret Service item has `service=nook` and `url=<origin>`. Its label holds the machine name; its value reaches `secret-tool store` only through stdin. `$XDG_CONFIG_HOME/nook/config.json` (default `~/.config/nook/config.json`) holds only the URL. Logout clears the item only after revocation succeeds or the Worker confirms an invalid token. On macOS, a generic password has service `nook`, account `<origin>`, and the same machine-name label. `security -i` receives one quoted command on stdin, including the token; the token never enters argv. Login, identity, and logout wait up to two minutes for Keychain access. Unlock the login keychain when prompted, then try again if the command times out. The CLI opens the approval URL with `open` on macOS and `xdg-open` on Linux. Binaries (#7) remain separate work.
 
 An empty or relative `XDG_CONFIG_HOME` uses the default directory. If login cannot save its keyring entry or URL, it revokes the newly issued token and clears any partial keyring entry. If revocation also fails, the CLI keeps any saved keyring entry and gives recovery guidance. Fix the configuration path and keyring, then repeat `login <origin>` to restore the URL when a saved entry exists, without creating another request; `logout` can then revoke the session.
 
-Login and logout coordinate through a Linux abstract socket for the OS user and the actual session bus ID obtained with `dbus-send`. Equivalent bus addresses and different config directories therefore protect the same keyring. A concurrent session command reports that another command is in progress; try again after it finishes. The kernel releases the socket on exit, including a crash. It carries no credential and creates no file.
+Login and logout coordinate through a Linux abstract socket for the OS user and the actual session bus ID obtained with `dbus-send`. Equivalent bus addresses and different config directories therefore protect the same keyring. A concurrent session command reports that another command is in progress; try again after it finishes. The kernel releases the socket on exit, including a crash. It carries no credential and creates no file. On macOS, an exclusive kernel lock protects an empty `~/Library/Application Support/nook/session.lock`. It is keyed by HOME, so changing `XDG_CONFIG_HOME` cannot bypass coordination. The file stays in place; closing the descriptor or exiting, including SIGKILL, releases the lock.
 
 ### E25: owner acceptance after deployment
 

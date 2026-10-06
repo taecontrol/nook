@@ -49,7 +49,7 @@ it('E19/E22: mcp-header emits exactly one JSON line from the private keyring, ma
   expect((await listMachines(app))[0].lastUsedAt).toBeNull();
   const result = await keyring.start(['mcp-header']).done;
   expect(result.status).toBe(0);
-  expect(result.stderr).toBe('');
+  expect(result.stderr === '', 'Header diagnostics are empty').toBe(true);
   expect(
     result.stdout ===
       `${JSON.stringify({ Authorization: `Bearer ${token}` })}\n`,
@@ -97,7 +97,10 @@ it('E20: a stalled keyring returns empty stdout and login guidance before the MC
   await mkdir(dirname(keyring.config), { recursive: true });
   await writeFile(keyring.config, JSON.stringify({ url: app.origin }));
   await writeFile(
-    resolve(keyring.shim, 'secret-tool'),
+    resolve(
+      keyring.shim,
+      process.platform === 'darwin' ? 'security' : 'secret-tool',
+    ),
     '#!/bin/sh\nsleep 60\n',
     { mode: 0o700 },
   );
@@ -105,7 +108,10 @@ it('E20: a stalled keyring returns empty stdout and login guidance before the MC
   const result = await keyring.start(['mcp-header']).done;
   expect(result.status).toBe(1);
   expect(result.stdout === '', 'A stalled helper emits no headers').toBe(true);
-  expect(result.stderr).toBe(`Not logged in. Run: nook login ${app.origin}\n`);
+  expect(
+    result.stderr === `Not logged in. Run: nook login ${app.origin}\n`,
+    'Exact login guidance without private diagnostics',
+  ).toBe(true);
   expect(performance.now() - started).toBeLessThan(9000);
 });
 it.each(['unconfigured', 'missing-token', 'keyring-unavailable'] as const)(
@@ -125,9 +131,11 @@ it.each(['unconfigured', 'missing-token', 'keyring-unavailable'] as const)(
     expect(result.stdout === '', 'A failed helper must emit no headers').toBe(
       true,
     );
-    expect(result.stderr).toBe(
-      `Not logged in. Run: nook login ${state === 'unconfigured' ? '<your Nook URL>' : app.origin}\n`,
-    );
+    expect(
+      result.stderr ===
+        `Not logged in. Run: nook login ${state === 'unconfigured' ? '<your Nook URL>' : app.origin}\n`,
+      'Exact login guidance without private diagnostics',
+    ).toBe(true);
   },
 );
 it.each([
@@ -148,7 +156,10 @@ it.each([
     await login(grant);
     const result = await keyring.start(['whoami']).done;
     expect(result.status).toBe(0);
-    expect(result.stdout).toBe(`work-laptop at ${app.origin}\n${access}\n`);
+    expect(
+      result.stdout === `work-laptop at ${app.origin}\n${access}\n`,
+      'Exact public identity without private output',
+    ).toBe(true);
     expectPrivate(result.stdout + result.stderr, [
       await keyring.lookup(app.origin),
     ]);

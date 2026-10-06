@@ -1,6 +1,9 @@
 import type { FileCoverageData } from 'istanbul-lib-coverage';
 import { afterAll } from 'vitest';
+import { trackMacFixtureProcesses } from '../scripts/lib/macos-process-groups.ts';
 import { observe } from '../scripts/observation.ts';
+
+trackMacFixtureProcesses();
 
 declare global {
   var __coverage__: Record<string, FileCoverageData> | undefined;

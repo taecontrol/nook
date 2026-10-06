@@ -139,6 +139,16 @@ it('E19: accepts complete coverage and fails closed on each missing execution se
   }
 });
 
+it('#33 E21: merged coverage requires four platform sources, including macOS', () => {
+  const input = evidence();
+  expect(() =>
+    validateCoverage({ ...input.manifest, shards: 4 }, input.artifacts, source),
+  ).not.toThrow();
+  expect(() =>
+    validateCoverage({ ...input.manifest, shards: 3 }, input.artifacts, source),
+  ).toThrow(/shards/);
+});
+
 it('E19: rejects unknown manifest versions and a forged file map under the current digest', () => {
   const version = evidence();
   expect(() =>
@@ -196,15 +206,18 @@ it('E19: empty files and zero counters cannot stand in for an execution seam', (
   }
 });
 
-it('E19: requires exactly all three shards, with distinct indexes and the same source', () => {
-  const manifests = [1, 2, 3].map((index) => ({
+it('E19/#33 E21: requires all three Linux shards and macOS, with distinct indexes and the same source', () => {
+  const manifests = [1, 2, 3, 'macos'].map((index) => ({
     ...evidence().manifest,
-    shard: `${index}/3`,
+    shard: index === 'macos' ? 'macos' : `${index}/3`,
   }));
   expect(() => validateShards(manifests, source)).not.toThrow();
   expect(() => validateShards(manifests.slice(0, 2), source)).toThrow(/shard/i);
   expect(() =>
-    validateShards([manifests[0], manifests[0], manifests[2]], source),
+    validateShards(
+      [manifests[0], manifests[0], manifests[2], manifests[3]],
+      source,
+    ),
   ).toThrow(/shard/i);
   expect(() =>
     validateShards(
@@ -220,9 +233,11 @@ it('E19: requires exactly all three shards, with distinct indexes and the same s
       [
         manifests[0],
         manifests[1],
-        { ...manifests[2], source: { ...source, digest: hash('different') } },
+        manifests[2],
+        { ...manifests[3], source: { ...source, digest: hash('different') } },
       ],
       source,
     ),
   ).toThrow(/source|stale/i);
+  expect(() => validateShards(manifests.slice(0, 3), source)).toThrow(/shard/i);
 });

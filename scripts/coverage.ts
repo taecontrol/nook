@@ -5,6 +5,7 @@ import { buildProduct } from './build.ts';
 import { startHostIsolation } from './lib/host-isolation.ts';
 import { digest, files, sourceIdentity } from './lib/identity.ts';
 import { evidenceRoot, prepare } from './lib/instrument.ts';
+import { macosCliSuites } from './lib/macos-cli-suites.ts';
 import { testEnvironment } from './lib/test-environment.ts';
 import { buildTest } from './test-build.ts';
 
@@ -13,6 +14,9 @@ const shard = process.argv
   ?.slice('--shard='.length);
 if (shard !== undefined && !/^[1-3]\/3$/.test(shard))
   throw new Error('Expected --shard=I/3 with I between one and three.');
+const macos = process.argv.includes('--macos-cli');
+if (macos && (process.platform !== 'darwin' || shard !== undefined))
+  throw new Error('--macos-cli requires macOS without a Linux shard.');
 const isolation = await startHostIsolation();
 try {
   await rm(evidenceRoot, { recursive: true, force: true });
@@ -20,16 +24,18 @@ try {
   await prepare();
   await buildProduct();
   await buildTest();
-  for (const args of [
-    ['exec', 'vitest', 'run', ...(shard ? [`--shard=${shard}`] : [])],
-    [
-      'exec',
-      'e2e',
-      'run',
-      '--strict-cache',
-      ...(shard ? ['--shard', shard, '--pass-with-no-tests'] : []),
-    ],
-  ]) {
+  for (const args of macos
+    ? [['exec', 'vitest', 'run', ...macosCliSuites]]
+    : [
+        ['exec', 'vitest', 'run', ...(shard ? [`--shard=${shard}`] : [])],
+        [
+          'exec',
+          'e2e',
+          'run',
+          '--strict-cache',
+          ...(shard ? ['--shard', shard, '--pass-with-no-tests'] : []),
+        ],
+      ]) {
     const result = spawnSync('pnpm', args, {
       stdio: 'inherit',
       env: testEnvironment(isolation.home, {
@@ -48,7 +54,12 @@ try {
   await writeFile(
     resolve(evidenceRoot, 'manifest.json'),
     JSON.stringify(
-      { schema: 1, source: before, ...(shard ? { shard } : {}), outputs },
+      {
+        schema: 1,
+        source: before,
+        ...(macos ? { shard: 'macos' } : shard ? { shard } : {}),
+        outputs,
+      },
       null,
       2,
     ),

@@ -12,6 +12,7 @@ import { createInterface } from 'node:readline';
 import { expect } from 'vitest';
 import { evidenceRoot } from '../../scripts/lib/instrument.ts';
 import { testEnvironment } from '../../scripts/lib/test-environment.ts';
+import { privateMacKeychain } from './macos-keychain.ts';
 import { testBuild } from './runtime.ts';
 import { launchSandbox } from './sandbox.ts';
 
@@ -23,6 +24,16 @@ export async function privateKeyring(
     sandboxExecutable?: string;
   } = {},
 ) {
+  if (process.platform === 'darwin') {
+    const keychain = await privateMacKeychain(options);
+    if (service === 'absent')
+      await writeFile(
+        resolve(keychain.shim, 'security'),
+        '#!/bin/sh\nexit 2\n',
+        { mode: 0o700 },
+      );
+    return keychain;
+  }
   const home = await mkdtemp(resolve(options.tempRoot ?? '/tmp', 'nook-cli-'));
   let sandbox: ReturnType<typeof launchSandbox> | undefined;
   try {

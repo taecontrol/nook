@@ -33,6 +33,6 @@ for (const [name, data] of Object.entries(artifacts)) {
 }
 await writeFile(
   resolve(evidenceRoot, 'manifest.json'),
-  JSON.stringify({ schema: 1, source, shards: 3, outputs }, null, 2),
+  JSON.stringify({ schema: 1, source, shards: 4, outputs }, null, 2),
 );
-console.log('Merged all three coverage shards.');
+console.log('Merged all three Linux coverage shards and macOS.');

@@ -1,4 +1,8 @@
+import { constants } from 'node:fs';
+import { mkdir, open } from 'node:fs/promises';
 import { createServer, type Server } from 'node:net';
+import { homedir } from 'node:os';
+import { resolve } from 'node:path';
 import { Effect, Stream } from 'effect';
 import { ChildProcess, ChildProcessSpawner } from 'effect/process';
 import { CliFailure, keyringMessage } from './errors.ts';
@@ -57,8 +61,36 @@ function acquireSocket(busId: string) {
 
 const acquire = busIdentity.pipe(Effect.flatMap(acquireSocket));
 
-export const lockSession = Effect.acquireRelease(acquire, (server) =>
+const linuxLock = Effect.acquireRelease(acquire, (server) =>
   Effect.promise(
     () => new Promise<void>((resolve) => server.close(() => resolve())),
   ),
 );
+
+const macosLock = Effect.acquireRelease(
+  Effect.tryPromise({
+    try: async () => {
+      const directory = resolve(homedir(), 'Library/Application Support/nook');
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      // O_EXLOCK is Darwin's kernel-held lock. Node does not name this flag.
+      // Never unlink: that would let a concurrent opener lock another inode.
+      return open(
+        resolve(directory, 'session.lock'),
+        constants.O_CREAT | constants.O_RDWR | constants.O_NONBLOCK | 0x20,
+        0o600,
+      );
+    },
+    catch: (error) =>
+      new CliFailure(
+        ['EAGAIN', 'EWOULDBLOCK'].includes(
+          (error as NodeJS.ErrnoException).code ?? '',
+        )
+          ? 'Another Nook session command is in progress. Finish it before starting a new one.'
+          : 'Could not protect the Nook session. Try again.',
+      ),
+  }),
+  (file) => Effect.promise(() => file.close()),
+);
+
+export const lockSession =
+  process.platform === 'darwin' ? macosLock : linuxLock;

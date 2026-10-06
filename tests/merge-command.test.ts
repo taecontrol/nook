@@ -31,7 +31,7 @@ it.each(['complete', 'baseline', 'duplicate', 'artifact'] as const)(
         await writeFile(target, await readFile(path));
       }
       const directories = [];
-      for (const index of [1, 2, 3]) {
+      for (const index of [1, 2, 3, 'macos']) {
         const shard = resolve(directory, 'shards', String(index));
         directories.push(shard);
         await mkdir(shard, { recursive: true });
@@ -60,7 +60,12 @@ it.each(['complete', 'baseline', 'duplicate', 'artifact'] as const)(
           await writeFile(resolve(shard, name), data);
         await writeFile(
           resolve(shard, 'manifest.json'),
-          JSON.stringify({ schema: 1, source, shard: `${index}/3`, outputs }),
+          JSON.stringify({
+            schema: 1,
+            source,
+            shard: index === 'macos' ? 'macos' : `${index}/3`,
+            outputs,
+          }),
         );
       }
       const output = resolve(directory, '.local/verification/coverage');
@@ -77,8 +82,8 @@ it.each(['complete', 'baseline', 'duplicate', 'artifact'] as const)(
         const merged = JSON.parse(
           await readFile(resolve(output, 'manifest.json'), 'utf8'),
         );
-        expect(merged).toMatchObject({ schema: 1, source, shards: 3 });
-        expect(Object.keys(merged.outputs).length).toBe(10);
+        expect(merged).toMatchObject({ schema: 1, source, shards: 4 });
+        expect(Object.keys(merged.outputs).length).toBe(13);
         expect(await readFile(resolve(output, 'baseline.json'), 'utf8')).toBe(
           originalBaseline,
         );

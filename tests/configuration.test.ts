@@ -43,7 +43,7 @@ it('E5: committed Worker and deploy settings contain no installation identifiers
   expect(config.preview_urls).toBe(false);
 });
 
-it('E17: PR CI runs static checks, three test shards and a final coverage/build/budget gate without Cloudflare credentials', async () => {
+it('E17/#33 E21: PR CI requires static checks, three Linux shards, macOS CLI and the final coverage/build/budget gate without Cloudflare credentials', async () => {
   const ci = await workflow('verify');
   expect(ci.on).toHaveProperty('pull_request');
   expect(
@@ -66,7 +66,30 @@ it('E17: PR CI runs static checks, three test shards and a final coverage/build/
     ),
   ).toBe(true);
   const final = ci.jobs.verify;
-  expect(final.needs).toEqual(['static-checks', 'tests']);
+  expect(final.needs).toEqual(['static-checks', 'tests', 'macos-cli']);
+  const macos = ci.jobs['macos-cli'];
+  expect(macos['runs-on']).toBe('macos-latest');
+  expect(macos['timeout-minutes']).toBe(15);
+  expect(macos.env.NOOK_TEST_MACOS_KEYCHAIN_BOOTSTRAP).toBe('github-hosted');
+  expect(
+    macos.steps.some(
+      (step: { run?: string }) => step.run === 'pnpm test:coverage --macos-cli',
+    ),
+  ).toBe(true);
+  expect(
+    macos.steps.some(
+      (step: { with?: { name?: string } }) =>
+        step.with?.name === 'coverage-macos',
+    ),
+  ).toBe(true);
+  expect(ci.env?.NOOK_TEST_MACOS_KEYCHAIN_BOOTSTRAP).toBeUndefined();
+  for (const [name, job] of Object.entries(ci.jobs) as [
+    string,
+    { env?: Record<string, string> },
+  ][]) {
+    if (name !== 'macos-cli')
+      expect(job.env?.NOOK_TEST_MACOS_KEYCHAIN_BOOTSTRAP).toBeUndefined();
+  }
   const commands = final.steps
     .filter((step: { run?: string }) => step.run)
     .map((step: { run: string }) => step.run);

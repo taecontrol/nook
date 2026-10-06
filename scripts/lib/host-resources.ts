@@ -1,12 +1,18 @@
 import { lstat, readdir, stat } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
+import {
+  type KeychainObservation,
+  observeKeychains,
+} from './macos-keychains.ts';
 
 type Entry = { name: string; size: number; mtime: number; kind: string };
 type DirectoryFingerprint = 'absent' | Entry[];
 export type HostFingerprint = {
   directories: Record<string, DirectoryFingerprint>;
+  keychain?: KeychainObservation;
 };
+export type HostResources = { directories: string[]; keychainHome?: string };
 
 function ownerDataHome(parent: NodeJS.ProcessEnv, home: string) {
   const data = parent.XDG_DATA_HOME;
@@ -20,8 +26,21 @@ function ownerDataHome(parent: NodeJS.ProcessEnv, home: string) {
   return data;
 }
 
-export function ownerResources(parent: NodeJS.ProcessEnv, owner = userInfo()) {
+export function ownerResources(
+  parent: NodeJS.ProcessEnv,
+  owner = userInfo(),
+  platform = process.platform,
+): HostResources {
   const home = owner.homedir;
+  if (platform === 'darwin')
+    return {
+      directories: [
+        resolve(home, 'Library/Keychains'),
+        resolve(home, '.config/nook'),
+        resolve(home, 'Library/Application Support/nook'),
+      ],
+      keychainHome: home,
+    };
   const realData = ownerDataHome(parent, home);
   return {
     directories: [
@@ -41,7 +60,11 @@ async function directoryEntries(root: string, name = '.'): Promise<Entry[]> {
     name,
     size: info.size,
     mtime: info.mtimeMs,
-    kind: info.isDirectory() ? 'directory' : 'entry',
+    kind: info.isDirectory()
+      ? 'directory'
+      : info.isSymbolicLink()
+        ? 'symlink'
+        : 'entry',
   };
   if (!info.isDirectory()) return [entry];
   const children = await Promise.all(
@@ -63,9 +86,10 @@ export async function fingerprintDirectory(
   }
 }
 
-export async function fingerprintHost(resources: {
-  directories: string[];
-}): Promise<HostFingerprint> {
+export async function fingerprintHost(
+  resources: HostResources,
+  observe = observeKeychains,
+): Promise<HostFingerprint> {
   const directories = Object.fromEntries(
     await Promise.all(
       resources.directories.map(async (path) => [
@@ -74,7 +98,12 @@ export async function fingerprintHost(resources: {
       ]),
     ),
   );
-  return { directories };
+  return {
+    directories,
+    ...(resources.keychainHome
+      ? { keychain: await observe(resources.keychainHome) }
+      : {}),
+  };
 }
 
 function entryChanges(
@@ -129,7 +158,8 @@ export function hostChanges(before: HostFingerprint, after: HostFingerprint) {
     ...Object.keys(before.directories),
     ...Object.keys(after.directories),
   ])) {
-    const keyrings = path.endsWith('/keyrings');
+    const keyrings =
+      path.endsWith('/keyrings') || path.endsWith('/Library/Keychains');
     if (
       JSON.stringify(directoryIdentity(before.directories[path], !keyrings)) !==
       JSON.stringify(directoryIdentity(after.directories[path], !keyrings))
@@ -138,6 +168,10 @@ export function hostChanges(before: HostFingerprint, after: HostFingerprint) {
         `${keyrings ? 'owner keyring directory changed' : 'owner Nook configuration directory changed'} (${JSON.stringify(path)}): ${directoryChanges(before.directories[path], after.directories[path], !keyrings).join(', ') || 'resource added or removed'}`,
       );
   }
+  if (JSON.stringify(before.keychain) !== JSON.stringify(after.keychain))
+    changes.push(
+      'owner keychain search list, default or login keychain changed',
+    );
   return [...new Set(changes)];
 }
 

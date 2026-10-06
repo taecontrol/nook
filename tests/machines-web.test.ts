@@ -458,15 +458,28 @@ it.each(['focus', 'intent'] as const)(
     const read = deferred();
     const readReady = deferred();
     const write = deferred();
+    const reconcile = deferred();
+    const reconcileReady = deferred();
+    let reads = 0;
+    let activeReads = 0;
     const aborted: string[] = [];
     const { page, machines, requests } = visit;
     try {
       await machineRow(page, machines[2].id).waitFor();
       await page.route('**/api/machines', async (route) => {
-        const response = await route.fetch();
-        readReady.resolve();
-        await read.promise;
-        await route.fulfill({ response }).catch(() => {});
+        activeReads++;
+        try {
+          if (++reads > 1) {
+            reconcileReady.resolve();
+            await reconcile.promise;
+          }
+          const response = await route.fetch();
+          readReady.resolve();
+          await read.promise;
+          await route.fulfill({ response }).catch(() => {});
+        } finally {
+          activeReads--;
+        }
       });
       await page.route('**/api/machines/*', async (route) => {
         await write.promise;
@@ -554,10 +567,19 @@ it.each(['focus', 'intent'] as const)(
       await expect
         .poll(() => page.getByRole('alert').innerText())
         .toContain('Revoked');
+      await reconcileReady.promise;
     } finally {
       read.resolve();
       write.resolve();
-      await visit.close();
+      reconcile.resolve();
+      try {
+        await page.unrouteAll({ behavior: 'wait' });
+        expect(activeReads, 'Routes finish before their context closes').toBe(
+          0,
+        );
+      } finally {
+        await visit.close();
+      }
     }
   },
 );

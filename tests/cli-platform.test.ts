@@ -1,13 +1,8 @@
-import { existsSync } from 'node:fs';
 import { expect, it, vi } from 'vitest';
 
-it.each(['login', 'whoami', 'logout'])(
-  'E10: %s on macOS exits with the unsupported message without a request',
+it.each(['login', 'whoami', 'logout', 'mcp-header'])(
+  'E15: %s on unsupported platforms exits without a request',
   async (command) => {
-    expect(
-      existsSync('apps/cli/src/commands.ts'),
-      'CLI command module is not implemented',
-    ).toBe(true);
     const path = '../apps/cli/src/commands.ts';
     const { execute } = await import(path);
     const fetch = vi.spyOn(globalThis, 'fetch');
@@ -16,13 +11,13 @@ it.each(['login', 'whoami', 'logout'])(
       const status = await execute(
         command === 'login' ? [command, 'https://nook.test'] : [command],
         {
-          platform: 'darwin',
+          platform: 'win32',
           write: (message: string) => output.push(message),
         },
       );
       expect(status).toBe(1);
       expect(output.join('\n')).toBe(
-        'Keeping the token in the macOS Keychain is not supported yet.',
+        'The Nook CLI supports Linux and macOS only.',
       );
       expect(fetch).not.toHaveBeenCalled();
     } finally {

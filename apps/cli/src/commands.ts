@@ -19,12 +19,8 @@ export async function execute(
     args[0] === 'mcp-header'
       ? (message: string) => process.stderr.write(`${message}\n`)
       : write;
-  if (platform === 'darwin') {
-    write('Keeping the token in the macOS Keychain is not supported yet.');
-    return 1;
-  }
-  if (platform !== 'linux') {
-    write('The Nook CLI currently supports Linux only.');
+  if (platform !== 'linux' && platform !== 'darwin') {
+    write('The Nook CLI supports Linux and macOS only.');
     return 1;
   }
   const command = Command.make('nook').pipe(

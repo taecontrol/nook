@@ -12,6 +12,9 @@ const inheritedNames = [
   'PLAYWRIGHT_BROWSERS_PATH',
   'CI',
   'FORCE_COLOR',
+  'NOOK_TEST_MACOS_KEYCHAIN_BOOTSTRAP',
+  'NOOK_TEST_PROCESS_GROUPS',
+  'NOOK_TEST_ROOT_PID',
 ];
 const overrideNames = new Set([
   ...inheritedNames,
@@ -68,7 +71,8 @@ function applyOverrides(
   overrides: NodeJS.ProcessEnv,
 ) {
   for (const [name, value] of Object.entries(overrides)) {
-    if (Object.hasOwn(directories, name)) safeDirectory(home, name, value);
+    if (Object.hasOwn(directories, name) || name === 'NOOK_TEST_PROCESS_GROUPS')
+      safeDirectory(home, name, value);
     else if (!overrideNames.has(name) && !/^LC_[A-Z_]+$/.test(name))
       throw new Error('Test environment override is not allowlisted.');
     if (value === undefined) delete env[name];

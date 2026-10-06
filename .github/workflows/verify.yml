@@ -1,5 +1,6 @@
 name: Verify
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [main]
@@ -79,8 +80,44 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+  macos-cli:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    env:
+      NOOK_TEST_MACOS_KEYCHAIN_BOOTSTRAP: github-hosted
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
+        with:
+          version: 12.8.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26.10.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Use an isolated Chromium cache
+        run: echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/nook-browsers" >> "$GITHUB_ENV"
+      - run: pnpm exec playwright install chromium
+      - run: pnpm test:coverage --macos-cli
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() }}
+        with:
+          name: macos-cli-evidence
+          path: .local/verification/screenshots
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-macos
+          path: .local/verification/coverage
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
   verify:
-    needs: [static-checks, tests]
+    needs: [static-checks, tests, macos-cli]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
