@@ -14,7 +14,7 @@ class Nook < Formula
     system "node", "scripts/build-cli.ts", libexec/"cli.js"
     (bin/"nook").write <<~SH
       #!/bin/bash
-      exec "#{Formula["node"].opt_bin}/node" "#{libexec}/cli.js" "$@"
+      exec "#{formula_opt_bin("node")}/node" "#{libexec}/cli.js" "$@"
     SH
   end
 
