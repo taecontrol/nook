@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import {
   mkdir,
@@ -223,19 +223,15 @@ it('filesystem fingerprinting never contacts a reachable Secret Service or creat
     expect(await fingerprintDirectory(fixture.keyrings)).toBe('absent');
     assertHostUnchanged(before, await fingerprintHost(resources));
     // The control proves activation is enabled on this genuine D-Bus fixture.
-    spawnSync(
-      '/usr/bin/busctl',
-      [
-        '--user',
-        '--timeout=1s',
-        'get-property',
-        'org.freedesktop.secrets',
-        '/org/freedesktop/secrets',
-        'org.freedesktop.Secret.Service',
-        'Collections',
-      ],
-      { env: testEnvironment(fixture.home, {}, fixture.bus), timeout: 1500 },
-    );
+    await fixture.control([
+      '--user',
+      '--timeout=1s',
+      'get-property',
+      'org.freedesktop.secrets',
+      '/org/freedesktop/secrets',
+      'org.freedesktop.Secret.Service',
+      'Collections',
+    ]);
     expect(Array.isArray(await fingerprintDirectory(fixture.keyrings))).toBe(
       true,
     );
