@@ -145,6 +145,33 @@ it('E21: the first successful list after route unmount and the query GC interval
       .getByRole('navigation', { name: 'breadcrumb' })
       .getByRole('link', { name: 'Nook', exact: true })
       .click();
+    const initialLists = listCount(visit);
+    await page.clock.fastForward(31_001);
+    await page
+      .getByRole('region', { name: 'Tools', exact: true })
+      .getByRole('link', { name: /Vault/ })
+      .hover();
+    await page.clock.runFor(100);
+    expect(listCount(visit)).toBe(initialLists);
+    await page
+      .getByRole('region', { name: 'Tools', exact: true })
+      .getByRole('link', { name: /Vault/ })
+      .click();
+    await page
+      .getByRole('list', { name: 'Buckets', exact: true })
+      .locator('[data-path="work/acme"]')
+      .getByRole('link')
+      .click();
+    expect(await secretRow(page, target).innerText()).toContain('Saving');
+    await page.evaluate(() =>
+      window.dispatchEvent(new Event('visibilitychange')),
+    );
+    await page.clock.runFor(100);
+    expect(listCount(visit)).toBe(initialLists);
+    await page
+      .getByRole('navigation', { name: 'breadcrumb' })
+      .getByRole('link', { name: 'Nook', exact: true })
+      .click();
     // Pending mutations survive the native GC interval, while an unobserved
     // query would be discarded and restart its successful-list counter at zero.
     await page.clock.fastForward(300_001);
@@ -180,54 +207,99 @@ it('E21: the first successful list after route unmount and the query GC interval
   }
 });
 
-it('E21: an unconfirmed submission survives route unmount and GC until a successful list, including a failed remount list', async () => {
-  let failList = false;
-  const visit = await vaultPage(browser, {
-    configure: async (page) => {
-      await page.route('**/api/secrets', (route) =>
-        route.request().method() === 'POST' || failList
-          ? route.fulfill({ status: 503, json: { _tag: 'ServiceUnavailable' } })
-          : route.continue(),
+it.each([
+  { label: 'desktop', viewport: { width: 1440, height: 900 } },
+  { label: 'phone', viewport: { width: 390, height: 844 } },
+])(
+  'E21: an unconfirmed submission survives route unmount and GC until a successful list, including a failed remount list on $label',
+  async ({ viewport }) => {
+    let failList = false;
+    const visit = await vaultPage(browser, {
+      viewport,
+      configure: async (page) => {
+        await page.route('**/api/secrets', (route) =>
+          route.request().method() === 'POST' || failList
+            ? route.fulfill({
+                status: 503,
+                json: { _tag: 'ServiceUnavailable' },
+              })
+            : route.continue(),
+        );
+      },
+    });
+    const { page } = visit;
+    const loadFailure = page
+      .getByRole('alert')
+      .filter({ hasText: 'Couldn’t load secrets' });
+    try {
+      await secretRow(page, 'work/acme/STRIPE_KEY').waitFor();
+      await page.clock.install({ time: new Date() });
+      const sheet = await createDraft(page);
+      await sheet
+        .getByRole('button', { name: 'Save secret', exact: true })
+        .click();
+      await feedback(page).filter({ hasText: 'could not confirm' }).waitFor();
+      failList = true;
+      await page
+        .getByRole('navigation', { name: 'breadcrumb' })
+        .getByRole('link', { name: 'Nook', exact: true })
+        .click();
+      await page.clock.fastForward(300_001);
+      const failedList = page
+        .waitForResponse(
+          (response) =>
+            response.request().method() === 'GET' &&
+            new URL(response.url()).pathname === '/api/secrets' &&
+            response.status() === 503,
+        )
+        .catch(() => undefined);
+      await page
+        .getByRole('region', { name: 'Tools', exact: true })
+        .getByRole('link', { name: /Vault/ })
+        .click();
+      const response = await failedList;
+      expect(response?.status()).toBe(503);
+      await response?.finished();
+      expect(
+        await page
+          .getByRole('list', { name: 'Buckets', exact: true })
+          .locator('[data-path="work/acme"]')
+          .innerText(),
+      ).toMatch(/5\s*secrets/);
+      // Cached failures must be visible on the phone bucket list before drill-in.
+      await loadFailure.waitFor({ state: 'visible' });
+      await page
+        .getByRole('list', { name: 'Buckets', exact: true })
+        .locator('[data-path="work/acme"]')
+        .getByRole('link')
+        .click();
+      await loadFailure.waitFor({ state: 'visible' });
+      expect(await loadFailure.innerText()).toContain('(503)');
+      expect(await secretRow(page, 'work/acme/STRIPE_KEY').count()).toBe(1);
+      expect(
+        await page
+          .getByRole('region', { name: 'Stored here' })
+          .locator('[data-secret]')
+          .count(),
+      ).toBe(5);
+      expect(await loadFailure.innerText()).toContain(
+        'Secret metadata could not be refreshed. Previously loaded data is still shown.',
       );
-    },
-  });
-  const { page } = visit;
-  try {
-    await secretRow(page, 'work/acme/STRIPE_KEY').waitFor();
-    await page.clock.install({ time: new Date() });
-    const sheet = await createDraft(page);
-    await sheet
-      .getByRole('button', { name: 'Save secret', exact: true })
-      .click();
-    await feedback(page).filter({ hasText: 'could not confirm' }).waitFor();
-    failList = true;
-    await page
-      .getByRole('navigation', { name: 'breadcrumb' })
-      .getByRole('link', { name: 'Nook', exact: true })
-      .click();
-    await page.clock.fastForward(300_001);
-    await page
-      .getByRole('link', { name: 'Vault', exact: true })
-      .first()
-      .click();
-    await page
-      .getByRole('list', { name: 'Buckets', exact: true })
-      .locator('[data-path="work/acme"]')
-      .getByRole('link')
-      .click();
-    await page.getByText('Couldn’t load secrets', { exact: true }).waitFor();
-    expect(await feedback(page).innerText()).toContain('could not confirm');
-    expect(await secretRow(page, target).innerText()).toContain('Confirming');
-    expect(
-      await privateClientState(page, ['synthetic-browser-vault-value']),
-    ).toEqual({ found: true, absentFromCache: true, absentFromDom: true });
-    failList = false;
-    await feedback(page)
-      .getByRole('button', { name: 'Try again', exact: true })
-      .click();
-    await feedback(page).filter({ hasText: 'is no longer stored.' }).waitFor();
-    expect(await secretRow(page, target).count()).toBe(0);
-  } finally {
-    await visit.close();
-  }
-});
+      expect(await feedback(page).innerText()).toContain('could not confirm');
+      expect(await secretRow(page, target).innerText()).toContain('Confirming');
+      expect(
+        await privateClientState(page, ['synthetic-browser-vault-value']),
+      ).toEqual({ found: true, absentFromCache: true, absentFromDom: true });
+      failList = false;
+      await feedback(page)
+        .getByRole('button', { name: 'Try again', exact: true })
+        .click();
+      await feedback(page)
+        .filter({ hasText: 'is no longer stored.' })
+        .waitFor();
+      expect(await secretRow(page, target).count()).toBe(0);
+    } finally {
+      await visit.close();
+    }
+  },
+);
