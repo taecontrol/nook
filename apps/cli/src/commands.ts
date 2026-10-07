@@ -4,6 +4,11 @@ import { Argument, Command } from 'effect/cli';
 import cliPackage from '../package.json' with { type: 'json' };
 import { CliFailure } from './errors.ts';
 import { login, logout, mcpHeader, whoami } from './session.ts';
+import { vaultList } from './vault.ts';
+
+function missingVaultBucket(args: readonly string[]) {
+  return args[0] === 'vault' && args[1] === 'list' && args.length === 2;
+}
 
 export async function execute(
   args: string[],
@@ -24,8 +29,21 @@ export async function execute(
     write('The Nook CLI supports Linux and macOS only.');
     return 1;
   }
+  if (missingVaultBucket(args)) {
+    write('Usage: nook vault list <bucket>');
+    return 1;
+  }
   const command = Command.make('nook').pipe(
     Command.withSubcommands([
+      Command.make('vault').pipe(
+        Command.withSubcommands([
+          Command.make(
+            'list',
+            { bucket: Argument.String('bucket') },
+            ({ bucket }) => vaultList(bucket, write),
+          ),
+        ]),
+      ),
       Command.make('login', { url: Argument.String('url') }, ({ url }) =>
         login(url, write),
       ),
@@ -50,7 +68,9 @@ export async function execute(
         writeError(
           error instanceof CliFailure
             ? error.message
-            : 'Usage: nook login <url> | nook whoami | nook logout | nook mcp-header | nook version',
+            : args[0] === 'vault'
+              ? 'Usage: nook vault list <bucket>'
+              : 'Usage: nook login <url> | nook whoami | nook logout | nook mcp-header | nook version',
         );
         return Effect.succeed(1);
       }),

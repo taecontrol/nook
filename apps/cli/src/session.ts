@@ -25,7 +25,7 @@ function notLoggedIn(url?: string) {
 function networkError(url: string) {
   return new CliFailure(`Could not reach ${url}. Try again.`);
 }
-const session = Effect.gen(function* () {
+export const session = Effect.gen(function* () {
   yield* checkKeyring;
   const url = yield* readConfig;
   if (!url) return yield* Effect.fail(notLoggedIn());

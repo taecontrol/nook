@@ -50,7 +50,7 @@ it('E8a: Claude discovery, tool list and call work without initialization or ses
       capabilities: { tools: {} },
     });
     expect(discovery).not.toHaveProperty('instructions');
-    expect((await driver.listTools()).tools).toHaveLength(3);
+    expect((await driver.listTools()).tools).toHaveLength(4);
     const result = await driver.call('list_buckets');
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toMatchObject({
@@ -125,7 +125,7 @@ it('E9: the synthetic owner accepts absent/same Origin and rejects a foreign Ori
     ])
       expect(
         (await mcpDriver(app.origin, '2026-07-28', headers).listTools()).tools,
-      ).toHaveLength(3);
+      ).toHaveLength(4);
     const response = await mcpDriver(app.origin, '2026-07-28', {
       Origin: 'https://foreign.test',
     }).request('tools/list');

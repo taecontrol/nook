@@ -14,11 +14,13 @@ import {
 } from './machine-routes.ts';
 import { machineOperations } from './machines.ts';
 import { mcpHandler } from './mcp.ts';
+import { ownerVault } from './vault.ts';
 
 export function handlerForPrincipal(
   email: string,
   db: D1Database,
   grant: BucketGrant = 'all',
+  vaultKey = '',
 ) {
   const session = HttpApiBuilder.group(Api, 'session', (handlers) =>
     handlers.handle('whoami', () => Effect.succeed({ email })),
@@ -40,8 +42,22 @@ export function handlerForPrincipal(
         .handle('revoke', ({ params }) => store.revoke(grant, params.id));
     }),
   ).pipe(Layer.provide(D1Client.layer({ db })));
+  const vault = HttpApiBuilder.group(Api, 'vault', (handlers) =>
+    Effect.gen(function* () {
+      const store = yield* ownerVault(vaultKey, grant);
+      return handlers
+        .handle('list', () => store.listAll())
+        .handle('create', ({ payload }) => store.create(payload))
+        .handle('replace', ({ params, payload }) =>
+          store.replace(params.path, payload),
+        )
+        .handle('remove', ({ params, query }) =>
+          store.remove(params.path, query.version),
+        );
+    }),
+  ).pipe(Layer.provide(D1Client.layer({ db })));
   const routes = HttpApiBuilder.layer(Api).pipe(
-    Layer.provide([session, buckets, machines]),
+    Layer.provide([session, buckets, machines, vault]),
     Layer.provide(HttpServer.layerServices),
   );
   const apiHandler = HttpRouter.toWebHandler(routes, {
@@ -57,16 +73,28 @@ let cached:
       email: string;
       db: D1Database;
       grant: BucketGrant;
+      vaultKey: string;
       handler: ReturnType<typeof handlerForPrincipal>;
     }
   | undefined;
-function handlerFor(email: string, db: D1Database, grant: BucketGrant) {
-  if (cached?.email !== email || cached.db !== db || cached.grant !== grant)
+function handlerFor(
+  email: string,
+  db: D1Database,
+  grant: BucketGrant,
+  vaultKey = '',
+) {
+  if (
+    cached?.email !== email ||
+    cached.db !== db ||
+    cached.grant !== grant ||
+    cached.vaultKey !== vaultKey
+  )
     cached = {
       email,
       db,
       grant,
-      handler: handlerForPrincipal(email, db, grant),
+      vaultKey,
+      handler: handlerForPrincipal(email, db, grant, vaultKey),
     };
   return cached.handler;
 }
@@ -74,14 +102,21 @@ function foreignOrigin(request: Request, url: URL) {
   const origin = request.headers.get('Origin');
   return (
     (['/mcp', '/api/machine/mcp'].includes(url.pathname) ||
-      ['POST', 'DELETE'].includes(request.method)) &&
+      !['GET', 'HEAD'].includes(request.method)) &&
     origin !== null &&
     origin !== url.origin
   );
 }
 function knownRoute(path: string, method: string) {
   return (
-    ['/api/whoami', '/api/buckets', '/api/machines', '/mcp'].includes(path) ||
+    [
+      '/api/whoami',
+      '/api/buckets',
+      '/api/machines',
+      '/api/secrets',
+      '/mcp',
+    ].includes(path) ||
+    (path.startsWith('/api/secrets/') && ['PUT', 'DELETE'].includes(method)) ||
     ((path.startsWith('/api/buckets/') || path.startsWith('/api/machines/')) &&
       method === 'DELETE')
   );
@@ -120,11 +155,21 @@ async function sanitized(response: Promise<Response>) {
         'InvalidMachineName',
         'InvalidBucketGrant',
         'GrantBucketNotFound',
+        'InvalidSecret',
+        'InvalidBucketPath',
+        'ReservedBucket',
       ].includes(body?._tag ?? '')
     )
       return Response.json({ _tag: 'BadRequest' }, { status: 400 });
   }
   return result;
+}
+function protectedMachineRoute(path: string, method: string) {
+  return (
+    path === '/api/machine/whoami' ||
+    (path === '/api/machine/secrets' && method === 'GET') ||
+    (path === '/api/machine/token' && method === 'DELETE')
+  );
 }
 function machineRequest(request: Request, url: URL, db: D1Database) {
   if (url.pathname === '/api/machine/mcp') {
@@ -132,10 +177,10 @@ function machineRequest(request: Request, url: URL, db: D1Database) {
       return Response.json({ _tag: 'Forbidden' }, { status: 403 });
     return machineMcpHandler(db, request);
   }
-  const protectedRoute =
-    url.pathname === '/api/machine/whoami' ||
-    (url.pathname === '/api/machine/token' && request.method === 'DELETE');
-  if (protectedRoute && !request.headers.has('Authorization'))
+  if (
+    protectedMachineRoute(url.pathname, request.method) &&
+    !request.headers.has('Authorization')
+  )
     return Response.json({ _tag: 'Unauthorized' }, { status: 401 });
   if (foreignOrigin(request, url))
     return Response.json({ _tag: 'Forbidden' }, { status: 403 });
@@ -144,7 +189,7 @@ function machineRequest(request: Request, url: URL, db: D1Database) {
 export default {
   async fetch(
     request: Request,
-    env: AuthBindings & { DB: D1Database },
+    env: AuthBindings & { DB: D1Database; VAULT_KEY?: string },
   ): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api/machine/'))
@@ -161,6 +206,13 @@ export default {
       return sanitized(routesFor(env.DB, url.origin).owner(request));
     if (!knownRoute(url.pathname, request.method))
       return Response.json({ error: 'Not found' }, { status: 404 });
-    return handlerFor(identity.email, env.DB, identity.grant)(request);
+    return sanitized(
+      handlerFor(
+        identity.email,
+        env.DB,
+        identity.grant,
+        env.VAULT_KEY,
+      )(request),
+    );
   },
 };

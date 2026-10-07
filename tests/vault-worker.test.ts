@@ -305,7 +305,15 @@ it('E11: Nook Bearers authenticate no owner route and the machine API exposes no
 it('E11: foreign Origin rejects every owner write, including PUT', async () => {
   const original = await stored();
   const before = await secretRows(app);
-  const headers = { Origin: 'https://foreign.nook.test' };
+  const issuer = await accessFixture();
+  await app.setBindings(
+    { ...access, VAULT_KEY: app.key },
+    { outboundService: issuer.outboundService },
+  );
+  const headers = {
+    Origin: 'https://foreign.nook.test',
+    'Cf-Access-Jwt-Assertion': await issuer.assertion(),
+  };
   for (const response of [
     await createSecret(app, secretInput(), headers),
     await replaceSecret(
