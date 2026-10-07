@@ -51,6 +51,7 @@ async function submit(page: Page, op: Operation) {
 async function retry(page: Page) {
   await page
     .getByRole('alert')
+    .filter({ has: page.getByRole('button', { name: 'Dismiss', exact: true }) })
     .getByRole('button', { name: 'Try again', exact: true })
     .click();
 }
