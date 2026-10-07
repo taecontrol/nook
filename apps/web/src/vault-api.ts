@@ -73,6 +73,19 @@ function sendOnce(write: SecretWrite, value: Redacted.Redacted<string>) {
     }),
   ).then((stored): WriteResult => ({ secret: stored }));
 }
+function negativeReply(
+  write: SecretWrite,
+  error: ApiError,
+  ambiguous: boolean,
+): WriteResult {
+  if (!ambiguous && write.op === 'delete' && error.tag === 'SecretNotFound')
+    return {
+      secret: null,
+      message: `${write.secret.path} is no longer stored.`,
+    };
+  error.ambiguous = ambiguous;
+  throw error;
+}
 async function send(write: SecretWrite, value: Redacted.Redacted<string>) {
   let ambiguous = false;
   for (let attempt = 0; ; attempt++) {
@@ -85,13 +98,7 @@ async function send(write: SecretWrite, value: Redacted.Redacted<string>) {
         ambiguous = true;
         if (attempt < 2) continue;
       }
-      if (!ambiguous && write.op === 'delete' && error.tag === 'SecretNotFound')
-        return {
-          secret: null,
-          message: `${write.secret.path} is no longer stored.`,
-        };
-      error.ambiguous = ambiguous;
-      throw error;
+      return negativeReply(write, error, ambiguous);
     }
   }
 }
