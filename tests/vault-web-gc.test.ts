@@ -52,6 +52,65 @@ async function pendingWrites(
   });
 }
 
+async function pendingValueMap(
+  page: Awaited<ReturnType<typeof vaultPage>>['page'],
+) {
+  return page.evaluateHandle(() => {
+    const element = document.querySelector('#root > *');
+    const key = Object.keys(element ?? {}).find((entry) =>
+      entry.startsWith('__reactFiber$'),
+    );
+    type Hook = {
+      memoizedState?: { current?: unknown };
+      next?: Hook;
+    };
+    type Fiber = {
+      return?: Fiber;
+      child?: Fiber;
+      sibling?: Fiber;
+      memoizedState?: Hook;
+      memoizedProps?: {
+        client?: {
+          getMutationCache(): {
+            getAll(): {
+              state: { status: string; variables?: { writeId?: string } };
+            }[];
+          };
+        };
+      };
+    };
+    let fiber = key
+      ? (element as unknown as Record<string, Fiber>)[key]
+      : undefined;
+    while (fiber) {
+      const client = fiber.memoizedProps?.client;
+      if (client?.getMutationCache) {
+        const writeId = client
+          .getMutationCache()
+          .getAll()
+          .find((mutation) => mutation.state.status === 'pending')?.state
+          .variables?.writeId;
+        if (!writeId) return null;
+        const findMap = (
+          node: Fiber | undefined,
+        ): Map<unknown, unknown> | null => {
+          if (!node) return null;
+          let hook = node.memoizedState;
+          while (hook) {
+            const value = hook.memoizedState?.current;
+            if (value instanceof Map && value.has(writeId)) return value;
+            hook = hook.next;
+          }
+          return findMap(node.child) ?? findMap(node.sibling);
+        };
+        return findMap(fiber.child);
+      }
+      fiber = fiber.return;
+    }
+    return null;
+  });
+}
+
 it.each([false, true])(
   'E21: an older unconfirmed submission (committed: %s) survives garbage collection after a later submission',
   async (committed) => {
@@ -133,6 +192,7 @@ it('E21: the first successful list after route unmount and the query GC interval
     },
   });
   const { page } = visit;
+  let valueMap: Awaited<ReturnType<typeof pendingValueMap>> | undefined;
   try {
     await secretRow(page, 'work/acme/STRIPE_KEY').waitFor();
     await page.clock.install({ time: new Date() });
@@ -141,6 +201,14 @@ it('E21: the first successful list after route unmount and the query GC interval
       .getByRole('button', { name: 'Save secret', exact: true })
       .click();
     expect(await secretRow(page, target).innerText()).toContain('Saving');
+    // Native mutation options retain this original Hook after route unmount.
+    // Observe its real Map through a handle; no protected value crosses the boundary.
+    valueMap = await pendingValueMap(page);
+    expect(
+      await valueMap.evaluate(
+        (value) => value instanceof Map && value.size > 0,
+      ),
+    ).toBe(true);
     await page
       .getByRole('navigation', { name: 'breadcrumb' })
       .getByRole('link', { name: 'Nook', exact: true })
@@ -184,6 +252,11 @@ it('E21: the first successful list after route unmount and the query GC interval
       .toBe(3);
     // Requests reaching the server do not prove their final replies settled.
     await expect.poll(() => pendingWrites(page)).toBe(0);
+    expect(
+      await valueMap.evaluate(
+        (value) => value instanceof Map && value.size === 0,
+      ),
+    ).toBe(true);
     const lists = listCount(visit);
     await page
       .getByRole('link', { name: 'Vault', exact: true })
@@ -203,7 +276,11 @@ it('E21: the first successful list after route unmount and the query GC interval
     ).toEqual({ found: true, absentFromCache: true, absentFromDom: true });
   } finally {
     gate.resolve();
-    await visit.close();
+    try {
+      await valueMap?.dispose();
+    } finally {
+      await visit.close();
+    }
   }
 });
 

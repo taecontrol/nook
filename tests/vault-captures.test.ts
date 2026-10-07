@@ -48,6 +48,45 @@ const matrix = states.flatMap((state) =>
     ].map((size) => ({ state, theme, size })),
   ),
 );
+
+it('E25: capture inventory covers every accepted scenario in both viewports and themes', () => {
+  // These profiles and scenario names are the accepted E25 requirements,
+  // independently specified from the capture fixture that must realize them.
+  const profiles = [
+    { width: 1440, height: 900, theme: 'light' },
+    { width: 1440, height: 900, theme: 'dark' },
+    { width: 390, height: 844, theme: 'light' },
+    { width: 390, height: 844, theme: 'dark' },
+  ];
+  expect(matrix).toHaveLength(52);
+  for (const profile of profiles)
+    expect(
+      matrix
+        .filter(
+          ({ theme, size }) =>
+            theme === profile.theme &&
+            size.width === profile.width &&
+            size.height === profile.height,
+        )
+        .map(({ state }) => state)
+        .sort(),
+    ).toEqual([
+      'bucket-empty',
+      'create',
+      'create-duplicate',
+      'create-invalid',
+      'created',
+      'delete-confirm',
+      'fresh',
+      'load-error',
+      'loading',
+      'many-long',
+      'replace-confirm',
+      'typical',
+      'write-failed',
+    ]);
+});
+
 async function configureState(
   page: Page,
   app: Awaited<ReturnType<typeof vaultRuntime>>,
