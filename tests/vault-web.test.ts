@@ -305,45 +305,50 @@ it('E20: a known duplicate sends no request; a raced duplicate refetches and reo
     await visit.close();
   }
 });
-it('E21: an unconfirmed write resends the same id and never announces premature success', async () => {
-  const ids: string[] = [];
-  const gate = deferred();
-  const visit = await vaultPage(browser, {
-    configure: async (page) => {
-      await page.route('**/api/secrets', async (route) => {
-        if (route.request().method() !== 'POST') return route.continue();
-        ids.push(route.request().postDataJSON().writeId);
-        if (ids.length < 3)
-          return route.fulfill({
-            status: 503,
-            json: { _tag: 'ServiceUnavailable' },
-          });
-        await gate.promise;
-        return route.continue().catch(() => {});
-      });
-    },
-  });
-  const { page } = visit;
-  try {
-    const sheet = await createDraft(page);
-    await sheet
-      .getByRole('button', { name: 'Save secret', exact: true })
-      .click();
-    await expect.poll(() => ids.length).toBe(3);
-    expect(new Set(ids).size).toBe(1);
-    expect(await page.getByRole('alert').innerText()).not.toMatch(
-      /Stored work\/acme/,
-    );
-    gate.resolve();
-    await page
-      .getByRole('alert')
-      .filter({ has: page.getByText('Secret saved', { exact: true }) })
-      .waitFor();
-  } finally {
-    gate.resolve();
-    await visit.close();
-  }
-});
+it.each(['storage', 'network'])(
+  'E21: an unconfirmed write resends the same id and never announces premature success (%s)',
+  async (failure) => {
+    const ids: string[] = [];
+    const gate = deferred();
+    const visit = await vaultPage(browser, {
+      configure: async (page) => {
+        await page.route('**/api/secrets', async (route) => {
+          if (route.request().method() !== 'POST') return route.continue();
+          ids.push(route.request().postDataJSON().writeId);
+          if (ids.length < 3) {
+            if (failure === 'network') return route.abort('failed');
+            return route.fulfill({
+              status: 503,
+              json: { _tag: 'ServiceUnavailable' },
+            });
+          }
+          await gate.promise;
+          return route.continue().catch(() => {});
+        });
+      },
+    });
+    const { page } = visit;
+    try {
+      const sheet = await createDraft(page);
+      await sheet
+        .getByRole('button', { name: 'Save secret', exact: true })
+        .click();
+      await expect.poll(() => ids.length).toBe(3);
+      expect(new Set(ids).size).toBe(1);
+      expect(await page.getByRole('alert').innerText()).not.toMatch(
+        /Stored work\/acme/,
+      );
+      gate.resolve();
+      await page
+        .getByRole('alert')
+        .filter({ has: page.getByText('Secret saved', { exact: true }) })
+        .waitFor();
+    } finally {
+      gate.resolve();
+      await visit.close();
+    }
+  },
+);
 it('E21: a persistent D1 failure keeps an unconfirmed row until a successful list settles it', async () => {
   const visit = await vaultPage(browser, {
     configure: async (_page, app) => {
