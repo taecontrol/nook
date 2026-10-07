@@ -331,11 +331,13 @@ function LoadFailure({
   retrying,
   onRetry,
   compact,
+  cached = false,
 }: {
   status: number;
   retrying: boolean;
   onRetry: () => void;
   compact?: boolean;
+  cached?: boolean;
 }) {
   const retry = (
     <Button variant="outline" size="sm" disabled={retrying} onClick={onRetry}>
@@ -348,8 +350,10 @@ function LoadFailure({
         <ServerCrash />
         <AlertTitle>Couldn’t load secrets</AlertTitle>
         <AlertDescription>
-          Nook is unavailable right now ({status}). Bucket counts are missing
-          until it loads.
+          Nook is unavailable right now ({status}).{' '}
+          {cached
+            ? 'Secret metadata could not be refreshed. Previously loaded data is still shown.'
+            : 'Bucket counts are missing until it loads.'}
           {retry}
         </AlertDescription>
       </Alert>
@@ -566,6 +570,7 @@ function BucketSecrets({ page }: { page: Page }) {
   const failure = (
     <LoadFailure
       compact={list !== undefined}
+      cached={list !== undefined}
       status={status}
       retrying={secrets.isFetching}
       onRetry={() => secrets.refetch()}
@@ -603,11 +608,12 @@ function BucketPane({ page }: { page: Page }) {
 function MobileListStatus({ page }: { page: Page }) {
   if (page.drilled) return null;
   const { secrets } = page;
-  if (secrets.isError && !page.list)
+  if (secrets.isError)
     return (
       <div className="lg:hidden">
         <LoadFailure
           compact
+          cached={page.list !== undefined}
           status={
             secrets.error instanceof ApiError ? secrets.error.status : 503
           }
