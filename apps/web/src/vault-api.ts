@@ -20,6 +20,8 @@ export const secretsOptions = queryOptions({
   ],
   retry: false,
   staleTime: 30_000,
+  // Keep the successful-list revision stable across route unmounts.
+  gcTime: Infinity,
   refetchOnWindowFocus: 'always',
   structuralSharing: false,
 });
@@ -213,6 +215,8 @@ export function useVault() {
   };
   const write = useMutation({
     mutationKey: writeKey,
+    // Unconfirmed submissions remain metadata-only until a list reconciles them.
+    gcTime: Infinity,
     mutationFn: (input: SecretWrite) =>
       send(input, values.current.get(input.writeId) ?? Redacted.make('')),
     onMutate: async () => {
