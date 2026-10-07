@@ -115,48 +115,94 @@ it('E19: phone drill-in supports All buckets and browser Back', async () => {
     await visit.close();
   }
 });
-it('E19: create is optimistic and settled values disappear from DOM, Query cache and mutation state', async () => {
-  const gate = deferred();
-  const visit = await vaultPage(browser, {
-    configure: async (page) => {
-      await page.route('**/api/secrets', async (route) => {
-        if (route.request().method() === 'POST') await gate.promise;
-        await route.continue().catch(() => {});
-      });
-    },
-  });
-  const { page } = visit;
-  const value = `synthetic-client-${randomUUID()}`;
-  try {
-    const sheet = await createDraft(page, { value });
-    const field = sheet.getByRole('textbox', { name: 'Value', exact: true });
-    expect(await field.getAttribute('autocomplete')).toBe('off');
-    expect(await field.getAttribute('spellcheck')).toBe('false');
-    await sheet
-      .getByRole('button', { name: 'Save secret', exact: true })
-      .click();
-    const row = secretRow(page, 'work/acme/RESEND_API_KEY');
-    await row.waitFor();
-    expect(await row.innerText()).toContain('Transactional email for staging');
-    expect(await row.innerText()).toContain('Saving');
-    expect(
-      (await listSecrets(visit.app)).some(
-        (secret) => secret.name === 'RESEND_API_KEY',
-      ),
-    ).toBe(false);
-    gate.resolve();
-    await page
-      .getByRole('alert')
-      .filter({ has: page.getByText('Secret saved', { exact: true }) })
-      .waitFor();
-    await expect
-      .poll(() => privateClientState(page, [value, ...visit.values]))
-      .toEqual({ found: true, absentFromCache: true, absentFromDom: true });
-  } finally {
-    gate.resolve();
-    await visit.close();
-  }
-});
+it.each([false, true])(
+  'E19: create is optimistic and settled values disappear from DOM, Query cache and mutation state (submit burst: %s)',
+  async (submitBurst) => {
+    const gate = deferred();
+    const visit = await vaultPage(browser, {
+      configure: async (page) => {
+        await page.route('**/api/secrets', async (route) => {
+          if (route.request().method() === 'POST') await gate.promise;
+          await route.continue().catch(() => {});
+        });
+      },
+    });
+    const { page } = visit;
+    const value = `synthetic-client-${randomUUID()}`;
+    try {
+      const sheet = await createDraft(page, { value });
+      const field = sheet.getByRole('textbox', { name: 'Value', exact: true });
+      expect(await field.getAttribute('autocomplete')).toBe('off');
+      expect(await field.getAttribute('spellcheck')).toBe('false');
+      if (submitBurst)
+        await sheet.locator('form').evaluate((element) => {
+          const form = element as HTMLFormElement;
+          form.requestSubmit();
+          form.requestSubmit();
+        });
+      else
+        await sheet
+          .getByRole('button', { name: 'Save secret', exact: true })
+          .click();
+      const row = secretRow(page, 'work/acme/RESEND_API_KEY');
+      await row.waitFor();
+      expect(await row.innerText()).toContain(
+        'Transactional email for staging',
+      );
+      expect(await row.innerText()).toContain('Saving');
+      expect(
+        (await listSecrets(visit.app)).some(
+          (secret) => secret.name === 'RESEND_API_KEY',
+        ),
+      ).toBe(false);
+      if (submitBurst) {
+        expect(
+          await page
+            .getByRole('button', { name: 'New secret', exact: true })
+            .isEnabled(),
+        ).toBe(false);
+        await secretRow(page, 'work/acme/STRIPE_KEY')
+          .getByRole('button', {
+            name: 'Actions for work/acme/STRIPE_KEY',
+            exact: true,
+          })
+          .click();
+        const remove = page.getByRole('menuitem', {
+          name: 'Delete secret…',
+          exact: true,
+        });
+        const replace = page.getByRole('menuitem', {
+          name: 'Replace value…',
+          exact: true,
+        });
+        expect(await remove.isEnabled()).toBe(false);
+        expect(await replace.isEnabled()).toBe(false);
+        await remove.click({ force: true });
+        await remove.press('Enter');
+        expect(await page.getByRole('alertdialog').count()).toBe(0);
+        await page.keyboard.press('Escape');
+      }
+      gate.resolve();
+      if (submitBurst) {
+        await page.waitForLoadState('networkidle');
+        expect(
+          visit.requests.filter((request) => request.method === 'POST'),
+        ).toHaveLength(1);
+        expect(await page.getByRole('dialog').count()).toBe(0);
+      }
+      await page
+        .getByRole('alert')
+        .filter({ has: page.getByText('Secret saved', { exact: true }) })
+        .waitFor();
+      await expect
+        .poll(() => privateClientState(page, [value, ...visit.values]))
+        .toEqual({ found: true, absentFromCache: true, absentFromDom: true });
+    } finally {
+      gate.resolve();
+      await visit.close();
+    }
+  },
+);
 it('E20: replacement and deletion require confirmation; Back and Cancel change nothing', async () => {
   const visit = await vaultPage(browser);
   const { page } = visit;
