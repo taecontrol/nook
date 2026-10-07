@@ -29,6 +29,43 @@ afterAll(async () => {
   await closeBrowser?.();
 });
 
+it('E19/E23: Home Vault intent preloads bucket and secret metadata before navigation and reuses it', async () => {
+  const gate = deferred();
+  const visit = await vaultPage(browser, {
+    start: '/',
+    configure: async (page) => {
+      await page.route(/\/api\/(buckets|secrets)$/, async (route) => {
+        await gate.promise;
+        await route.continue().catch(() => {});
+      });
+    },
+  });
+  const { page } = visit;
+  const metadataReads = () =>
+    visit.requests
+      .filter((request) =>
+        ['/api/buckets', '/api/secrets'].includes(request.path),
+      )
+      .map((request) => request.path)
+      .sort();
+  try {
+    const link = page
+      .getByRole('region', { name: 'Tools', exact: true })
+      .getByRole('link', { name: /Vault/ });
+    await link.hover();
+    await expect.poll(metadataReads).toEqual(['/api/buckets', '/api/secrets']);
+    expect(new URL(page.url()).pathname).toBe('/');
+    gate.resolve();
+    await page.waitForLoadState('networkidle');
+    await link.click();
+    await secretRow(page, 'me/GITHUB_TOKEN').waitFor();
+    expect(metadataReads()).toEqual(['/api/buckets', '/api/secrets']);
+  } finally {
+    gate.resolve();
+    await visit.close();
+  }
+});
+
 it('E19: the outline counts secrets and URL selection separates stored and inherited groups', async () => {
   const visit = await vaultPage(browser, { start: '/' });
   const { page } = visit;
@@ -250,6 +287,15 @@ it('E20: a known duplicate sends no request; a raced duplicate refetches and reo
       .getByRole('dialog')
       .getByText('work/acme/RESEND_API_KEY already exists.', { exact: true })
       .waitFor();
+    expect(
+      (await page
+        .getByRole('dialog')
+        .getByRole('textbox', { name: 'Value', exact: true })
+        .inputValue()) === '',
+    ).toBe(true);
+    expect(
+      await privateClientState(page, ['synthetic-browser-vault-value']),
+    ).toEqual({ found: true, absentFromCache: true, absentFromDom: true });
     expect(
       (await listSecrets(visit.app)).filter(
         (secret) => secret.name === 'RESEND_API_KEY',

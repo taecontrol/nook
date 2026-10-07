@@ -110,14 +110,15 @@ export async function privateClientState(
       const key = Object.keys(element ?? {}).find((entry) =>
         entry.startsWith('__reactFiber$'),
       );
+      type Hook = {
+        memoizedState?: { current?: unknown };
+        next?: Hook;
+      };
       type Fiber = {
         return?: Fiber;
         child?: Fiber;
         sibling?: Fiber;
-        memoizedState?: {
-          memoizedState?: { current?: unknown };
-          next?: Fiber['memoizedState'];
-        };
+        memoizedState?: Hook;
         memoizedProps?: {
           client?: {
             getQueryCache(): { getAll(): unknown[] };
@@ -131,25 +132,24 @@ export async function privateClientState(
       while (fiber) {
         const client = fiber.memoizedProps?.client;
         if (client?.getQueryCache) {
-          const valueCaches: Map<unknown, unknown>[] = [];
-          const collectValueCaches = (node: Fiber | undefined) => {
+          const refs: unknown[] = [];
+          const collectRefs = (node: Fiber | undefined) => {
             if (!node) return;
             let hook = node.memoizedState;
             while (hook) {
               const value = hook.memoizedState?.current;
-              if (value instanceof Map) valueCaches.push(value);
+              if (value !== undefined) refs.push(value);
               hook = hook.next;
             }
-            collectValueCaches(node.child);
-            collectValueCaches(node.sibling);
+            collectRefs(node.child);
+            collectRefs(node.sibling);
           };
-          collectValueCaches(fiber.child);
+          collectRefs(fiber.child);
           const retained = {
             queries: client
               .getQueryCache()
               .getAll()
               .map((entry) => (entry as { state: unknown }).state),
-            valueCaches,
             mutations: client
               .getMutationCache()
               .getAll()
@@ -162,6 +162,7 @@ export async function privateClientState(
             if (!value || typeof value !== 'object' || seen.has(value))
               return false;
             seen.add(value);
+            if (value instanceof Node) return false;
             if (brand in value) return true;
             if (value instanceof Map)
               return Array.from(value.values()).some(containsValue);
@@ -179,6 +180,7 @@ export async function privateClientState(
             found: true,
             absentFromCache:
               !containsValue(retained) &&
+              !containsValue(refs) &&
               privateValues.every((value) => !cache.includes(value)),
             absentFromDom: privateValues.every((value) => !dom.includes(value)),
           };
