@@ -1,7 +1,7 @@
 # ADR-0011: Vault writes are idempotent by client write id and guarded by version
 
 Date: 2026-10-07
-Status: Proposed
+Status: Accepted
 
 ## Context
 
