@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Browser } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { deferred } from './support/machines.ts';
@@ -349,52 +349,125 @@ it.each(['storage', 'network'])(
     }
   },
 );
-it('E21: a persistent D1 failure keeps an unconfirmed row until a successful list settles it', async () => {
-  const visit = await vaultPage(browser, {
-    configure: async (_page, app) => {
-      await (await app.mf.getD1Database('DB'))
-        .prepare(
-          "CREATE TRIGGER vault_failure BEFORE INSERT ON secrets BEGIN SELECT RAISE(ABORT, 'Synthetic private failure'); END",
-        )
-        .run();
-    },
+async function fetchingVault(page: Page) {
+  return page.evaluate(() => {
+    const element = document.querySelector('#root > *');
+    const key = Object.keys(element ?? {}).find((entry) =>
+      entry.startsWith('__reactFiber$'),
+    );
+    type Fiber = {
+      return?: Fiber;
+      memoizedProps?: {
+        client?: { isFetching(filters: { queryKey: string[] }): number };
+      };
+    };
+    let fiber = key
+      ? (element as unknown as Record<string, Fiber>)[key]
+      : undefined;
+    while (fiber) {
+      const client = fiber.memoizedProps?.client;
+      if (client?.isFetching)
+        return client.isFetching({ queryKey: ['vault', 'secrets'] });
+      fiber = fiber.return;
+    }
+    return -1;
   });
-  const { page } = visit;
-  try {
-    const sheet = await createDraft(page);
-    await sheet
-      .getByRole('button', { name: 'Save secret', exact: true })
-      .click();
-    await page
-      .getByRole('alert')
-      .filter({
-        hasText:
-          'Nook could not confirm whether work/acme/RESEND_API_KEY was stored.',
-      })
-      .waitFor();
-    expect(
-      await secretRow(page, 'work/acme/RESEND_API_KEY').innerText(),
-    ).toContain('Confirming');
-    expect(await page.getByRole('alert').innerText()).not.toContain(
-      'Nothing was stored',
-    );
-    expect(
-      visit.requests.filter((request) => request.method === 'POST'),
-    ).toHaveLength(3);
-    await page
-      .getByRole('alert')
-      .getByRole('button', { name: 'Try again', exact: true })
-      .click();
-    await secretRow(page, 'work/acme/RESEND_API_KEY').waitFor({
-      state: 'detached',
+}
+
+it.each([false, true])(
+  'E21: a persistent D1 failure keeps an unconfirmed row until a successful list settles it (earlier refresh: %s)',
+  async (earlierRefresh) => {
+    const staleList = deferred();
+    const writeGate = deferred();
+    if (!earlierRefresh) writeGate.resolve();
+    let holdList = false;
+    let snapshotReady = false;
+    let snapshotReleased = false;
+    const visit = await vaultPage(browser, {
+      configure: async (page, app) => {
+        await page.route('**/api/secrets', async (route) => {
+          if (route.request().method() === 'POST') await writeGate.promise;
+          if (route.request().method() === 'GET' && holdList) {
+            holdList = false;
+            const response = await route.fetch();
+            expect(response.status()).toBe(200);
+            snapshotReady = true;
+            await staleList.promise;
+            try {
+              await route.fulfill({ response });
+            } catch {
+              // The production cancelQueries call aborts this older request.
+            } finally {
+              snapshotReleased = true;
+            }
+            return;
+          }
+          await route.continue().catch(() => {});
+        });
+        await (await app.mf.getD1Database('DB'))
+          .prepare(
+            "CREATE TRIGGER vault_failure BEFORE INSERT ON secrets BEGIN SELECT RAISE(ABORT, 'Synthetic private failure'); END",
+          )
+          .run();
+      },
     });
-    expect(await page.getByRole('alert').innerText()).toContain(
-      'is no longer stored',
-    );
-  } finally {
-    await visit.close();
-  }
-});
+    const { page } = visit;
+    try {
+      if (earlierRefresh) {
+        await secretRow(page, 'work/acme/STRIPE_KEY').waitFor();
+        holdList = true;
+        await page.evaluate(() =>
+          window.dispatchEvent(new Event('visibilitychange')),
+        );
+        await expect.poll(() => snapshotReady).toBe(true);
+      }
+      const sheet = await createDraft(page);
+      await sheet
+        .getByRole('button', { name: 'Save secret', exact: true })
+        .click();
+      if (earlierRefresh) {
+        await secretRow(page, 'work/acme/RESEND_API_KEY').waitFor();
+        expect(
+          await secretRow(page, 'work/acme/RESEND_API_KEY').innerText(),
+        ).toContain('Saving');
+        staleList.resolve();
+        await expect.poll(() => snapshotReleased).toBe(true);
+        await expect.poll(() => fetchingVault(page)).toBe(0);
+        writeGate.resolve();
+      }
+      await page
+        .getByRole('alert')
+        .filter({
+          hasText:
+            'Nook could not confirm whether work/acme/RESEND_API_KEY was stored.',
+        })
+        .waitFor();
+      expect(
+        await secretRow(page, 'work/acme/RESEND_API_KEY').innerText(),
+      ).toContain('Confirming');
+      expect(await page.getByRole('alert').innerText()).not.toContain(
+        'Nothing was stored',
+      );
+      expect(
+        visit.requests.filter((request) => request.method === 'POST'),
+      ).toHaveLength(3);
+      await page
+        .getByRole('alert')
+        .getByRole('button', { name: 'Try again', exact: true })
+        .click();
+      await secretRow(page, 'work/acme/RESEND_API_KEY').waitFor({
+        state: 'detached',
+      });
+      expect(await page.getByRole('alert').innerText()).toContain(
+        'is no longer stored',
+      );
+    } finally {
+      staleList.resolve();
+      writeGate.resolve();
+      await visit.close();
+    }
+  },
+);
 it('E21: a lost response after commit reconciles pending metadata by version on the next list', async () => {
   let requests = 0;
   const visit = await vaultPage(browser, {
