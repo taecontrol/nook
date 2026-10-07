@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { startRuntime } from './runtime.ts';
 
 const argument = process.argv.indexOf('--port');
@@ -8,6 +9,7 @@ const { runtime } = await startRuntime({
   port,
   directory: process.env.NOOK_BUILD ?? '.local/test-build',
   syntheticOwner: true,
+  bindings: { VAULT_KEY: randomBytes(32).toString('base64') },
   coverage: Boolean(process.env.COVERAGE_RUN),
 });
 console.log(`Nook: http://127.0.0.1:${port}`);

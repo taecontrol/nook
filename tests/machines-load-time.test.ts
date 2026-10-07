@@ -12,6 +12,8 @@ const measured = {
   machines: [1000, 1000, 1000, 1000, 1000],
   machinesNavigation: [100, 100, 100, 100, 100],
   approvalNavigation: [100, 100, 100, 100, 100],
+  vault: Array(5).fill(500),
+  vaultNavigation: Array(5).fill(20),
 };
 it.each(['machines', 'machinesNavigation'])(
   'E25: an over-budget %s fails for its own timing',

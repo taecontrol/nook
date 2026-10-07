@@ -121,6 +121,7 @@ it.each([1, 2])(
 it('a slow browser opener leaves the server poll interval unchanged', async () => {
   let started = 0;
   const polls: number[] = [];
+  const completedPolls: number[] = [];
   const server = createServer(async (request, response) => {
     try {
       const chunks: Buffer[] = [];
@@ -137,6 +138,8 @@ it('a slow browser opener leaves the server poll interval unchanged', async () =
           forwarded.headers.get('Content-Type') ?? 'application/json',
       });
       response.end(Buffer.from(await forwarded.arrayBuffer()));
+      if (request.url === '/api/machine/token')
+        completedPolls.push(forwarded.status);
     } catch {
       response.writeHead(503).end();
     }
@@ -153,7 +156,10 @@ it('a slow browser opener leaves the server poll interval unchanged', async () =
       throw new Error('Local proxy unavailable');
     const child = keyring.start(['login', `http://127.0.0.1:${address.port}`]);
     const code = await readUserCode(child);
-    await expect.poll(() => polls.length >= 1, { timeout: 10_000 }).toBe(true);
+    await expect
+      .poll(() => completedPolls.length >= 1, { timeout: 10_000 })
+      .toBe(true);
+    expect(completedPolls[0]).toBe(400);
     expect((await approve(app, code)).status).toBe(204);
     expect((await child.done).status).toBe(0);
     expect(polls.length >= 2).toBe(true);

@@ -5,12 +5,13 @@ import {
   HttpApiError,
   HttpApiGroup,
 } from 'effect/http-api';
-
+import { BucketNotFound, InvalidBucketPath } from './buckets.ts';
 import {
   BucketGrant,
   GrantBucketNotFound,
   InvalidBucketGrant,
 } from './grants.ts';
+import { Secret } from './vault.ts';
 export const MachineIdentity = Schema.Struct({
   machine: Schema.String,
   grant: BucketGrant,
@@ -169,6 +170,19 @@ export const MachineApi = HttpApi.make('machine').add(
         success: MachineIdentity,
         error: machineErrors,
         headers: Schema.Struct({ authorization: Schema.String }),
+      }),
+    )
+    .add(
+      HttpApiEndpoint.get('secrets', '/api/machine/secrets', {
+        headers: Schema.Struct({ authorization: Schema.String }),
+        query: Schema.Struct({ bucket: Schema.String }),
+        success: Schema.Struct({ secrets: Schema.Array(Secret) }),
+        error: [
+          ...machineErrors,
+          HttpApiError.Forbidden,
+          InvalidBucketPath,
+          BucketNotFound,
+        ],
       }),
     )
     .add(

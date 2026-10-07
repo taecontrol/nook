@@ -14,10 +14,23 @@ import {
   ReservedBucket,
 } from './buckets.ts';
 import { Machine } from './machines.ts';
+import {
+  BucketHasSecrets,
+  CreateSecret,
+  InvalidSecret,
+  OwnerSecret,
+  ReplaceSecret,
+  SecretChanged,
+  SecretExists,
+  SecretNotFound,
+  VaultNotConfigured,
+  WriteId,
+} from './vault.ts';
 
 export * from './buckets.ts';
 export * from './grants.ts';
 export * from './machines.ts';
+export * from './vault.ts';
 export const Owner = Schema.Struct({ email: Schema.String });
 export type Owner = typeof Owner.Type;
 const errors = [
@@ -58,7 +71,60 @@ export const Api = HttpApi.make('nook')
             InvalidBucketPath,
             ReservedBucket,
             BucketHasChildren,
+            BucketHasSecrets,
             BucketNotFound,
+          ],
+        }),
+      ),
+  )
+  .add(
+    HttpApiGroup.make('vault')
+      .add(
+        HttpApiEndpoint.get('list', '/api/secrets', {
+          success: Schema.Struct({ secrets: Schema.Array(OwnerSecret) }),
+          error: errors,
+        }),
+      )
+      .add(
+        HttpApiEndpoint.post('create', '/api/secrets', {
+          payload: CreateSecret,
+          success: OwnerSecret.annotate({ httpApiStatus: 201 }),
+          error: [
+            ...errors,
+            InvalidBucketPath,
+            InvalidSecret,
+            BucketNotFound,
+            SecretExists,
+            VaultNotConfigured,
+          ],
+        }),
+      )
+      .add(
+        HttpApiEndpoint.put('replace', '/api/secrets/:path', {
+          params: Schema.Struct({ path: Schema.String }),
+          payload: ReplaceSecret,
+          success: OwnerSecret,
+          error: [
+            ...errors,
+            InvalidBucketPath,
+            InvalidSecret,
+            SecretNotFound,
+            SecretChanged,
+            VaultNotConfigured,
+          ],
+        }),
+      )
+      .add(
+        HttpApiEndpoint.delete('remove', '/api/secrets/:path', {
+          params: Schema.Struct({ path: Schema.String }),
+          query: Schema.Struct({ version: WriteId }),
+          success: Schema.Void.annotate({ httpApiStatus: 204 }),
+          error: [
+            ...errors,
+            InvalidBucketPath,
+            InvalidSecret,
+            SecretNotFound,
+            SecretChanged,
           ],
         }),
       ),

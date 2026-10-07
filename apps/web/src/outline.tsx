@@ -80,7 +80,7 @@ export type OutlineActions = {
   requestDelete: (path: string, trigger: HTMLButtonElement | null) => void;
 };
 
-function Guides({ depth }: { depth: number }) {
+export function Guides({ depth }: { depth: number }) {
   return ['root', 'one', 'two', 'three', 'four']
     .slice(0, depth)
     .map((level) => (

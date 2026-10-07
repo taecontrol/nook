@@ -100,11 +100,16 @@ function writeFailure(
     };
   return {
     title: `Couldn't delete ${write.path}`,
-    description:
-      write.error instanceof ApiError && write.error.status === 409
-        ? 'Nook reports that it has child buckets, so the tree changed since you loaded it. Delete its child buckets first. The outline has been refreshed.'
-        : `Nook is unavailable right now${statusText(write.error)}. The bucket is still there.`,
+    description: deleteFailure(write.error),
   };
+}
+
+function deleteFailure(error: Error | null) {
+  if (error instanceof ApiError && error.tag === 'BucketHasSecrets')
+    return error.message;
+  if (error instanceof ApiError && error.status === 409)
+    return 'Nook reports that it has child buckets, so the tree changed since you loaded it. Delete its child buckets first. The outline has been refreshed.';
+  return `Nook is unavailable right now${statusText(error)}. The bucket is still there.`;
 }
 
 function PlanPreview({ plan }: { plan: CreatePlan }) {

@@ -25,10 +25,7 @@ import {
 import type { Session } from './identity';
 import { OwnerMenu } from './owner-menu';
 
-const tools = [
-  { label: 'Memory', icon: Brain },
-  { label: 'Vault', icon: KeyRound },
-];
+const tools = [{ label: 'Memory', icon: Brain }];
 const footerText = {
   loading: 'Checking session…',
   'session-expired': 'Session expired',
@@ -102,6 +99,14 @@ export function AppSidebar({ session }: { session: Session }) {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={pathname === '/vault'}>
+                  <Link to="/vault" search={{}} onClick={close}>
+                    <KeyRound />
+                    <span>Vault</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

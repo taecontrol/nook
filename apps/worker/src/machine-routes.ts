@@ -6,6 +6,7 @@ import { HttpRouter, HttpServer } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
 import { machineOperations } from './machines.ts';
 import { mcpHandler } from './mcp.ts';
+import { machineVault } from './vault.ts';
 
 export function machineMcpHandler(db: D1Database, request: Request) {
   const unavailable = () =>
@@ -35,12 +36,20 @@ export function machineHandler(db: D1Database, origin: string) {
   const handlers = HttpApiBuilder.group(MachineApi, 'machine', (handlers) =>
     Effect.gen(function* () {
       const store = yield* machineOperations;
+      const sql = yield* D1Client.D1Client;
       return handlers
         .handle('authorize', ({ payload }) =>
           store.create(origin, payload.suggestedName, payload.client),
         )
         .handle('poll', ({ payload }) => store.poll(payload.deviceCode))
         .handle('whoami', ({ headers }) => store.whoami(headers.authorization))
+        .handle('secrets', ({ headers, query }) =>
+          Effect.gen(function* () {
+            const { grant } = yield* store.whoami(headers.authorization);
+            const vault = yield* machineVault(grant);
+            return yield* vault.list(query.bucket);
+          }).pipe(Effect.provideService(D1Client.D1Client, sql)),
+        )
         .handle('logout', ({ headers }) => store.logout(headers.authorization));
     }),
   ).pipe(Layer.provide(D1Client.layer({ db })));

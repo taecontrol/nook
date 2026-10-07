@@ -59,7 +59,7 @@ it('E19/E22: mcp-header emits exactly one JSON line from the private keyring, ma
   const headers = JSON.parse(result.stdout) as Record<string, string>;
   expect(
     (await machineMcp(app, undefined, '2026-07-28', headers).listTools()).tools,
-  ).toHaveLength(3);
+  ).toHaveLength(4);
   expect(
     await filesContain(keyring.home, token),
     'No token is written under temporary HOME',

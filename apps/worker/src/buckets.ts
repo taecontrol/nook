@@ -1,6 +1,7 @@
 import { D1Client } from '@effect/sql-d1';
 import {
   BucketHasChildren,
+  BucketHasSecrets,
   BucketNotFound,
   bucketLineage,
   InvalidBucketPath,
@@ -72,16 +73,22 @@ export const bucketOperations = Effect.gen(function* () {
         // The guarded delete and its failure classification share one atomic batch.
         const [removed, remaining] = yield* sql
           .batch([
-            sql`DELETE FROM buckets WHERE path = ${path} AND NOT EXISTS (SELECT 1 FROM buckets child WHERE substr(child.path, 1, length(${path}) + 1) = ${`${path}/`}) RETURNING path`,
-            sql`SELECT path FROM buckets WHERE path = ${path}`,
+            sql`DELETE FROM buckets WHERE path = ${path} AND NOT EXISTS (SELECT 1 FROM buckets child WHERE substr(child.path, 1, length(${path}) + 1) = ${`${path}/`}) AND NOT EXISTS (SELECT 1 FROM secrets WHERE bucket = ${path}) RETURNING path`,
+            sql<{
+              has_children: number;
+            }>`SELECT EXISTS (SELECT 1 FROM buckets child WHERE substr(child.path, 1, length(${path}) + 1) = ${`${path}/`}) AS has_children FROM buckets WHERE path = ${path}`,
           ])
           .pipe(unavailable);
         if (removed.length) return;
-        if (remaining.length)
+        if (remaining[0]?.has_children)
           return yield* Effect.fail(
             new BucketHasChildren({
               message: 'Delete its child buckets first.',
             }),
+          );
+        if (remaining.length)
+          return yield* Effect.fail(
+            new BucketHasSecrets({ message: 'Delete its secrets first.' }),
           );
         return yield* Effect.fail(
           new BucketNotFound({ message: 'Bucket not found.' }),
