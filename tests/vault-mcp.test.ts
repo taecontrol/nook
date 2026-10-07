@@ -1,6 +1,7 @@
 import { beforeEach, expect, it } from 'vitest';
 import { access, accessFixture } from './support/access.ts';
 import { issueGrant, machineMcp } from './support/grants.ts';
+import { listMachines, revokeMachine } from './support/machines.ts';
 import { expectToolError, mcpDriver, type ToolResult } from './support/mcp.ts';
 import {
   expectNoValue,
@@ -147,6 +148,13 @@ it('E16: machine HTTP requires its Bearer and returns the same authorized metada
       { headers },
     );
   expect((await get('work/acme')).status).toBe(401);
+  for (const credential of [
+    'Bearer malformed',
+    `Bearer nook_${'z'.repeat(43)}`,
+  ])
+    expect((await get('work/acme', { Authorization: credential })).status).toBe(
+      401,
+    );
   const issuer = await accessFixture();
   await app.setBindings(
     { ...access, VAULT_KEY: app.key },
@@ -168,4 +176,10 @@ it('E16: machine HTTP requires its Bearer and returns the same authorized metada
   expect(body.secrets.map((secret) => secret.path)).toEqual(visibleAcme);
   expect((await get('personal/finances', headers)).status).toBe(403);
   expect((await get('work/acme/missing', headers)).status).toBe(404);
+  const owner = { 'Cf-Access-Jwt-Assertion': await issuer.assertion() };
+  expect(
+    (await revokeMachine(app, (await listMachines(app, owner))[0].id, owner))
+      .status,
+  ).toBe(204);
+  expect((await get('work/acme', headers)).status).toBe(401);
 });

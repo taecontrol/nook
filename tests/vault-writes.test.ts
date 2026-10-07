@@ -47,6 +47,14 @@ it('E27: create and replace resends return original metadata and ignore changed 
   expect(replay.status).toBe(200);
   expect(await replay.json()).toEqual(metadata);
   expect(await secretRows(app)).toEqual(before);
+  const changedVersionReplay = await replaceSecret(app, path, {
+    ...replacement,
+    value: 'synthetic-third-replay',
+    expectedVersion: replacement.writeId,
+  });
+  expect(changedVersionReplay.status).toBe(200);
+  expect(await changedVersionReplay.json()).toEqual(metadata);
+  expect(await secretRows(app)).toEqual(before);
   expect((await deleteSecret(app, path, replacement.writeId)).status).toBe(204);
   expect((await deleteSecret(app, path, replacement.writeId)).status).toBe(404);
 });

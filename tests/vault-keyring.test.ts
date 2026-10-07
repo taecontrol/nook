@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID, webcrypto } from 'node:crypto';
 import { Effect, Redacted } from 'effect';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { open, parseKeyring, seal } from '../apps/worker/src/vault-keyring.ts';
 
 it('the keyring imports a non-extractable AES-256 key and fingerprints raw bytes', async () => {
@@ -53,11 +53,28 @@ it.each(['', '\uFEFF'])(
       'Opening returns the exact value in a Redacted wrapper',
     ).toBe(true);
     expect(JSON.stringify(opened).includes(value)).toBe(false);
+    const invalidIv = webcrypto.getRandomValues(new Uint8Array(12));
+    const invalidBytes = await webcrypto.subtle.encrypt(
+      {
+        name: 'AES-GCM',
+        iv: invalidIv,
+        additionalData: Buffer.from(path),
+        tagLength: 128,
+      },
+      ring.key,
+      Uint8Array.of(0xff),
+    );
+    const invalidUtf8 = {
+      key_id: ring.keyId,
+      iv: Buffer.from(invalidIv).toString('base64url'),
+      ciphertext: Buffer.from(invalidBytes).toString('base64url'),
+    };
     for (const [otherPath, changed] of [
       ['work/globex/MULTILINE_KEY', envelope],
       [path, { ...envelope, key_id: '0000000000000000' }],
       [path, { ...envelope, ciphertext: '@@' }],
       [path, { ...envelope, iv: '@@' }],
+      [path, invalidUtf8],
     ] as const) {
       const result = await Effect.runPromise(
         Effect.result(open(ring, otherPath, changed)),
@@ -88,4 +105,25 @@ it('an encryption failure has a fixed typed error with no value-derived details'
   if (result._tag === 'Failure')
     expect(result.failure._tag).toBe('ServiceUnavailable');
   expect(JSON.stringify(result).includes(value)).toBe(false);
+});
+
+it('keyring sealing returns unpadded URL-safe base64 for its envelope', async () => {
+  const ring = await Effect.runPromise(
+    parseKeyring(randomBytes(32).toString('base64')),
+  );
+  const random = vi
+    .spyOn(crypto, 'getRandomValues')
+    .mockImplementationOnce((bytes) => {
+      (bytes as Uint8Array).fill(251);
+      return bytes;
+    });
+  try {
+    const envelope = await Effect.runPromise(
+      seal(ring, 'me/KEY', Redacted.make('x')),
+    );
+    expect(envelope.iv).toBe('-_v7-_v7-_v7-_v7');
+    expect(envelope.ciphertext).toMatch(/^[A-Za-z0-9_-]{23}$/);
+  } finally {
+    random.mockRestore();
+  }
 });

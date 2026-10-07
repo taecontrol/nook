@@ -17,6 +17,8 @@ import {
   secretRows,
   vaultRuntime,
 } from './support/vault.ts';
+import { vaultBindingRuntime } from './support/vault-bindings.ts';
+import { vaultCheckpoints } from './support/vault-checkpoints.ts';
 
 let app: Awaited<ReturnType<typeof vaultRuntime>>;
 beforeEach(async () => {
@@ -79,13 +81,16 @@ it.each(['multi-line', '64-KiB'])(
     expect((await decryptRow(app.key, row)) === value).toBe(true);
   },
 );
-it.each(['', 'x'.repeat(65537), 'synthetic\u0000value', 'synthetic\ud800'])(
-  'E3: invalid UTF-8 or size stores nothing (%#)',
-  async (value) => {
-    expect((await createSecret(app, secretInput({ value }))).status).toBe(400);
-    expect(await secretRows(app)).toEqual([]);
-  },
-);
+it.each([
+  '',
+  'x'.repeat(65537),
+  '界'.repeat(21845) + 'xx',
+  'synthetic\u0000value',
+  'synthetic\ud800',
+])('E3: invalid UTF-8 or size stores nothing (%#)', async (value) => {
+  expect((await createSecret(app, secretInput({ value }))).status).toBe(400);
+  expect(await secretRows(app)).toEqual([]);
+});
 it.each(['resend_api_key', '1KEY', 'A-B', 'A'.repeat(65)])(
   'E4: an invalid name has shared validation feedback (%#)',
   async (name) => {
@@ -101,6 +106,19 @@ it.each(['resend_api_key', '1KEY', 'A-B', 'A'.repeat(65)])(
     expect(await secretRows(app)).toEqual([]);
   },
 );
+it('E4: an empty name retains the prototype feedback and stores nothing', async () => {
+  const response = await createSecret(app, secretInput({ name: '' }));
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({
+    _tag: 'InvalidSecret',
+    message: 'Enter a name.',
+  });
+  expect(await secretRows(app)).toEqual([]);
+});
+it('E4: a 64-character name beginning with underscore is accepted', async () => {
+  const name = '_' + 'A'.repeat(63);
+  expect((await stored(secretInput({ name }))).name).toBe(name);
+});
 it.each([
   '🔐'.repeat(201),
   'bad\rline',
@@ -212,9 +230,23 @@ it.each(['replace', 'delete'])(
     expect(await secretRows(app)).toEqual(before);
   },
 );
+it.each([{ value: 'synthetic\u0000value' }, { description: 'bad\nline' }])(
+  'E3/E4: replace validates value and description before storing (%#)',
+  async (overrides) => {
+    const original = await stored();
+    const before = await secretRows(app);
+    const response = await replaceSecret(app, original.path, {
+      ...secretInput(overrides),
+      expectedVersion: original.version,
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ _tag: 'InvalidSecret' });
+    expect(await secretRows(app)).toEqual(before);
+  },
+);
 it('E8: deleting a secret leaves unrelated rows byte-identical', async () => {
   const target = await stored(secretInput({ name: 'DATABASE_URL' }));
-  await stored();
+  await stored(secretInput({ writeId: target.version }));
   const before = (await secretRows(app)).filter(
     (row) => row.name !== 'DATABASE_URL',
   );
@@ -223,7 +255,126 @@ it('E8: deleting a secret leaves unrelated rows byte-identical', async () => {
   );
   expect(await secretRows(app)).toEqual(before);
 });
-it.each([undefined, 'malformed', Buffer.alloc(31).toString('base64')])(
+it('E9: a cached handler observes a missing key without changing its D1 binding', async () => {
+  const measured = await vaultBindingRuntime();
+  try {
+    const input = secretInput();
+    expect((await createSecret(measured, input)).status).toBe(201);
+    const [original] = await listSecrets(measured);
+    const before = await secretRows(measured);
+    const headers = { 'X-Nook-Test-Missing-Key': '1' };
+    for (const response of [
+      await createSecret(measured, secretInput({ name: 'OTHER_KEY' }), headers),
+      await replaceSecret(
+        measured,
+        original.path,
+        {
+          ...secretInput(),
+          expectedVersion: original.version,
+        },
+        headers,
+      ),
+    ]) {
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({
+        _tag: 'VaultNotConfigured',
+      });
+    }
+    expect(await secretRows(measured)).toEqual(before);
+    const list = await fetch(`${measured.origin}/api/secrets`, { headers });
+    expect(list.status).toBe(200);
+    expect(await list.json()).toEqual({ secrets: [original] });
+    expect(
+      (await deleteSecret(measured, original.path, original.version, headers))
+        .status,
+    ).toBe(204);
+  } finally {
+    await measured.close();
+  }
+});
+it.each(['create', 'replace'])(
+  'owner %s defaults an omitted optional description to empty',
+  async (operation) => {
+    const input = secretInput({ description: undefined });
+    const response =
+      operation === 'create'
+        ? await createSecret(app, input)
+        : await replaceSecret(app, 'work/acme/STRIPE_KEY', {
+            ...input,
+            expectedVersion: (await stored()).version,
+          });
+    expect(response.status).toBe(operation === 'create' ? 201 : 200);
+    expect(await response.json()).toMatchObject({ description: '' });
+  },
+);
+it('owner request schemas reject missing fields and malformed values before SQL without exposing their input', async () => {
+  const labels: string[] = [];
+  const measured = await vaultCheckpoints(async (label) => {
+    labels.push(label);
+    return true;
+  });
+  try {
+    const input = secretInput();
+    expect((await createSecret(measured, input)).status).toBe(201);
+    const replacement = { ...secretInput(), expectedVersion: input.writeId };
+    const requests: {
+      method: string;
+      path: string;
+      payload?: Record<string, unknown>;
+    }[] = [];
+    for (const field of ['bucket', 'name', 'value', 'writeId']) {
+      const payload: Record<string, unknown> = { ...input };
+      delete payload[field];
+      requests.push({ method: 'POST', path: '/api/secrets', payload });
+    }
+    for (const field of ['value', 'writeId', 'expectedVersion']) {
+      const payload: Record<string, unknown> = { ...replacement };
+      delete payload[field];
+      requests.push({
+        method: 'PUT',
+        path: '/api/secrets/work%2Facme%2FSTRIPE_KEY',
+        payload,
+      });
+    }
+    for (const field of ['value', 'description']) {
+      requests.push({
+        method: 'POST',
+        path: '/api/secrets',
+        payload: { ...input, [field]: { sensitive: input.value } },
+      });
+    }
+    requests.push({
+      method: 'DELETE',
+      path: '/api/secrets/work%2Facme%2FSTRIPE_KEY',
+    });
+    for (const request of requests) {
+      labels.length = 0;
+      const response = await fetch(`${measured.origin}${request.path}`, {
+        method: request.method,
+        ...(request.payload
+          ? {
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(request.payload),
+            }
+          : {}),
+      });
+      expect(response.status).toBe(400);
+      const text = await response.text();
+      expectNoValue(text, [input.value, replacement.value]);
+      expect(JSON.parse(text)).toEqual({ _tag: 'BadRequest' });
+      expect(labels).toEqual([]);
+    }
+    expect(await secretRows(measured)).toHaveLength(1);
+  } finally {
+    await measured.close();
+  }
+});
+it.each([
+  undefined,
+  'malformed',
+  Buffer.alloc(31).toString('base64'),
+  Buffer.alloc(32).toString('base64').replace(/A=$/, 'B='),
+])(
   'E9: missing or malformed VAULT_KEY blocks writes but permits list and delete (%#)',
   async (key) => {
     const target = await stored();
@@ -357,6 +508,17 @@ it('E26: validation, D1 insert/replace failures and MCP errors never log values 
   );
   expect(invalid.status).toBe(400);
   expectNoValue(await invalid.text(), privateValues);
+  const malformed = await createSecret(
+    app,
+    secretInput({
+      name: 'OTHER_KEY',
+      value: { sensitive: input.value },
+    }),
+  );
+  expect(malformed.status).toBe(400);
+  const malformedText = await malformed.text();
+  expectNoValue(malformedText, privateValues);
+  expect(JSON.parse(malformedText)).toEqual({ _tag: 'BadRequest' });
   const db = await app.mf.getD1Database('DB');
   for (const operation of ['INSERT', 'UPDATE']) {
     await db
