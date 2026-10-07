@@ -97,11 +97,9 @@ it.each(['replace', 'delete'] as const)(
     const { page, app } = visit;
     try {
       await submit(page, op);
-      const feedback = page
-        .getByRole('alert')
-        .filter({
-          has: page.getByRole('button', { name: 'Dismiss', exact: true }),
-        });
+      const feedback = page.getByRole('alert').filter({
+        has: page.getByRole('button', { name: 'Dismiss', exact: true }),
+      });
       await feedback.waitFor();
       expect(await feedback.innerText()).toContain(
         'Nook could not confirm whether',

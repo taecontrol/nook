@@ -42,22 +42,12 @@ export type ObservedWrite = {
 function without(secrets: readonly OwnerSecret[], path: string) {
   return secrets.filter((secret) => secret.path !== path);
 }
-const definitiveTags = new Set([
-  'SecretExists',
-  'SecretChanged',
-  'SecretNotFound',
-  'BucketNotFound',
-  'InvalidSecret',
-  'InvalidBucketPath',
-  'BadRequest',
-  'VaultNotConfigured',
-]);
 export function unconfirmed(error: Error | null) {
   return (
     error instanceof ApiError &&
     (error.outcomeUnknown ||
       error.tag === 'ServiceUnavailable' ||
-      (error.ambiguous && !definitiveTags.has(error.tag)))
+      error.ambiguous)
   );
 }
 function sendOnce(write: SecretWrite, value: Redacted.Redacted<string>) {
@@ -95,7 +85,7 @@ async function send(write: SecretWrite, value: Redacted.Redacted<string>) {
         ambiguous = true;
         if (attempt < 2) continue;
       }
-      if (write.op === 'delete' && error.tag === 'SecretNotFound')
+      if (!ambiguous && write.op === 'delete' && error.tag === 'SecretNotFound')
         return {
           secret: null,
           message: `${write.secret.path} is no longer stored.`,

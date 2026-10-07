@@ -13,7 +13,7 @@ This contract will also constrain future released CLI writers. The accepted stor
 
 Mint one random write id per client submission and use it as the resulting secret's version. A retry whose id is still the current version returns the original success without changing the row, even if its payload differs. A changed submission gets a new id. Require the version the owner saw for replacement and deletion, and reject stale versions instead of silently overwriting another writer.
 
-Treat transport and storage failures as unconfirmed. Retry with the same id; once an attempt is unconfirmed, later conflicts describe the current state rather than claiming the earlier write did not happen. Reconcile remaining uncertainty against the next successful metadata list. Definitive validation and missing-key failures still mean no change.
+Treat transport and storage failures as unconfirmed. Retry with the same id; once an attempt is unconfirmed, every later negative answer leaves the submission unconfirmed until a successful metadata list reconciles its version. This includes a missing key: the key can disappear after a committed write loses its response, while listing still works without it. Validation and missing-key failures mean no change only when the submission had no unconfirmed attempt.
 
 ## Consequences
 
