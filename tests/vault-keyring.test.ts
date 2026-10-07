@@ -16,56 +16,59 @@ it('the keyring imports a non-extractable AES-256 key and fingerprints raw bytes
     (await Effect.runPromise(parseKeyring(binding))).key === ring.key,
   ).toBe(true);
 });
-it('keyring seal and open use the full path as AAD and preserve exact UTF-8', async () => {
-  const key = randomBytes(32);
-  const ring = await Effect.runPromise(parseKeyring(key.toString('base64')));
-  const value = `synthetic-${randomUUID()}\né🙂 \n `;
-  const path = 'work/acme/MULTILINE_KEY';
-  const envelope = await Effect.runPromise(
-    seal(ring, path, Redacted.make(value)),
-  );
-  const oracleKey = await webcrypto.subtle.importKey(
-    'raw',
-    key,
-    'AES-GCM',
-    false,
-    ['decrypt'],
-  );
-  const bytes = await webcrypto.subtle.decrypt(
-    {
-      name: 'AES-GCM',
-      iv: Buffer.from(envelope.iv, 'base64url'),
-      additionalData: Buffer.from(path),
-      tagLength: 128,
-    },
-    oracleKey,
-    Buffer.from(envelope.ciphertext, 'base64url'),
-  );
-  expect(
-    new TextDecoder().decode(bytes) === value,
-    'Independent AES-GCM decryption preserves the value',
-  ).toBe(true);
-  const opened = await Effect.runPromise(open(ring, path, envelope));
-  expect(
-    Redacted.value(opened) === value,
-    'Opening returns the exact value in a Redacted wrapper',
-  ).toBe(true);
-  expect(JSON.stringify(opened).includes(value)).toBe(false);
-  for (const [otherPath, changed] of [
-    ['work/globex/MULTILINE_KEY', envelope],
-    [path, { ...envelope, key_id: '0000000000000000' }],
-    [path, { ...envelope, ciphertext: '@@' }],
-    [path, { ...envelope, iv: '@@' }],
-  ] as const) {
-    const result = await Effect.runPromise(
-      Effect.result(open(ring, otherPath, changed)),
+it.each(['', '\uFEFF'])(
+  'keyring seal and open use the full path as AAD and preserve exact UTF-8 (%#)',
+  async (prefix) => {
+    const key = randomBytes(32);
+    const ring = await Effect.runPromise(parseKeyring(key.toString('base64')));
+    const value = `${prefix}synthetic-${randomUUID()}\né🙂 \n `;
+    const path = 'work/acme/MULTILINE_KEY';
+    const envelope = await Effect.runPromise(
+      seal(ring, path, Redacted.make(value)),
     );
-    expect(result._tag).toBe('Failure');
-    if (result._tag === 'Failure')
-      expect(result.failure._tag).toBe('ServiceUnavailable');
-    expect(JSON.stringify(result).includes(value)).toBe(false);
-  }
-});
+    const oracleKey = await webcrypto.subtle.importKey(
+      'raw',
+      key,
+      'AES-GCM',
+      false,
+      ['decrypt'],
+    );
+    const bytes = await webcrypto.subtle.decrypt(
+      {
+        name: 'AES-GCM',
+        iv: Buffer.from(envelope.iv, 'base64url'),
+        additionalData: Buffer.from(path),
+        tagLength: 128,
+      },
+      oracleKey,
+      Buffer.from(envelope.ciphertext, 'base64url'),
+    );
+    expect(
+      Buffer.from(bytes).toString('utf8') === value,
+      'Independent AES-GCM decryption preserves the value',
+    ).toBe(true);
+    const opened = await Effect.runPromise(open(ring, path, envelope));
+    expect(
+      Redacted.value(opened) === value,
+      'Opening returns the exact value in a Redacted wrapper',
+    ).toBe(true);
+    expect(JSON.stringify(opened).includes(value)).toBe(false);
+    for (const [otherPath, changed] of [
+      ['work/globex/MULTILINE_KEY', envelope],
+      [path, { ...envelope, key_id: '0000000000000000' }],
+      [path, { ...envelope, ciphertext: '@@' }],
+      [path, { ...envelope, iv: '@@' }],
+    ] as const) {
+      const result = await Effect.runPromise(
+        Effect.result(open(ring, otherPath, changed)),
+      );
+      expect(result._tag).toBe('Failure');
+      if (result._tag === 'Failure')
+        expect(result.failure._tag).toBe('ServiceUnavailable');
+      expect(JSON.stringify(result).includes(value)).toBe(false);
+    }
+  },
+);
 it('an encryption failure has a fixed typed error with no value-derived details', async () => {
   const ring = await Effect.runPromise(
     parseKeyring(randomBytes(32).toString('base64')),
