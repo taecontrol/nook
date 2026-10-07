@@ -332,15 +332,22 @@ function LoadFailure({
   onRetry,
   compact,
   cached = false,
+  busy = false,
 }: {
   status: number;
   retrying: boolean;
   onRetry: () => void;
   compact?: boolean;
   cached?: boolean;
+  busy?: boolean;
 }) {
   const retry = (
-    <Button variant="outline" size="sm" disabled={retrying} onClick={onRetry}>
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={retrying || busy}
+      onClick={onRetry}
+    >
       {retrying && <Spinner />}Try again
     </Button>
   );
@@ -571,6 +578,7 @@ function BucketSecrets({ page }: { page: Page }) {
     <LoadFailure
       compact={list !== undefined}
       cached={list !== undefined}
+      busy={page.busy}
       status={status}
       retrying={secrets.isFetching}
       onRetry={() => secrets.refetch()}
@@ -614,6 +622,7 @@ function MobileListStatus({ page }: { page: Page }) {
         <LoadFailure
           compact
           cached={page.list !== undefined}
+          busy={page.busy}
           status={
             secrets.error instanceof ApiError ? secrets.error.status : 503
           }
