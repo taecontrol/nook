@@ -104,7 +104,7 @@ export function open(ring: Keyring, path: string, envelope: Envelope) {
         decode(envelope.ciphertext),
       );
       return Redacted.make(
-        new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+        new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes),
       );
     },
     catch: () => new HttpApiError.ServiceUnavailable(),
