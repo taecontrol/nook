@@ -5,7 +5,7 @@ Status: Proposed
 
 ## Context
 
-A lost response or D1 failure can leave the owner unsure whether a secret write committed. Retrying must not overwrite a later write. Another owner tab, or an agent that deletes and re-creates a name in a future feature, can change the secret between the initial request and the retry. A failure alone therefore cannot justify saying that nothing was stored.
+A lost response or D1 failure can leave the owner unsure whether a secret write committed. Retrying must not overwrite a later write. Another owner tab, or a future agent that re-creates a name the owner deleted, can change the secret between the initial request and the retry. A failure alone therefore cannot justify saying that nothing was stored.
 
 This contract will also constrain future released CLI writers. The accepted storage design chose a current-state answer over permanent write receipts: receipts would retain historical bookkeeping indefinitely to answer a rare interleaving exactly, while the owner can be told the current state truthfully.
 
