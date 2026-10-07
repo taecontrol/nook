@@ -388,7 +388,7 @@ it('E21: a lost response after commit reconciles pending metadata by version on 
     await visit.close();
   }
 });
-it('E21: a negative retry after ambiguity describes current state without claiming nothing was stored', async () => {
+it('E21: a negative retry after ambiguity stays pending until listing describes the current state', async () => {
   let requests = 0;
   const visit = await vaultPage(browser, {
     configure: async (page, app) => {
@@ -415,11 +415,22 @@ it('E21: a negative retry after ambiguity describes current state without claimi
       .click();
     await visit.page
       .getByRole('alert')
-      .filter({ hasText: 'now exists' })
+      .filter({ hasText: 'could not confirm' })
       .waitFor();
     expect(await visit.page.getByRole('alert').innerText()).not.toMatch(
       /nothing was stored/i,
     );
+    expect(
+      await secretRow(visit.page, 'work/acme/RESEND_API_KEY').innerText(),
+    ).toContain('Confirming');
+    await visit.page
+      .getByRole('alert')
+      .getByRole('button', { name: 'Try again', exact: true })
+      .click();
+    await visit.page
+      .getByRole('alert')
+      .filter({ hasText: 'now exists' })
+      .waitFor();
   } finally {
     await visit.close();
   }

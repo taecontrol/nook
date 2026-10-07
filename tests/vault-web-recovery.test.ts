@@ -56,6 +56,88 @@ async function retry(page: Page) {
     .click();
 }
 
+it.each(['replace', 'delete'] as const)(
+  'E21: a negative %s retry after a lost commit stays unconfirmed until listing',
+  async (op) => {
+    let attempts = 0;
+    const path = targetPath(op);
+    const visit = await vaultPage(browser, {
+      configure: async (page, app) => {
+        await page.route('**/api/secrets**', async (route) => {
+          if (route.request().method() === 'GET') return route.continue();
+          const response = await route.fetch();
+          if (++attempts !== 1) {
+            expect(response.status()).toBe(op === 'replace' ? 409 : 404);
+            expect((await response.json())._tag).toBe(
+              op === 'replace' ? 'SecretChanged' : 'SecretNotFound',
+            );
+            return route.fulfill({ response });
+          }
+          expect(response.status()).toBe(op === 'replace' ? 200 : 204);
+          if (op === 'replace') {
+            const current = (await listSecrets(app)).find(
+              (row) => row.path === path,
+            )!;
+            expect(
+              (
+                await replaceSecret(app, path, {
+                  ...secretInput({ description: 'Changed in another session' }),
+                  expectedVersion: current.version,
+                })
+              ).status,
+            ).toBe(200);
+          }
+          return route.fulfill({
+            status: 503,
+            json: { _tag: 'ServiceUnavailable' },
+          });
+        });
+      },
+    });
+    const { page, app } = visit;
+    try {
+      await submit(page, op);
+      const feedback = page
+        .getByRole('alert')
+        .filter({
+          has: page.getByRole('button', { name: 'Dismiss', exact: true }),
+        });
+      await feedback.waitFor();
+      expect(await feedback.innerText()).toContain(
+        'Nook could not confirm whether',
+      );
+      expect(await feedback.innerText()).not.toMatch(
+        /Nothing (was stored|changed)/,
+      );
+      expect(attempts).toBe(2);
+      await retry(page);
+      await feedback
+        .filter({
+          has: page.getByText('Current secret state', { exact: true }),
+        })
+        .waitFor();
+      expect(await feedback.innerText()).toContain(
+        op === 'replace'
+          ? `${path} changed in another session. Review it and try again.`
+          : `${path} is no longer stored.`,
+      );
+      const current = (await listSecrets(app)).find((row) => row.path === path);
+      expect(await secretRow(page, path).count()).toBe(current ? 1 : 0);
+      if (current) {
+        expect(await secretRow(page, path).innerText()).toContain(
+          current.description,
+        );
+        expect(await secretRow(page, path).innerText()).not.toContain(
+          'Confirming',
+        );
+      }
+      expect(attempts).toBe(2);
+    } finally {
+      await visit.close();
+    }
+  },
+);
+
 it.each([
   [
     'name',
