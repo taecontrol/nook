@@ -14,7 +14,13 @@ import {
   validateName,
   validateValue,
 } from './vault-model';
-import { type Draft, idleUi, openSheet, type VaultUi } from './vault-state';
+import {
+  type Draft,
+  idleUi,
+  openSheet,
+  type SheetState,
+  type VaultUi,
+} from './vault-state';
 
 function useWide() {
   const [wide, setWide] = useState(
@@ -69,6 +75,15 @@ function knownDuplicate(draft: Draft, list: readonly Secret[]) {
     draft.mode === 'create' &&
     list.some((secret) => secret.path === secretPath(draft))
   );
+}
+function rejectedSheet(sheet: SheetState, list: readonly Secret[]) {
+  const duplicate = knownDuplicate(sheet.draft, list);
+  if (!invalidDraft(sheet.draft) && !duplicate) return null;
+  return {
+    ...sheet,
+    submitted: true,
+    duplicate: duplicate ? secretPath(sheet.draft) : null,
+  };
 }
 function duplicateHandler(
   input: SecretWrite,
@@ -144,15 +159,9 @@ export function useVaultPage() {
     const sheet = state.sheet;
     if (!sheet || !list) return;
     const { draft } = sheet;
-    const duplicate = knownDuplicate(draft, list);
-    if (invalidDraft(draft) || duplicate) {
-      patch({
-        sheet: {
-          ...sheet,
-          submitted: true,
-          duplicate: duplicate ? secretPath(draft) : null,
-        },
-      });
+    const rejected = rejectedSheet(sheet, list);
+    if (rejected) {
+      patch({ sheet: rejected });
       return;
     }
     if (draft.mode === 'replace') {
