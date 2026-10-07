@@ -231,6 +231,8 @@ it.each([
     const loadFailure = page
       .getByRole('alert')
       .filter({ hasText: 'Couldn’t load secrets' });
+    const cachedMessage =
+      'Secret metadata could not be refreshed. Previously loaded data is still shown.';
     try {
       await secretRow(page, 'work/acme/STRIPE_KEY').waitFor();
       await page.clock.install({ time: new Date() });
@@ -268,6 +270,7 @@ it.each([
       ).toMatch(/5\s*secrets/);
       // Cached failures must be visible on the phone bucket list before drill-in.
       await loadFailure.waitFor({ state: 'visible' });
+      expect(await loadFailure.innerText()).toContain(cachedMessage);
       await page
         .getByRole('list', { name: 'Buckets', exact: true })
         .locator('[data-path="work/acme"]')
@@ -282,9 +285,7 @@ it.each([
           .locator('[data-secret]')
           .count(),
       ).toBe(5);
-      expect(await loadFailure.innerText()).toContain(
-        'Secret metadata could not be refreshed. Previously loaded data is still shown.',
-      );
+      expect(await loadFailure.innerText()).toContain(cachedMessage);
       expect(await feedback(page).innerText()).toContain('could not confirm');
       expect(await secretRow(page, target).innerText()).toContain('Confirming');
       expect(
