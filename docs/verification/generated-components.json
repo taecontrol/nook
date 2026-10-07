@@ -15,6 +15,7 @@
   "apps/web/src/components/ui/input.tsx": "0c9457181f6ddc80969bcf854e92c362903a55b6e889fbef3fd85343ecc4af5b",
   "apps/web/src/components/ui/kbd.tsx": "c0c0ae6a7d1adb7749b9b34cab8f4d2f5caf333e819b64c2051e77f918d3661f",
   "apps/web/src/components/ui/label.tsx": "344bde38b8531615dbf8e14af3895517c24d8ef6ce56ddeda7e2e6fe4b5d0c00",
+  "apps/web/src/components/ui/select.tsx": "9293fd75923693411cd443049fba313135014c4ad6997cfcde1e37693fc85b04",
   "apps/web/src/components/ui/separator.tsx": "7d943e8c309f8d530f25433ffc9167f771e635f2eeb1c3b55fa16955068c1657",
   "apps/web/src/components/ui/sheet.tsx": "ea473d38a26a9b0b879e5a13139899ad45e9782e896b3fa205c7763a6c506876",
   "apps/web/src/components/ui/sidebar.tsx": "9d503f3a07ba1101e527bb697216e747a37bc2a7ab1eaf92683bf8d1773ca7d2",

@@ -380,9 +380,9 @@ it.each(visualMatrix)(
       ).toBe(true);
       expect(
         await page
-          .getByRole('button', { name: 'Vault Not available yet' })
-          .isDisabled(),
-      ).toBe(true);
+          .getByRole('link', { name: 'Vault', exact: true })
+          .getAttribute('href'),
+      ).toBe('/vault');
       if (state.name === 'long-email') {
         if (size.name === 'mobile')
           await page.screenshot({

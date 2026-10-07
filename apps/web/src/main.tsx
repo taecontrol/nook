@@ -13,6 +13,7 @@ import { Home } from './home';
 import { identityOptions } from './identity';
 import { preloadMachines } from './machines-api';
 import { Shell } from './shell';
+import { preloadVault } from './vault-api';
 import './index.css';
 
 const theme = matchMedia('(prefers-color-scheme: dark)');
@@ -52,6 +53,21 @@ const router = createRouter({
     owner.addChildren([
       home,
       buckets,
+      createRoute({
+        getParentRoute: () => owner,
+        path: '/vault',
+        component: lazyRouteComponent(
+          () => import('./vault-page'),
+          'VaultPage',
+        ),
+        validateSearch: (
+          search: Record<string, unknown>,
+        ): { bucket?: string } =>
+          typeof search.bucket === 'string' ? { bucket: search.bucket } : {},
+        loader: ({ context }) => {
+          preloadVault(context.queryClient);
+        },
+      }),
       createRoute({
         getParentRoute: () => owner,
         path: '/machines',

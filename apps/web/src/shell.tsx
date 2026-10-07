@@ -21,6 +21,7 @@ import { identityOptions, type Session } from './identity';
 const titles: Record<string, string> = {
   '/buckets': 'Buckets',
   '/machines': 'Machines',
+  '/vault': 'Vault',
 };
 
 export function Shell() {

@@ -108,7 +108,10 @@ it('E19: create is optimistic and settled values disappear from DOM, Query cache
       ),
     ).toBe(false);
     gate.resolve();
-    await page.getByRole('alert').filter({ hasText: 'Stored' }).waitFor();
+    await page
+      .getByRole('alert')
+      .filter({ has: page.getByText('Secret saved', { exact: true }) })
+      .waitFor();
     await expect
       .poll(() => privateClientState(page, [value, ...visit.values]))
       .toEqual({ found: true, absentFromCache: true, absentFromDom: true });
@@ -286,7 +289,10 @@ it('E21: an unconfirmed write resends the same id and never announces premature 
       /Stored work\/acme/,
     );
     gate.resolve();
-    await page.getByRole('alert').filter({ hasText: 'Stored' }).waitFor();
+    await page
+      .getByRole('alert')
+      .filter({ has: page.getByText('Secret saved', { exact: true }) })
+      .waitFor();
   } finally {
     gate.resolve();
     await visit.close();
@@ -371,7 +377,10 @@ it('E21: a lost response after commit reconciles pending metadata by version on 
       .getByRole('alert')
       .getByRole('button', { name: 'Try again', exact: true })
       .click();
-    await page.getByRole('alert').filter({ hasText: 'Stored' }).waitFor();
+    await page
+      .getByRole('alert')
+      .filter({ has: page.getByText('Secret saved', { exact: true }) })
+      .waitFor();
     expect(
       await secretRow(page, 'work/acme/RESEND_API_KEY').innerText(),
     ).not.toContain('Confirming');
@@ -411,6 +420,54 @@ it('E21: a negative retry after ambiguity describes current state without claimi
     expect(await visit.page.getByRole('alert').innerText()).not.toMatch(
       /nothing was stored/i,
     );
+  } finally {
+    await visit.close();
+  }
+});
+it('E21: an expired session after a lost committed response stays unconfirmed until an authorized list', async () => {
+  let requests = 0;
+  const visit = await vaultPage(browser, {
+    configure: async (page, app) => {
+      await page.route('**/api/secrets', async (route) => {
+        if (route.request().method() !== 'POST') return route.continue();
+        if (requests++ !== 0) return route.continue();
+        await route.fetch();
+        await app.setBindings({ ...app.bindings, LOCAL_OWNER: '' });
+        return route.fulfill({
+          status: 503,
+          json: { _tag: 'ServiceUnavailable' },
+        });
+      });
+    },
+  });
+  const { page } = visit;
+  try {
+    const sheet = await createDraft(page);
+    await sheet
+      .getByRole('button', { name: 'Save secret', exact: true })
+      .click();
+    await page
+      .getByRole('alert')
+      .filter({ hasText: 'could not confirm' })
+      .waitFor();
+    expect(await page.getByRole('alert').innerText()).not.toMatch(
+      /nothing was stored/i,
+    );
+    expect(
+      await secretRow(page, 'work/acme/RESEND_API_KEY').innerText(),
+    ).toContain('Confirming');
+    await visit.app.setBindings(visit.app.bindings);
+    await page
+      .getByRole('alert')
+      .getByRole('button', { name: 'Try again', exact: true })
+      .click();
+    await page
+      .getByRole('alert')
+      .filter({ has: page.getByText('Secret saved', { exact: true }) })
+      .waitFor();
+    expect(
+      await secretRow(page, 'work/acme/RESEND_API_KEY').innerText(),
+    ).not.toContain('Confirming');
   } finally {
     await visit.close();
   }

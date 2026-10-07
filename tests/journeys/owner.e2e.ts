@@ -86,7 +86,10 @@ test('E24: the owner stores a secret in Vault and sees only its metadata', async
     .locator('[data-path="work/vault-journey"]')
     .getByRole('link')
     .click();
-  await screen.getByRole('button', { name: 'New secret', exact: true }).click();
+  await screen
+    .getByRole('button', { name: 'New secret', exact: true })
+    .first()
+    .click();
   const sheet = screen.getByRole('dialog');
   await sheet
     .getByRole('textbox', { name: 'Name', exact: true })

@@ -1,6 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { ChevronRight, ListTree, MonitorSmartphone } from 'lucide-react';
+import {
+  ChevronRight,
+  KeyRound,
+  ListTree,
+  MonitorSmartphone,
+} from 'lucide-react';
 import {
   Item,
   ItemActions,
@@ -50,6 +55,25 @@ export function Home() {
               <ItemTitle>Machines</ItemTitle>
               <ItemDescription>
                 See connected machines and revoke their access.
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <ChevronRight className="size-4 text-muted-foreground" />
+            </ItemActions>
+          </Link>
+        </Item>
+      </section>
+      <section aria-label="Tools" className="mt-12">
+        <div className={label}>Tools</div>
+        <Item variant="outline" asChild>
+          <Link to="/vault">
+            <ItemMedia variant="icon">
+              <KeyRound />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Vault</ItemTitle>
+              <ItemDescription>
+                Store secrets and find them by name.
               </ItemDescription>
             </ItemContent>
             <ItemActions>
