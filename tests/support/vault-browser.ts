@@ -1,3 +1,4 @@
+import { Redacted } from 'effect';
 import type { Browser, Page } from 'playwright';
 import { closeBrowserPage } from './buckets-browser.ts';
 import { seedSecrets, vaultRuntime } from './vault.ts';
@@ -97,8 +98,14 @@ export async function privateClientState(
   page: Page,
   values: readonly string[],
 ) {
+  // JSON hides live Redacted values. Find their brand through the public predicate
+  // and inspect retained state before serialization as well.
+  const brand = Object.getOwnPropertyNames(
+    Object.getPrototypeOf(Redacted.make('synthetic-probe')),
+  ).find((key) => Redacted.isRedacted({ [key]: true }));
+  if (!brand) throw new Error('Cannot inspect redacted client values.');
   return page.evaluate(
-    (privateValues) => {
+    ({ privateValues, brand }) => {
       const element = document.querySelector('#root > *');
       const key = Object.keys(element ?? {}).find((entry) =>
         entry.startsWith('__reactFiber$'),
@@ -118,7 +125,7 @@ export async function privateClientState(
       while (fiber) {
         const client = fiber.memoizedProps?.client;
         if (client?.getQueryCache) {
-          const cache = JSON.stringify({
+          const retained = {
             queries: client
               .getQueryCache()
               .getAll()
@@ -127,7 +134,20 @@ export async function privateClientState(
               .getMutationCache()
               .getAll()
               .map((entry) => (entry as { state: unknown }).state),
-          });
+          };
+          const seen = new WeakSet<object>();
+          const containsValue = (value: unknown): boolean => {
+            if (typeof value === 'string')
+              return privateValues.some((secret) => value.includes(secret));
+            if (!value || typeof value !== 'object' || seen.has(value))
+              return false;
+            seen.add(value);
+            if (brand in value) return true;
+            return Object.getOwnPropertyNames(value).some((key) =>
+              containsValue((value as Record<string, unknown>)[key]),
+            );
+          };
+          const cache = JSON.stringify(retained);
           const dom = `${document.documentElement.innerHTML} ${Array.from(
             document.querySelectorAll('textarea, input'),
           )
@@ -135,9 +155,9 @@ export async function privateClientState(
             .join(' ')}`;
           return {
             found: true,
-            absentFromCache: privateValues.every(
-              (value) => !cache.includes(value),
-            ),
+            absentFromCache:
+              !containsValue(retained) &&
+              privateValues.every((value) => !cache.includes(value)),
             absentFromDom: privateValues.every((value) => !dom.includes(value)),
           };
         }
@@ -145,6 +165,6 @@ export async function privateClientState(
       }
       return { found: false, absentFromCache: false, absentFromDom: false };
     },
-    [...values],
+    { privateValues: [...values], brand },
   );
 }
