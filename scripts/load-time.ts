@@ -1,7 +1,7 @@
 import type { Browser, Page } from 'playwright';
 import { createAuthorization } from '../tests/support/authorizations.ts';
 import { seedGrantTree } from '../tests/support/grants.ts';
-import { runtime } from '../tests/support/runtime.ts';
+import { seedSecrets, vaultRuntime } from '../tests/support/vault.ts';
 import { startHostIsolation } from './lib/host-isolation.ts';
 import {
   assertLoadTimes,
@@ -31,7 +31,7 @@ async function phonePage(browser: Browser, kind: string) {
   await cdp.send('Network.emulateNetworkConditions', loadTimeBudgets.network);
   return { context, page };
 }
-type ColdScreen = 'home' | 'buckets' | 'authorize' | 'machines';
+type ColdScreen = 'home' | 'buckets' | 'authorize' | 'machines' | 'vault';
 function markFirstScreen(kind: ColdScreen) {
   const observer = new MutationObserver(() => {
     const ready =
@@ -41,11 +41,16 @@ function markFirstScreen(kind: ColdScreen) {
           ? document
               .querySelector('[aria-label="Owner access"]')
               ?.textContent?.includes('owner@nook.test')
-          : document.querySelector(
-              kind === 'machines'
-                ? '[data-machine]'
-                : '[aria-label="All buckets"] [data-path]',
-            );
+          : kind === 'vault'
+            ? document.querySelector('[data-secret="work/acme/STRIPE_KEY"]') &&
+              document
+                .querySelector('[aria-label="Buckets"] [data-path="work/acme"]')
+                ?.textContent?.includes('4 secrets')
+            : document.querySelector(
+                kind === 'machines'
+                  ? '[data-machine]'
+                  : '[aria-label="All buckets"] [data-path]',
+              );
     if (!ready) return;
     observer.disconnect();
     requestAnimationFrame(() =>
@@ -65,6 +70,7 @@ async function cold(page: Page, origin: string, kind: ColdScreen) {
     buckets: '/buckets',
     authorize: '/cli/authorize',
     machines: '/machines',
+    vault: '/vault?bucket=work/acme',
   };
   await page.goto(origin + paths[kind]);
   await page.waitForFunction(
@@ -133,14 +139,20 @@ async function approvalNavigation(page: Page, origin: string, code: string) {
 async function navigate(
   page: Page,
   origin: string,
-  kind: 'buckets' | 'machines',
+  kind: 'buckets' | 'machines' | 'vault',
 ) {
   await page.goto(origin);
   await page.getByRole('heading', { name: "You're signed in" }).waitFor();
   const link = page
-    .getByRole('region', { name: 'Platform' })
+    .getByRole('region', { name: kind === 'vault' ? 'Tools' : 'Platform' })
     .getByRole('link', {
-      name: new RegExp(kind === 'buckets' ? 'Buckets' : 'Machines'),
+      name: new RegExp(
+        kind === 'buckets'
+          ? 'Buckets'
+          : kind === 'vault'
+            ? 'Vault'
+            : 'Machines',
+      ),
     });
   await link.hover();
   await page.waitForLoadState('networkidle');
@@ -162,7 +174,9 @@ async function navigate(
     },
     kind === 'buckets'
       ? '[aria-label="All buckets"] [data-path]'
-      : '[data-machine]',
+      : kind === 'vault'
+        ? '[data-secret="me/GITHUB_TOKEN"]'
+        : '[data-machine]',
   );
   await link.click();
   await page.waitForFunction(
@@ -179,13 +193,10 @@ async function navigate(
 }
 const isolation = await startHostIsolation();
 try {
-  const app = await runtime({ directory: 'dist' });
-  await app.setBindings({
-    LOCAL_OWNER: 'synthetic-owner',
-    LOCAL_ORIGIN: app.origin,
-  });
+  const app = await vaultRuntime({ directory: 'dist' });
   const db = await app.mf.getD1Database('DB');
   await seedGrantTree(app);
+  await seedSecrets(app);
   const pending = await createAuthorization(app);
   await db
     .prepare(
@@ -209,6 +220,8 @@ try {
       machines: [],
       machinesNavigation: [],
       approvalNavigation: [],
+      vault: [],
+      vaultNavigation: [],
       gzipBytes: (await measureInitialJs('dist/assets')).gzipBytes,
     };
     for (const kind of [
@@ -219,6 +232,8 @@ try {
       'machines',
       'machinesNavigation',
       'approvalNavigation',
+      'vault',
+      'vaultNavigation',
     ] as const) {
       for (let run = 0; run < loadTimeBudgets.runs; run++) {
         const { context, page } = await phonePage(browser, kind);
@@ -226,11 +241,17 @@ try {
           measured[kind].push(
             await (kind === 'approvalNavigation'
               ? approvalNavigation(page, app.origin, pending.userCode)
-              : kind === 'navigation' || kind === 'machinesNavigation'
+              : kind === 'navigation' ||
+                  kind === 'machinesNavigation' ||
+                  kind === 'vaultNavigation'
                 ? navigate(
                     page,
                     app.origin,
-                    kind === 'navigation' ? 'buckets' : 'machines',
+                    kind === 'navigation'
+                      ? 'buckets'
+                      : kind === 'vaultNavigation'
+                        ? 'vault'
+                        : 'machines',
                   )
                 : cold(page, app.origin, kind)),
           );

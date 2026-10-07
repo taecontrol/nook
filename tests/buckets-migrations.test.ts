@@ -73,6 +73,7 @@ it('E22/E23: Wrangler applies only the numbered migrations and preserves the loc
       { name: '0002_reserve_me.sql' },
       { name: '0003_machine_authorizations.sql' },
       { name: '0004_machine_management.sql' },
+      { name: '0005_vault_secrets.sql' },
     ]);
     expect(first[1].results).toEqual([
       { path: 'me', created_at: expect.any(String) },
@@ -360,8 +361,8 @@ it.each([
     const directory = resolve(root, 'migrations');
     const statement = `CREATE TABLE ${table} (x TEXT DEFAULT ${value});`;
     const snapshot = (await readFile('migrations/schema.sql', 'utf8')).replace(
-      'CREATE TRIGGER',
-      `${statement}\nCREATE TRIGGER`,
+      'CREATE TABLE secrets',
+      `${statement}\nCREATE TABLE secrets`,
     );
     try {
       await writeFile(resolve(directory, '0003_quoted.sql'), statement);

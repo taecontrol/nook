@@ -15,6 +15,8 @@ it('E24: the approval cold-open median is enforced at 1000 ms without changing e
     authorize: [999, 1001, 1002, 1003, 1004],
     machines: [500, 500, 500, 500, 500],
     machinesNavigation: [50, 50, 50, 50, 50],
+    vault: Array(5).fill(500),
+    vaultNavigation: Array(5).fill(20),
     approvalNavigation: [50, 50, 50, 50, 50],
   };
   expect(() => assertLoadTimes(measured)).toThrow(/authorize|approval/i);
