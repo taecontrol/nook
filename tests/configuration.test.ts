@@ -4,6 +4,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { delimiter, resolve } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
+import { macosCliSuites } from '../scripts/lib/macos-cli-suites.ts';
 import { testEnvironment } from '../scripts/lib/test-environment.ts';
 
 const expression = (value: string) => ['$', '{{ ', value, ' }}'].join('');
@@ -81,6 +82,13 @@ it('E17/#33 E21: PR CI requires static checks, three Linux shards, macOS CLI and
       (step: { run?: string }) => step.run === 'pnpm test:coverage --macos-cli',
     ),
   ).toBe(true);
+  expect(macosCliSuites).toEqual(
+    expect.arrayContaining([
+      'tests/vault-cli.test.ts',
+      'tests/macos-keyring-policy.test.ts',
+      'tests/macos-boundary-policy.test.ts',
+    ]),
+  );
   expect(
     macos.steps.some(
       (step: { with?: { name?: string } }) =>

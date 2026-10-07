@@ -165,11 +165,19 @@ it.each(matrix)(
         await page.getByRole('button', { name: /Scenarios|Reset/i }).count(),
       ).toBe(0);
       expect(errors).toEqual([]);
+      expect(
+        await page.evaluate(
+          () => matchMedia('(prefers-color-scheme: dark)').matches,
+        ),
+      ).toBe(theme === 'dark');
       const filename = `vault-${state}-${size.name}-${theme}`;
-      await page.screenshot({
+      const png = await page.screenshot({
         path: resolve(directory, `${filename}.png`),
         animations: 'disabled',
       });
+      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual(
+        size.name === 'desktop' ? [1440, 900] : [390, 844],
+      );
       if (state === 'many-long')
         await page.screenshot({
           path: resolve(directory, `${filename}-full.png`),

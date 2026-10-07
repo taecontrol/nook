@@ -67,11 +67,37 @@ it('E18: real CLI denial, missing bucket and usage each emit one line and exit o
     [['vault', 'list', 'personal'], 'Access to this bucket is forbidden.'],
     [['vault', 'list', 'work/acme/missing'], 'Bucket not found.'],
     [['vault', 'list'], 'Usage: nook vault list <bucket>'],
+    [['vault', 'list', 'Work/Acme'], 'Use lowercase letters: work/acme'],
   ] as const) {
     const result = await keyring.start([...args]).done;
     expect(result.status).toBe(1);
     expectOutput(result.stdout + result.stderr, message, true);
   }
+});
+it('Vault parser failures end with command-specific usage', async () => {
+  const result = await keyring.start(['vault', 'unknown']).done;
+  expect(result.status).toBe(1);
+  expectOutput(
+    (result.stdout + result.stderr).trimEnd().split('\n').at(-1) ?? '',
+    'Usage: nook vault list <bucket>',
+    true,
+  );
+});
+it('Vault list uses the existing unavailable-server guidance for a genuine storage failure', async () => {
+  await login();
+  await (await app.mf.getD1Database('DB'))
+    .prepare('ALTER TABLE secrets RENAME TO unavailable_secrets')
+    .run();
+  const result = await keyring.start(['vault', 'list', 'work/acme']).done;
+  expect(result.status).toBe(1);
+  expectOutput(
+    result.stdout + result.stderr,
+    `Could not reach ${app.origin}. Try again.`,
+    true,
+  );
+  expectNoValue(result.stdout + result.stderr, [
+    await keyring.lookup(app.origin),
+  ]);
 });
 it('E18: revoked and absent sessions use existing reconnect guidance', async () => {
   let result = await keyring.start(['vault', 'list', 'me']).done;

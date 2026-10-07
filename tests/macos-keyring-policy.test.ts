@@ -93,8 +93,10 @@ it.each([
     'máquina 😀',
   ],
   [1, 'Synthetic private failure', { failure }],
+  [1, '    0x00000007 <blob>="Nook machine "synthetic machine""', { failure }],
   [0, '    "acct" <blob>="private account"', { failure }],
   [0, '    0x00000007 <blob>="Other application"', { failure }],
+  [0, '    0x00000007 <blob>="Other system "synthetic machine""', { failure }],
   [0, '    0x00000007 <blob>="Nook machine 42"', { failure }],
   [
     0,
