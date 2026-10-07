@@ -28,6 +28,29 @@ function listCount(visit: Awaited<ReturnType<typeof vaultPage>>) {
     (request) => request.method === 'GET' && request.path === '/api/secrets',
   ).length;
 }
+async function pendingWrites(
+  page: Awaited<ReturnType<typeof vaultPage>>['page'],
+) {
+  return page.evaluate(() => {
+    const element = document.querySelector('#root > *');
+    const key = Object.keys(element ?? {}).find((entry) =>
+      entry.startsWith('__reactFiber$'),
+    );
+    type Fiber = {
+      return?: Fiber;
+      memoizedProps?: { client?: { isMutating(): number } };
+    };
+    let fiber = key
+      ? (element as unknown as Record<string, Fiber>)[key]
+      : undefined;
+    while (fiber) {
+      const client = fiber.memoizedProps?.client;
+      if (client?.isMutating) return client.isMutating();
+      fiber = fiber.return;
+    }
+    return -1;
+  });
+}
 
 it.each([false, true])(
   'E21: an older unconfirmed submission (committed: %s) survives garbage collection after a later submission',
@@ -132,6 +155,8 @@ it('E21: the first successful list after route unmount and the query GC interval
           visit.requests.filter((request) => request.method === 'POST').length,
       )
       .toBe(3);
+    // Requests reaching the server do not prove their final replies settled.
+    await expect.poll(() => pendingWrites(page)).toBe(0);
     const lists = listCount(visit);
     await page
       .getByRole('link', { name: 'Vault', exact: true })
