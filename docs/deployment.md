@@ -12,6 +12,7 @@ The installation owner supplies the following settings:
 | `ACCESS_ISSUER` | Worker **nook → Settings → Variables and Secrets**, type **Secret** | `https://<team-name>.cloudflareaccess.com`, with no trailing slash. Find the team name under **Zero Trust → Settings**. |
 | `ACCESS_AUDIENCE` | The same Worker secrets | **Zero Trust → Access controls → Applications → the Nook application → Configure → Additional settings → Application Audience (AUD) Tag**. |
 | `OWNER_EMAIL` | The same Worker secrets | The exact email the owner's identity provider supplies to Access; use the same identity in the application's Allow policy. |
+| `VAULT_KEY` | The same Worker secrets | Standard base64 of 32 random bytes, generated privately with `openssl rand -base64 32`. Keep a backup outside Cloudflare. |
 
 Never paste secret values into an agent conversation, commit them, or put them in command arguments or logs. Set them directly through their dashboards. No local secret file is necessary.
 
@@ -19,7 +20,7 @@ Before the first deployment, create a self-hosted Access application with a publ
 
 Every push to `main` deploys itself. When **Verify** succeeds on a `main` push, the Deploy workflow starts for that exact commit. It deploys only while `main` still points to that commit; when a later merge has moved `main`, it skips, because the later commit's own run deploys it. It checks the commit's successful Verify run, builds the product from that commit, and only then deploys using the repository settings. An installation without the `NOOK_HOSTNAME` variable, such as a fork that is not configured yet, skips automatic deployment. To redeploy by hand, use **Actions → Deploy → Run workflow** and select **main**; dispatches on other branches skip the deployment job.
 
-The workflow creates the `nook` D1 database when missing, applies its migrations, and then deploys the Worker and custom domain. Its binding resolves by database name; no database ID is committed. If the Worker did not already exist, add its three Access secrets through the Worker settings afterwards and apply the secret changes there. Until all three exist, owner-authenticated Worker requests return 401. Machine API requests use their separate credential boundary. Later workflow deployments preserve those secrets. The owner can also provision the Worker secrets beforehand through their own Cloudflare administration.
+The workflow creates the `nook` D1 database when missing, applies its migrations, and then deploys the Worker and custom domain. Its binding resolves by database name; no database ID is committed. If the Worker did not already exist, add its three Access secrets and `VAULT_KEY` through the Worker settings afterwards and apply the secret changes there. Until all three Access secrets exist, owner-authenticated Worker requests return 401. Machine API requests use their separate credential boundary. Later workflow deployments preserve those secrets. The owner can also provision the Worker secrets beforehand through their own Cloudflare administration.
 
 Complete production acceptance by recording a successful main deployment. In a fresh signed-out browser, confirm that `/`, a real hashed JavaScript asset, `/api/whoami`, and `/mcp` redirect to Access or are denied; none may serve the app or asset. Then sign in as the owner and capture the shell showing that identity. Retain outcomes and screenshots without cookies, JWTs, or secret values.
 
@@ -27,9 +28,48 @@ Sources: [Access application](https://developers.cloudflare.com/cloudflare-one/a
 
 For bucket acceptance after this change merges, add **Account → D1 → Edit** to `CLOUDFLARE_API_TOKEN` in the Cloudflare token dashboard. Merging deploys automatically once Verify passes on `main`. Sign in as the owner, confirm `GET /api/buckets` lists `me`, create a bucket in the outline, and record the result on the pull request. Do not share the token or Access assertion.
 
+## Vault key and post-deployment smoke test
+
+Set `VAULT_KEY` as a **Secret** on the `nook` Worker, next to the Access secrets. Generate it privately with `openssl rand -base64 32`, paste it directly into the Cloudflare dashboard, and keep a secure backup outside Cloudflare. Do not run key generation through an agent or include its output in a transcript. Losing the key makes existing values unreadable; replacing it is not key rotation. Listing and deleting metadata work without a key, but create and replace return `VaultNotConfigured` until a valid key is configured. See [ADR-0006](adrs/0006-vault-values-encrypted-in-d1-under-a-worker-key.md) and [Worker secrets](https://developers.cloudflare.com/workers/configuration/secrets/).
+
+Vault stores AES-GCM ciphertext in D1. Delete and replace remove the current ciphertext, but [D1 Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/) retains previous database states during its retention window. Nook does not purge that history.
+
+After merging and the green-main deployment, the owner performs these checks. Local workerd tests prove the same behavior, but production foreign-key enforcement and an approximately 85 KiB ciphertext bound parameter still need this observation.
+
+1. In the production database's D1 console, run `PRAGMA foreign_keys;` and require `1`. Cloudflare documents [foreign-key enforcement](https://developers.cloudflare.com/d1/sql-api/foreign-keys/) by default.
+2. Sign in to Nook as the owner. In that tab's browser console, run the synthetic smoke test below. It creates a unique temporary bucket and a 64 KiB ASCII value, checks that deleting its nonempty bucket returns the exact blocker, then deletes the secret and bucket. It prints only metadata and statuses.
+
+```js
+const bucket = `vault-smoke-${crypto.randomUUID().slice(0, 8)}`;
+const headers = { 'Content-Type': 'application/json' };
+const madeBucket = await fetch('/api/buckets', {
+  method: 'POST', headers, body: JSON.stringify({ path: bucket }),
+});
+if (madeBucket.status !== 200) throw new Error('Smoke bucket creation failed.');
+const stored = await fetch('/api/secrets', {
+  method: 'POST', headers,
+  body: JSON.stringify({
+    bucket, name: 'SIZE_SMOKE', description: 'Synthetic 64 KiB smoke test',
+    value: 'x'.repeat(64 * 1024), writeId: crypto.randomUUID(),
+  }),
+});
+if (stored.status !== 201) throw new Error('64 KiB create failed.');
+const metadata = await stored.json();
+const blocked = await fetch(`/api/buckets/${encodeURIComponent(bucket)}`, { method: 'DELETE' });
+const blocker = await blocked.json();
+if (blocked.status !== 409 || blocker.message !== 'Delete its secrets first.')
+  throw new Error('Nonempty bucket deletion was not blocked.');
+const removed = await fetch(`/api/secrets/${encodeURIComponent(metadata.path)}?version=${encodeURIComponent(metadata.version)}`, { method: 'DELETE' });
+const cleaned = await fetch(`/api/buckets/${encodeURIComponent(bucket)}`, { method: 'DELETE' });
+console.info({ bucket, createStatus: stored.status, blockedStatus: blocked.status,
+  deleteSecretStatus: removed.status, deleteBucketStatus: cleaned.status });
+```
+
+Require create `201`, blocked bucket delete `409`, and both cleanup deletes `204`. If a check fails, retain the temporary bucket's name for cleanup and report the status without response payloads or credentials. Record the foreign-key result and smoke outcomes on the PR. Finally, open Vault and confirm the stored/inherited grouping, then use `list_secrets({ bucket: 'me' })` or `nook vault list me` to discover names and descriptions. These interfaces never return values; CLI writes and value delivery are later features.
+
 ## Remote MCP and Access Managed OAuth
 
-Nook serves `list_buckets`, `create_bucket`, and `delete_bucket` at `https://<hostname>/mcp`. The owner authenticates through the existing Access application with access to the whole bucket tree. The Worker verifies the forwarded Access assertion before MCP. Nook machine tokens use the separate `/api/machine/mcp` endpoint described below.
+Nook serves `list_buckets`, `create_bucket`, `delete_bucket`, and `list_secrets` at `https://<hostname>/mcp`. The owner authenticates through the existing Access application with access to the whole bucket tree. The Worker verifies the forwarded Access assertion before MCP. Nook machine tokens use the separate `/api/machine/mcp` endpoint described below.
 
 In **Zero Trust → Access controls → Applications**, edit the existing self-hosted Nook application. Under **Advanced settings**, enable **Managed OAuth**, then save. Keep its whole-hostname protection and owner Allow policy. Access supplies the OAuth flow and forwards the user's JWT in `Cf-Access-Jwt-Assertion`; Nook does not implement an OAuth server. See [Cloudflare Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/).
 

@@ -64,7 +64,7 @@ CI runs the five static commands, three `pnpm test:coverage --shard=I/3` jobs, a
 
 ## Browser evidence and budget
 
-The shell suite captures all five accepted states at 1440×900 and 390×844 in both light and dark. It checks horizontal overflow, card bounds, rendered email line breaks after allowed separators, disabled future tools, mobile Sheet behavior, and the full-email dropdown with the Access logout destination. The twenty base screenshots and six overlay screenshots appear in `.local/verification/screenshots/` and CI's `web-shell-I` artifact. Compare them with the chosen prototype when changing the shell.
+The shell suite captures all five accepted states at 1440×900 and 390×844 in both light and dark. It checks horizontal overflow, card bounds, rendered email line breaks after allowed separators, the disabled Memory tool and enabled Vault link, mobile Sheet behavior, and the full-email dropdown with the Access logout destination. The twenty base screenshots and six overlay screenshots appear in `.local/verification/screenshots/` and CI's `web-shell-I` artifact. Compare them with the chosen prototype when changing the shell.
 
 The owner journey uses a recorded `agent.act` to create `work/acme`, followed by an exact locator proving nesting inside `work`. Local recording uses the owner's ChatGPT subscription through `e2e/oauth/chatgpt`; credentials are never copied. Committed `.e2e/cache/` recordings replay in CI with `e2e run --strict-cache` and zero retries or model calls. Reports, logs, videos, and failure artifacts stay ignored and are uploaded on CI failure.
 
@@ -99,6 +99,29 @@ Real CLI processes use the private Secret Service fixture to prove the single JS
 The load-time stage adds five phone-network samples for code acceptance to the rendered, preloaded approval tree. Its median must be at most 100 ms. Step one requests buckets before lookup; step two uses the same cached query with no extra loading screen. Existing cold-open and navigation limits remain mandatory.
 
 `pnpm test tests/machine-grant-captures.test.ts` records the 12 accepted Inline tree scenarios at 1440×900 and 390×844 in light and dark. The `machine-grant-*` viewport and full-page PNGs live in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare them with reference A in `.work/prototypes/machine-grant/candidates/inline-tree/shots/`, accounting for DECISION.md's production corrections. E23 remains the owner's post-deployment capture for both real clients, documented in [deployment.md](../deployment.md#e23-owner-capture-after-deployment-pending).
+
+## Vault storage and discovery
+
+The Vault acceptance suites exercise the built Worker, migrated D1, genuine Access assertions, both observed MCP protocols, real CLI processes, and Chromium. Each runtime receives a random synthetic 32-byte `VAULT_KEY`; no owner credential is read. The private Linux and macOS keyring fixtures remain the CLI boundary, and `vault-cli.test.ts` runs in both platform jobs.
+
+| Examples | Evidence |
+| --- | --- |
+| E1–E11, E7a, E26 | `vault-worker.test.ts`: independent Node WebCrypto decrypts D1 envelopes; UTF-8 limits, validation, row preservation, versions, bucket emptiness, missing key, owner/Origin boundaries, and private failures. |
+| E12–E16 | `vault-mcp.test.ts`: nearest-to-`me` ordering, names-only discovery, both protocols, subtree grants, forbidden-before-existence behavior, and the Nook-only machine HTTP route. |
+| E17–E18 | `vault-cli.test.ts`: plain-text listing, usage and reconnect errors, ancestors, an empty installation, and credential exclusion. |
+| E19–E22 | `vault-web.test.ts` and `vault-web-recovery.test.ts`: outline and mobile navigation, optimistic confirmed writes, duplicate handling, destructive confirmation, no settled values in DOM/Query/mutation state, invalid drafts, definitive retries, unconfirmed reconciliation against concurrent writers, concurrency messages, and Buckets' secret blocker. |
+| E23 | `vault-load-time.test.ts` and `pnpm verify:load-time`: mandatory five-sample medians, cold `/vault?bucket=work/acme` within 1000 ms and preloaded Home-to-Vault navigation within 100 ms. |
+| E24 | `tests/journeys/owner.e2e.ts`: deterministic locators create a secret and prove that only metadata remains. The existing `agent.act` recording still replays with strict cache and zero retries. |
+| E25 | `vault-captures.test.ts`: 52 viewport PNGs at 1440×900 and 390×844 in both themes, plus four full-page many-long PNGs. |
+| E27–E28 | `vault-writes.test.ts`: stable-id replays, D1 failures before/after commit, concurrent writes, deleted-and-recreated names, bucket-delete races, one-batch budgets, and per-operation grant denials before SQL. |
+
+`vault-keyring.test.ts` additionally proves non-extractable keys, raw-byte fingerprints, exact UTF-8 opening, independent AES-GCM decryption, path binding, and fixed errors for unusable envelopes or keys.
+
+The `vault-*` PNGs live in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare them with the chosen A “The tree is the address” reference: typical, fresh, bucket-empty, many-long, loading, load-error, create, create-invalid, create-duplicate, created, replace-confirm, delete-confirm, and write-failed. Captures use genuine Worker/D1 metadata and writes; loading gates a genuine request and load-error uses an unavailable table. The definitive write-failed capture removes the synthetic encryption key and shows `VaultNotConfigured`, preserving the accepted distinction from an unconfirmed storage failure. No scenario selector enters the product, and write feedback has one live region.
+
+The load-time stage seeds the representative nine secrets and their buckets in the uninstrumented production target. It uses the existing 9 Mbps/3 Mbps/85 ms profile, cache disabled, five runs, and animation-frame marks for both the loaded outline and secret rows. Vault uses the existing Home/Buckets viewport; the responsive phone journey is verified separately in Chromium. The Home Tools card and sidebar both preload Vault's route and single metadata query on intent. Sample validity and budgets remain fixed and independently enforced.
+
+Production foreign keys and the approximately 85 KiB bound ciphertext parameter remain the owner's [post-deployment smoke test](../deployment.md#vault-key-and-post-deployment-smoke-test). Local evidence does not claim production execution.
 
 ## Migrations
 
