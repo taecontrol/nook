@@ -34,6 +34,7 @@ const RequestRow = Schema.Struct({
 });
 type RequestRow = typeof RequestRow.Type;
 const TokenRow = Schema.Struct({
+  id: Schema.String,
   token_hash: Schema.String,
   machine_name: Schema.String,
   grant_json: Schema.String,
@@ -126,7 +127,7 @@ export const machineOperations = Effect.gen(function* () {
     Request: Schema.String,
     Result: TokenRow,
     execute: (hash) =>
-      sql`UPDATE machine_tokens SET last_used_at=unixepoch('subsec')*1000 WHERE token_hash=${hash} RETURNING token_hash, machine_name, grant_json`,
+      sql`UPDATE machine_tokens SET last_used_at=unixepoch('subsec')*1000 WHERE token_hash=${hash} RETURNING id, token_hash, machine_name, grant_json`,
   });
   const listRows = SqlSchema.findAll({
     Request: Schema.Void,
@@ -241,7 +242,7 @@ export const machineOperations = Effect.gen(function* () {
           .batch([
             sql<
               typeof TokenRow.Type
-            >`INSERT INTO machine_tokens(token_hash, machine_name, grant_json, created_at, id) SELECT ${tokenHash}, machine_name, grant_json, ${Date.now()}, ${crypto.randomUUID()} FROM authorizations WHERE device_hash=${deviceHash} AND status='approved' AND expires_at>unixepoch('subsec')*1000 RETURNING token_hash, machine_name, grant_json`,
+            >`INSERT INTO machine_tokens(token_hash, machine_name, grant_json, created_at, id) SELECT ${tokenHash}, machine_name, grant_json, ${Date.now()}, ${crypto.randomUUID()} FROM authorizations WHERE device_hash=${deviceHash} AND status='approved' AND expires_at>unixepoch('subsec')*1000 RETURNING id, token_hash, machine_name, grant_json`,
             sql`DELETE FROM authorizations WHERE device_hash=${deviceHash} AND EXISTS (SELECT 1 FROM machine_tokens WHERE token_hash=${tokenHash})`,
           ])
           .pipe(unavailable);
@@ -277,6 +278,14 @@ export const machineOperations = Effect.gen(function* () {
           .batch([sql`DELETE FROM machine_tokens WHERE id=${id}`])
           .pipe(unavailable);
       }),
+    forRun: (authorization: string) =>
+      authenticated(authorization).pipe(
+        Effect.flatMap((row) =>
+          identity(row).pipe(
+            Effect.map((result) => ({ ...result, id: row.id })),
+          ),
+        ),
+      ),
     whoami: (authorization: string) =>
       authenticated(authorization).pipe(Effect.flatMap(identity)),
     logout: (authorization: string) =>

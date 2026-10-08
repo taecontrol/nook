@@ -12,4 +12,5 @@ export const macosCliSuites = [
   'tests/machines-cli.test.ts',
   'tests/machine-grant-cli.test.ts',
   'tests/vault-cli.test.ts',
+  'tests/run-cli.test.ts',
 ];

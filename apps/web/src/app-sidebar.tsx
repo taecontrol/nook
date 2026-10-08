@@ -2,6 +2,7 @@ import { Link, useRouterState } from '@tanstack/react-router';
 import {
   Box,
   Brain,
+  History,
   KeyRound,
   ListTree,
   MonitorSmartphone,
@@ -73,6 +74,14 @@ export function AppSidebar({ session }: { session: Session }) {
                   <Link to="/machines" onClick={close}>
                     <MonitorSmartphone />
                     <span>Machines</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={pathname === '/audit'}>
+                  <Link to="/audit" search={{}} onClick={close}>
+                    <History />
+                    <span>Audit</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

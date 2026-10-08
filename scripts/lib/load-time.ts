@@ -23,6 +23,8 @@ export type Measurements = {
   approvalNavigation: number[];
   vault: number[];
   vaultNavigation: number[];
+  audit: number[];
+  auditNavigation: number[];
   gzipBytes?: number;
 };
 export function median(samples: number[]) {
@@ -43,6 +45,12 @@ export function assertLoadTimes(measured: Measurements) {
     [
       'machinesNavigation',
       'Intent navigation /machines',
+      loadTimeBudgets.navigationMs,
+    ],
+    ['audit', 'Cold open /audit', loadTimeBudgets.coldOpenMs],
+    [
+      'auditNavigation',
+      'Intent navigation /audit',
       loadTimeBudgets.navigationMs,
     ],
     ['vault', 'Cold open /vault', loadTimeBudgets.coldOpenMs],
@@ -76,6 +84,8 @@ export function formatMeasurements(measured: Measurements) {
         machines: median(measured.machines),
         machinesNavigation: median(measured.machinesNavigation),
         approvalNavigation: median(measured.approvalNavigation),
+        audit: median(measured.audit),
+        auditNavigation: median(measured.auditNavigation),
         vault: median(measured.vault),
         vaultNavigation: median(measured.vaultNavigation),
       },

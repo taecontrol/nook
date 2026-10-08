@@ -1,6 +1,7 @@
 import type { Browser, Page } from 'playwright';
+import { acmePath, fetchValues } from '../tests/support/audit.ts';
 import { createAuthorization } from '../tests/support/authorizations.ts';
-import { seedGrantTree } from '../tests/support/grants.ts';
+import { issueGrant, seedGrantTree } from '../tests/support/grants.ts';
 import { seedSecrets, vaultRuntime } from '../tests/support/vault.ts';
 import { startHostIsolation } from './lib/host-isolation.ts';
 import {
@@ -19,6 +20,8 @@ async function phonePage(browser: Browser, kind: string) {
       'machines',
       'machinesNavigation',
       'approvalNavigation',
+      'audit',
+      'auditNavigation',
     ].includes(kind)
       ? { viewport: { width: 390, height: 844 } }
       : {}),
@@ -31,26 +34,34 @@ async function phonePage(browser: Browser, kind: string) {
   await cdp.send('Network.emulateNetworkConditions', loadTimeBudgets.network);
   return { context, page };
 }
-type ColdScreen = 'home' | 'buckets' | 'authorize' | 'machines' | 'vault';
+type ColdScreen =
+  | 'home'
+  | 'buckets'
+  | 'authorize'
+  | 'machines'
+  | 'vault'
+  | 'audit';
 function markFirstScreen(kind: ColdScreen) {
+  const selectors = {
+    buckets: '[aria-label="All buckets"] [data-path]',
+    authorize: '#authorization-code',
+    machines: '[data-machine]',
+    audit: '[data-entry]',
+    home: '',
+    vault: '',
+  };
   const observer = new MutationObserver(() => {
     const ready =
-      kind === 'authorize'
-        ? document.querySelector('#authorization-code')
-        : kind === 'home'
-          ? document
-              .querySelector('[aria-label="Owner access"]')
-              ?.textContent?.includes('owner@nook.test')
-          : kind === 'vault'
-            ? document.querySelector('[data-secret="work/acme/STRIPE_KEY"]') &&
-              document
-                .querySelector('[aria-label="Buckets"] [data-path="work/acme"]')
-                ?.textContent?.includes('4 secrets')
-            : document.querySelector(
-                kind === 'machines'
-                  ? '[data-machine]'
-                  : '[aria-label="All buckets"] [data-path]',
-              );
+      kind === 'home'
+        ? document
+            .querySelector('[aria-label="Owner access"]')
+            ?.textContent?.includes('owner@nook.test')
+        : kind === 'vault'
+          ? document.querySelector('[data-secret="work/acme/STRIPE_KEY"]') &&
+            document
+              .querySelector('[aria-label="Buckets"] [data-path="work/acme"]')
+              ?.textContent?.includes('4 secrets')
+          : document.querySelector(selectors[kind]);
     if (!ready) return;
     observer.disconnect();
     requestAnimationFrame(() =>
@@ -71,6 +82,7 @@ async function cold(page: Page, origin: string, kind: ColdScreen) {
     authorize: '/cli/authorize',
     machines: '/machines',
     vault: '/vault?bucket=work/acme',
+    audit: '/audit',
   };
   await page.goto(origin + paths[kind]);
   await page.waitForFunction(
@@ -139,7 +151,7 @@ async function approvalNavigation(page: Page, origin: string, code: string) {
 async function navigate(
   page: Page,
   origin: string,
-  kind: 'buckets' | 'machines' | 'vault',
+  kind: 'buckets' | 'machines' | 'vault' | 'audit',
 ) {
   await page.goto(origin);
   await page.getByRole('heading', { name: "You're signed in" }).waitFor();
@@ -147,11 +159,12 @@ async function navigate(
     .getByRole('region', { name: kind === 'vault' ? 'Tools' : 'Platform' })
     .getByRole('link', {
       name: new RegExp(
-        kind === 'buckets'
-          ? 'Buckets'
-          : kind === 'vault'
-            ? 'Vault'
-            : 'Machines',
+        {
+          buckets: 'Buckets',
+          machines: 'Machines',
+          vault: 'Vault',
+          audit: 'Audit',
+        }[kind],
       ),
     });
   await link.hover();
@@ -172,11 +185,12 @@ async function navigate(
       });
       observer.observe(document, { childList: true, subtree: true });
     },
-    kind === 'buckets'
-      ? '[aria-label="All buckets"] [data-path]'
-      : kind === 'vault'
-        ? '[data-secret="me/GITHUB_TOKEN"]'
-        : '[data-machine]',
+    {
+      buckets: '[aria-label="All buckets"] [data-path]',
+      vault: '[data-secret="me/GITHUB_TOKEN"]',
+      machines: '[data-machine]',
+      audit: '[data-entry]',
+    }[kind],
   );
   await link.click();
   await page.waitForFunction(
@@ -191,12 +205,36 @@ async function navigate(
       ).duration,
   );
 }
+async function measureScreen(
+  page: Page,
+  origin: string,
+  code: string,
+  kind: Exclude<keyof Measurements, 'gzipBytes'>,
+) {
+  const destinations = {
+    navigation: 'buckets',
+    machinesNavigation: 'machines',
+    vaultNavigation: 'vault',
+    auditNavigation: 'audit',
+  } as const;
+  const destination = destinations[kind as keyof typeof destinations];
+  if (kind === 'approvalNavigation')
+    return approvalNavigation(page, origin, code);
+  return destination
+    ? navigate(page, origin, destination)
+    : cold(page, origin, kind as ColdScreen);
+}
 const isolation = await startHostIsolation();
 try {
   const app = await vaultRuntime({ directory: 'dist' });
   const db = await app.mf.getD1Database('DB');
   await seedGrantTree(app);
   await seedSecrets(app);
+  const { token } = await issueGrant(app);
+  const used = await fetchValues(app, token, { secrets: [acmePath] });
+  if (used.status !== 200)
+    throw new Error('The Audit timing fixture requires a genuine use.');
+  await used.body?.cancel();
   const pending = await createAuthorization(app);
   await db
     .prepare(
@@ -222,6 +260,8 @@ try {
       approvalNavigation: [],
       vault: [],
       vaultNavigation: [],
+      audit: [],
+      auditNavigation: [],
       gzipBytes: (await measureInitialJs('dist/assets')).gzipBytes,
     };
     for (const kind of [
@@ -234,26 +274,14 @@ try {
       'approvalNavigation',
       'vault',
       'vaultNavigation',
+      'audit',
+      'auditNavigation',
     ] as const) {
       for (let run = 0; run < loadTimeBudgets.runs; run++) {
         const { context, page } = await phonePage(browser, kind);
         try {
           measured[kind].push(
-            await (kind === 'approvalNavigation'
-              ? approvalNavigation(page, app.origin, pending.userCode)
-              : kind === 'navigation' ||
-                  kind === 'machinesNavigation' ||
-                  kind === 'vaultNavigation'
-                ? navigate(
-                    page,
-                    app.origin,
-                    kind === 'navigation'
-                      ? 'buckets'
-                      : kind === 'vaultNavigation'
-                        ? 'vault'
-                        : 'machines',
-                  )
-                : cold(page, app.origin, kind)),
+            await measureScreen(page, app.origin, pending.userCode, kind),
           );
         } finally {
           await context.close();

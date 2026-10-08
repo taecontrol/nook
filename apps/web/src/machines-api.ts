@@ -9,7 +9,7 @@ import {
 } from '@tanstack/react-query';
 import { runApi } from './api-client';
 
-const machinesOptions = queryOptions({
+export const machinesOptions = queryOptions({
   queryKey: ['machines'],
   queryFn: async ({ signal }) => [
     ...(await runApi((api) => api.machines.list(), signal)).machines,

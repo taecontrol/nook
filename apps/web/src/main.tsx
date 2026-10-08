@@ -8,6 +8,7 @@ import {
   RouterProvider,
 } from '@tanstack/react-router';
 import { createRoot } from 'react-dom/client';
+import { preloadAudit } from './audit-api';
 import { preloadBuckets } from './buckets-api';
 import { Home } from './home';
 import { identityOptions } from './identity';
@@ -66,6 +67,28 @@ const router = createRouter({
           typeof search.bucket === 'string' ? { bucket: search.bucket } : {},
         loader: ({ context }) => {
           preloadVault(context.queryClient);
+        },
+      }),
+      createRoute({
+        getParentRoute: () => owner,
+        path: '/audit',
+        component: lazyRouteComponent(
+          () => import('./audit-page'),
+          'AuditPage',
+        ),
+        validateSearch: (
+          search: Record<string, unknown>,
+        ): { bucket?: string; secret?: string } => ({
+          ...(typeof search.bucket === 'string'
+            ? { bucket: search.bucket }
+            : {}),
+          ...(typeof search.secret === 'string'
+            ? { secret: search.secret }
+            : {}),
+        }),
+        loaderDeps: ({ search }) => search,
+        loader: ({ context, deps }) => {
+          preloadAudit(context.queryClient, deps);
         },
       }),
       createRoute({

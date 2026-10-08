@@ -6,6 +6,7 @@ import { HttpRouter, HttpServer } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
 import { machineOperations } from './machines.ts';
 import { mcpHandler } from './mcp.ts';
+import { runSecrets } from './run-secrets.ts';
 import { machineVault } from './vault.ts';
 
 export function machineMcpHandler(db: D1Database, request: Request) {
@@ -32,7 +33,7 @@ export function machineMcpHandler(db: D1Database, request: Request) {
   );
 }
 
-export function machineHandler(db: D1Database, origin: string) {
+export function machineHandler(db: D1Database, origin: string, vaultKey = '') {
   const handlers = HttpApiBuilder.group(MachineApi, 'machine', (handlers) =>
     Effect.gen(function* () {
       const store = yield* machineOperations;
@@ -49,6 +50,12 @@ export function machineHandler(db: D1Database, origin: string) {
             const vault = yield* machineVault(grant);
             return yield* vault.list(query.bucket);
           }).pipe(Effect.provideService(D1Client.D1Client, sql)),
+        )
+        .handle('values', ({ headers, payload }) =>
+          store.forRun(headers.authorization).pipe(
+            Effect.flatMap((machine) => runSecrets(machine, payload, vaultKey)),
+            Effect.provideService(D1Client.D1Client, sql),
+          ),
         )
         .handle('logout', ({ headers }) => store.logout(headers.authorization));
     }),

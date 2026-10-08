@@ -4,6 +4,7 @@ import { Api } from '@nook/contract';
 import { Effect, Layer } from 'effect';
 import { HttpRouter, HttpServer } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
+import { auditStore } from './audit.ts';
 import { type AuthBindings, authenticate } from './auth.ts';
 import type { BucketGrant } from './authorization.ts';
 import { bucketOperations } from './buckets.ts';
@@ -56,8 +57,14 @@ export function handlerForPrincipal(
         );
     }),
   ).pipe(Layer.provide(D1Client.layer({ db })));
+  const audit = HttpApiBuilder.group(Api, 'audit', (handlers) =>
+    Effect.gen(function* () {
+      const store = yield* auditStore;
+      return handlers.handle('list', ({ query }) => store.list(grant, query));
+    }),
+  ).pipe(Layer.provide(D1Client.layer({ db })));
   const routes = HttpApiBuilder.layer(Api).pipe(
-    Layer.provide([session, buckets, machines, vault]),
+    Layer.provide([session, buckets, machines, vault, audit]),
     Layer.provide(HttpServer.layerServices),
   );
   const apiHandler = HttpRouter.toWebHandler(routes, {
@@ -114,6 +121,7 @@ function knownRoute(path: string, method: string) {
       '/api/buckets',
       '/api/machines',
       '/api/secrets',
+      '/api/audit',
       '/mcp',
     ].includes(path) ||
     (path.startsWith('/api/secrets/') && ['PUT', 'DELETE'].includes(method)) ||
@@ -125,16 +133,22 @@ let machineRoutes:
   | {
       db: D1Database;
       origin: string;
+      vaultKey: string;
       machine: ReturnType<typeof machineHandler>;
       owner: ReturnType<typeof authorizationHandler>;
     }
   | undefined;
-function routesFor(db: D1Database, origin: string) {
-  if (machineRoutes?.db !== db || machineRoutes.origin !== origin)
+function routesFor(db: D1Database, origin: string, vaultKey = '') {
+  if (
+    machineRoutes?.db !== db ||
+    machineRoutes.origin !== origin ||
+    machineRoutes.vaultKey !== vaultKey
+  )
     machineRoutes = {
       db,
       origin,
-      machine: machineHandler(db, origin),
+      vaultKey,
+      machine: machineHandler(db, origin, vaultKey),
       owner: authorizationHandler(db),
     };
   return machineRoutes;
@@ -156,6 +170,8 @@ async function sanitized(response: Promise<Response>) {
         'InvalidBucketGrant',
         'GrantBucketNotFound',
         'InvalidSecret',
+        'InvalidRun',
+        'InvalidAuditFilter',
         'InvalidBucketPath',
         'ReservedBucket',
       ].includes(body?._tag ?? '')
@@ -167,11 +183,17 @@ async function sanitized(response: Promise<Response>) {
 function protectedMachineRoute(path: string, method: string) {
   return (
     path === '/api/machine/whoami' ||
+    (path === '/api/machine/secrets/values' && method === 'POST') ||
     (path === '/api/machine/secrets' && method === 'GET') ||
     (path === '/api/machine/token' && method === 'DELETE')
   );
 }
-function machineRequest(request: Request, url: URL, db: D1Database) {
+async function machineRequest(
+  request: Request,
+  url: URL,
+  db: D1Database,
+  vaultKey = '',
+) {
   if (url.pathname === '/api/machine/mcp') {
     if (foreignOrigin(request, url))
       return Response.json({ _tag: 'Forbidden' }, { status: 403 });
@@ -184,7 +206,12 @@ function machineRequest(request: Request, url: URL, db: D1Database) {
     return Response.json({ _tag: 'Unauthorized' }, { status: 401 });
   if (foreignOrigin(request, url))
     return Response.json({ _tag: 'Forbidden' }, { status: 403 });
-  return sanitized(routesFor(db, url.origin).machine(request));
+  const response = await sanitized(
+    routesFor(db, url.origin, vaultKey).machine(request),
+  );
+  if (url.pathname === '/api/machine/secrets/values')
+    response.headers.set('Cache-Control', 'no-store');
+  return response;
 }
 export default {
   async fetch(
@@ -193,7 +220,7 @@ export default {
   ): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api/machine/'))
-      return machineRequest(request, url, env.DB);
+      return machineRequest(request, url, env.DB, env.VAULT_KEY);
     const identity = await authenticate(request, env);
     if ('status' in identity)
       return Response.json(
