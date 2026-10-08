@@ -182,7 +182,12 @@ export async function privateKeyring(
       bus,
       shim,
       config: resolve(home, 'config/nook/config.json'),
-      start(args: string[], extra?: Record<string, string | undefined>) {
+      command: start,
+      start(
+        args: string[],
+        extra?: Record<string, string | undefined>,
+        input = '',
+      ) {
         expect(
           existsSync(resolve(testBuild, 'cli.js')),
           'The production Nook CLI is not implemented',
@@ -201,6 +206,7 @@ export async function privateKeyring(
               : {}),
             ...extra,
           },
+          input,
         );
       },
       lookup: async (url: string) =>

@@ -227,7 +227,8 @@ trackMacFixtureProcesses(${JSON.stringify(groups)});
       keychain,
       config: resolve(home, 'config/nook/config.json'),
       close,
-      start(args: string[], extra: NodeJS.ProcessEnv = {}) {
+      command,
+      start(args: string[], extra: NodeJS.ProcessEnv = {}, input = '') {
         if (!existsSync(resolve(testBuild, 'cli.js')))
           throw new Error('The built CLI is required.');
         return command(
@@ -245,6 +246,7 @@ trackMacFixtureProcesses(${JSON.stringify(groups)});
               : {}),
             ...extra,
           },
+          input,
         );
       },
       async lookup(url: string) {
