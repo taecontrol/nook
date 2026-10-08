@@ -32,7 +32,7 @@ function validExecutable(executable: string) {
   if (!executable || /[/\0]/.test(executable) || byteLength(executable) > 255)
     return 'Executable must be a name of 1 to 255 bytes, without a slash or NUL.';
 }
-function validPaths(paths: readonly string[]) {
+export function validateSecretPaths(paths: readonly string[]) {
   const distinct = [...new Set(paths)];
   if (distinct.length < 1 || distinct.length > 20)
     return 'Request 1 to 20 distinct secret paths.';
@@ -51,7 +51,7 @@ export function validateRunSecrets(input: RunSecrets): string | undefined {
     validatePurpose(input.purpose) ??
     validDirectory(input.workingDirectory) ??
     validExecutable(input.executable) ??
-    validPaths(input.secrets)
+    validateSecretPaths(input.secrets)
   );
 }
 export const DeliveredSecrets = Schema.Struct({

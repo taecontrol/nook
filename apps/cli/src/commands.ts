@@ -5,7 +5,7 @@ import cliPackage from '../package.json' with { type: 'json' };
 import { CliFailure } from './errors.ts';
 import { run } from './run.ts';
 import { login, logout, mcpHeader, whoami } from './session.ts';
-import { vaultList } from './vault.ts';
+import { vaultCheck, vaultList } from './vault.ts';
 
 function missingVaultBucket(args: readonly string[]) {
   return args[0] === 'vault' && args[1] === 'list' && args.length === 2;
@@ -42,6 +42,9 @@ export async function execute(
       ),
       Command.make('vault').pipe(
         Command.withSubcommands([
+          Command.make('check', {}, () => vaultCheck(write)).pipe(
+            Command.withDescription('Check the secrets mapped in nook.json.'),
+          ),
           Command.make(
             'list',
             { bucket: Argument.String('bucket') },

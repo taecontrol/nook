@@ -57,10 +57,12 @@ function decrypt(
   binding: string,
 ) {
   return Effect.gen(function* () {
-    const missing = paths.find((_, index) => rows[index].length === 0);
-    if (missing)
+    const missing = paths.filter((_, index) => rows[index].length === 0);
+    if (missing.length)
       return yield* Effect.fail(
-        new SecretNotFound({ message: `${missing} was not found.` }),
+        new SecretNotFound({
+          message: missing.map((path) => `${path} was not found.`).join(' '),
+        }),
       );
     const ring = yield* parseKeyring(binding);
     return yield* Effect.forEach(paths, (path, index) =>

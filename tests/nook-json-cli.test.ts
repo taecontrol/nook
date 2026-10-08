@@ -4,6 +4,7 @@ import {
   mkdir,
   readFile,
   realpath,
+  rm,
   symlink,
   writeFile,
 } from 'node:fs/promises';
@@ -148,14 +149,13 @@ beforeEach(async () => {
   checkpoints.length = 0;
   return async () => {
     try {
-      expectPrivate(
-        JSON.stringify({
-          outputs,
-          log: log.messages,
-          audit: await auditRows(app),
-          argv: await transcript(),
-        }),
-      );
+      for (const text of [
+        ...outputs,
+        ...log.messages,
+        JSON.stringify(await auditRows(app)),
+        await transcript(),
+      ])
+        expectPrivate(text);
     } finally {
       await keyring.close();
       await app.close();
@@ -499,6 +499,45 @@ it('E12: check without a file fails before keyring access', async () => {
     ['vault', 'check'],
     `No nook.json in ${project} or its parents.`,
   );
+});
+it('check uses metadata even when the installation cannot decrypt values', async () => {
+  await config(mappings);
+  await app.setBindings({ ...app.bindings, VAULT_KEY: '' });
+  const result = await cli(['vault', 'check']);
+  expect(result.status).toBe(0);
+  expectOutput(
+    result.stdout + result.stderr,
+    `All 2 secrets mapped in ${file} are available.`,
+    true,
+  );
+  expect(requests('listing')).toBe(1);
+  expect(requests('value')).toBe(0);
+  expect(await auditPaths()).toEqual([]);
+});
+it('an empty nearest file hides the parent and check needs no keyring or network', async () => {
+  await config(mappings, resolve(keyring.home, 'nook.json'));
+  await config({});
+  await rm(keyring.config);
+  const before = await transcript();
+  const result = await cli(['vault', 'check']);
+  expect(result.status).toBe(0);
+  expectOutput(
+    result.stdout + result.stderr,
+    `All 0 secrets mapped in ${file} are available.`,
+    true,
+  );
+  expect((await transcript()) === before).toBe(true);
+  expect(checkpoints).toEqual([]);
+  expect(await auditPaths()).toEqual([]);
+});
+it('an unreadable nearest config fails privately before keyring or network', async () => {
+  await mkdir(file);
+  const message = `Could not read ${file}.`;
+  await beforeAccess(
+    runArgs(['/usr/bin/true'], [`GH_TOKEN=${acmePath}`]),
+    message,
+  );
+  await beforeAccess(['vault', 'check'], message);
 });
 it('file mappings preserve prototype-like environment names and duplicate flag rejection', async () => {
   await config(

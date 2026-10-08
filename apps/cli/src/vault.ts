@@ -1,6 +1,15 @@
-import { validateBucketPath } from '@nook/contract';
+import {
+  type Secret,
+  splitSecretPath,
+  validateBucketPath,
+} from '@nook/contract';
 import { Effect } from 'effect';
 import { CliFailure, type ServerFailure } from './errors.ts';
+import {
+  currentDirectory,
+  projectSecrets,
+  requireMappingLimit,
+} from './project-secrets.ts';
 import { session } from './session.ts';
 
 function listFailure(error: ServerFailure, url: string) {
@@ -35,5 +44,73 @@ export function vaultList(bucket: string, write: (message: string) => void) {
           ? `${secret.path}  ${secret.description}`
           : secret.path,
       );
+  });
+}
+type Availability = Set<string> | 'not found' | "outside this machine's grant";
+function availability(
+  operation: Effect.Effect<{ secrets: readonly Secret[] }, ServerFailure>,
+  url: string,
+): Effect.Effect<Availability, CliFailure> {
+  return operation.pipe(
+    Effect.map(({ secrets }) => new Set(secrets.map(({ path }) => path))),
+    Effect.catch((error) => {
+      if (error.tag === 'Forbidden')
+        return Effect.succeed("outside this machine's grant" as const);
+      if (error.tag === 'BucketNotFound')
+        return Effect.succeed('not found' as const);
+      return Effect.fail(listFailure(error, url));
+    }),
+  );
+}
+export function vaultCheck(write: (message: string) => void) {
+  return Effect.gen(function* () {
+    const directory = yield* currentDirectory;
+    const project = yield* projectSecrets(directory);
+    if (!project)
+      return yield* Effect.fail(
+        new CliFailure(`No nook.json in ${directory} or its parents.`),
+      );
+    yield* Effect.try({
+      try: () => requireMappingLimit(project.mappings, project.file),
+      catch: (error) => error as CliFailure,
+    });
+    const buckets = [
+      ...new Set(
+        project.mappings.map(({ path }) => splitSecretPath(path).bucket),
+      ),
+    ];
+    const count = new Set(project.mappings.map(({ path }) => path)).size;
+    const summary = `All ${count} secrets mapped in ${project.file} are available.`;
+    if (buckets.length === 0) {
+      write(summary);
+      return;
+    }
+    const { url, token, request } = yield* session;
+    const listed = new Map(
+      yield* Effect.forEach(buckets, (bucket) =>
+        availability(
+          request((api) =>
+            api.machine.secrets({
+              headers: { authorization: `Bearer ${token}` },
+              query: { bucket },
+            }),
+          ),
+          url,
+        ).pipe(Effect.map((found) => [bucket, found] as const)),
+      ),
+    );
+    const problems = project.mappings.flatMap(({ name, path }) => {
+      const found = listed.get(splitSecretPath(path).bucket);
+      const problem =
+        typeof found === 'string'
+          ? found
+          : found?.has(path)
+            ? undefined
+            : 'not found';
+      return problem ? [`${name}  ${path}  ${problem}`] : [];
+    });
+    if (problems.length)
+      return yield* Effect.fail(new CliFailure(problems.join('\n')));
+    write(summary);
   });
 }
