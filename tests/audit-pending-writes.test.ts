@@ -74,7 +74,9 @@ it.each([
   ...cases.map((input) => ({ ...input, awayMs: 300_001, settleAway: false })),
   ...cases
     .filter((input) => input.area === 'buckets')
-    .map((input) => ({ ...input, awayMs: 300_001, settleAway: true })),
+    .flatMap((input) =>
+      [0, 300_001].map((awayMs) => ({ ...input, awayMs, settleAway: true })),
+    ),
 ])(
   'Audit observes pending $area $operation without refreshing pre-commit metadata after $awayMs ms away (settlement away: $settleAway)',
   async ({ area, operation, start, awayMs, settleAway }) => {

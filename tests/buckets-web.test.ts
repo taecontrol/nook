@@ -865,6 +865,74 @@ it.each([false, true])(
   },
 );
 
+it.each(['POST', 'DELETE'])(
+  'a successful %s stays confirmed when its recovery list fails',
+  async (method) => {
+    await withRealBuckets(async (page, local, requests) => {
+      const path = method === 'POST' ? 'work/read-failure' : 'personal/health';
+      const db = await local.mf.getD1Database('DB');
+      const field = page.getByRole('textbox', { name: 'New bucket path' });
+      await page.route('**/api/buckets**', async (route) => {
+        if (route.request().method() !== method) return route.continue();
+        const response = await route.fetch();
+        expect(response.status()).toBe(method === 'POST' ? 200 : 204);
+        await db
+          .prepare('ALTER TABLE buckets RENAME TO unavailable_buckets')
+          .run();
+        return route.fulfill({ response });
+      });
+      if (method === 'POST') {
+        await field.fill(path);
+        await field.press('Enter');
+      } else {
+        await page
+          .getByRole('button', { name: `Actions for ${path}`, exact: true })
+          .click();
+        await page.getByRole('menuitem', { name: 'Delete bucket…' }).click();
+        await page
+          .getByRole('alertdialog')
+          .getByRole('button', { name: 'Delete bucket', exact: true })
+          .click();
+      }
+      await page.getByRole('button', { name: 'Try again' }).waitFor();
+      await expect.poll(() => field.isEnabled()).toBe(true);
+      await page.waitForLoadState('networkidle');
+      expect(await field.inputValue()).toBe('');
+      expect(await page.locator('#bucket-path-feedback').innerText()).toContain(
+        `${method === 'POST' ? 'Created' : 'Deleted'} ${path}.`,
+      );
+      expect(
+        await page
+          .getByRole('alert')
+          .filter({
+            hasText: `Couldn't ${method === 'POST' ? 'create' : 'delete'} ${path}`,
+          })
+          .count(),
+      ).toBe(0);
+      expect(await row(page, path).count()).toBe(method === 'POST' ? 1 : 0);
+      expect(
+        (
+          await db
+            .prepare('SELECT path FROM unavailable_buckets WHERE path=?')
+            .bind(path)
+            .all()
+        ).results,
+      ).toHaveLength(method === 'POST' ? 1 : 0);
+      await db
+        .prepare('ALTER TABLE unavailable_buckets RENAME TO buckets')
+        .run();
+      await page.getByRole('button', { name: 'Try again' }).click();
+      await expect
+        .poll(() => page.getByRole('button', { name: 'Try again' }).count())
+        .toBe(0);
+      expect(await row(page, path).count()).toBe(method === 'POST' ? 1 : 0);
+      expect(
+        requests.filter((request) => request.method === method),
+      ).toHaveLength(1);
+    });
+  },
+);
+
 it('Cancel returns keyboard focus to the bucket row action', async () => {
   const { page, context } = await bucketPage(browser, app.origin);
   try {
