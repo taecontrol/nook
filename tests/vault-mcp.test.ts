@@ -128,9 +128,11 @@ it('E15: the read-only tool requires a bucket and teaches metadata-only ancestor
   expect(tool!.description).toMatch(/ancestors/i);
   expect(tool!.description).toMatch(/never values/i);
   expect(tool!.description).toMatch(
-    /must not ask the owner for (?:a |the )?value/i,
+    /instead of asking the owner for (?:a |the )?value/i,
   );
-  expect(tool!.description).not.toContain('nook run');
+  expect(tool!.description).toContain(
+    'nook run --secret ENV=bucket/NAME --purpose "…" -- <command>',
+  );
   expect(
     tools
       .filter((entry) => /secret/.test(entry.name))

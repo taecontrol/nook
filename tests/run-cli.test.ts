@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   chmod,
   mkdir,
@@ -9,6 +9,7 @@ import {
 } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { beforeEach, expect, it } from 'vitest';
+import { evidenceRoot } from '../scripts/lib/instrument.ts';
 import {
   acmePath,
   auditPageData,
@@ -20,7 +21,12 @@ import { issueGrant } from './support/grants.ts';
 import { revokeMachine } from './support/machines.ts';
 import { expectOutput } from './support/private-assertions.ts';
 import { testBuild } from './support/runtime.ts';
-import { createSecret, expectNoValue, secretInput } from './support/vault.ts';
+import {
+  createSecret,
+  expectNoValue,
+  keyFingerprint,
+  secretInput,
+} from './support/vault.ts';
 import { vaultCheckpoints } from './support/vault-checkpoints.ts';
 
 let app: Awaited<ReturnType<typeof runFixture>>;
@@ -37,6 +43,14 @@ const runArgs = (
   '--',
   ...command,
 ];
+async function keyringTranscript() {
+  try {
+    return await readFile(resolve(keyring.home, 'argv'), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
+    throw error;
+  }
+}
 beforeEach(async () => {
   app = await runFixture();
   keyring = await privateKeyring();
@@ -81,12 +95,11 @@ it.each([0, 1, 42])(
       executable: process.execPath.split('/').at(-1),
       purpose: 'open the release PR',
     });
-    expectNoValue(
-      result.stdout +
-        result.stderr +
-        (await readFile(resolve(keyring.home, 'argv'), 'utf8')),
-      [app.input.value, app.token, app.key],
-    );
+    expectNoValue(result.stdout + result.stderr + (await keyringTranscript()), [
+      app.input.value,
+      app.token,
+      app.key,
+    ]);
     expect(await filesContain(keyring.home, app.input.value)).toBe(false);
   },
 );
@@ -101,13 +114,18 @@ it.skipIf(process.platform !== 'linux')(
     const command = args
       .map((arg) => "'" + arg.replaceAll("'", "'\\''") + "'")
       .join(' ');
-    const result = await keyring.command('/usr/bin/script', [
-      '--quiet',
-      '--return',
-      '--command',
-      command,
-      '/dev/null',
-    ]).done;
+    const result = await keyring.command(
+      '/usr/bin/script',
+      ['--quiet', '--return', '--command', command, '/dev/null'],
+      process.env.COVERAGE_RUN
+        ? {
+            NOOK_CLI_COVERAGE: resolve(
+              evidenceRoot,
+              `cli-${crypto.randomUUID()}.json`,
+            ),
+          }
+        : {},
+    ).done;
     expect(result.status).toBe(0);
     expectOutput(result.stdout, '[true,true,true]', true);
     expect(result.stderr).toBe('');
@@ -147,7 +165,9 @@ it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
 it('E4: command resolution precedes keyring/network, with 127 and 126', async () => {
   const locked = resolve(keyring.home, 'not-executable');
   await writeFile(locked, '#!/bin/sh\nexit 0\n', { mode: 0o600 });
-  const before = await readFile(resolve(keyring.home, 'argv'), 'utf8');
+  const before = await readFile(resolve(keyring.home, 'argv'), 'utf8').catch(
+    () => '',
+  );
   for (const [name, code, message] of [
     [
       'nook-command-that-does-not-exist',
@@ -160,9 +180,7 @@ it('E4: command resolution precedes keyring/network, with 127 and 126', async ()
     expect(result.status).toBe(code);
     expectOutput(result.stdout + result.stderr, message, true);
   }
-  expect(
-    (await readFile(resolve(keyring.home, 'argv'), 'utf8')) === before,
-  ).toBe(true);
+  expect((await keyringTranscript()) === before).toBe(true);
   expect(await auditRows(app)).toEqual([]);
 });
 it.each(
@@ -210,13 +228,17 @@ it.each(
 )(
   'E6: invalid run args stop before the keyring with one useful line (%#)',
   async ({ args }) => {
-    const before = await readFile(resolve(keyring.home, 'argv'), 'utf8');
+    const before = await readFile(resolve(keyring.home, 'argv'), 'utf8').catch(
+      () => '',
+    );
     const result = await keyring.start(['run', ...args]).done;
     expect(result.status).toBe(1);
     expect((result.stdout + result.stderr).trim().split('\n')).toHaveLength(1);
     expect((result.stdout + result.stderr).trim().length).toBeGreaterThan(0);
     expect(
-      (await readFile(resolve(keyring.home, 'argv'), 'utf8')) === before,
+      (await readFile(resolve(keyring.home, 'argv'), 'utf8').catch(
+        () => '',
+      )) === before,
     ).toBe(true);
     expect(await auditRows(app)).toEqual([]);
   },
@@ -351,4 +373,24 @@ it('E1: a quiet successful child produces no CLI output', async () => {
   expect(result.status).toBe(0);
   expect(result.stdout).toBe('');
   expect(result.stderr).toBe('');
+});
+
+it('E8: a mismatched key stops the child with only the recorded key fingerprint', async () => {
+  await app.setBindings({
+    ...app.bindings,
+    VAULT_KEY: randomBytes(32).toString('base64'),
+  });
+  const result = await keyring.start(runArgs()).done;
+  expect(result.status).toBe(1);
+  expectOutput(
+    result.stdout + result.stderr,
+    `Cannot open a secret encrypted with key ${keyFingerprint(app.key)}.`,
+    true,
+  );
+  expectNoValue(result.stdout + result.stderr, [
+    app.input.value,
+    app.key,
+    app.token,
+  ]);
+  expect(await auditRows(app)).toEqual([]);
 });

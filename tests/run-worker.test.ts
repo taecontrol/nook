@@ -31,6 +31,7 @@ beforeEach(async () => {
 it('E10/E28: distinct values are delivered only after a complete private audit, with no-store', async () => {
   const other = secretInput({ name: 'OTHER_KEY' });
   expect((await createSecret(app, other)).status).toBe(201);
+  const started = Date.now();
   const response = await fetchValues(app, app.token, {
     secrets: [acmePath, 'work/acme/OTHER_KEY', acmePath],
   });
@@ -57,6 +58,9 @@ it('E10/E28: distinct values are delivered only after a complete private audit, 
       executable: 'gh',
     });
     expect(new Date(entry.at).toISOString()).toBe(entry.at);
+    expect(
+      Date.parse(entry.at) >= started && Date.parse(entry.at) <= Date.now(),
+    ).toBe(true);
   }
   expectNoValue(JSON.stringify({ page, rows: await auditRows(app) }), [
     app.input.value,
@@ -202,7 +206,9 @@ it('E11/E12: one auth statement, one read batch, one audit batch; commit precede
     batches = 0;
     mode = 'normal';
     expect((await fetchValues(measured, token)).status).toBe(200);
-    expect(await auditRows(measured)).toHaveLength(3);
+    const threeRuns = await auditRows(measured);
+    expect(threeRuns).toHaveLength(3);
+    expect(new Set(threeRuns.map((row) => row.run_id)).size).toBe(3);
     labels.length = 0;
     batches = 0;
     expect(
@@ -371,6 +377,10 @@ it.each([
   '?secret=work/acme',
   '?cursor=garbage',
   '?cursor=e30',
+  '?cursor=%21',
+  `?cursor=${'a'.repeat(257)}`,
+  `?cursor=${Buffer.from(JSON.stringify({ at: 'invalid-time', id: '12345678-1234-4123-8123-123456789abc' })).toString('base64url')}`,
+  `?cursor=${Buffer.from(JSON.stringify({ at: '2026-10-08T12:00:00.000Z', id: 'invalid-id' })).toString('base64url')}`,
   '?bucket=/work',
   '?secret=work/acme/GH_TOKEN/extra',
 ])('E13: malformed audit filters/cursors return 400 (%s)', async (query) => {
@@ -458,4 +468,25 @@ it('E11/E28: genuine audit write failure rolls back every row and exposes no pri
     app.token,
     app.key,
   ]);
+});
+
+it('E8: an undecryptable later path fails the whole fetch without partial delivery or audit', async () => {
+  const other = secretInput({ name: 'OTHER_KEY' });
+  expect((await createSecret(app, other)).status).toBe(201);
+  await (await app.mf.getD1Database('DB'))
+    .prepare(
+      "UPDATE secrets SET key_id='0000000000000000' WHERE name='OTHER_KEY'",
+    )
+    .run();
+  const response = await fetchValues(app, app.token, {
+    secrets: [acmePath, 'work/acme/OTHER_KEY'],
+  });
+  expect(response.status).toBe(503);
+  const text = await response.text();
+  expectNoValue(text, [app.input.value, other.value, app.key, app.token]);
+  expect(JSON.parse(text)).toEqual({
+    _tag: 'SecretKeyUnavailable',
+    message: 'Cannot open a secret encrypted with key 0000000000000000.',
+  });
+  expect(await auditRows(app)).toEqual([]);
 });

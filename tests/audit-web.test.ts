@@ -52,6 +52,10 @@ it('E17/E18/E28: chronological ledger, named facts, details and historical links
     expect(await first.innerText()).toContain('work-laptop');
     expect(await first.innerText()).toContain('gh');
     expect(await auditEntries(page).nth(1).innerText()).toContain('5m ago');
+    expect(await auditEntries(page).nth(21).innerText()).toContain('3h ago');
+    expect(
+      await auditEntries(page).nth(22).locator('time').first().innerText(),
+    ).toBe('Oct 7');
     await first.getByRole('button', { name: /Show details/ }).click();
     const text = await first.innerText();
     for (const fact of [
@@ -126,6 +130,7 @@ it('E19: subtree/exact filters, URL reload and Back, cleared stale secret and hi
     ).toBe(true);
     await selectAudit(page, 'Secret', acmePath);
     await page.waitForLoadState('networkidle');
+    await auditEntries(page).first().waitFor();
     const ids = await auditEntries(page).evaluateAll((rows) =>
       rows.map((row) => row.getAttribute('data-entry')),
     );
@@ -208,7 +213,6 @@ it('E22: fresh and filtered-empty copy, clear filters and one skeleton status', 
   const fresh = await visitAudit(browser, { count: 0 });
   try {
     await fresh.page.getByText('No secret uses yet', { exact: true }).waitFor();
-    expect(await fresh.page.locator('main').count()).toBeGreaterThanOrEqual(0);
     expect(await fresh.page.locator('body').innerText()).toContain('nook run');
     await selectAudit(fresh.page, 'Bucket', 'work');
     await fresh.page
@@ -340,12 +344,23 @@ it('E24: Audit intent loads all four queries, filter pointer intent caches insta
     expect(
       visit.requests.some((request) => request.includes('bucket=work%2Facme')),
     ).toBe(true);
+    const beforeRefresh = visit.requests.filter((request) =>
+      request.includes('bucket=work%2Facme'),
+    ).length;
     hold = true;
     await page.getByRole('option', { name: 'work/acme', exact: true }).click();
     expect(
       await page.getByRole('status', { name: 'Loading audit entries' }).count(),
     ).toBe(0);
     expect(await auditEntries(page).count()).toBeGreaterThan(0);
+    await expect
+      .poll(
+        () =>
+          visit.requests.filter((request) =>
+            request.includes('bucket=work%2Facme'),
+          ).length,
+      )
+      .toBeGreaterThan(beforeRefresh);
     gate.resolve();
     await page.waitForLoadState('networkidle');
   } finally {

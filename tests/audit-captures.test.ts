@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
-import { acmePath, fetchValues } from './support/audit.ts';
+import { acmePath, auditNow, fetchValues } from './support/audit.ts';
 import { auditEntries, visitAudit } from './support/audit-browser.ts';
 import { issueGrant } from './support/grants.ts';
 import { deferred, listMachines, revokeMachine } from './support/machines.ts';
@@ -71,7 +71,13 @@ it.each(matrix)(
             ).status,
           ).toBe(403);
         }
-        if (state === 'long-content')
+        if (state === 'long-content') {
+          await db
+            .prepare('UPDATE machine_tokens SET machine_name=?')
+            .bind(
+              'luis-macbook-pro-16-inch-2026-client-site-loaner-for-billing',
+            )
+            .run();
           expect(
             (
               await fetchValues(app, seeded.token, {
@@ -89,6 +95,13 @@ it.each(matrix)(
               })
             ).status,
           ).toBe(200);
+          await db
+            .prepare(
+              "UPDATE audit_entries SET at=? WHERE path LIKE 'work/acme/billing-service/%'",
+            )
+            .bind(new Date(auditNow.getTime() - 360_000).toISOString())
+            .run();
+        }
         if (state === 'deleted-revoked') {
           const secret = (await listSecrets(app)).find(
             (item) => item.path === acmePath,
@@ -130,8 +143,15 @@ it.each(matrix)(
       else {
         await auditEntries(page).first().waitFor();
         if (state === 'long-content' || state === 'deleted-revoked') {
-          await auditEntries(page)
-            .first()
+          await (state === 'long-content'
+            ? auditEntries(page)
+                .filter({
+                  hasText:
+                    'CLOUDFLARE_API_TOKEN_FOR_BILLING_SERVICE_PRODUCTION_DEPLOYS',
+                })
+                .first()
+            : auditEntries(page).first()
+          )
             .getByRole('button', { name: /Show details/ })
             .click();
           await page.getByText('Working directory', { exact: true }).waitFor();

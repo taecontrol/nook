@@ -113,7 +113,14 @@ export async function seedAudit(
     await db
       .prepare('UPDATE audit_entries SET at=? WHERE id=?')
       .bind(
-        new Date(auditNow.getTime() - index * 300_000).toISOString(),
+        new Date(
+          auditNow.getTime() -
+            (index < 21
+              ? index * 300_000
+              : index === 21
+                ? 10_800_000
+                : (index - 21) * 86_400_000),
+        ).toISOString(),
         row.id,
       )
       .run();

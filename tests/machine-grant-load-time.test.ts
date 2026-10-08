@@ -14,6 +14,8 @@ const measured = {
   approvalNavigation: Array(5).fill(100),
   vault: Array(5).fill(500),
   vaultNavigation: Array(5).fill(20),
+  audit: Array(5).fill(500),
+  auditNavigation: Array(5).fill(20),
 };
 it('E32: loaded approval tree timing is mandatory, independently limited to 100 ms, and printed', () => {
   expect(() =>
