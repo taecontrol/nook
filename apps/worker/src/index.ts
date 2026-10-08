@@ -184,7 +184,7 @@ function protectedMachineRoute(path: string, method: string) {
   return (
     path === '/api/machine/whoami' ||
     (path === '/api/machine/secrets/values' && method === 'POST') ||
-    (path === '/api/machine/secrets' && method === 'GET') ||
+    (path === '/api/machine/secrets' && ['GET', 'POST'].includes(method)) ||
     (path === '/api/machine/token' && method === 'DELETE')
   );
 }

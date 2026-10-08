@@ -1,8 +1,10 @@
 import { D1Client } from '@effect/sql-d1';
 import {
   BucketNotFound,
+  type CreateMachineSecret,
   type CreateSecret,
   InvalidBucketPath,
+  InvalidRun,
   InvalidSecret,
   type OwnerSecret,
   type ReplaceSecret,
@@ -13,13 +15,16 @@ import {
   secretLineage,
   secretPath,
   validateBucketPath,
+  validatePurpose,
   validateSecretDescription,
   validateSecretName,
   validateSecretValue,
+  validateWorkingDirectory,
 } from '@nook/contract';
 import { Effect, Redacted, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
 import { SqlSchema } from 'effect/sql';
+import type { AuditMachine } from './audit.ts';
 import { type BucketGrant, canRead, canWrite } from './authorization.ts';
 import { parseKeyring, seal } from './vault-keyring.ts';
 
@@ -149,16 +154,66 @@ const readStore = Effect.gen(function* () {
       };
     });
 });
+type Creation = {
+  machine: Pick<AuditMachine, 'id' | 'machine'>;
+  input: CreateMachineSecret;
+};
+function createStore(binding: string, grant: BucketGrant) {
+  return Effect.gen(function* () {
+    const sql = yield* D1Client.D1Client;
+    return (input: CreateSecret, creation?: Creation) =>
+      Effect.gen(function* () {
+        yield* authorized(grant, input.bucket, true);
+        yield* validName(input.name);
+        yield* validValue(input);
+        const ring = yield* parseKeyring(binding);
+        const path = secretPath(input);
+        const envelope = yield* seal(ring, path, input.value);
+        const now = new Date().toISOString();
+        const audit = creation
+          ? [
+              sql`INSERT INTO audit_entries(id, at, outcome, path, purpose, machine_id, machine_name, working_directory) SELECT ${input.writeId}, ${now}, 'created', ${path}, ${creation.input.purpose}, ${creation.machine.id}, ${creation.machine.machine}, ${creation.input.workingDirectory} WHERE EXISTS (SELECT 1 FROM secrets WHERE bucket = ${input.bucket} AND name = ${input.name} AND version = ${input.writeId}) ON CONFLICT(id) DO NOTHING`,
+            ]
+          : [];
+        const [inserted, states] = yield* sql
+          .batch([
+            sql<Row>`INSERT INTO secrets(bucket, name, description, version, key_id, iv, ciphertext, created_at, updated_at) SELECT ${input.bucket}, ${input.name}, ${input.description ?? ''}, ${input.writeId}, ${envelope.key_id}, ${envelope.iv}, ${envelope.ciphertext}, ${now}, ${now} WHERE EXISTS (SELECT 1 FROM buckets WHERE path = ${input.bucket}) ON CONFLICT(bucket, name) DO NOTHING RETURNING bucket, name, description, updated_at, version`,
+            sql<CreateState>`SELECT EXISTS(SELECT 1 FROM buckets WHERE path = ${input.bucket}) AS has_bucket, bucket, name, description, updated_at, version FROM (SELECT 1) LEFT JOIN secrets ON bucket = ${input.bucket} AND name = ${input.name}`,
+            ...audit,
+          ])
+          .pipe(unavailable);
+        return yield* createOutcome(inserted, states[0], input.writeId, path);
+      });
+  });
+}
 // This face deliberately has no value read, replace, or remove capability.
-export function machineVault(grant: BucketGrant) {
-  return readStore.pipe(
-    Effect.map((list) => ({ list: (bucket: string) => list(grant, bucket) })),
-  );
+export function machineVault(grant: BucketGrant, binding = '') {
+  return Effect.gen(function* () {
+    const list = yield* readStore;
+    const create = yield* createStore(binding, grant);
+    return {
+      list: (bucket: string) => list(grant, bucket),
+      create: (machine: Creation['machine'], input: CreateMachineSecret) =>
+        Effect.gen(function* () {
+          const message =
+            validatePurpose(input.purpose) ??
+            validateWorkingDirectory(input.workingDirectory);
+          if (message) return yield* Effect.fail(new InvalidRun({ message }));
+          return yield* create(input, { machine, input }).pipe(
+            Effect.map(publicMetadata),
+            Effect.catchTag('InvalidBucketPath', (error) =>
+              Effect.fail(new InvalidSecret({ message: error.message })),
+            ),
+          );
+        }),
+    };
+  });
 }
 export function ownerVault(binding = '', grant: BucketGrant = 'all') {
   return Effect.gen(function* () {
     const sql = yield* D1Client.D1Client;
     const read = yield* readStore;
+    const create = yield* createStore(binding, grant);
     const listRows = SqlSchema.findAll({
       Request: Schema.Void,
       Result: Row,
@@ -174,23 +229,7 @@ export function ownerVault(binding = '', grant: BucketGrant = 'all') {
               Effect.map((rows) => ({ secrets: rows.map(metadata) })),
             )
           : Effect.fail(new HttpApiError.Forbidden()),
-      create: (input: CreateSecret) =>
-        Effect.gen(function* () {
-          yield* authorized(grant, input.bucket, true);
-          yield* validName(input.name);
-          yield* validValue(input);
-          const ring = yield* parseKeyring(binding);
-          const path = secretPath(input);
-          const envelope = yield* seal(ring, path, input.value);
-          const now = new Date().toISOString();
-          const [inserted, states] = yield* sql
-            .batch([
-              sql<Row>`INSERT INTO secrets(bucket, name, description, version, key_id, iv, ciphertext, created_at, updated_at) SELECT ${input.bucket}, ${input.name}, ${input.description ?? ''}, ${input.writeId}, ${envelope.key_id}, ${envelope.iv}, ${envelope.ciphertext}, ${now}, ${now} WHERE EXISTS (SELECT 1 FROM buckets WHERE path = ${input.bucket}) ON CONFLICT(bucket, name) DO NOTHING RETURNING bucket, name, description, updated_at, version`,
-              sql<CreateState>`SELECT EXISTS(SELECT 1 FROM buckets WHERE path = ${input.bucket}) AS has_bucket, bucket, name, description, updated_at, version FROM (SELECT 1) LEFT JOIN secrets ON bucket = ${input.bucket} AND name = ${input.name}`,
-            ])
-            .pipe(unavailable);
-          return yield* createOutcome(inserted, states[0], input.writeId, path);
-        }),
+      create: (input: CreateSecret) => create(input),
       replace: (path: string, input: ReplaceSecret) =>
         Effect.gen(function* () {
           const { bucket, name } = yield* target(grant, path);

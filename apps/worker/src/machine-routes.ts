@@ -52,10 +52,17 @@ export function machineHandler(db: D1Database, origin: string, vaultKey = '') {
           }).pipe(Effect.provideService(D1Client.D1Client, sql)),
         )
         .handle('values', ({ headers, payload }) =>
-          store.forRun(headers.authorization).pipe(
+          store.forAudit(headers.authorization).pipe(
             Effect.flatMap((machine) => runSecrets(machine, payload, vaultKey)),
             Effect.provideService(D1Client.D1Client, sql),
           ),
+        )
+        .handle('createSecret', ({ headers, payload }) =>
+          Effect.gen(function* () {
+            const machine = yield* store.forAudit(headers.authorization);
+            const vault = yield* machineVault(machine.grant, vaultKey);
+            return yield* vault.create(machine, payload);
+          }).pipe(Effect.provideService(D1Client.D1Client, sql)),
         )
         .handle('logout', ({ headers }) => store.logout(headers.authorization));
     }),

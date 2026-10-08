@@ -227,7 +227,7 @@ function Outcome({ entry }: { entry: AuditEntry }) {
   ) : (
     <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
       <CircleCheck className="size-3" aria-hidden />
-      Delivered
+      {entry.outcome === 'created' ? 'Created' : 'Delivered'}
     </span>
   );
 }
@@ -255,6 +255,7 @@ function Entry({
   deleted: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const executable = entry.outcome === 'created' ? '' : entry.executable;
   return (
     <li
       data-entry={entry.id}
@@ -302,7 +303,8 @@ function Entry({
                 {entry.purpose}
               </p>
               <p className="mt-1 truncate text-xs text-muted-foreground lg:hidden">
-                {entry.machine.name} · {entry.executable}
+                {entry.machine.name}
+                {executable && ` · ${executable}`}
               </p>
             </div>
             <div className="hidden w-40 min-w-0 shrink-0 lg:block">
@@ -311,9 +313,9 @@ function Entry({
               </p>
               <p
                 className="truncate font-mono text-xs text-muted-foreground"
-                title={entry.executable}
+                title={executable}
               >
-                {entry.executable}
+                {executable}
               </p>
             </div>
           </div>
@@ -381,22 +383,26 @@ function EntryDetails({
             <span className="font-mono">{entry.workingDirectory}</span>
           </Fact>
         </div>
-        <Fact label="Executable">
-          <span className="font-mono">{entry.executable}</span>
-        </Fact>
-        <Fact label="Run">
-          <span className="font-mono text-xs">{entry.runId}</span>
-        </Fact>
+        {entry.outcome !== 'created' && (
+          <>
+            <Fact label="Executable">
+              <span className="font-mono">{entry.executable}</span>
+            </Fact>
+            <Fact label="Run">
+              <span className="font-mono text-xs">{entry.runId}</span>
+            </Fact>
+          </>
+        )}
       </dl>
       <div className="mt-4 flex flex-wrap gap-2">
         <Button size="sm" variant="outline" asChild>
           <Link to="/audit" search={{ secret: entry.path }}>
-            Uses of this secret
+            Activity for this secret
           </Link>
         </Button>
         <Button size="sm" variant="ghost" asChild>
           <Link to="/audit" search={{ bucket: entry.bucket }}>
-            Uses in this bucket
+            Activity in this bucket
           </Link>
         </Button>
       </div>
@@ -433,12 +439,14 @@ function NoEntries({ filtered }: { filtered: boolean }) {
             {filtered ? <SearchX /> : <History />}
           </EmptyMedia>
           <EmptyTitle>
-            {filtered ? 'No uses match these filters' : 'No secret uses yet'}
+            {filtered
+              ? 'No activity matches these filters'
+              : 'No secret uses or creations yet'}
           </EmptyTitle>
           <EmptyDescription>
             {filtered
-              ? 'Try another bucket or secret, or return to all uses.'
-              : 'When a machine asks for a secret through nook run, its use appears here. Denied requests appear here too.'}
+              ? 'Try another bucket or secret, or return to all activity.'
+              : 'When a machine uses a secret through nook run or stores one through nook vault create, it appears here. Denied uses appear here too.'}
           </EmptyDescription>
         </EmptyHeader>
         {filtered && (
@@ -472,8 +480,8 @@ export function AuditPage() {
         Audit
       </h1>
       <p className="max-w-2xl text-sm text-muted-foreground">
-        Every secret request, newest first. Review what was used, why, and by
-        which machine.
+        Every secret use and creation, newest first. Review what happened, why,
+        and by which machine.
       </p>
       <Filters
         filters={filters}
@@ -539,7 +547,7 @@ function AuditResults({
   ) : entries.length === 0 ? (
     <NoEntries filtered={filtered} />
   ) : (
-    <section aria-label="Secret requests">
+    <section aria-label="Secret activity">
       <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
         <span>{entries.length} entries loaded</span>
         <span>Newest first</span>

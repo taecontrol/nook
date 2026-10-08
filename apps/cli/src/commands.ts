@@ -1,14 +1,21 @@
 import { NodeServices } from '@effect/platform-node';
 import { Effect } from 'effect';
-import { Argument, Command } from 'effect/cli';
+import { Argument, Command, Flag } from 'effect/cli';
 import cliPackage from '../package.json' with { type: 'json' };
 import { CliFailure } from './errors.ts';
 import { run } from './run.ts';
 import { login, logout, mcpHeader, whoami } from './session.ts';
 import { vaultCheck, vaultList } from './vault.ts';
+import { vaultCreate } from './vault-create.ts';
 
 function missingVaultBucket(args: readonly string[]) {
   return args[0] === 'vault' && args[1] === 'list' && args.length === 2;
+}
+function creatingVault(args: readonly string[]) {
+  return args[0] === 'vault' && args[1] === 'create' && args[2] !== '--help';
+}
+function supportedPlatform(platform: NodeJS.Platform) {
+  return platform === 'linux' || platform === 'darwin';
 }
 
 export async function execute(
@@ -26,7 +33,7 @@ export async function execute(
     args[0] === 'mcp-header'
       ? (message: string) => process.stderr.write(`${message}\n`)
       : write;
-  if (platform !== 'linux' && platform !== 'darwin') {
+  if (!supportedPlatform(platform)) {
     write('The Nook CLI supports Linux and macOS only.');
     return 1;
   }
@@ -50,6 +57,15 @@ export async function execute(
             { bucket: Argument.String('bucket') },
             ({ bucket }) => vaultList(bucket, write),
           ),
+          Command.make('create', {
+            path: Argument.String('path'),
+            purpose: Flag.String('purpose'),
+            description: Flag.optional(Flag.String('description')),
+          }).pipe(
+            Command.withDescription(
+              'Store a new secret from stdin without overwriting.',
+            ),
+          ),
         ]),
       ),
       Command.make('login', { url: Argument.String('url') }, ({ url }) =>
@@ -66,10 +82,13 @@ export async function execute(
     ]),
   );
   return Effect.runPromise(
-    Command.runWith(command, {
-      version: cliPackage.version,
-      renderErrors: false,
-    })(args).pipe(
+    (creatingVault(args)
+      ? vaultCreate(args.slice(2), write)
+      : Command.runWith(command, {
+          version: cliPackage.version,
+          renderErrors: false,
+        })(args)
+    ).pipe(
       Effect.provide(NodeServices.layer),
       Effect.as(0),
       Effect.catch((error) => {

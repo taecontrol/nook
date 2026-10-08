@@ -1,17 +1,27 @@
 import { Schema } from 'effect';
-export const AuditEntry = Schema.Struct({
+
+const EntryFacts = Schema.Struct({
   id: Schema.String,
   at: Schema.String,
-  outcome: Schema.Literals(['delivered', 'denied']),
   path: Schema.String,
   bucket: Schema.String,
   name: Schema.String,
   purpose: Schema.String,
   machine: Schema.Struct({ id: Schema.String, name: Schema.String }),
   workingDirectory: Schema.String,
-  executable: Schema.String,
-  runId: Schema.String,
 });
+export const AuditEntry = Schema.Union([
+  EntryFacts.mapFields((fields) => ({
+    ...fields,
+    outcome: Schema.Literals(['delivered', 'denied']),
+    executable: Schema.String,
+    runId: Schema.String,
+  })),
+  EntryFacts.mapFields((fields) => ({
+    ...fields,
+    outcome: Schema.Literal('created'),
+  })),
+]);
 export type AuditEntry = typeof AuditEntry.Type;
 export const AuditFilters = Schema.Struct({
   bucket: Schema.optionalKey(Schema.String),

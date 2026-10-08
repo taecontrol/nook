@@ -50,6 +50,16 @@ The purpose is required and must be one line of 1 to 200 characters. Nook resolv
 
 Before delivering values, the Worker records one entry per secret, including the purpose, machine, working directory, executable, and time. Denied requests record only the denied paths. Audit entries are permanent and read-only, and retain their recorded machine name after revocation. Filter Audit by bucket subtree or exact secret path, including deleted secrets, and load older entries in pages of 25. A failed or lost value request is not retried automatically; a new request is a separate use.
 
+## Store a new secret
+
+```sh
+provider-cli new-token | nook vault create work/acme/NEW_TOKEN --purpose "token from provider setup" --description "Provider API token"
+```
+
+The value travels directly from stdin to Vault. Nook removes exactly one trailing LF or CRLF, preserves other whitespace, and accepts at most 64 KiB of valid UTF-8 without NUL. From a terminal it asks for a hidden value. A purpose is required; the description is optional. Values cannot be passed as arguments. Existing names are never overwritten, and machines cannot replace or delete secrets.
+
+The bucket must already exist within the machine's write grant. Each successful creation records its path, purpose, machine, working directory, and time in the same Audit ledger as uses, with outcome `Created`. Denied attempts and owner web creations add no creation entry. Retries reuse one write id, so a lost response cannot duplicate the creation or its audit entry. If the result cannot be confirmed, Nook says so.
+
 ## Run locally
 
 Install [mise](https://mise.jdx.dev/), then run from the repository root:

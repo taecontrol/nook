@@ -77,7 +77,7 @@ it('E17/E18/E28: chronological ledger, named facts, details and historical links
       visit.entries[0].runId,
     ])
       expect(text).toContain(fact);
-    await first.getByRole('link', { name: 'Uses of this secret' }).click();
+    await first.getByRole('link', { name: 'Activity for this secret' }).click();
     expect(new URL(page.url()).searchParams.get('secret')).toBe(acmePath);
     expectNoValue(await page.content(), visit.values);
   } finally {
@@ -217,7 +217,9 @@ it('E20/E21: recorded denial reason, Deleted and Revoked use historical identity
     await expect.poll(() => delivered.innerText()).toContain('Deleted');
     expect(await delivered.innerText()).toContain('Revoked');
     expect(await delivered.innerText()).toContain('work-laptop');
-    await delivered.getByRole('link', { name: 'Uses in this bucket' }).click();
+    await delivered
+      .getByRole('link', { name: 'Activity in this bucket' })
+      .click();
     expect(new URL(page.url()).searchParams.get('bucket')).toBe('work/acme');
   } finally {
     await visit.close();
@@ -226,20 +228,24 @@ it('E20/E21: recorded denial reason, Deleted and Revoked use historical identity
 it('E22: fresh and filtered-empty copy, clear filters and one skeleton status', async () => {
   const fresh = await visitAudit(browser, { count: 0 });
   try {
-    await fresh.page.getByText('No secret uses yet', { exact: true }).waitFor();
+    await fresh.page
+      .getByText('No secret uses or creations yet', { exact: true })
+      .waitFor();
     expect(await fresh.page.locator('body').innerText()).toContain('nook run');
     expect(await fresh.page.locator('body').innerText()).toContain(
-      'Denied requests appear here too.',
+      'Denied uses appear here too.',
     );
     await selectAudit(fresh.page, 'Bucket', 'work');
     await fresh.page
-      .getByText('No uses match these filters', { exact: true })
+      .getByText('No activity matches these filters', { exact: true })
       .waitFor();
     await fresh.page
       .getByRole('link', { name: 'Clear filters' })
       .last()
       .click();
-    await fresh.page.getByText('No secret uses yet', { exact: true }).waitFor();
+    await fresh.page
+      .getByText('No secret uses or creations yet', { exact: true })
+      .waitFor();
   } finally {
     await fresh.close();
   }
@@ -502,7 +508,7 @@ it('E19: historical URL selections remain visible even when no matching entry is
   try {
     const { page } = visit;
     await page
-      .getByText('No uses match these filters', { exact: true })
+      .getByText('No activity matches these filters', { exact: true })
       .waitFor();
     expect(
       await page
@@ -574,7 +580,7 @@ it('E24: intent on historical detail links preloads their URL filters before nav
     const row = auditEntries(page).first();
     await row.waitFor();
     await row.getByRole('button', { name: /Show details/ }).click();
-    const secret = row.getByRole('link', { name: 'Uses of this secret' });
+    const secret = row.getByRole('link', { name: 'Activity for this secret' });
     await secret.hover();
     await expect
       .poll(() =>
@@ -583,7 +589,7 @@ it('E24: intent on historical detail links preloads their URL filters before nav
         ),
       )
       .toBe(true);
-    const bucket = row.getByRole('link', { name: 'Uses in this bucket' });
+    const bucket = row.getByRole('link', { name: 'Activity in this bucket' });
     await bucket.hover();
     await expect
       .poll(() =>

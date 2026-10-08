@@ -174,10 +174,12 @@ it.each(matrix)(
           .getByText('Couldn’t load audit entries', { exact: true })
           .waitFor();
       else if (state === 'fresh')
-        await page.getByText('No secret uses yet', { exact: true }).waitFor();
+        await page
+          .getByText('No secret uses or creations yet', { exact: true })
+          .waitFor();
       else if (state === 'filter-empty')
         await page
-          .getByText('No uses match these filters', { exact: true })
+          .getByText('No activity matches these filters', { exact: true })
           .waitFor();
       else {
         await auditEntries(page).first().waitFor();

@@ -12,13 +12,20 @@ import {
   InvalidBucketGrant,
 } from './grants.ts';
 import {
+  CreateMachineSecret,
   DeliveredSecrets,
   InvalidRun,
   RunSecrets,
   SecretKeyUnavailable,
   SecretsForbidden,
 } from './run.ts';
-import { Secret, SecretNotFound, VaultNotConfigured } from './vault.ts';
+import {
+  InvalidSecret,
+  Secret,
+  SecretExists,
+  SecretNotFound,
+  VaultNotConfigured,
+} from './vault.ts';
 export const MachineIdentity = Schema.Struct({
   machine: Schema.String,
   grant: BucketGrant,
@@ -189,6 +196,22 @@ export const MachineApi = HttpApi.make('machine').add(
           HttpApiError.Forbidden,
           InvalidBucketPath,
           BucketNotFound,
+        ],
+      }),
+    )
+    .add(
+      HttpApiEndpoint.post('createSecret', '/api/machine/secrets', {
+        headers: Schema.Struct({ authorization: Schema.String }),
+        payload: CreateMachineSecret,
+        success: Secret.annotate({ httpApiStatus: 201 }),
+        error: [
+          ...machineErrors,
+          HttpApiError.Forbidden,
+          BucketNotFound,
+          InvalidSecret,
+          InvalidRun,
+          SecretExists,
+          VaultNotConfigured,
         ],
       }),
     )
