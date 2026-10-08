@@ -10,6 +10,7 @@ import {
   seedSecrets,
   vaultRuntime,
 } from './vault.ts';
+import { vaultCheckpoints } from './vault-checkpoints.ts';
 
 export const auditNow = new Date('2026-10-08T12:00:00.000Z');
 export const acmePath = 'work/acme/GH_TOKEN';
@@ -72,8 +73,13 @@ export async function auditPageData(
     next: string | null;
   };
 }
-export async function runFixture(grant: BucketGrant = ['work/acme']) {
-  const app = await vaultRuntime();
+export async function runFixture(
+  grant: BucketGrant = ['work/acme'],
+  onCheckpoint?: (label: string) => Promise<boolean>,
+) {
+  const app = onCheckpoint
+    ? await vaultCheckpoints(onCheckpoint, undefined, true)
+    : await vaultRuntime();
   const input = secretInput({
     name: 'GH_TOKEN',
     value: `synthetic\n秘密 🔐\r\ntrailing  \t\n`,

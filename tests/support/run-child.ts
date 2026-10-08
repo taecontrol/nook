@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 const [mode, expected, exit] = process.argv.slice(2);
 const hash = (value: string) =>
@@ -22,6 +22,21 @@ if (mode === 'streams') {
   process.stdout.write(JSON.stringify(report) + '\nstdout-one\nstdout-two\n');
   process.stderr.write('stderr-one\nstderr-two\n');
   process.exitCode = Number(exit ?? '0');
+} else if (mode === 'mappings') {
+  const entries = JSON.parse(expected) as [string, string | null][];
+  process.stdout.write(
+    String(
+      entries.every(([name, digest]) =>
+        digest === null
+          ? process.env[name] === undefined
+          : hash(process.env[name] ?? '') === digest,
+      ),
+    ),
+  );
+  process.exitCode = Number(exit ?? '0');
+} else if (mode === 'mark') {
+  writeFileSync(expected, 'started');
+  process.stdout.write('child-started');
 } else if (mode === 'tty') {
   process.stdout.write(
     JSON.stringify([

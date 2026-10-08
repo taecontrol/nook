@@ -418,6 +418,9 @@ it('E16/E28: MCP discovery directs agents to nook run and exposes no values', as
   );
   expect(description).toMatch(/never values/);
   expect(description).toMatch(/instead of asking the owner/);
+  // Issue #6, E15: the remote description is enough to use project mappings.
+  expect(description).toMatch(/project.*nook\.json/i);
+  expect(description).toMatch(/mapped secrets.*injected without --secret/i);
   expectNoValue(
     JSON.stringify({
       tools,

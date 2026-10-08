@@ -57,11 +57,13 @@ function startCommand(
   env: NodeJS.ProcessEnv,
   input = '',
   mirror?: string,
+  workingDirectory = process.cwd(),
 ) {
   const child = spawnMacFixtureProcess(
     () =>
       spawn(file, args, {
         env,
+        cwd: workingDirectory,
         detached: true,
         stdio: ['pipe', 'pipe', 'pipe'],
       }),
@@ -205,6 +207,7 @@ trackMacFixtureProcesses(${JSON.stringify(groups)});
       args: string[],
       extra: NodeJS.ProcessEnv = {},
       input = '',
+      workingDirectory = process.cwd(),
     ) {
       if (!existsSync(keychain))
         throw new Error(
@@ -216,7 +219,14 @@ trackMacFixtureProcesses(${JSON.stringify(groups)});
       });
       if (childEnv.PATH?.split(':')[0] !== shim)
         throw new Error('Fixture shims must be first on PATH.');
-      const running = startCommand(file, args, childEnv, input, groups);
+      const running = startCommand(
+        file,
+        args,
+        childEnv,
+        input,
+        groups,
+        workingDirectory,
+      );
       children.add(running);
       void running.done.then(() => children.delete(running));
       return running;
@@ -228,7 +238,12 @@ trackMacFixtureProcesses(${JSON.stringify(groups)});
       config: resolve(home, 'config/nook/config.json'),
       close,
       command,
-      start(args: string[], extra: NodeJS.ProcessEnv = {}, input = '') {
+      start(
+        args: string[],
+        extra: NodeJS.ProcessEnv = {},
+        input = '',
+        workingDirectory = process.cwd(),
+      ) {
         if (!existsSync(resolve(testBuild, 'cli.js')))
           throw new Error('The built CLI is required.');
         return command(
@@ -247,6 +262,7 @@ trackMacFixtureProcesses(${JSON.stringify(groups)});
             ...extra,
           },
           input,
+          workingDirectory,
         );
       },
       async lookup(url: string) {
