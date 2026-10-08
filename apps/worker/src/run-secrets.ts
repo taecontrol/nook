@@ -15,7 +15,7 @@ import { canRead } from './authorization.ts';
 import { open, parseKeyring } from './vault-keyring.ts';
 
 const Envelope = Schema.Struct({
-  key_id: Schema.String.check(Schema.isPattern(/^[0-9a-f]{16}$/)),
+  key_id: Schema.String,
   iv: Schema.String,
   ciphertext: Schema.String,
 });

@@ -1,9 +1,5 @@
 import { basename } from 'node:path';
-import {
-  validatePurpose,
-  validateRunSecrets,
-  validateSecretPath,
-} from '@nook/contract';
+import { validateRunSecrets } from '@nook/contract';
 import { CliFailure } from './errors.ts';
 export const runUsage =
   'Usage: nook run --secret ENV=bucket/NAME --purpose "…" -- <command>';
@@ -12,11 +8,7 @@ function mapping(value: string): Mapping {
   const separator = value.indexOf('=');
   const name = value.slice(0, separator);
   const path = value.slice(separator + 1);
-  if (
-    separator < 1 ||
-    !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ||
-    validateSecretPath(path)
-  )
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
     throw new CliFailure(
       'Use --secret ENV=bucket/NAME with a valid environment name and secret path.',
     );
@@ -41,10 +33,6 @@ export function parseRun(args: string[], workingDirectory: string) {
     throw new CliFailure(runUsage);
   const { purpose, secrets } = options(args.slice(0, separator));
   if (purpose === undefined) throw new CliFailure('A purpose is required.');
-  const invalidPurpose = validatePurpose(purpose);
-  if (invalidPurpose) throw new CliFailure(invalidPurpose);
-  if (!secrets.length)
-    throw new CliFailure('At least one --secret is required.');
   requireUniqueNames(secrets);
   const command = args.slice(separator + 1);
   const input = {

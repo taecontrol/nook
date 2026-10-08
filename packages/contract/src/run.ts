@@ -8,11 +8,7 @@ export function splitSecretPath(path: string) {
 }
 export function validateSecretPath(path: string): string | undefined {
   const { bucket, name } = splitSecretPath(path);
-  if (
-    !path.includes('/') ||
-    validateBucketPath(bucket) ||
-    validateSecretName(name)
-  )
+  if (validateBucketPath(bucket) || validateSecretName(name))
     return 'Use a secret path such as work/acme/GH_TOKEN.';
 }
 export function validatePurpose(purpose: string): string | undefined {

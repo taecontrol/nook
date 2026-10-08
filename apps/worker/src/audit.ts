@@ -51,13 +51,10 @@ function encodeCursor(row: { at: string; id: string }) {
 }
 function decodeCursor(cursor?: string) {
   if (!cursor) return undefined;
-  if (cursor.length > 256 || !/^[A-Za-z0-9_-]+$/.test(cursor))
-    throw new InvalidAuditFilter();
   const decoded = JSON.parse(
     atob(cursor.replaceAll('-', '+').replaceAll('_', '/')),
   ) as { at: string; id: string };
   if (
-    typeof decoded.at !== 'string' ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
       decoded.id,
     ) ||
