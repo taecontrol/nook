@@ -11,9 +11,14 @@ export function machineApi(url: string) {
   ) {
     return Effect.flatMap(client, operation).pipe(
       Effect.provide(FetchHttpClient.layer),
-      Effect.timeout('10 seconds'),
       Effect.catch((error) =>
         serverFailure(error).pipe(Effect.flatMap(Effect.fail)),
+      ),
+      Effect.timeout('10 seconds'),
+      Effect.mapError((error) =>
+        error instanceof ServerFailure
+          ? error
+          : new ServerFailure('TimeoutError', undefined, [], true),
       ),
     );
   };
@@ -23,28 +28,30 @@ const PublicError = Schema.Struct({
   _tag: Schema.optionalKey(Schema.String),
   message: Schema.optionalKey(Schema.String),
 });
+function publicFailure(text: string, status: number) {
+  try {
+    const body = Schema.decodeUnknownSync(PublicError)(JSON.parse(text));
+    return new ServerFailure(
+      body._tag ?? 'Unavailable',
+      body.message,
+      [],
+      status >= 500 && body._tag !== 'VaultNotConfigured',
+    );
+  } catch {
+    return new ServerFailure('Unavailable', undefined, [], status >= 500);
+  }
+}
 function responseFailure(error: HttpClientError.HttpClientError) {
   const response = error.response;
   if (!response)
     return Effect.succeed(
       new ServerFailure('Unavailable', undefined, [], true),
     );
-  return response.json.pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(PublicError)),
-    Effect.map(
-      (body) =>
-        new ServerFailure(
-          body._tag ?? 'Unavailable',
-          body.message,
-          [],
-          response.status >= 500 && body._tag !== 'VaultNotConfigured',
-        ),
-    ),
-    Effect.catch(() =>
-      Effect.succeed(
-        new ServerFailure('Unavailable', undefined, [], response.status >= 500),
-      ),
-    ),
+  return response.text.pipe(
+    Effect.match({
+      onSuccess: (text) => publicFailure(text, response.status),
+      onFailure: () => new ServerFailure('Unavailable', undefined, [], true),
+    }),
   );
 }
 function serverFailure(error: unknown) {
