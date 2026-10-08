@@ -5,6 +5,7 @@ import { Effect, Redacted } from 'effect';
 import { CliFailure } from './errors.ts';
 
 const tooLarge = () => new CliFailure('A value can be at most 64 KiB.');
+const utf8 = () => new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 async function pipedValue() {
   const chunks: Buffer[] = [];
   let length = 0;
@@ -14,10 +15,7 @@ async function pipedValue() {
     if (length > secretLimits.valueBytes + 2) throw tooLarge();
     chunks.push(bytes);
   }
-  const value = new TextDecoder('utf-8', {
-    fatal: true,
-    ignoreBOM: true,
-  }).decode(Buffer.concat(chunks));
+  const value = utf8().decode(Buffer.concat(chunks));
   return value.replace(/\r?\n$/, '');
 }
 function hiddenValue(path: string) {
@@ -34,12 +32,38 @@ function hiddenValue(path: string) {
       terminal: true,
     });
     let answered = false;
+    let length = 0;
+    const decoder = utf8();
+    function fail(error: unknown) {
+      answered = true;
+      reject(error);
+      prompt.close();
+    }
+    function bounded(chunk: Buffer | string) {
+      try {
+        const bytes = Buffer.from(chunk);
+        length += bytes.length;
+        if (length > secretLimits.valueBytes + 2) throw tooLarge();
+        decoder.decode(bytes, { stream: true });
+      } catch (error) {
+        fail(error);
+      }
+    }
+    // Validate raw bytes before readline decodes them or grows its line buffer.
+    process.stdin.prependListener('data', bounded);
     prompt.once('close', () => {
+      process.stdin.removeListener('data', bounded);
       if (!answered) reject(new CliFailure('Enter a value.'));
     });
     prompt.once('SIGINT', () => prompt.close());
     process.stdout.write(`Value for ${path}: `);
     prompt.question('', (line) => {
+      try {
+        decoder.decode();
+      } catch (error) {
+        fail(error);
+        return;
+      }
       answered = true;
       prompt.close();
       process.stdout.write('\n');

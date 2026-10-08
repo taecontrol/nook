@@ -153,7 +153,10 @@ function routesFor(db: D1Database, origin: string, vaultKey = '') {
     };
   return machineRoutes;
 }
-async function sanitized(response: Promise<Response>) {
+function invalidCreation(message = 'Invalid secret creation request.') {
+  return Response.json({ _tag: 'InvalidSecret', message }, { status: 400 });
+}
+async function sanitized(response: Promise<Response>, creation = false) {
   const result = await response;
   if (result.status === 400) {
     const body = (await result
@@ -176,9 +179,35 @@ async function sanitized(response: Promise<Response>) {
         'ReservedBucket',
       ].includes(body?._tag ?? '')
     )
-      return Response.json({ _tag: 'BadRequest' }, { status: 400 });
+      return creation
+        ? invalidCreation()
+        : Response.json({ _tag: 'BadRequest' }, { status: 400 });
   }
   return result;
+}
+async function checkedCreation(request: Request) {
+  try {
+    const body = await request.arrayBuffer();
+    new TextDecoder('utf-8', { fatal: true }).decode(body);
+    return new Request(request, { body });
+  } catch {
+    return invalidCreation('Use valid Unicode for the value.');
+  }
+}
+async function machineApiResponse(
+  request: Request,
+  url: URL,
+  db: D1Database,
+  vaultKey: string,
+) {
+  const creation =
+    url.pathname === '/api/machine/secrets' && request.method === 'POST';
+  const checked = creation ? await checkedCreation(request) : request;
+  if (checked instanceof Response) return checked;
+  return sanitized(
+    routesFor(db, url.origin, vaultKey).machine(checked),
+    creation,
+  );
 }
 function protectedMachineRoute(path: string, method: string) {
   return (
@@ -206,9 +235,7 @@ async function machineRequest(
     return Response.json({ _tag: 'Unauthorized' }, { status: 401 });
   if (foreignOrigin(request, url))
     return Response.json({ _tag: 'Forbidden' }, { status: 403 });
-  const response = await sanitized(
-    routesFor(db, url.origin, vaultKey).machine(request),
-  );
+  const response = await machineApiResponse(request, url, db, vaultKey);
   if (url.pathname === '/api/machine/secrets/values')
     response.headers.set('Cache-Control', 'no-store');
   return response;
