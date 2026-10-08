@@ -74,7 +74,7 @@ it('E1/E4/E20: real create, run, list and MCP preserve exact bytes without expos
   expect(audit).toMatchObject({
     outcome: 'created',
     path: createdPath,
-    working_directory: await realpath(process.cwd()),
+    working_directory: await realpath(keyring.home),
     purpose: 'token from provider setup',
   });
   const listing = await keyring.start(['vault', 'list', 'work/acme']).done;
