@@ -9,7 +9,7 @@ import {
 } from '@tanstack/react-query';
 import { runApi } from './api-client';
 
-const machinesOptions = queryOptions({
+export const machinesOptions = queryOptions({
   queryKey: ['machines'],
   queryFn: async ({ signal }) => [
     ...(await runApi((api) => api.machines.list(), signal)).machines,
@@ -50,6 +50,7 @@ export function useMachines() {
   );
   const machines = useQuery({
     ...machinesOptions,
+    enabled: !busy,
     staleTime: busy ? Infinity : machinesOptions.staleTime,
     refetchOnWindowFocus: busy ? false : machinesOptions.refetchOnWindowFocus,
     select: (data) => data.filter((machine) => !pendingIds.has(machine.id)),

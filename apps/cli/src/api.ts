@@ -12,10 +12,28 @@ export function machineApi(url: string) {
     return Effect.flatMap(client, operation).pipe(
       Effect.provide(FetchHttpClient.layer),
       Effect.timeout('10 seconds'),
-      Effect.mapError(
-        (error) =>
-          new ServerFailure((error as { _tag?: string })._tag ?? 'Unavailable'),
-      ),
+      Effect.mapError((error) => serverFailure(error)),
     );
   };
+}
+
+function serverFailure(error: unknown) {
+  const typed = error as {
+    _tag?: string;
+    message?: string;
+    paths?: readonly string[];
+  };
+  const tag = typed._tag ?? 'Unavailable';
+  const message = [
+    'SecretNotFound',
+    'SecretKeyUnavailable',
+    'VaultNotConfigured',
+  ].includes(tag)
+    ? typed.message
+    : undefined;
+  return new ServerFailure(
+    tag,
+    message,
+    tag === 'SecretsForbidden' ? typed.paths : [],
+  );
 }

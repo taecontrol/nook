@@ -18,6 +18,8 @@ const inheritedNames = [
 ];
 const overrideNames = new Set([
   ...inheritedNames,
+  'NOOK_TEST_INHERITED',
+  'GH_TOKEN',
   'NODE_OPTIONS',
   'COVERAGE_RUN',
   'NOOK_BUILD',

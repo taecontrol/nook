@@ -14,6 +14,8 @@ const measured = {
   approvalNavigation: [20, 20, 20, 20, 20],
   vault: [1000, 1000, 1000, 1000, 1000],
   vaultNavigation: [100, 100, 100, 100, 100],
+  audit: Array(5).fill(500),
+  auditNavigation: Array(5).fill(20),
 };
 it.each(['vault', 'vaultNavigation'])(
   'E23: the existing stage rejects an over-budget %s',

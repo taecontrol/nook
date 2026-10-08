@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import {
   ChevronRight,
+  History,
   KeyRound,
   ListTree,
   MonitorSmartphone,
@@ -55,6 +56,22 @@ export function Home() {
               <ItemTitle>Machines</ItemTitle>
               <ItemDescription>
                 See connected machines and revoke their access.
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <ChevronRight className="size-4 text-muted-foreground" />
+            </ItemActions>
+          </Link>
+        </Item>
+        <Item variant="outline" className="mt-3" asChild>
+          <Link to="/audit" search={{}}>
+            <ItemMedia variant="icon">
+              <History />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Audit</ItemTitle>
+              <ItemDescription>
+                Review secret uses and denied requests.
               </ItemDescription>
             </ItemContent>
             <ItemActions>

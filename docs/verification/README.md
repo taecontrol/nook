@@ -131,6 +131,29 @@ The load-time stage seeds the representative nine secrets and their buckets in t
 
 Production foreign keys and the approximately 85 KiB bound ciphertext parameter remain the owner's [post-deployment smoke test](../deployment.md#vault-key-and-post-deployment-smoke-test). Local evidence does not claim production execution.
 
+## Audited command delivery
+
+The issue #5 acceptance suites run the production CLI with the private Linux/macOS keyring, the built Worker with migrated D1, and Chromium with a temporary profile and a fixed clock. No owner account, token, key, bus, or browser profile is used. The macOS job includes `run-cli.test.ts`; only the util-linux `script` TTY case is Linux-only.
+
+| Examples | Evidence |
+| --- | --- |
+| E1–E9, E28 | `run-cli.test.ts`: exact injected bytes checked by an independent child digest; preserved streams, piped stdin, exit statuses, inherited environment, duplicate-path aliases, TTYs, signal decisions, command resolution and spawn races, validation before keyring access, all-or-nothing failures, reconnect guidance, and no plaintext files or values in argv/output. |
+| E7–E8, E10–E15, E28 | `run-worker.test.ts`: authorization before existence/read, successful no-store delivery, atomic audit failure, response held after committed audit, lost-response/new-request independence, bounded input, fingerprint-only encryption errors, owner/machine/Origin boundaries, historical retention, opaque keyset pagination, malformed filters/cursors, fixed private errors, and statement/batch budgets. |
+| E16, E28 | `run-worker.test.ts`: real MCP discovery and names-only listing direct agents to `nook run` without exposing values. |
+| E17–E24, E28 | `audit-web.test.ts`: ledger ordering and relative/exact times, disclosure links, phone wrapping, URL filters/reload/Back, historical deletion/revocation, loading/empty/error/retry states, pagination during new uses, intent prefetching, cached filters and background refresh. |
+| Shared write invariants | `audit-pending-writes.test.ts`: Audit intent, mounting, and focus defer metadata reads during real Vault create/replace/delete, Bucket create/delete, and Machine revocation. Lost Vault responses remain unconfirmed until a successful list reconciles the committed version. |
+| E25 | `audit-load-time.test.ts` and `pnpm verify:load-time`: both required five-sample medians under the unchanged 4G profile at 390×844; cold `/audit` within 1000 ms and Home-to-Audit after intent within 100 ms. The stage seeds its entry through the genuine value endpoint. |
+| E26 | `audit-captures.test.ts`: the 11 accepted scenarios at 1440×900 and 390×844 in light and dark, 44 PNGs from genuine Worker/D1 records. |
+| E27 | `tests/journeys/owner.e2e.ts`: a real `nook run` receives its value silently and the owner sees exactly one delivered entry. The entire journey runs with `--strict-cache` and zero retries. |
+
+The `audit-*` PNGs live in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare them with selected prototype A, “The chronological ledger”: typical, fresh, denied-recent, filter-secret, filter-bucket, filter-empty, long-content, many, deleted-revoked, loading, and load-error. Production has no scenario controls or mock API. Capture fixtures write entries through the machine endpoint and assign historical timestamps; loading holds a real request and failure makes the genuine audit table unavailable.
+
+The statement decorator sends only fixed checkpoint labels. One authentication statement precedes at most one read batch and one atomic audit batch. A denied fetch performs no read batch; listing an audit page is one statement. Values remain redacted in the contract and CLI until the child environment is built. Audit rows have no foreign keys to mutable secrets or machines, so deletion and revocation preserve the recorded facts.
+
+Audit consumes the same guarded metadata hooks as Vault, Buckets, and Machines. The pending-write regressions hold genuine writes before commit, advance the browser clock beyond cache freshness, navigate to Audit, and trigger focus. They require no extra metadata read before settlement. Vault cases then commit and lose all responses, fail metadata refresh, and return to Vault with the submission still unconfirmed; only a successful list may confirm it.
+
+URL search parameters remain plain strings for both Audit and Vault. Browser regressions create and use the valid buckets `123`, `1e3`, `true`, `false`, and `null` through the owner and machine APIs, then prove direct URLs, selection, and reload preserve the exact path. The valid `all` bucket also remains distinct from the All buckets control.
+
 ## Migrations
 
 `migrations/NNNN_name.sql` files are applied in order using Wrangler's SQL splitter and one atomic D1 batch per file, including its `d1_migrations` record. `migrations/schema.sql` is a snapshot, not a migration. The D1 binding's `migrations_pattern` selects only numbered files; a local Wrangler acceptance test proves that it excludes the snapshot and preserves replay. Verification uses fresh Miniflare databases, checks an idempotent replay, and applies the latest file to the previous schema containing a sentinel bucket. Both final normalized schemas must match the snapshot, and the sentinel must remain unchanged. A second migration enforces the reserved `me` invariant at the database boundary.

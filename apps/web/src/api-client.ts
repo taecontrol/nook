@@ -19,6 +19,7 @@ const statusByTag: Record<string, number> = {
   Forbidden: 403,
   ServiceUnavailable: 503,
   InvalidBucketPath: 400,
+  InvalidAuditFilter: 400,
   ReservedBucket: 400,
   BucketNotFound: 404,
   BucketHasChildren: 409,

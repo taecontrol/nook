@@ -34,6 +34,13 @@ type BucketWrite = {
 function isWriting(queryClient: QueryClient) {
   return queryClient.isMutating({ mutationKey: writeKey }) > 0;
 }
+async function refreshBuckets(queryClient: QueryClient) {
+  const filters = { queryKey: bucketsOptions.queryKey };
+  await queryClient.invalidateQueries({ ...filters, refetchType: 'none' });
+  // Disabled observers still need one recovery read after the write result.
+  if (queryClient.getQueryCache().find(filters)?.getObserversCount())
+    await queryClient.prefetchQuery(bucketsOptions);
+}
 
 function useCreateBucket() {
   const queryClient = useQueryClient();
@@ -62,8 +69,7 @@ function useCreateBucket() {
         buckets.filter((bucket) => !added.has(bucket.path)),
       );
     },
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: bucketsOptions.queryKey }),
+    onSettled: () => refreshBuckets(queryClient),
   });
 }
 
@@ -93,8 +99,7 @@ function useDeleteBucket() {
           ]),
         );
     },
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: bucketsOptions.queryKey }),
+    onSettled: () => refreshBuckets(queryClient),
   });
 }
 
@@ -130,6 +135,7 @@ export function useBuckets() {
   return {
     buckets: useQuery({
       ...bucketsOptions,
+      enabled: !busy,
       staleTime: busy ? Infinity : bucketsOptions.staleTime,
       refetchOnWindowFocus: busy ? false : bucketsOptions.refetchOnWindowFocus,
     }),

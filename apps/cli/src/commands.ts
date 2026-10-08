@@ -3,6 +3,7 @@ import { Effect } from 'effect';
 import { Argument, Command } from 'effect/cli';
 import cliPackage from '../package.json' with { type: 'json' };
 import { CliFailure } from './errors.ts';
+import { run } from './run.ts';
 import { login, logout, mcpHeader, whoami } from './session.ts';
 import { vaultList } from './vault.ts';
 
@@ -29,12 +30,16 @@ export async function execute(
     write('The Nook CLI supports Linux and macOS only.');
     return 1;
   }
+  if (args[0] === 'run') return run(args.slice(1), write);
   if (missingVaultBucket(args)) {
     write('Usage: nook vault list <bucket>');
     return 1;
   }
   const command = Command.make('nook').pipe(
     Command.withSubcommands([
+      Command.make('run').pipe(
+        Command.withDescription('Run a command with audited secrets.'),
+      ),
       Command.make('vault').pipe(
         Command.withSubcommands([
           Command.make(

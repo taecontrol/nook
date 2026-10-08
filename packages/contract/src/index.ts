@@ -5,6 +5,7 @@ import {
   HttpApiError,
   HttpApiGroup,
 } from 'effect/http-api';
+import { AuditFilters, AuditPage, InvalidAuditFilter } from './audit.ts';
 import {
   Bucket,
   BucketHasChildren,
@@ -27,9 +28,11 @@ import {
   WriteId,
 } from './vault.ts';
 
+export * from './audit.ts';
 export * from './buckets.ts';
 export * from './grants.ts';
 export * from './machines.ts';
+export * from './run.ts';
 export * from './vault.ts';
 export const Owner = Schema.Struct({ email: Schema.String });
 export type Owner = typeof Owner.Type;
@@ -39,6 +42,15 @@ const errors = [
   HttpApiError.ServiceUnavailable,
 ];
 export const Api = HttpApi.make('nook')
+  .add(
+    HttpApiGroup.make('audit').add(
+      HttpApiEndpoint.get('list', '/api/audit', {
+        query: AuditFilters,
+        success: AuditPage,
+        error: [...errors, InvalidAuditFilter],
+      }),
+    ),
+  )
   .add(
     HttpApiGroup.make('session').add(
       HttpApiEndpoint.get('whoami', '/api/whoami', {

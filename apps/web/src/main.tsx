@@ -6,8 +6,10 @@ import {
   lazyRouteComponent,
   Outlet,
   RouterProvider,
+  stringifySearchWith,
 } from '@tanstack/react-router';
 import { createRoot } from 'react-dom/client';
+import { preloadAudit } from './audit-api';
 import { preloadBuckets } from './buckets-api';
 import { Home } from './home';
 import { identityOptions } from './identity';
@@ -70,6 +72,20 @@ const router = createRouter({
       }),
       createRoute({
         getParentRoute: () => owner,
+        path: '/audit',
+        component: lazyRouteComponent(
+          () => import('./audit-page'),
+          'AuditPage',
+        ),
+        validateSearch: (search: { bucket?: string; secret?: string }) =>
+          search,
+        loaderDeps: ({ search }) => search,
+        loader: ({ context, deps }) => {
+          preloadAudit(context.queryClient, deps);
+        },
+      }),
+      createRoute({
+        getParentRoute: () => owner,
         path: '/machines',
         component: lazyRouteComponent(
           () => import('./machines-page'),
@@ -93,6 +109,8 @@ const router = createRouter({
     }),
   ]),
   context: { queryClient },
+  parseSearch: (search) => Object.fromEntries(new URLSearchParams(search)),
+  stringifySearch: stringifySearchWith(JSON.stringify),
   defaultPreload: 'intent',
   defaultPreloadStaleTime: 0,
 });
