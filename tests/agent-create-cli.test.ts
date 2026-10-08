@@ -67,10 +67,11 @@ it('E1/E4/E20: real create, run, list and MCP preserve exact bytes without expos
   ).done;
   expect(result.status).toBe(0);
   expectOutput(result.stdout, `Stored ${createdPath}.`, true);
-  expect(result.stderr).toBe('');
+  expect(result.stderr.length).toBe(0);
   const [row] = await secretRows(app);
   expect((await decryptRow(app.key, row)) === value).toBe(true);
   const [audit] = await auditRows(app);
+  expectNoValue(JSON.stringify(audit), [value, token, app.key]);
   expect(audit).toMatchObject({
     outcome: 'created',
     path: createdPath,
@@ -118,6 +119,7 @@ it.each(
     { input: 'a\n\n', expected: 'a\n' },
     { input: 'a\r\n', expected: 'a' },
     { input: 'a', expected: 'a' },
+    { input: '\ufeffa\n', expected: '\ufeffa' },
     { input: '  a\t\r', expected: '  a\t\r' },
     { input: 'a'.repeat(65536) + '\r\n', expected: 'a'.repeat(65536) },
   ].map((sample, index) => ({ ...sample, index })),
@@ -129,6 +131,40 @@ it.each(
     expect(
       (await decryptRow(app.key, (await secretRows(app))[0])) === expected,
     ).toBe(true);
+  },
+);
+it.skipIf(process.platform !== 'linux').each(['tty-open', 'tty-invalid'])(
+  'E3/E8: an unfinished or invalid terminal input (%s) is rejected privately before HTTP',
+  async (mode) => {
+    const transport = await createTransport(app, () => undefined);
+    try {
+      await configure(transport.origin);
+      const before = await transcript();
+      const result = await keyring.command(
+        process.execPath,
+        [
+          resolve('tests/support/create-input.ts'),
+          mode,
+          resolve(testBuild, 'cli.js'),
+        ],
+        childEnv(),
+        mode === 'tty-open' ? 'a'.repeat(100_000) : '',
+      ).done;
+      expect(result.status).toBe(1);
+      expectOutput(result.stdout, `Value for ${createdPath}: `);
+      expectOutput(
+        result.stdout + result.stderr,
+        mode === 'tty-open'
+          ? 'A value can be at most 64 KiB.'
+          : 'Use valid Unicode for the value.',
+      );
+      expect(transport.bodies.length).toBe(0);
+      expect((await transcript()) === before).toBe(true);
+      expect(await secretRows(app)).toEqual([]);
+      expect(await auditRows(app)).toEqual([]);
+    } finally {
+      await transport.close();
+    }
   },
 );
 it.skipIf(process.platform !== 'linux')(
@@ -260,7 +296,7 @@ it.each(
       ).done;
       expect(result.status).toBe(1);
       expectOutput(result.stdout + result.stderr, message, true);
-      expect(transport.bodies).toHaveLength(0);
+      expect(transport.bodies.length).toBe(0);
       expect((await transcript()) === before).toBe(true);
       expect(await secretRows(app)).toEqual([]);
       expect(await auditRows(app)).toEqual([]);
@@ -292,7 +328,7 @@ it.each(['invalid-utf8', 'open-pipe'])(
           : 'A value can be at most 64 KiB.',
         true,
       );
-      expect(transport.bodies).toHaveLength(0);
+      expect(transport.bodies.length).toBe(0);
     } finally {
       await transport.close();
     }
@@ -414,7 +450,7 @@ it.each(['lost', 'hang', '503', 'unknown-5xx', 'committed'])(
         `Stored ${createdPath}.`,
         true,
       );
-      expect(transport.bodies).toHaveLength(2);
+      expect(transport.bodies.length).toBe(2);
       expect(transport.bodies[0].equals(transport.bodies[1])).toBe(true);
       const body = JSON.parse(transport.bodies[0].toString());
       expect(body.writeId).toMatch(
@@ -452,7 +488,7 @@ it('E16: a committed lost response followed by owner replacement remains unconfi
       .done;
     expect(result.status).toBe(1);
     expectOutput(result.stdout + result.stderr, unconfirmed, true);
-    expect(transport.bodies).toHaveLength(2);
+    expect(transport.bodies.length).toBe(2);
     expect(await auditRows(app)).toHaveLength(1);
   } finally {
     await transport.close();
@@ -479,7 +515,7 @@ it.each([
         .done;
       expect(result.status).toBe(1);
       expectOutput(result.stdout + result.stderr, unconfirmed, true);
-      expect(transport.bodies).toHaveLength(2);
+      expect(transport.bodies.length).toBe(2);
     } finally {
       await transport.close();
     }
@@ -498,7 +534,7 @@ it('E17: an initial VaultNotConfigured is definitive and is not retried', async 
       'This installation has no VAULT_KEY. Add it as a Worker secret, then try again.',
       true,
     );
-    expect(transport.bodies).toHaveLength(1);
+    expect(transport.bodies.length).toBe(1);
   } finally {
     await transport.close();
   }
@@ -514,7 +550,7 @@ it('E18: exactly three unconfirmed attempts stop with the unconfirmed message', 
       .done;
     expect(result.status).toBe(1);
     expectOutput(result.stdout + result.stderr, unconfirmed, true);
-    expect(transport.bodies).toHaveLength(3);
+    expect(transport.bodies.length).toBe(3);
     expect(
       transport.bodies.every((body) => body.equals(transport.bodies[0])),
     ).toBe(true);
@@ -537,7 +573,7 @@ it('E19: an unknown definitive tag preserves its public message without retrying
       'A future public refusal.',
       true,
     );
-    expect(transport.bodies).toHaveLength(1);
+    expect(transport.bodies.length).toBe(1);
   } finally {
     await transport.close();
   }

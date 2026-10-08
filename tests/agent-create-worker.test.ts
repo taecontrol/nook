@@ -40,6 +40,7 @@ it('E1/E4/E20: create returns public metadata, encrypted storage and one private
   const response = await machineCreate(app, token, input);
   expect(response.status).toBe(201);
   const text = await response.text();
+  expectNoValue(text, [input.value, token, app.key]);
   const metadata = JSON.parse(text);
   expect(Object.keys(metadata).sort()).toEqual([
     'bucket',
@@ -55,6 +56,11 @@ it('E1/E4/E20: create returns public metadata, encrypted storage and one private
   const [row] = await secretRows(app);
   expect((await decryptRow(app.key, row)) === input.value).toBe(true);
   const entries = (await auditPageData(app)).entries;
+  expectNoValue(JSON.stringify({ row, entries }), [
+    input.value,
+    token,
+    app.key,
+  ]);
   expect(entries).toHaveLength(1);
   expect(entries[0]).toMatchObject({
     id: input.writeId,
@@ -80,11 +86,13 @@ it('E1/E4/E20: create returns public metadata, encrypted storage and one private
       Date.parse(entries[0].at) <= Date.now(),
   ).toBe(true);
   const [audit] = await auditRows(app);
+  expectNoValue(JSON.stringify(audit), [input.value, token, app.key]);
   expect(audit.executable).toBeNull();
   expect(audit.run_id).toBeNull();
   const discovery = await machineMcp(app, token).call('list_secrets', {
     bucket: 'work/acme',
   });
+  expectNoValue(JSON.stringify(discovery), [input.value, token, app.key]);
   expect(discovery.structuredContent!.secrets).toEqual([metadata]);
   expectNoValue(text + JSON.stringify({ row, audit, entries, discovery }), [
     input.value,
@@ -161,6 +169,9 @@ it.each(
     { purpose: 'two\nlines' },
     { purpose: 'a'.repeat(201) },
     { workingDirectory: 'relative' },
+    { purpose: undefined },
+    { workingDirectory: undefined },
+    { writeId: 'bad-id' },
   ].map((overrides, index) => ({ overrides, index })),
 )(
   'E9/E20: bypassed invalid payload $index is rejected privately without changing rows',
@@ -176,6 +187,32 @@ it.each(
     expect(await auditRows(app)).toEqual([]);
   },
 );
+it('E9/E20: raw invalid UTF-8 in a JSON value is rejected without storing replacement bytes', async () => {
+  const { token } = await issueGrant(app, ['work/acme']);
+  const input = machineCreateInput();
+  const encoded = Buffer.from(JSON.stringify(input));
+  const value = Buffer.from(JSON.stringify(input.value));
+  const offset = encoded.indexOf(value);
+  const body = Buffer.concat([
+    encoded.subarray(0, offset + 1),
+    Buffer.from([0xc3, 0x28]),
+    encoded.subarray(offset + value.length - 1),
+  ]);
+  const response = await fetch(`${app.origin}/api/machine/secrets`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body,
+  });
+  expect(response.status).toBe(400);
+  const text = await response.text();
+  expectNoValue(text, [input.value, token, app.key]);
+  expect(JSON.parse(text)._tag).toBe('InvalidSecret');
+  expect(await secretRows(app)).toEqual([]);
+  expect(await auditRows(app)).toEqual([]);
+});
 it('E11/E20: machine create authenticates only valid Nook tokens, without leaking schema failures', async () => {
   const { token } = await issueGrant(app, ['work/acme']);
   const input = machineCreateInput();
