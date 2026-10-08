@@ -7,6 +7,8 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { beforeEach, expect, it } from 'vitest';
 import { evidenceRoot } from '../scripts/lib/instrument.ts';
@@ -393,4 +395,306 @@ it('E8: a mismatched key stops the child with only the recorded key fingerprint'
     app.token,
   ]);
   expect(await auditRows(app)).toEqual([]);
+});
+
+it('E1/E5: every accepted environment name reaches the child, including __proto__', async () => {
+  const probe = resolve(keyring.home, 'environment-name.js');
+  await writeFile(
+    probe,
+    "import { createHash } from 'node:crypto'; const value = process.env['__proto__']; process.stdout.write(String(createHash('sha256').update(typeof value === 'string' ? value : '').digest('hex') === process.argv[2]));",
+  );
+  const digest = createHash('sha256').update(app.input.value).digest('hex');
+  const result = await keyring.start(
+    runArgs([process.execPath, probe, digest], [`__proto__=${acmePath}`]),
+  ).done;
+  expect(result.status).toBe(0);
+  expectOutput(result.stdout, 'true', true);
+  expect(result.stderr).toBe('');
+  expect(await auditRows(app)).toHaveLength(1);
+  expectNoValue(result.stdout + result.stderr, [app.input.value, app.token]);
+});
+
+it.each([
+  {
+    args: ['--secret', `GH_TOKEN=${acmePath}`, '--', 'node'],
+    message: 'A purpose is required.',
+  },
+  {
+    args: ['--secret', '--', 'node'],
+    message:
+      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" -- <command>',
+  },
+  {
+    args: ['--purpose', '--', 'node'],
+    message:
+      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" -- <command>',
+  },
+  {
+    args: [
+      '--secret',
+      `GH_TOKEN=${acmePath}`,
+      '--purpose',
+      'test',
+      '--purpose',
+      'other',
+      '--',
+      'node',
+    ],
+    message:
+      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" -- <command>',
+  },
+  {
+    args: ['--secret', `GH_TOKEN=${acmePath}`, '--purpose', 'test', '--'],
+    message:
+      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" -- <command>',
+  },
+  {
+    args: [
+      '--secret',
+      `GH_TOKEN=${acmePath}`,
+      '--secret',
+      `GH_TOKEN=${acmePath}`,
+      '--purpose',
+      'test',
+      '--',
+      'node',
+    ],
+    message: 'Environment name GH_TOKEN is repeated.',
+  },
+])(
+  'E6: argument failures name their cause before keyring access (%#)',
+  async ({ args, message }) => {
+    const before = await keyringTranscript();
+    const result = await keyring.start(['run', ...args]).done;
+    expect(result.status).toBe(1);
+    expectOutput(result.stdout + result.stderr, message, true);
+    expect((await keyringTranscript()) === before).toBe(true);
+    expect(await auditRows(app)).toEqual([]);
+  },
+);
+it('E14: too many CLI paths fail before the keyring and network', async () => {
+  const before = await keyringTranscript();
+  const result = await keyring.start(
+    runArgs(
+      ['/usr/bin/true'],
+      Array.from(
+        { length: 21 },
+        (_, index) => `KEY_${index}=work/acme/KEY_${index}`,
+      ),
+    ),
+  ).done;
+  expect(result.status).toBe(1);
+  expectOutput(
+    result.stdout + result.stderr,
+    'Request 1 to 20 distinct secret paths.',
+    true,
+  );
+  expect((await keyringTranscript()) === before).toBe(true);
+  expect(await auditRows(app)).toEqual([]);
+});
+
+async function valueTransport(
+  mode: 'normal' | 'incomplete' | 'lost' = 'normal',
+) {
+  const counts: number[] = [];
+  const server = createServer(async (request, response) => {
+    try {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const body = Buffer.concat(chunks);
+      counts.push(
+        (JSON.parse(body.toString()) as { secrets: string[] }).secrets.length,
+      );
+      const delivered = await fetch(
+        app.origin + '/api/machine/secrets/values',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: request.headers.authorization ?? '',
+            'Content-Type': 'application/json',
+          },
+          body,
+        },
+      );
+      response.writeHead(delivered.status, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+      });
+      if (mode === 'lost') {
+        await delivered.body?.cancel();
+        response.destroy();
+      } else if (mode === 'incomplete') {
+        await delivered.body?.cancel();
+        response.end(JSON.stringify({ values: [] }));
+      } else response.end(Buffer.from(await delivered.arrayBuffer()));
+    } catch {
+      response.writeHead(503);
+      response.end(JSON.stringify({ _tag: 'ServiceUnavailable' }));
+    }
+  });
+  await new Promise<void>((accept) => server.listen(0, '127.0.0.1', accept));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  await writeFile(keyring.config, JSON.stringify({ url: origin }));
+  await keyring.store(origin, app.token);
+  return {
+    origin,
+    counts,
+    close: () =>
+      new Promise<void>((accept) => {
+        server.closeAllConnections();
+        server.close(() => accept());
+      }),
+  };
+}
+it('E5: alias mappings send one path in the real value request', async () => {
+  const transport = await valueTransport();
+  try {
+    const result = await keyring.start(
+      runArgs(['/usr/bin/true'], [`GH_TOKEN=${acmePath}`, `ALIAS=${acmePath}`]),
+    ).done;
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toBe('');
+    expect(transport.counts).toEqual([1]);
+    expect(await auditRows(app)).toHaveLength(1);
+  } finally {
+    await transport.close();
+  }
+});
+it('E9: an incomplete successful value response fails privately before spawning', async () => {
+  const transport = await valueTransport('incomplete');
+  try {
+    const result = await keyring.start(
+      runArgs([process.execPath, childFile, 'tty']),
+    ).done;
+    expect(result.status).toBe(1);
+    expectOutput(
+      result.stdout + result.stderr,
+      `Could not reach ${transport.origin}. Try again.`,
+      true,
+    );
+    expect(transport.counts).toEqual([1]);
+    expect(await auditRows(app)).toHaveLength(1);
+    expectNoValue(result.stdout + result.stderr, [
+      app.input.value,
+      app.token,
+      app.key,
+    ]);
+  } finally {
+    await transport.close();
+  }
+});
+it('E11: the CLI does not retry a lost value response after the Worker audited delivery', async () => {
+  const transport = await valueTransport('lost');
+  try {
+    const result = await keyring.start(
+      runArgs([process.execPath, childFile, 'tty']),
+    ).done;
+    expect(result.status).toBe(1);
+    expectOutput(
+      result.stdout + result.stderr,
+      `Could not reach ${transport.origin}. Try again.`,
+      true,
+    );
+    expect(transport.counts).toEqual([1]);
+    expect(await auditRows(app)).toHaveLength(1);
+    expectNoValue(result.stdout + result.stderr, [
+      app.input.value,
+      app.token,
+      app.key,
+    ]);
+  } finally {
+    await transport.close();
+  }
+});
+
+it('E4: a directory is denied before reading the keyring', async () => {
+  const directory = resolve(keyring.home, 'directory-command');
+  await mkdir(directory);
+  const before = await keyringTranscript();
+  const result = await keyring.start(runArgs([directory])).done;
+  expect(result.status).toBe(126);
+  expectOutput(
+    result.stdout + result.stderr,
+    `Command is not executable: ${directory}`,
+    true,
+  );
+  expect((await keyringTranscript()) === before).toBe(true);
+  expect(await auditRows(app)).toEqual([]);
+});
+it('E4: command lookup uses the caller PATH', async () => {
+  await writeFile(
+    resolve(keyring.shim, 'path-command'),
+    '#!/bin/sh\nexit 42\n',
+    { mode: 0o700 },
+  );
+  const result = await keyring.start(runArgs(['path-command'])).done;
+  expect(result.status).toBe(42);
+  expect(result.stdout).toBe('');
+  expect(result.stderr).toBe('');
+  expect(await auditRows(app)).toHaveLength(1);
+});
+function runFrom(directory: string, args: string[], deleted = false) {
+  const entry = resolve(testBuild, 'cli.js');
+  const script = `import { rmdirSync } from 'node:fs'; process.chdir(${JSON.stringify(directory)}); ${deleted ? `rmdirSync(${JSON.stringify(directory)});` : ''} process.argv = ${JSON.stringify([process.execPath, entry, ...args])}; await import(${JSON.stringify(entry)});`;
+  return keyring.command(
+    process.execPath,
+    ['--input-type=module', '-e', script],
+    process.env.COVERAGE_RUN
+      ? {
+          NOOK_CLI_COVERAGE: resolve(
+            evidenceRoot,
+            `cli-${crypto.randomUUID()}.json`,
+          ),
+        }
+      : {},
+  ).done;
+}
+it('E4: a relative command path resolves from the real current directory', async () => {
+  await writeFile(
+    resolve(keyring.home, 'relative-command'),
+    '#!/bin/sh\nexit 42\n',
+    { mode: 0o700 },
+  );
+  const result = await runFrom(keyring.home, runArgs(['./relative-command']));
+  expect(result.status).toBe(42);
+  expect(result.stdout).toBe('');
+  expect(result.stderr).toBe('');
+  expect((await auditPageData(app)).entries[0]).toMatchObject({
+    workingDirectory: await realpath(keyring.home),
+    executable: 'relative-command',
+  });
+});
+it('E6: a disappeared working directory fails before keyring access', async () => {
+  const directory = resolve(keyring.home, 'disappeared-cwd');
+  await mkdir(directory);
+  const before = await keyringTranscript();
+  const result = await runFrom(directory, runArgs(['/usr/bin/true']), true);
+  expect(result.status).toBe(1);
+  expectOutput(
+    result.stdout + result.stderr,
+    'Could not resolve the working directory.',
+    true,
+  );
+  expect((await keyringTranscript()) === before).toBe(true);
+  expect(await auditRows(app)).toEqual([]);
+});
+it('CLI help lists the installed audited run command', async () => {
+  const result = await keyring.start(['--help']).done;
+  expect(result.status).toBe(0);
+  expectOutput(result.stdout, 'Run a command with audited secrets.');
+});
+it('E1: the resolved command keeps argv0 and forwards arguments literally', async () => {
+  const probe = resolve(keyring.home, 'arguments.js');
+  await writeFile(
+    probe,
+    "process.stdout.write(String(process.argv0 === 'node' && JSON.stringify(process.argv.slice(2)) === JSON.stringify(['a b', '$NOOK_TEST_INHERITED', '--flag'])));",
+  );
+  const result = await keyring.start(
+    runArgs(['node', probe, 'a b', '$NOOK_TEST_INHERITED', '--flag']),
+  ).done;
+  expect(result.status).toBe(0);
+  expectOutput(result.stdout, 'true', true);
+  expect(result.stderr).toBe('');
+  expect(await auditRows(app)).toHaveLength(1);
 });

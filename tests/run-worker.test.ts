@@ -490,3 +490,112 @@ it('E8: an undecryptable later path fails the whole fetch without partial delive
   });
   expect(await auditRows(app)).toEqual([]);
 });
+
+it('E14: the first directory byte beyond the limit is rejected before reads and audit', async () => {
+  const labels: string[] = [];
+  const measured = await vaultCheckpoints(async (label) => {
+    labels.push(label);
+    return true;
+  });
+  try {
+    const { token } = await issueGrant(measured);
+    labels.length = 0;
+    const response = await fetchValues(measured, token, {
+      workingDirectory: '/' + 'x'.repeat(4096),
+    });
+    expect(response.status).toBe(400);
+    expect(labels).toEqual(['/statement']);
+    expect(await auditRows(measured)).toEqual([]);
+  } finally {
+    await measured.close();
+  }
+});
+it.each([
+  { extra: true },
+  { at: '2026-10-08T12:00:00Z' },
+  { at: 1791460800000 },
+])(
+  'E13: a cursor must use the exact opaque encoding issued by the API (%#)',
+  async (invalid) => {
+    const cursor = Buffer.from(
+      JSON.stringify({
+        at: '2026-10-08T12:00:00.000Z',
+        id: '12345678-1234-4123-8123-123456789abc',
+        ...invalid,
+      }),
+    ).toString('base64url');
+    expect(
+      (await fetch(`${app.origin}/api/audit?cursor=${cursor}`)).status,
+    ).toBe(400);
+  },
+);
+it('E28: a genuine secret read failure exposes only a fixed unavailable response', async () => {
+  const log = new PrivateRunLog();
+  await app.setBindings(app.bindings, {
+    log,
+    handleRuntimeStdio: (stdout, stderr) => {
+      for (const input of [stdout, stderr])
+        createInterface({ input }).on('line', (line) =>
+          log.messages.push(line),
+        );
+    },
+  });
+  await (await app.mf.getD1Database('DB'))
+    .prepare('ALTER TABLE secrets RENAME TO unavailable_secrets')
+    .run();
+  const response = await fetchValues(app, app.token);
+  expect(response.status).toBe(503);
+  const text = await response.text();
+  expectNoValue(text + log.messages.join('\n'), [
+    app.input.value,
+    app.token,
+    app.key,
+  ]);
+  expect(JSON.parse(text)).toEqual({ _tag: 'ServiceUnavailable' });
+  expect(await auditRows(app)).toEqual([]);
+});
+
+it('E13: chronology and subtree filters distinguish newer prefix lookalikes', async () => {
+  expect((await fetchValues(app, app.token)).status).toBe(200);
+  expect(
+    (await fetchValues(app, app.token, { secrets: ['work/acme-old/GH_TOKEN'] }))
+      .status,
+  ).toBe(403);
+  const db = await app.mf.getD1Database('DB');
+  await db
+    .prepare(
+      "UPDATE audit_entries SET at=CASE WHEN path='work/acme/GH_TOKEN' THEN '2026-10-07T12:00:00.000Z' ELSE '2026-10-08T12:00:00.000Z' END",
+    )
+    .run();
+  const all = await auditPageData(app);
+  expect(all.entries.map((entry) => entry.path)).toEqual([
+    'work/acme-old/GH_TOKEN',
+    acmePath,
+  ]);
+  const subtree = await auditPageData(app, '?bucket=work%2Facme');
+  expect(subtree.entries.map((entry) => entry.path)).toEqual([acmePath]);
+});
+it('E13: a final full-sized audit page has no next cursor', async () => {
+  for (let index = 0; index < 25; index++) {
+    const response = await fetchValues(app, app.token);
+    expect(response.status).toBe(200);
+    await response.body?.cancel();
+  }
+  const page = await auditPageData(app);
+  expect(page.entries).toHaveLength(25);
+  expect(page.next).toBeNull();
+});
+it('E13/E14: public typed validation failures preserve their safe contract payload', async () => {
+  const run = await fetchValues(app, app.token, { purpose: '' });
+  expect(run.status).toBe(400);
+  const invalid = (await run.json()) as { _tag: string; message?: string };
+  expectNoValue(JSON.stringify(invalid), [app.input.value, app.token, app.key]);
+  expect(invalid._tag).toBe('InvalidRun');
+  expect(
+    typeof invalid.message === 'string' && /purpose/i.test(invalid.message),
+  ).toBe(true);
+  const audit = await fetch(`${app.origin}/api/audit?bucket=Work`);
+  expect(audit.status).toBe(400);
+  expect(await audit.json()).toEqual({ _tag: 'InvalidAuditFilter' });
+  expect(await auditRows(app)).toEqual([]);
+});

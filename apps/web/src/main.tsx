@@ -6,6 +6,7 @@ import {
   lazyRouteComponent,
   Outlet,
   RouterProvider,
+  stringifySearchWith,
 } from '@tanstack/react-router';
 import { createRoot } from 'react-dom/client';
 import { preloadAudit } from './audit-api';
@@ -116,6 +117,8 @@ const router = createRouter({
     }),
   ]),
   context: { queryClient },
+  parseSearch: (search) => Object.fromEntries(new URLSearchParams(search)),
+  stringifySearch: stringifySearchWith(JSON.stringify),
   defaultPreload: 'intent',
   defaultPreloadStaleTime: 0,
 });

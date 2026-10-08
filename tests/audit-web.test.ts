@@ -3,6 +3,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import {
   acmePath,
+  auditNow,
   auditPageData,
   auditRows,
   fetchValues,
@@ -12,9 +13,16 @@ import {
   selectAudit,
   visitAudit,
 } from './support/audit-browser.ts';
+import { jsonRequest } from './support/authorizations.ts';
 import { issueGrant } from './support/grants.ts';
 import { deferred, listMachines, revokeMachine } from './support/machines.ts';
-import { deleteSecret, expectNoValue, listSecrets } from './support/vault.ts';
+import {
+  createSecret,
+  deleteSecret,
+  expectNoValue,
+  listSecrets,
+  secretInput,
+} from './support/vault.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
@@ -191,6 +199,12 @@ it('E20/E21: recorded denial reason, Deleted and Revoked use historical identity
     const { page } = visit;
     await auditEntries(page).first().waitFor();
     const denied = auditEntries(page).filter({ hasText: 'Denied' }).first();
+    expect(
+      await denied
+        .locator('[data-slot="badge"]')
+        .first()
+        .getAttribute('data-variant'),
+    ).toBe('destructive');
     await denied.getByRole('button', { name: /Show details/ }).click();
     expect(await denied.innerText()).toContain(
       'Outside this machine’s bucket grant. No value was delivered.',
@@ -214,6 +228,9 @@ it('E22: fresh and filtered-empty copy, clear filters and one skeleton status', 
   try {
     await fresh.page.getByText('No secret uses yet', { exact: true }).waitFor();
     expect(await fresh.page.locator('body').innerText()).toContain('nook run');
+    expect(await fresh.page.locator('body').innerText()).toContain(
+      'Denied requests appear here too.',
+    );
     await selectAudit(fresh.page, 'Bucket', 'work');
     await fresh.page
       .getByText('No uses match these filters', { exact: true })
@@ -262,6 +279,10 @@ it('E22: genuine D1 load failure retries, and older-page failure keeps loaded en
     await page
       .getByText('Couldn’t load audit entries', { exact: true })
       .waitFor();
+    expect(
+      visit.requests.filter((request) => request.startsWith('/api/audit'))
+        .length,
+    ).toBe(1);
     const db = await visit.app.mf.getD1Database('DB');
     await db
       .prepare('ALTER TABLE unavailable_audit_entries RENAME TO audit_entries')
@@ -365,6 +386,281 @@ it('E24: Audit intent loads all four queries, filter pointer intent caches insta
     await page.waitForLoadState('networkidle');
   } finally {
     gate.resolve();
+    await visit.close();
+  }
+});
+
+it('E19: the valid all bucket is distinct from All buckets in selection and intent', async () => {
+  const visit = await visitAudit(browser, {
+    count: 1,
+    configure: async (_page, app, seeded) => {
+      expect(
+        (await jsonRequest(app, '/api/buckets', { path: 'all/child' })).status,
+      ).toBe(200);
+      for (const bucket of ['all', 'all/child']) {
+        expect(
+          (await createSecret(app, secretInput({ bucket, name: 'ALL_KEY' })))
+            .status,
+        ).toBe(201);
+        const response = await fetchValues(app, seeded.token, {
+          secrets: [`${bucket}/ALL_KEY`],
+        });
+        expect(response.status).toBe(200);
+        await response.body?.cancel();
+      }
+    },
+  });
+  try {
+    const { page } = visit;
+    await expect.poll(() => auditEntries(page).count()).toBe(3);
+    await page.getByRole('combobox', { name: 'Bucket', exact: true }).click();
+    await page.getByRole('option', { name: 'all', exact: true }).hover();
+    await expect
+      .poll(() =>
+        visit.requests.some((request) => request.includes('bucket=all')),
+      )
+      .toBe(true);
+    await page.getByRole('option', { name: 'all', exact: true }).click();
+    expect(new URL(page.url()).searchParams.get('bucket')).toBe('all');
+    await expect.poll(() => auditEntries(page).count()).toBe(2);
+    expect(
+      (await auditEntries(page).allTextContents()).every((entry) =>
+        entry.includes('ALL_KEY'),
+      ),
+    ).toBe(true);
+    await page.reload();
+    await expect.poll(() => auditEntries(page).count()).toBe(2);
+    await selectAudit(page, 'Bucket', 'All buckets');
+    expect(new URL(page.url()).searchParams.has('bucket')).toBe(false);
+    await expect.poll(() => auditEntries(page).count()).toBe(3);
+  } finally {
+    await visit.close();
+  }
+});
+
+it('E19: bucket controls reject prefix-lookalike secret choices and clear their selection', async () => {
+  const path = 'work/acme-old/GH_TOKEN';
+  const visit = await visitAudit(browser, {
+    count: 1,
+    configure: async (_page, app, seeded) => {
+      expect(
+        (await jsonRequest(app, '/api/buckets', { path: 'work/acme-old' }))
+          .status,
+      ).toBe(200);
+      expect(
+        (
+          await createSecret(
+            app,
+            secretInput({ bucket: 'work/acme-old', name: 'GH_TOKEN' }),
+          )
+        ).status,
+      ).toBe(201);
+      const response = await fetchValues(app, seeded.token, {
+        secrets: [path],
+      });
+      expect(response.status).toBe(200);
+      await response.body?.cancel();
+    },
+  });
+  try {
+    const { page } = visit;
+    await auditEntries(page).first().waitFor();
+    await selectAudit(page, 'Secret', path);
+    await selectAudit(page, 'Bucket', 'work/acme');
+    expect(new URL(page.url()).searchParams.has('secret')).toBe(false);
+    await page.getByRole('combobox', { name: 'Secret', exact: true }).click();
+    expect(
+      await page.getByRole('option', { name: path, exact: true }).count(),
+    ).toBe(0);
+    expect(
+      await page.getByRole('option', { name: acmePath, exact: true }).count(),
+    ).toBe(1);
+  } finally {
+    await visit.close();
+  }
+});
+it('E19: historical URL selections remain visible even when no matching entry is loaded', async () => {
+  const visit = await visitAudit(browser, {
+    count: 1,
+    start: '/audit?bucket=work%2Fdeleted&secret=work%2Fdeleted%2FMISSING',
+  });
+  try {
+    const { page } = visit;
+    await page
+      .getByText('No uses match these filters', { exact: true })
+      .waitFor();
+    expect(
+      await page
+        .getByRole('combobox', { name: 'Bucket', exact: true })
+        .innerText(),
+    ).toBe('work/deleted');
+    expect(
+      await page
+        .getByRole('combobox', { name: 'Secret', exact: true })
+        .innerText(),
+    ).toBe('work/deleted/MISSING');
+  } finally {
+    await visit.close();
+  }
+});
+it('E19: a deleted secret in loaded history remains a filter choice', async () => {
+  const visit = await visitAudit(browser, {
+    count: 1,
+    configure: async (_page, app) => {
+      const secret = (await listSecrets(app)).find(
+        (entry) => entry.path === acmePath,
+      )!;
+      expect((await deleteSecret(app, acmePath, secret.version)).status).toBe(
+        204,
+      );
+    },
+  });
+  try {
+    const { page } = visit;
+    await auditEntries(page).first().waitFor();
+    await page.waitForLoadState('networkidle');
+    await selectAudit(page, 'Secret', acmePath);
+    expect(new URL(page.url()).searchParams.get('secret')).toBe(acmePath);
+    await expect.poll(() => auditEntries(page).count()).toBe(1);
+  } finally {
+    await visit.close();
+  }
+});
+it('E17: date labels retain the year and advance after a minute on an idle page', async () => {
+  const visit = await visitAudit(browser, {
+    count: 2,
+    configure: async (page, app, seeded) => {
+      const db = await app.mf.getD1Database('DB');
+      await db
+        .prepare('UPDATE audit_entries SET at=? WHERE id=?')
+        .bind('2025-10-07T12:00:00.000Z', seeded.entries[1].id)
+        .run();
+      await page.clock.install({ time: auditNow });
+    },
+  });
+  try {
+    const { page } = visit;
+    await expect.poll(() => auditEntries(page).count()).toBe(2);
+    expect(
+      await auditEntries(page).last().locator('time').first().innerText(),
+    ).toBe('Oct 7, 2025');
+    expect(await auditEntries(page).first().innerText()).toContain('Just now');
+    await page.clock.runFor(60_000);
+    expect(await auditEntries(page).first().innerText()).toContain('1m ago');
+  } finally {
+    await visit.close();
+  }
+});
+
+it('E24: intent on historical detail links preloads their URL filters before navigation', async () => {
+  const visit = await visitAudit(browser, { count: 2 });
+  try {
+    const { page } = visit;
+    const row = auditEntries(page).first();
+    await row.waitFor();
+    await row.getByRole('button', { name: /Show details/ }).click();
+    const secret = row.getByRole('link', { name: 'Uses of this secret' });
+    await secret.hover();
+    await expect
+      .poll(() =>
+        visit.requests.some((request) =>
+          request.includes('secret=work%2Facme%2FGH_TOKEN'),
+        ),
+      )
+      .toBe(true);
+    const bucket = row.getByRole('link', { name: 'Uses in this bucket' });
+    await bucket.hover();
+    await expect
+      .poll(() =>
+        visit.requests.some((request) =>
+          request.includes('bucket=work%2Facme'),
+        ),
+      )
+      .toBe(true);
+    await bucket.click();
+    expect(new URL(page.url()).searchParams.get('bucket')).toBe('work/acme');
+    expect(
+      await page.getByRole('status', { name: 'Loading audit entries' }).count(),
+    ).toBe(0);
+    expect(await auditEntries(page).count()).toBe(2);
+  } finally {
+    await visit.close();
+  }
+});
+
+it.each(['123', '1e3', 'true', 'false', 'null'].map((bucket) => ({ bucket })))(
+  'E19: a JSON-like bucket $bucket works from an ordinary direct URL and after reload',
+  async ({ bucket }) => {
+    const visit = await visitAudit(browser, {
+      count: 1,
+      start: `/audit?bucket=${bucket}`,
+      configure: async (_page, app, seeded) => {
+        expect(
+          (await jsonRequest(app, '/api/buckets', { path: bucket })).status,
+        ).toBe(200);
+        expect(
+          (await createSecret(app, secretInput({ bucket, name: 'URL_KEY' })))
+            .status,
+        ).toBe(201);
+        const response = await fetchValues(app, seeded.token, {
+          secrets: [`${bucket}/URL_KEY`],
+        });
+        expect(response.status).toBe(200);
+        await response.body?.cancel();
+      },
+    });
+    try {
+      const { page } = visit;
+      await expect.poll(() => auditEntries(page).count()).toBe(1);
+      expect(await auditEntries(page).first().innerText()).toContain('URL_KEY');
+      expect(
+        await page
+          .getByRole('combobox', { name: 'Bucket', exact: true })
+          .innerText(),
+      ).toBe(bucket);
+      await selectAudit(page, 'Bucket', 'All buckets');
+      await expect.poll(() => auditEntries(page).count()).toBe(2);
+      await selectAudit(page, 'Bucket', bucket);
+      expect(new URL(page.url()).searchParams.get('bucket')).toBe(bucket);
+      await page.reload();
+      await expect.poll(() => auditEntries(page).count()).toBe(1);
+      expect(await auditEntries(page).first().innerText()).toContain('URL_KEY');
+      await page.goto(`${visit.app.origin}/vault?bucket=${bucket}`);
+      await page.locator(`[data-secret="${bucket}/URL_KEY"]`).waitFor();
+      expect(
+        await page.locator(`[data-secret="${bucket}/URL_KEY"]`).count(),
+      ).toBe(1);
+    } finally {
+      await visit.close();
+    }
+  },
+);
+
+it('E21: unknown current metadata does not claim a historical secret is deleted or a machine revoked', async () => {
+  const gate = deferred();
+  const visit = await visitAudit(browser, {
+    count: 1,
+    configure: async (page) => {
+      for (const area of ['secrets', 'machines'])
+        await page.route(`**/api/${area}`, async (route) => {
+          await gate.promise;
+          await route.continue().catch(() => {});
+        });
+    },
+  });
+  try {
+    const row = auditEntries(visit.page).first();
+    await row.waitFor();
+    await row.getByRole('button', { name: /Show details/ }).click();
+    const text = await row.innerText();
+    expect(text.includes('Deleted') || text.includes('Revoked')).toBe(false);
+    gate.resolve();
+    await visit.page.waitForLoadState('networkidle');
+    expect((await row.innerText()).includes('Deleted')).toBe(false);
+    expect((await row.innerText()).includes('Revoked')).toBe(false);
+  } finally {
+    gate.resolve();
+    await visit.page.unrouteAll({ behavior: 'wait' });
     await visit.close();
   }
 });

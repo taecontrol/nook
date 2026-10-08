@@ -46,7 +46,10 @@ export function run(args: string[], write: (message: string) => void) {
       const values = new Map(
         delivered.values.map(({ path, value }) => [path, value]),
       );
-      const env = { ...process.env };
+      const env: NodeJS.ProcessEnv = Object.assign(
+        Object.create(null),
+        process.env,
+      );
       for (const { name, path } of parsed.mappings) {
         const value = values.get(path);
         if (!value)

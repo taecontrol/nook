@@ -37,6 +37,9 @@ export async function execute(
   }
   const command = Command.make('nook').pipe(
     Command.withSubcommands([
+      Command.make('run').pipe(
+        Command.withDescription('Run a command with audited secrets.'),
+      ),
       Command.make('vault').pipe(
         Command.withSubcommands([
           Command.make(

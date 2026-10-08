@@ -1,9 +1,5 @@
 import type { AuditEntry } from '@nook/contract';
-import {
-  useInfiniteQuery,
-  useQuery,
-  useQueryClient,
-} from '@tanstack/react-query';
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { cn } from 'cn';
 import {
@@ -44,9 +40,11 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { type AuditFilters, auditOptions } from './audit-api';
-import { bucketsOptions } from './buckets-api';
-import { machinesOptions } from './machines-api';
-import { secretsOptions } from './vault-api';
+import { useBuckets } from './buckets-api';
+import { useMachines } from './machines-api';
+import { useVault } from './vault-api';
+
+const allBuckets = '*';
 
 function recentTime(at: string) {
   const minutes = Math.max(
@@ -97,26 +95,28 @@ function missingFrom<T>(
 function Filters({
   filters,
   entries,
+  buckets,
+  secrets,
 }: {
   filters: AuditFilters;
   entries: AuditEntry[];
+  buckets?: readonly { path: string }[];
+  secrets?: readonly { path: string }[];
 }) {
-  const buckets = useQuery(bucketsOptions);
-  const secrets = useQuery(secretsOptions);
   const queries = useQueryClient();
   const navigate = useNavigate({ from: '/audit' });
   const bucketPaths = filterPaths(
-    buckets.data,
+    buckets,
     entries.map((entry) => entry.bucket),
     filters.bucket,
   );
   const secretPaths = filterPaths(
-    secrets.data,
+    secrets,
     entries.map((entry) => entry.path),
     filters.secret,
   ).filter((path) => path === filters.secret || inBucket(path, filters.bucket));
   const changeBucket = (value: string): AuditFilters => {
-    const bucket = value === 'all' ? undefined : value;
+    const bucket = value === allBuckets ? undefined : value;
     return {
       bucket,
       secret:
@@ -137,7 +137,7 @@ function Filters({
         <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:max-w-64">
           <Label htmlFor="audit-bucket">Bucket</Label>
           <Select
-            value={filters.bucket ?? 'all'}
+            value={filters.bucket ?? allBuckets}
             onValueChange={(value) =>
               void navigate({ search: changeBucket(value) })
             }
@@ -147,8 +147,8 @@ function Filters({
             </SelectTrigger>
             <SelectContent position="popper" className="w-80 sm:w-96">
               <SelectItem
-                value="all"
-                onPointerEnter={() => preload(changeBucket('all'))}
+                value={allBuckets}
+                onPointerEnter={() => preload(changeBucket(allBuckets))}
               >
                 All buckets
               </SelectItem>
@@ -457,8 +457,9 @@ function NoEntries({ filtered }: { filtered: boolean }) {
 export function AuditPage() {
   const filters = useSearch({ from: '/owner/audit' });
   const query = useAuditEntries(filters);
-  const machines = useQuery(machinesOptions);
-  const secrets = useQuery(secretsOptions);
+  const { machines } = useMachines();
+  const { secrets } = useVault();
+  const { buckets } = useBuckets();
   const [, tick] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => tick((n) => n + 1), 60_000);
@@ -474,7 +475,12 @@ export function AuditPage() {
         Every secret request, newest first. Review what was used, why, and by
         which machine.
       </p>
-      <Filters filters={filters} entries={entries} />
+      <Filters
+        filters={filters}
+        entries={entries}
+        buckets={buckets.data}
+        secrets={secrets.data}
+      />
       <AuditResults
         query={query}
         entries={entries}
