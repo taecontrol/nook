@@ -17,7 +17,12 @@ export function jsonRequest(
 ) {
   return fetch(`${app.origin}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', ...headers },
+    // A control request must not inherit a socket from a closed fixture runtime.
+    headers: {
+      'Content-Type': 'application/json',
+      ...headers,
+      Connection: 'close',
+    },
     ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
   });
 }
