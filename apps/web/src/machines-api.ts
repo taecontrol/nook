@@ -50,6 +50,7 @@ export function useMachines() {
   );
   const machines = useQuery({
     ...machinesOptions,
+    enabled: !busy,
     staleTime: busy ? Infinity : machinesOptions.staleTime,
     refetchOnWindowFocus: busy ? false : machinesOptions.refetchOnWindowFocus,
     select: (data) => data.filter((machine) => !pendingIds.has(machine.id)),

@@ -69,9 +69,15 @@ async function startBucketWrite(page: Page, operation: string) {
       .click();
   }
 }
-it.each(cases)(
-  'Audit observes pending $area $operation without refreshing pre-commit metadata',
-  async ({ area, operation, start }) => {
+it.each([
+  ...cases.map((input) => ({ ...input, awayMs: 0, settleAway: false })),
+  ...cases.map((input) => ({ ...input, awayMs: 300_001, settleAway: false })),
+  ...cases
+    .filter((input) => input.area === 'buckets')
+    .map((input) => ({ ...input, awayMs: 300_001, settleAway: true })),
+])(
+  'Audit observes pending $area $operation without refreshing pre-commit metadata after $awayMs ms away (settlement away: $settleAway)',
+  async ({ area, operation, start, awayMs, settleAway }) => {
     const gate = deferred();
     let writes = 0;
     let settled = false;
@@ -132,6 +138,13 @@ it.each(cases)(
       else await confirmRevoke(page, machineId);
       await expect.poll(() => writes).toBe(1);
       const before = reads.length;
+      if (awayMs) {
+        await page
+          .getByRole('navigation', { name: 'breadcrumb' })
+          .getByRole('link', { name: 'Nook', exact: true })
+          .click();
+        await page.clock.fastForward(awayMs);
+      }
       await page.getByRole('link', { name: 'Audit', exact: true }).hover();
       await page.getByRole('link', { name: 'Audit', exact: true }).click();
       await auditEntries(page).first().waitFor();
@@ -143,8 +156,24 @@ it.each(cases)(
         reads.length,
         'Audit intent, mounting, and focus defer metadata reads until the pending write settles',
       ).toBe(before);
+      if (settleAway)
+        await page
+          .getByRole('navigation', { name: 'breadcrumb' })
+          .getByRole('link', { name: 'Nook', exact: true })
+          .click();
       gate.resolve();
       await expect.poll(() => settled).toBe(true);
+      if (settleAway) {
+        await page.waitForLoadState('networkidle');
+        await page.clock.runFor(100);
+        expect(
+          reads.length,
+          'Settlement preserves an inactive query until intent or mounting reads it',
+        ).toBe(before);
+        await page.getByRole('link', { name: 'Audit', exact: true }).hover();
+        await page.getByRole('link', { name: 'Audit', exact: true }).click();
+        await auditEntries(page).first().waitFor();
+      }
       if (area === 'secrets') {
         await expect.poll(() => writes).toBe(3);
         const current = await listSecrets(visit.app);
@@ -195,6 +224,27 @@ it.each(cases)(
             operation === 'create' ? createdPath : secretPath,
           ).count(),
         ).toBe(operation === 'delete' ? 0 : 1);
+      } else {
+        await expect
+          .poll(
+            () => reads.filter((read) => read === 'after-settlement').length,
+          )
+          .toBeGreaterThan(0);
+        await page.waitForLoadState('networkidle');
+        if (area === 'buckets') {
+          await page
+            .getByRole('combobox', { name: 'Bucket', exact: true })
+            .click();
+          expect(
+            await page
+              .getByRole('option', { name: bucketPath, exact: true })
+              .count(),
+          ).toBe(operation === 'create' ? 1 : 0);
+        } else {
+          const row = auditEntries(page).first();
+          await row.getByRole('button', { name: /Show details/ }).click();
+          await expect.poll(() => row.innerText()).toContain('Revoked');
+        }
       }
     } finally {
       gate.resolve();
