@@ -430,7 +430,17 @@ it('E19: the valid all bucket is distinct from All buckets in selection and inte
     ).toBe(true);
     await page.reload();
     await expect.poll(() => auditEntries(page).count()).toBe(2);
-    await selectAudit(page, 'Bucket', 'All buckets');
+    const unfiltered = () =>
+      visit.requests.filter((request) => request === '/api/audit').length;
+    const beforeClear = unfiltered();
+    await page.getByRole('combobox', { name: 'Bucket', exact: true }).click();
+    await page
+      .getByRole('option', { name: 'All buckets', exact: true })
+      .hover();
+    await expect.poll(unfiltered).toBeGreaterThan(beforeClear);
+    await page
+      .getByRole('option', { name: 'All buckets', exact: true })
+      .click();
     expect(new URL(page.url()).searchParams.has('bucket')).toBe(false);
     await expect.poll(() => auditEntries(page).count()).toBe(3);
   } finally {
@@ -474,6 +484,11 @@ it('E19: bucket controls reject prefix-lookalike secret choices and clear their 
     ).toBe(0);
     expect(
       await page.getByRole('option', { name: acmePath, exact: true }).count(),
+    ).toBe(1);
+    expect(
+      await page
+        .getByRole('option', { name: 'work/acme/STRIPE_KEY', exact: true })
+        .count(),
     ).toBe(1);
   } finally {
     await visit.close();

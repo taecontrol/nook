@@ -164,11 +164,9 @@ it.each(cases)(
           .locator('[data-path="work/acme"]')
           .getByRole('link')
           .click();
-        const feedback = page
-          .getByRole('alert')
-          .filter({
-            has: page.getByRole('button', { name: 'Dismiss', exact: true }),
-          });
+        const feedback = page.getByRole('alert').filter({
+          has: page.getByRole('button', { name: 'Dismiss', exact: true }),
+        });
         await feedback.filter({ hasText: 'could not confirm' }).waitFor();
         if (operation !== 'delete')
           expect(
