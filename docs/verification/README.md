@@ -156,7 +156,7 @@ URL search parameters remain plain strings for both Audit and Vault. Browser reg
 
 ### Project secret mappings
 
-Issue #6 is verified at the production CLI boundary in `nook-json-cli.test.ts`, against the built Worker and migrated D1. The Linux bubblewrap fixture and the private macOS keychain fixture accept a command working directory. Every project file lives beneath that fixture's temporary HOME; no `nook.json` is committed at the repository root. The macOS CLI job includes this suite.
+Issue #6 is verified at the production CLI boundary in `nook-json-cli.test.ts`, against the built Worker and migrated D1. The Linux bubblewrap fixture and the private macOS keychain fixture accept a command working directory; the CLI starts in that fixture's temporary HOME unless a test supplies a directory. Every project file lives beneath that HOME; no `nook.json` is committed at the repository root. The macOS CLI job includes this suite.
 
 | Examples | Evidence |
 | --- | --- |

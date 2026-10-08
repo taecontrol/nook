@@ -94,7 +94,7 @@ it.each([0, 1, 42])(
     const entries = (await auditPageData(app)).entries;
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
-      workingDirectory: await realpath(process.cwd()),
+      workingDirectory: await realpath(keyring.home),
       executable: process.execPath.split('/').at(-1),
       purpose: 'open the release PR',
     });

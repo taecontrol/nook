@@ -242,7 +242,7 @@ trackMacFixtureProcesses(${JSON.stringify(groups)});
         args: string[],
         extra: NodeJS.ProcessEnv = {},
         input = '',
-        workingDirectory = process.cwd(),
+        workingDirectory = home,
       ) {
         if (!existsSync(resolve(testBuild, 'cli.js')))
           throw new Error('The built CLI is required.');

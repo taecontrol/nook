@@ -188,7 +188,7 @@ export async function privateKeyring(
         args: string[],
         extra?: Record<string, string | undefined>,
         input = '',
-        workingDirectory = process.cwd(),
+        workingDirectory = home,
       ) {
         expect(
           existsSync(resolve(testBuild, 'cli.js')),
