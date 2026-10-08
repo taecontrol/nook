@@ -168,6 +168,8 @@ Issue #6 is verified at the production CLI boundary in `nook-json-cli.test.ts`, 
 
 The existing statement decorator optionally observes requests through fixed labels only; it never records a body, token, or value. Config discovery and validation are shared by `run` and `check`, and the contract owns path validation and the distinct-path limit. The Worker collects every absent path before decryption or delivery audit. This change adds no endpoint, published JSON Schema, project approval policy, or new architecture invariant.
 
+Runtime binding updates retain the last successful output observers and outbound-service overrides. Real-workerd lifecycle tests emit fixed public stdout/stderr markers before and after an update, replace and explicitly reset the observer, and recover from a failed observer update. These checks keep private log capture active when the metadata-only CLI case removes the decryption key.
+
 Control JSON requests close their HTTP connections so temporary runtimes cannot inherit a stale pooled socket. `runtime-lifecycle.test.ts` forwards real authorization creations and a denial through the existing closing-connection fixture, which rejects socket reuse, and checks their D1 state. This regression protects the fixture transport while retaining the authorization assertions.
 
 ## Migrations
