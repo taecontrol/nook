@@ -5,6 +5,7 @@ import {
   readFile,
   realpath,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -682,9 +683,11 @@ it('E6: a disappeared working directory fails before keyring access', async () =
 it('CLI help lists the installed audited run command', async () => {
   const result = await keyring.start(['--help']).done;
   expect(result.status).toBe(0);
+  expect(/\brun\b/.test(result.stdout)).toBe(true);
   expectOutput(result.stdout, 'Run a command with audited secrets.');
 });
 it('E1: the resolved command keeps argv0 and forwards arguments literally', async () => {
+  await symlink(process.execPath, resolve(keyring.shim, 'node'));
   const probe = resolve(keyring.home, 'arguments.js');
   await writeFile(
     probe,
@@ -692,6 +695,7 @@ it('E1: the resolved command keeps argv0 and forwards arguments literally', asyn
   );
   const result = await keyring.start(
     runArgs(['node', probe, 'a b', '$NOOK_TEST_INHERITED', '--flag']),
+    { PATH: keyring.shim },
   ).done;
   expect(result.status).toBe(0);
   expectOutput(result.stdout, 'true', true);
