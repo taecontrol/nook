@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
+import { machineCreate, machineCreateInput } from './support/agent-create.ts';
 import { acmePath, auditNow, fetchValues } from './support/audit.ts';
 import { auditEntries, visitAudit } from './support/audit-browser.ts';
 import { issueGrant } from './support/grants.ts';
@@ -31,6 +32,7 @@ const states = [
   'deleted-revoked',
   'loading',
   'load-error',
+  'created',
 ] as const;
 const matrix = states.flatMap((state) =>
   (['light', 'dark'] as const).flatMap((theme) =>
@@ -61,6 +63,43 @@ it.each(matrix)(
       configure: async (page, app, seeded) => {
         page.on('pageerror', (error) => errors.push(error.name));
         const db = await app.mf.getD1Database('DB');
+        if (state === 'created') {
+          expect(
+            (
+              await machineCreate(
+                app,
+                seeded.token,
+                machineCreateInput({
+                  bucket: 'work/acme/billing-service',
+                  name: 'NEW_PROVIDER_TOKEN_FOR_BILLING_SERVICE_PRODUCTION_DEPLOYS',
+                  purpose:
+                    'token from provider setup for the billing-service production deploy pipeline '
+                      .repeat(2)
+                      .trim(),
+                  workingDirectory:
+                    '/synthetic/projects/' +
+                    'billing-service-production/'.repeat(45),
+                }),
+              )
+            ).status,
+          ).toBe(201);
+          const { token } = await issueGrant(app, ['work/acme']);
+          expect(
+            (
+              await fetchValues(app, token, {
+                secrets: ['personal/finances/PLAID_SECRET'],
+              })
+            ).status,
+          ).toBe(403);
+          await db
+            .prepare("UPDATE audit_entries SET at=? WHERE outcome='created'")
+            .bind(new Date(auditNow.getTime() - 1000).toISOString())
+            .run();
+          await db
+            .prepare("UPDATE audit_entries SET at=? WHERE outcome='denied'")
+            .bind(new Date(auditNow.getTime() - 2000).toISOString())
+            .run();
+        }
         if (state === 'denied-recent') {
           const { token } = await issueGrant(app, ['work/acme']);
           expect(
@@ -174,6 +213,29 @@ it.each(matrix)(
         size.width,
         size.height,
       ]);
+      if (state === 'created') {
+        const row = auditEntries(page)
+          .filter({
+            hasText:
+              'NEW_PROVIDER_TOKEN_FOR_BILLING_SERVICE_PRODUCTION_DEPLOYS',
+          })
+          .first();
+        expect(await row.innerText()).toContain('Created');
+        await row.getByRole('button', { name: /Show details/ }).click();
+        await page.getByText('Working directory', { exact: true }).waitFor();
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth),
+        ).toBe(size.width);
+        expect(/Executable|\bRun\b/.test(await row.innerText())).toBe(false);
+        await page.screenshot({
+          path: resolve(
+            directory,
+            `audit-created-details-${size.name}-${theme}.png`,
+          ),
+          animations: 'disabled',
+          fullPage: true,
+        });
+      }
     } finally {
       gate.resolve();
       await visit.close();
