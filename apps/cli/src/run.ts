@@ -1,7 +1,7 @@
-import { realpath } from 'node:fs/promises';
 import { NodeServices } from '@effect/platform-node';
 import { Effect, Redacted } from 'effect';
 import { CliFailure, type ServerFailure } from './errors.ts';
+import { currentDirectory, projectSecrets } from './project-secrets.ts';
 import { parseRun } from './run-arguments.ts';
 import { CommandFailure, resolveCommand, runCommand } from './run-command.ts';
 import { session } from './session.ts';
@@ -27,12 +27,10 @@ function runFailure(error: ServerFailure, url: string) {
 export function run(args: string[], write: (message: string) => void) {
   return Effect.runPromise(
     Effect.gen(function* () {
-      const workingDirectory = yield* Effect.tryPromise({
-        try: () => realpath(process.cwd()),
-        catch: () => new CliFailure('Could not resolve the working directory.'),
-      });
+      const workingDirectory = yield* currentDirectory;
+      const project = yield* projectSecrets(workingDirectory);
       const parsed = yield* Effect.try({
-        try: () => parseRun(args, workingDirectory),
+        try: () => parseRun(args, workingDirectory, project),
         catch: (error) => error as CliFailure,
       });
       const file = yield* resolveCommand(parsed.command[0]);

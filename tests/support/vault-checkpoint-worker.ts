@@ -38,11 +38,23 @@ function decorate(db: D1Database): D1Database {
     withSession: db.withSession.bind(db),
   };
 }
-export function vaultCheckpointWorker(worker: {
-  fetch(request: Request, env: { DB: D1Database }): Promise<Response>;
-}) {
+export function vaultCheckpointWorker(
+  worker: {
+    fetch(request: Request, env: { DB: D1Database }): Promise<Response>;
+  },
+  observeRequests = false,
+) {
   return {
-    fetch: (request: Request, env: { DB: D1Database }) =>
-      worker.fetch(request, { ...env, DB: decorate(env.DB) }),
+    async fetch(request: Request, env: { DB: D1Database }) {
+      if (observeRequests) {
+        await checkpoint('request');
+        const path = new URL(request.url).pathname;
+        if (path === '/api/machine/secrets/values')
+          await checkpoint('value-request');
+        if (path === '/api/machine/secrets')
+          await checkpoint('listing-request');
+      }
+      return worker.fetch(request, { ...env, DB: decorate(env.DB) });
+    },
   };
 }

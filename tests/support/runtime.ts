@@ -84,10 +84,11 @@ export async function runtime(
     throw error;
   }
   const { runtime: mf, settings: mfOptions } = started;
+  let currentOptions = mfOptions;
   return {
     origin,
     mf,
-    setBindings(
+    async setBindings(
       bindings: Record<string, string>,
       overrides: {
         outboundService?: (request: Request) => Promise<Response>;
@@ -95,7 +96,9 @@ export async function runtime(
         handleRuntimeStdio?: (stdout: Readable, stderr: Readable) => void;
       } = {},
     ) {
-      return mf.setOptions({ ...mfOptions, bindings, ...overrides });
+      const options = { ...currentOptions, bindings, ...overrides };
+      await mf.setOptions(options);
+      currentOptions = options;
     },
     async close() {
       try {

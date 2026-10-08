@@ -13,4 +13,5 @@ export const macosCliSuites = [
   'tests/machine-grant-cli.test.ts',
   'tests/vault-cli.test.ts',
   'tests/run-cli.test.ts',
+  'tests/nook-json-cli.test.ts',
 ];

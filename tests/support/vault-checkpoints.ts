@@ -7,6 +7,7 @@ import { vaultRuntime } from './vault.ts';
 export async function vaultCheckpoints(
   onCheckpoint: (label: string) => Promise<boolean>,
   grant?: readonly string[],
+  observeRequests = false,
 ) {
   await mkdir('.local', { recursive: true });
   const directory = await mkdtemp(resolve('.local', 'vault-checkpoints-'));
@@ -16,7 +17,7 @@ export async function vaultCheckpoints(
     });
     await build({
       stdin: {
-        contents: `import worker${grant ? ', { handlerForPrincipal }' : ''} from ${JSON.stringify(resolve(testBuild, 'worker.js'))}; import { vaultCheckpointWorker } from ${JSON.stringify(resolve('tests/support/vault-checkpoint-worker.ts'))}; export default vaultCheckpointWorker(${grant ? `{ fetch(request, env) { if (new URL(request.url).pathname === '/__test/coverage') return worker.fetch(request, env); return handlerForPrincipal('owner@nook.test', env.DB, ${JSON.stringify(grant)}, env.VAULT_KEY)(request); } }` : 'worker'});`,
+        contents: `import worker${grant ? ', { handlerForPrincipal }' : ''} from ${JSON.stringify(resolve(testBuild, 'worker.js'))}; import { vaultCheckpointWorker } from ${JSON.stringify(resolve('tests/support/vault-checkpoint-worker.ts'))}; export default vaultCheckpointWorker(${grant ? `{ fetch(request, env) { if (new URL(request.url).pathname === '/__test/coverage') return worker.fetch(request, env); return handlerForPrincipal('owner@nook.test', env.DB, ${JSON.stringify(grant)}, env.VAULT_KEY)(request); } }` : 'worker'}, ${observeRequests});`,
         resolveDir: process.cwd(),
       },
       outfile: resolve(directory, 'worker.js'),

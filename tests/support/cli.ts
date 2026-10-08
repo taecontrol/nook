@@ -143,6 +143,7 @@ export async function privateKeyring(
       args: string[],
       extra: Record<string, string | undefined> = {},
       input = '',
+      workingDirectory = process.cwd(),
     ) {
       if (
         Object.keys(extra).some(
@@ -167,7 +168,7 @@ export async function privateKeyring(
       const state = { stdout: '', stderr: '', finish: finish! };
       running.set(current, state);
       host.stdin.write(
-        `${JSON.stringify({ id: current, file, args, input, env: { PATH: `${shim}:/usr/bin`, ...extra }, unset: Object.keys(extra).filter((key) => extra[key] === undefined) })}\n`,
+        `${JSON.stringify({ id: current, file, args, input, cwd: workingDirectory, env: { PATH: `${shim}:/usr/bin`, ...extra }, unset: Object.keys(extra).filter((key) => extra[key] === undefined) })}\n`,
       );
       return {
         done,
@@ -187,6 +188,7 @@ export async function privateKeyring(
         args: string[],
         extra?: Record<string, string | undefined>,
         input = '',
+        workingDirectory = home,
       ) {
         expect(
           existsSync(resolve(testBuild, 'cli.js')),
@@ -207,6 +209,7 @@ export async function privateKeyring(
             ...extra,
           },
           input,
+          workingDirectory,
         );
       },
       lookup: async (url: string) =>

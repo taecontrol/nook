@@ -154,6 +154,24 @@ Audit consumes the same guarded metadata hooks as Vault, Buckets, and Machines. 
 
 URL search parameters remain plain strings for both Audit and Vault. Browser regressions create and use the valid buckets `123`, `1e3`, `true`, `false`, and `null` through the owner and machine APIs, then prove direct URLs, selection, and reload preserve the exact path. The valid `all` bucket also remains distinct from the All buckets control.
 
+### Project secret mappings
+
+Issue #6 is verified at the production CLI boundary in `nook-json-cli.test.ts`, against the built Worker and migrated D1. The Linux bubblewrap fixture and the private macOS keychain fixture accept a command working directory; the CLI starts in that fixture's temporary HOME unless a test supplies a directory. Every project file lives beneath that HOME; no `nook.json` is committed at the repository root. The macOS CLI job includes this suite.
+
+| Examples | Evidence |
+| --- | --- |
+| E1–E5 | Independent child digests prove exact bytes, exit 42, silence, flag overrides and additions, duplicate-path aliases, parent discovery, nearest-file precedence, real directories entered through symlinks, and prototype-like environment names. Fixed request checkpoints and D1 audit rows prove a single value request, one entry per distinct path, one purpose, and one run ID. |
+| E6–E9, E13 | Missing secrets and absent buckets are all named without starting a marker-writing child or auditing delivery. Denied mappings are audited. Invalid-file cases run independently through `run`, `run` with flags, and `check`, and prove matching private diagnostics before any keyring or HTTP access. Empty and absent file guidance, duplicate flags, the post-merge twenty-path boundary, and path guidance for an invalid flag alongside a valid file are exercised. |
+| E10–E12 | Metadata checks report healthy, missing, denied, and duplicate mappings, use exact paths rather than ancestor names, and discover the file from subdirectories. They send one listing request per distinct bucket, no value requests, and write no audit entries. Real revocation and storage failures retain the existing session and server guidance. |
+| E14 | Every CLI case checks output, errors, individual Worker log messages and complete UTF-8 stdout/stderr streams, keyring argument transcripts, and audit for raw, JSON-escaped, hex, base64, and base64url values and credentials. Whole-stream checks catch multiline values split across log lines; individual-message checks retain escaped-value detection. Pasted value-like paths and malformed JSON are generated privately and never appear in assertion diagnostics. |
+| E15 | The real machine MCP description in `run-worker.test.ts` explains that a project's `nook.json` mappings are injected without `--secret`, while retaining the existing flags guidance and metadata-only guarantees. |
+
+The existing statement decorator optionally observes requests through fixed labels only; it never records a body, token, or value. Config discovery and validation are shared by `run` and `check`, and the contract owns path validation and the distinct-path limit. The Worker collects every absent path before decryption or delivery audit. This change adds no endpoint, published JSON Schema, project approval policy, or new architecture invariant.
+
+Runtime binding updates retain the last successful output observers and outbound-service overrides. Real-workerd lifecycle tests emit fixed public stdout/stderr markers before and after an update, replace and explicitly reset the observer, and recover from a failed observer update. These checks keep private log capture active when the metadata-only CLI case removes the decryption key.
+
+Control JSON requests close their HTTP connections so temporary runtimes cannot inherit a stale pooled socket. `runtime-lifecycle.test.ts` forwards real authorization creations and a denial through the existing closing-connection fixture, which rejects socket reuse, and checks their D1 state. This regression protects the fixture transport while retaining the authorization assertions.
+
 ## Migrations
 
 `migrations/NNNN_name.sql` files are applied in order using Wrangler's SQL splitter and one atomic D1 batch per file, including its `d1_migrations` record. `migrations/schema.sql` is a snapshot, not a migration. The D1 binding's `migrations_pattern` selects only numbered files; a local Wrangler acceptance test proves that it excludes the snapshot and preserves replay. Verification uses fresh Miniflare databases, checks an idempotent replay, and applies the latest file to the previous schema containing a sentinel bucket. Both final normalized schemas must match the snapshot, and the sentinel must remain unchanged. A second migration enforces the reserved `me` invariant at the database boundary.

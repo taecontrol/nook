@@ -68,7 +68,7 @@ export function mcpHandler(db: D1Database, grant: BucketGrant) {
       'list_secrets',
       {
         description:
-          'List names and descriptions of secrets in the bucket and its ancestors, never values. Use nook run --secret ENV=bucket/NAME --purpose "…" -- <command> instead of asking the owner for a value.',
+          'List names and descriptions of secrets in the bucket and its ancestors, never values. Use nook run --secret ENV=bucket/NAME --purpose "…" -- <command> instead of asking the owner for a value. When the project has a nook.json, its mapped secrets are injected without --secret.',
         inputSchema: SecretInput,
         outputSchema: SecretsOutput,
         annotations: { readOnlyHint: true },

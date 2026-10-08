@@ -20,11 +20,33 @@ brew install taecontrol/tap/nook            # macOS
 
 ## Run a command with secrets
 
+Commit a `nook.json` with environment names and full secret paths:
+
+```json
+{
+  "secrets": {
+    "GH_TOKEN": "work/acme/GH_TOKEN",
+    "DB_URL": "work/acme/DB_URL"
+  }
+}
+```
+
+```sh
+nook vault check
+nook run --purpose "dev server" -- pnpm dev
+```
+
+The CLI searches from the real working directory up to the filesystem root and uses the nearest `nook.json`. Files are never merged. `vault check` uses metadata only: it prints each missing or denied mapping and exits 1, or reports that all distinct mapped secrets are available and exits 0. Checking does not fetch values, test decryption, or write audit entries.
+
+`--secret` adds a variable or overrides the same environment name from the file. You can also use flags without a file:
+
 ```sh
 nook run --secret GH_TOKEN=work/acme/GH_TOKEN --purpose "open the release PR" -- gh pr create
 ```
 
-Repeat `--secret ENV=bucket/NAME` for more variables. The purpose is required and must be one line of 1 to 200 characters. Nook resolves the command before contacting the keyring or server. It fetches each distinct path once, injects values only into the child's environment, and preserves stdin, stdout, stderr, TTYs, and the child's exit status. Any denied, missing, or undecryptable path prevents the command from starting. Values never appear in Nook's own output; the child controls its output.
+Repeat `--secret ENV=bucket/NAME` for more variables; repeated flag names are rejected. The merged mappings may contain at most 20 distinct paths, with multiple environment names allowed for the same path. A file holds references only, never secret values. Unknown top-level keys, malformed JSON, and invalid names or paths fail before keyring or network access, even when flags are supplied. An empty file needs at least one flag to run a command.
+
+The purpose is required and must be one line of 1 to 200 characters. Nook resolves the command before contacting the keyring or server. It sends one value request, fetches each distinct path once, injects values only into the child's environment, and preserves stdin, stdout, stderr, TTYs, and the child's exit status. Any denied, missing, or undecryptable path prevents the command from starting; missing-path errors name every missing path. Values never appear in Nook's own output; the child controls its output.
 
 Before delivering values, the Worker records one entry per secret, including the purpose, machine, working directory, executable, and time. Denied requests record only the denied paths. Audit entries are permanent and read-only, and retain their recorded machine name after revocation. Filter Audit by bucket subtree or exact secret path, including deleted secrets, and load older entries in pages of 25. A failed or lost value request is not retried automatically; a new request is a separate use.
 

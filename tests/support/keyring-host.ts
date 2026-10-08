@@ -91,6 +91,7 @@ reader.on('line', (line) => {
     file: string;
     args: string[];
     input?: string;
+    cwd?: string;
     env?: Record<string, string>;
     unset?: string[];
     signal?: NodeJS.Signals;
@@ -108,6 +109,7 @@ reader.on('line', (line) => {
     throw new Error('A private session bus is required for every child.');
   const child = spawn(request.file, request.args, {
     env,
+    cwd: request.cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   children.set(request.id, child);
