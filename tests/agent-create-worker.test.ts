@@ -413,3 +413,38 @@ it('Migration preserves populated use rows and chronology/path indexes while all
     (await auditPageData(app)).entries.map((entry) => entry.outcome),
   ).toEqual(['created', 'delivered']);
 });
+it('Migration preserves denied use history with all recorded facts', async () => {
+  const db = await app.mf.getD1Database('DB');
+  const old = unstable_splitSqlQuery(
+    await readFile('migrations/0006_audit_entries.sql', 'utf8'),
+  );
+  await db.batch([
+    db.prepare('DROP TABLE audit_entries'),
+    ...old.map((sql) => db.prepare(sql)),
+    db.prepare(
+      "DELETE FROM d1_migrations WHERE name='0007_secret_creations.sql'",
+    ),
+  ]);
+  await db
+    .prepare('INSERT INTO audit_entries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(
+      randomUUID(),
+      '2026-10-07T00:00:00.000Z',
+      'denied',
+      'personal/finances/PLAID_SECRET',
+      'previous denied use',
+      'old-machine',
+      'previous laptop',
+      '/previous',
+      'gh',
+      'previous-run',
+    )
+    .run();
+  const before = await auditRows(app);
+  expect(before).toHaveLength(1);
+  expect(await applyMigrations(db)).toEqual(['0007_secret_creations.sql']);
+  expect(await auditRows(app)).toEqual(before);
+  expect(
+    (await auditPageData(app)).entries.map((entry) => entry.outcome),
+  ).toEqual(['denied']);
+});

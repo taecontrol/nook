@@ -3,6 +3,7 @@ import {
   mkdir,
   readFile,
   realpath,
+  rm,
   symlink,
   writeFile,
 } from 'node:fs/promises';
@@ -100,6 +101,7 @@ it('E1/E4/E20: real create, run, list and MCP preserve exact bytes without expos
   const mcp = await machineMcp(app, token).call('list_secrets', {
     bucket: 'work/acme',
   });
+  expectNoValue(JSON.stringify(mcp), [value, token, app.key]);
   expect(
     (mcp.structuredContent!.secrets as { description: string }[])[0]
       .description,
@@ -132,6 +134,7 @@ it.each(
     expect(
       (await decryptRow(app.key, (await secretRows(app))[0])) === expected,
     ).toBe(true);
+    expect((await secretRows(app))[0].description === '').toBe(true);
   },
 );
 it.skipIf(process.platform !== 'linux').each(['tty-open', 'tty-invalid'])(
@@ -168,20 +171,32 @@ it.skipIf(process.platform !== 'linux').each(['tty-open', 'tty-invalid'])(
     }
   },
 );
-it.skipIf(process.platform !== 'linux')(
-  'E3: a genuine PTY prompts without echoing the typed value',
-  async () => {
+it.skipIf(process.platform !== 'linux').each(['tty', 'tty-open'])(
+  'E3: a genuine PTY prompts without echoing the typed value (%s)',
+  async (mode) => {
     const value = secretInput().value;
-    const result = await keyring.command(
+    const command = keyring.command(
       process.execPath,
       [
         resolve('tests/support/create-input.ts'),
-        'tty',
+        mode,
         resolve(testBuild, 'cli.js'),
       ],
       childEnv(),
       value + '\n',
-    ).done;
+    );
+    let timedOut = false;
+    const deadline = setTimeout(() => {
+      timedOut = true;
+      command.kill('SIGKILL');
+    }, 6000);
+    let result: Awaited<typeof command.done>;
+    try {
+      result = await command.done;
+    } finally {
+      clearTimeout(deadline);
+    }
+    expect(timedOut).toBe(false);
     expect(result.status).toBe(0);
     expectOutput(result.stdout, `Value for ${createdPath}: `);
     expectOutput(result.stdout, `Stored ${createdPath}.`);
@@ -209,6 +224,69 @@ it('E4: the creation records the realpath of a symlinked cwd', async () => {
     await realpath(directory),
   );
 });
+it.skipIf(process.platform !== 'linux')(
+  'TTY input: a Unicode character split across consumed chunks remains exact',
+  async () => {
+    const value = '界';
+    const result = await keyring.command(
+      process.execPath,
+      [
+        resolve('tests/support/create-input.ts'),
+        'tty-split',
+        resolve(testBuild, 'cli.js'),
+      ],
+      childEnv(),
+      value + '\n',
+    ).done;
+    expectNoValue(result.stdout + result.stderr, [value, token, app.key]);
+    expect(result.status).toBe(0);
+    expectOutput(result.stdout, `Stored ${createdPath}.`);
+    expect(
+      (await decryptRow(app.key, (await secretRows(app))[0])) === value,
+    ).toBe(true);
+  },
+);
+it.skipIf(process.platform !== 'linux').each([
+  { label: 'Ctrl-C', control: '\x03' },
+  { label: 'EOF', control: '\x04' },
+])(
+  'TTY lifecycle: $label closes privately without keyring or HTTP access',
+  async ({ control }) => {
+    const transport = await createTransport(app, () => undefined);
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await configure(transport.origin);
+      const before = await transcript();
+      const command = keyring.command(
+        process.execPath,
+        [
+          resolve('tests/support/create-input.ts'),
+          'tty',
+          resolve(testBuild, 'cli.js'),
+        ],
+        childEnv(),
+        control,
+      );
+      let timedOut = false;
+      deadline = setTimeout(() => {
+        timedOut = true;
+        command.kill('SIGKILL');
+      }, 6000);
+      const result = await command.done;
+      expect(timedOut).toBe(false);
+      expect(result.status).toBe(1);
+      expectOutput(result.stdout + result.stderr, 'Enter a value.');
+      expectNoValue(result.stdout + result.stderr, [token, app.key]);
+      expect((await transcript()) === before).toBe(true);
+      expect(transport.bodies.length).toBe(0);
+      expect((await secretRows(app)).length).toBe(0);
+      expect((await auditRows(app)).length).toBe(0);
+    } finally {
+      clearTimeout(deadline);
+      await transport.close();
+    }
+  },
+);
 it('E5: a duplicate name reports the conflict and leaves its value, description, version and time unchanged', async () => {
   expect(
     (await createSecret(app, secretInput({ name: 'NEW_TOKEN' }))).status,
@@ -357,6 +435,111 @@ it.each(['flag', 'positional'])(
     expect(await auditRows(app)).toEqual([]);
   },
 );
+it.each([
+  { args: ['vault', 'create'], label: 'missing path' },
+  { args: [...createArgs(), '--description'], label: 'dangling description' },
+  {
+    args: [...createArgs(), '--purpose', 'other purpose'],
+    label: 'duplicate purpose',
+  },
+  {
+    args: [
+      ...createArgs(),
+      '--description',
+      'first',
+      '--description',
+      'second',
+    ],
+    label: 'duplicate description',
+  },
+])('CLI usage: $label is refused before keyring or HTTP', async ({ args }) => {
+  const transport = await createTransport(app, () => undefined);
+  try {
+    await configure(transport.origin);
+    const before = await transcript();
+    const result = await keyring.start(args, {}, secretInput().value).done;
+    expect(result.status).toBe(1);
+    expectOutput(
+      result.stdout + result.stderr,
+      'Usage: nook vault create <bucket>/<NAME> --purpose "…" [--description "…"]',
+      true,
+    );
+    expect(transport.bodies.length).toBe(0);
+    expect((await transcript()) === before).toBe(true);
+    expect((await secretRows(app)).length).toBe(0);
+    expect((await auditRows(app)).length).toBe(0);
+  } finally {
+    await transport.close();
+  }
+});
+it('HTTP error body: an incomplete known configuration shape remains definitive', async () => {
+  const transport = await createTransport(app, (attempt) =>
+    attempt === 1
+      ? { status: 503, body: { _tag: 'VaultNotConfigured' } }
+      : undefined,
+  );
+  try {
+    await configure(transport.origin);
+    const value = secretInput().value;
+    const result = await keyring.start(createArgs(), {}, value).done;
+    expectNoValue(result.stdout + result.stderr, [value, token, app.key]);
+    expect({
+      status: result.status,
+      requests: transport.bodies.length,
+      stored: (await secretRows(app)).length,
+      audits: (await auditRows(app)).length,
+    }).toEqual({ status: 1, requests: 1, stored: 0, audits: 0 });
+    expectOutput(
+      result.stdout + result.stderr,
+      `Could not reach ${transport.origin}. Try again.`,
+      true,
+    );
+  } finally {
+    await transport.close();
+  }
+});
+it('CLI cwd: a disappeared working directory refuses create before keyring or HTTP', async () => {
+  const directory = resolve(keyring.home, 'disappeared-cwd');
+  await mkdir(directory);
+  const transport = await createTransport(app, () => undefined);
+  try {
+    await configure(transport.origin);
+    const before = await transcript();
+    const entry = resolve(testBuild, 'cli.js');
+    const script = `import { rmdirSync } from 'node:fs'; process.chdir(${JSON.stringify(directory)}); rmdirSync(${JSON.stringify(directory)}); process.argv=${JSON.stringify([process.execPath, entry, ...createArgs()])}; await import(${JSON.stringify(entry)});`;
+    const result = await keyring.command(
+      process.execPath,
+      ['--input-type=module', '-e', script],
+      childEnv(),
+      secretInput().value,
+    ).done;
+    expect(result.status).toBe(1);
+    expectOutput(
+      result.stdout + result.stderr,
+      'Could not resolve the working directory.',
+      true,
+    );
+    expect(transport.bodies.length).toBe(0);
+    expect((await transcript()) === before).toBe(true);
+    expect((await secretRows(app)).length).toBe(0);
+    expect((await auditRows(app)).length).toBe(0);
+  } finally {
+    await transport.close();
+  }
+});
+it('E11: an unconfigured machine gives the create login placeholder', async () => {
+  await rm(keyring.config);
+  const result = await keyring.start(createArgs(), {}, secretInput().value)
+    .done;
+  expect(result.status).toBe(1);
+  expectOutput(
+    result.stdout + result.stderr,
+    "This machine's token is no longer valid. Run: nook login <url>",
+    true,
+  );
+  expect((await secretRows(app)).length).toBe(0);
+  expect((await auditRows(app)).length).toBe(0);
+});
 it.each(['absent', 'revoked'])(
   'E11: %s token uses the create reconnect guidance',
   async (mode) => {
@@ -419,7 +602,7 @@ it.each(['before', 'after'])(
     }
   },
 );
-it.each(['lost', 'hang', '503', 'unknown-5xx', 'committed'])(
+it.each(['lost', 'hang', '503', 'unknown-500', 'unknown-5xx', 'committed'])(
   'E14/E15: %s retries reuse one UUID v4 and an identical payload',
   async (mode) => {
     const transport = await createTransport(
@@ -430,7 +613,8 @@ it.each(['lost', 'hang', '503', 'unknown-5xx', 'committed'])(
           : mode === 'lost' || mode === 'hang'
             ? mode
             : {
-                status: mode === '503' ? 503 : 502,
+                status:
+                  mode === '503' ? 503 : mode === 'unknown-500' ? 500 : 502,
                 body: {
                   _tag:
                     mode === '503' ? 'ServiceUnavailable' : 'FutureTransient',
@@ -453,10 +637,18 @@ it.each(['lost', 'hang', '503', 'unknown-5xx', 'committed'])(
       );
       expect(transport.bodies.length).toBe(2);
       expect(transport.bodies[0].equals(transport.bodies[1])).toBe(true);
-      const body = JSON.parse(transport.bodies[0].toString());
-      expect(body.writeId).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-      );
+      let body: { writeId?: unknown };
+      try {
+        body = JSON.parse(transport.bodies[0].toString());
+      } catch {
+        throw new Error('Creation requests must contain valid JSON.');
+      }
+      expect(
+        typeof body.writeId === 'string' &&
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+            body.writeId,
+          ),
+      ).toBe(true);
       expect(await secretRows(app)).toHaveLength(1);
       expect(await auditRows(app)).toHaveLength(1);
     } finally {
@@ -638,3 +830,44 @@ it('E19: an unknown definitive tag preserves its public message without retrying
     await transport.close();
   }
 });
+it.each([
+  { status: 422, shape: 'invalid JSON', rawBody: '{"_tag":', retry: false },
+  { status: 502, shape: 'invalid JSON', rawBody: '{"_tag":', retry: true },
+  { status: 422, shape: 'invalid shape', rawBody: '{"_tag":7}', retry: false },
+  { status: 502, shape: 'invalid shape', rawBody: '{"_tag":7}', retry: true },
+])(
+  'HTTP error body: complete $shape $status keeps transport retry policy',
+  async ({ status, rawBody, retry }) => {
+    const transport = await createTransport(app, (attempt) =>
+      attempt === 1 ? { status, body: undefined, rawBody } : undefined,
+    );
+    try {
+      await configure(transport.origin);
+      const value = secretInput().value;
+      const result = await keyring.start(createArgs(), {}, value).done;
+      expectNoValue(result.stdout + result.stderr, [value, token, app.key]);
+      expect({
+        status: result.status,
+        requests: transport.bodies.length,
+        stored: (await secretRows(app)).length,
+        audits: (await auditRows(app)).length,
+      }).toEqual({
+        status: retry ? 0 : 1,
+        requests: retry ? 2 : 1,
+        stored: retry ? 1 : 0,
+        audits: retry ? 1 : 0,
+      });
+      if (retry)
+        expect(transport.bodies[0].equals(transport.bodies[1])).toBe(true);
+      expectOutput(
+        result.stdout + result.stderr,
+        retry
+          ? `Stored ${createdPath}.`
+          : `Could not reach ${transport.origin}. Try again.`,
+        true,
+      );
+    } finally {
+      await transport.close();
+    }
+  },
+);

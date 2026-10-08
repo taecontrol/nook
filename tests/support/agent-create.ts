@@ -45,7 +45,7 @@ export async function createTransport(
     | 'lost'
     | 'hang'
     | 'open-error-body'
-    | { status: number; body: unknown }
+    | { status: number; body: unknown; rawBody?: string }
     | undefined,
   after?: (
     attempt: number,
@@ -76,7 +76,7 @@ export async function createTransport(
         response.writeHead(fault.status, {
           'Content-Type': 'application/json',
         });
-        response.end(JSON.stringify(fault.body));
+        response.end(fault.rawBody ?? JSON.stringify(fault.body));
         return;
       }
       const forwarded = await fetch(app.origin + '/api/machine/secrets', {

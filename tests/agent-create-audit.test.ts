@@ -68,6 +68,24 @@ it.each([
         '/synthetic/work/acme',
       ])
         expect(details).toContain(fact);
+      expect(
+        (await row
+          .getByText('Machine', { exact: true })
+          .locator('..')
+          .locator('dd')
+          .innerText()) === 'work-laptop',
+      ).toBe(true);
+      expect(
+        (await row
+          .getByText('Purpose', { exact: true })
+          .locator('..')
+          .locator('dd')
+          .innerText()) === 'token from provider setup',
+      ).toBe(true);
+      expect(
+        (await row.locator('dl time').getAttribute('datetime')) ===
+          new Date(auditNow.getTime() - 1000).toISOString(),
+      ).toBe(true);
       expect(/Executable|\bRun\b|undefined/.test(details)).toBe(false);
       await row.getByRole('link', { name: 'Activity for this secret' }).click();
       await expect.poll(() => auditEntries(page).count()).toBe(1);
@@ -102,6 +120,13 @@ it('E23: fresh Audit explains uses and creations without adding a kind control',
       await page.locator('[data-slot="empty-description"]').innerText(),
     ).toContain('nook vault create');
     expect(await page.getByRole('combobox').count()).toBe(2);
+    expect(
+      await page
+        .getByRole('heading', { name: 'Audit', exact: true })
+        .locator('..')
+        .getByRole('button')
+        .count(),
+    ).toBe(0);
   } finally {
     await visit.close();
   }

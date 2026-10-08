@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 
 const [mode, entry] = process.argv.slice(2);
 const args = [
@@ -23,12 +24,37 @@ const child = terminal
       '--quiet',
       '--return',
       '--command',
-      command,
+      mode === 'tty-split' ? `exec ${command}` : command,
       '/dev/null',
     ])
   : spawn(process.execPath, [entry, ...args]);
 let output = '';
 let supplied = false;
+async function splitInput() {
+  const descendants = await readFile(
+    `/proc/${child.pid}/task/${child.pid}/children`,
+    'utf8',
+  );
+  const pid = descendants.trim().split(/\s+/)[0];
+  const consumed = async () =>
+    Number(
+      /^rchar:\s*(\d+)/m.exec(await readFile(`/proc/${pid}/io`, 'utf8'))?.[1],
+    );
+  const before = await consumed();
+  child.stdin.write(typed!.subarray(0, 1));
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    try {
+      if ((await consumed()) > before) {
+        child.stdin.end(typed!.subarray(1));
+        return;
+      }
+    } catch {
+      return;
+    }
+  }
+  throw new Error('TTY fixture could not observe its private child reading.');
+}
 child.stdout.on('data', (chunk) => {
   output += String(chunk);
   process.stdout.write(chunk);
@@ -38,7 +64,14 @@ child.stdout.on('data', (chunk) => {
     output.includes('Value for work/acme/NEW_TOKEN: ')
   ) {
     supplied = true;
-    if (mode === 'tty-open') child.stdin.write(typed);
+    if (mode === 'tty-split')
+      void splitInput().catch(() => {
+        process.stderr.write(
+          'TTY fixture could not observe its private child reading.\n',
+        );
+        child.kill('SIGKILL');
+      });
+    else if (mode === 'tty-open') child.stdin.write(typed);
     else child.stdin.end(typed);
   }
 });
