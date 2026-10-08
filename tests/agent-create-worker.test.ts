@@ -181,8 +181,8 @@ it.each(
     const response = await machineCreate(app, token, input);
     expect(response.status).toBe(400);
     const text = await response.text();
-    expect(['InvalidSecret', 'InvalidRun']).toContain(JSON.parse(text)._tag);
     if (input.value.length > 1) expectNoValue(text, [input.value]);
+    expect(['InvalidSecret', 'InvalidRun']).toContain(JSON.parse(text)._tag);
     expect(await secretRows(app)).toEqual([]);
     expect(await auditRows(app)).toEqual([]);
   },

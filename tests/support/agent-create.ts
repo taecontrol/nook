@@ -41,8 +41,16 @@ export async function createTransport(
   app: TestRuntime,
   before: (
     attempt: number,
-  ) => 'lost' | 'hang' | { status: number; body: unknown } | undefined,
-  after?: (attempt: number, response: Response) => Promise<'lost' | undefined>,
+  ) =>
+    | 'lost'
+    | 'hang'
+    | 'open-error-body'
+    | { status: number; body: unknown }
+    | undefined,
+  after?: (
+    attempt: number,
+    response: Response,
+  ) => Promise<'lost' | 'partial-201' | undefined>,
 ) {
   const bodies: Buffer[] = [];
   const server = createServer(async (request, response) => {
@@ -56,6 +64,12 @@ export async function createTransport(
       if (fault === 'hang') return;
       if (fault === 'lost') {
         response.destroy();
+        return;
+      }
+      if (fault === 'open-error-body') {
+        response.writeHead(502, { 'Content-Type': 'application/json' });
+        response.flushHeaders();
+        response.write('{"_tag":"FutureTransient"');
         return;
       }
       if (fault) {
@@ -73,9 +87,20 @@ export async function createTransport(
         },
         body,
       });
-      if ((await after?.(attempt, forwarded.clone())) === 'lost') {
+      const responseFault = await after?.(attempt, forwarded.clone());
+      if (responseFault === 'lost') {
         await forwarded.body?.cancel();
         response.destroy();
+        return;
+      }
+      if (responseFault === 'partial-201') {
+        const received = Buffer.from(await forwarded.arrayBuffer());
+        response.writeHead(forwarded.status, {
+          'Content-Type': 'application/json',
+          'Content-Length': received.length,
+          Connection: 'close',
+        });
+        response.end(received.subarray(0, 1));
         return;
       }
       response.writeHead(forwarded.status, {

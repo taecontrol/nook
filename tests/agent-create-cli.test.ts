@@ -95,6 +95,7 @@ it('E1/E4/E20: real create, run, list and MCP preserve exact bytes without expos
     hash,
   ]).done;
   expect(run.status).toBe(0);
+  expectNoValue(run.stdout + run.stderr, [value, token, app.key]);
   expect(JSON.parse(run.stdout.split('\n')[0]).valueMatches).toBe(true);
   const mcp = await machineMcp(app, token).call('list_secrets', {
     bucket: 'work/acme',
@@ -490,6 +491,65 @@ it('E16: a committed lost response followed by owner replacement remains unconfi
     expectOutput(result.stdout + result.stderr, unconfirmed, true);
     expect(transport.bodies.length).toBe(2);
     expect(await auditRows(app)).toHaveLength(1);
+  } finally {
+    await transport.close();
+  }
+});
+it('E14/E15: an opened error body stays within the request timeout before replaying the identical payload', async () => {
+  const transport = await createTransport(app, (attempt) =>
+    attempt === 1 ? 'open-error-body' : undefined,
+  );
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await configure(transport.origin);
+    const command = keyring.start(createArgs(), {}, secretInput().value);
+    let timedOut = false;
+    deadline = setTimeout(() => {
+      timedOut = true;
+      command.kill('SIGKILL');
+    }, 20_000);
+    const result = await command.done;
+    expect({
+      withinDeadline: !timedOut,
+      status: result.status,
+      requests: transport.bodies.length,
+      stored: (await secretRows(app)).length,
+      audits: (await auditRows(app)).length,
+    }).toEqual({
+      withinDeadline: true,
+      status: 0,
+      requests: 2,
+      stored: 1,
+      audits: 1,
+    });
+    expect(transport.bodies[0].equals(transport.bodies[1])).toBe(true);
+    expectOutput(result.stdout + result.stderr, `Stored ${createdPath}.`, true);
+  } finally {
+    clearTimeout(deadline);
+    await transport.close();
+  }
+});
+it('E15: a committed response cut after 201 headers replays the identical payload and confirms once', async () => {
+  const transport = await createTransport(
+    app,
+    () => undefined,
+    async (attempt, response) => {
+      expect(response.status).toBe(201);
+      return attempt === 1 ? 'partial-201' : undefined;
+    },
+  );
+  try {
+    await configure(transport.origin);
+    const result = await keyring.start(createArgs(), {}, secretInput().value)
+      .done;
+    expect({
+      status: result.status,
+      requests: transport.bodies.length,
+      stored: (await secretRows(app)).length,
+      audits: (await auditRows(app)).length,
+    }).toEqual({ status: 0, requests: 2, stored: 1, audits: 1 });
+    expect(transport.bodies[0].equals(transport.bodies[1])).toBe(true);
+    expectOutput(result.stdout + result.stderr, `Stored ${createdPath}.`, true);
   } finally {
     await transport.close();
   }
