@@ -19,6 +19,7 @@ import {
   runFixture,
 } from './support/audit.ts';
 import { privateKeyring } from './support/cli.ts';
+import { revokeMachine } from './support/machines.ts';
 import { expectOutput } from './support/private-assertions.ts';
 import { createSecret, expectNoValue, secretInput } from './support/vault.ts';
 
@@ -134,13 +135,19 @@ beforeEach(async () => {
   }
   privateValues = [...Object.values(values), app.token, app.key];
   const log = new PrivateLog();
+  const workerOutput = ['', ''];
   await app.setBindings(app.bindings, {
     log,
     handleRuntimeStdio: (stdout, stderr) => {
-      for (const input of [stdout, stderr])
+      [stdout, stderr].forEach((input, index) => {
+        input.setEncoding('utf8');
+        input.on('data', (chunk) => {
+          workerOutput[index] += String(chunk);
+        });
         createInterface({ input }).on('line', (line) =>
           log.messages.push(line),
         );
+      });
     },
   });
   await mkdir(dirname(keyring.config), { recursive: true });
@@ -152,6 +159,7 @@ beforeEach(async () => {
       for (const text of [
         ...outputs,
         ...log.messages,
+        ...workerOutput,
         JSON.stringify(await auditRows(app)),
         await transcript(),
       ])
@@ -423,6 +431,15 @@ it('E8: the twenty-path limit applies after merging with flags', async () => {
     `Invalid ${file}: secrets must map at most 20 distinct paths.`,
   );
 });
+it('an invalid flag path keeps the contract guidance with a valid project file', async () => {
+  await config(mappings);
+  const pasted = `ghp_${randomBytes(20).toString('hex')}`;
+  privateValues.push(pasted);
+  await beforeAccess(
+    runArgs(['/usr/bin/true'], [`GH_TOKEN=${pasted}`]),
+    'Use a secret path such as work/acme/GH_TOKEN.',
+  );
+});
 it('E9: absent mappings print usage before keyring access', async () => {
   await beforeAccess(runArgs(['/usr/bin/true']), usage);
 });
@@ -500,6 +517,31 @@ it('E12: check without a file fails before keyring access', async () => {
     `No nook.json in ${project} or its parents.`,
   );
 });
+it.each(['revoked machine', 'unavailable storage'] as const)(
+  'check preserves the existing session or server guidance for %s',
+  async (failure) => {
+    await config(mappings);
+    if (failure === 'revoked machine')
+      expect((await revokeMachine(app, app.machine.id)).status).toBe(204);
+    else
+      await (await app.mf.getD1Database('DB'))
+        .prepare('ALTER TABLE secrets RENAME TO unavailable_secrets')
+        .run();
+    checkpoints.length = 0;
+    const result = await cli(['vault', 'check']);
+    expect(result.status).toBe(1);
+    expectOutput(
+      result.stdout + result.stderr,
+      failure === 'revoked machine'
+        ? `This machine's token is no longer valid. Run: nook login ${app.origin}`
+        : `Could not reach ${app.origin}. Try again.`,
+      true,
+    );
+    expect(requests('listing')).toBe(1);
+    expect(requests('value')).toBe(0);
+    expect(await auditPaths()).toEqual([]);
+  },
+);
 it('check uses metadata even when the installation cannot decrypt values', async () => {
   await config(mappings);
   await app.setBindings({ ...app.bindings, VAULT_KEY: '' });
