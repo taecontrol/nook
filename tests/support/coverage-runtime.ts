@@ -54,8 +54,15 @@ export async function closingClientRuntime(
       return;
     }
     requests.add(incoming.socket);
+    const chunks: Buffer[] = [];
+    for await (const chunk of incoming) chunks.push(Buffer.from(chunk));
     const response = await started.runtime.dispatchFetch(
-      `http://127.0.0.1${incoming.url}`,
+      `http://127.0.0.1:${options.port}${incoming.url}`,
+      {
+        method: incoming.method,
+        headers: incoming.headers as Record<string, string>,
+        ...(chunks.length ? { body: Buffer.concat(chunks) } : {}),
+      },
     );
     const body = Buffer.from(await response.arrayBuffer());
     outgoing.writeHead(response.status, {

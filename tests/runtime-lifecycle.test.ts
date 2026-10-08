@@ -11,6 +11,11 @@ import {
 import * as observation from '../scripts/observation.ts';
 import { startRuntime } from '../scripts/runtime.ts';
 import {
+  createAuthorization,
+  jsonRequest,
+  ownerRuntime,
+} from './support/authorizations.ts';
+import {
   closingClientRuntime,
   coverageRuntime,
 } from './support/coverage-runtime.ts';
@@ -35,6 +40,29 @@ vi.mock('../scripts/runtime.ts', async (original) => {
 
 const leasePath = (port: number | string) =>
   resolve(tmpdir(), 'nook-test-ports', String(port));
+
+it('fixture API requests survive a public connection that cannot be reused', async () => {
+  vi.mocked(startRuntime).mockImplementationOnce(closingClientRuntime);
+  const app = await ownerRuntime(await runtime());
+  try {
+    const first = await createAuthorization(app);
+    const second = await createAuthorization(app);
+    expect(first.deviceCode !== second.deviceCode).toBe(true);
+    const denied = await jsonRequest(
+      app,
+      `/api/authorizations/${first.userCode}/deny`,
+    );
+    expect(denied.status).toBe(204);
+    const row = await (await app.mf.getD1Database('DB'))
+      .prepare(
+        "SELECT count(*) AS count FROM authorizations WHERE status='pending'",
+      )
+      .first();
+    expect(row?.count).toBe(1);
+  } finally {
+    await app.close();
+  }
+});
 
 async function runFixture(fixture: string, file: string, name: string) {
   const home = await temporaryTestHome();
