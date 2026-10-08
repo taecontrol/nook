@@ -1,4 +1,4 @@
-import type { BucketGrant } from '@nook/contract';
+import type { AuditEntry, AuditPage, BucketGrant } from '@nook/contract';
 import { expect } from 'vitest';
 import { jsonRequest } from './authorizations.ts';
 import { issueGrant } from './grants.ts';
@@ -14,19 +14,11 @@ import { vaultCheckpoints } from './vault-checkpoints.ts';
 
 export const auditNow = new Date('2026-10-08T12:00:00.000Z');
 export const acmePath = 'work/acme/GH_TOKEN';
-export type RecordedEntry = {
-  id: string;
-  at: string;
-  outcome: 'delivered' | 'denied';
-  path: string;
-  bucket: string;
-  name: string;
-  purpose: string;
-  machine: { id: string; name: string };
-  workingDirectory: string;
-  executable: string;
-  runId: string;
-};
+export function useEntry(entry: AuditEntry) {
+  if (entry.outcome === 'created')
+    throw new Error('This fixture expects a secret use.');
+  return entry;
+}
 export function runInput(overrides: Record<string, unknown> = {}) {
   return {
     purpose: 'open the release PR',
@@ -68,10 +60,7 @@ export async function auditPageData(
 ) {
   const response = await fetch(`${app.origin}/api/audit${query}`, { headers });
   expect(response.status, 'The owner audit page is available').toBe(200);
-  return (await response.json()) as {
-    entries: RecordedEntry[];
-    next: string | null;
-  };
+  return (await response.json()) as typeof AuditPage.Type;
 }
 export async function runFixture(
   grant: BucketGrant = ['work/acme'],
@@ -131,5 +120,9 @@ export async function seedAudit(
       )
       .run();
   }
-  return { values, token, entries: (await auditPageData(app)).entries };
+  return {
+    values,
+    token,
+    entries: (await auditPageData(app)).entries.map(useEntry),
+  };
 }
