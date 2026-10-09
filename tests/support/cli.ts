@@ -12,7 +12,7 @@ import { createInterface } from 'node:readline';
 import { expect } from 'vitest';
 import { evidenceRoot } from '../../scripts/lib/instrument.ts';
 import { testEnvironment } from '../../scripts/lib/test-environment.ts';
-import { privateMacKeychain } from './macos-keychain.ts';
+import { type CommandResult, privateMacKeychain } from './macos-keychain.ts';
 import { testBuild } from './runtime.ts';
 import { launchSandbox } from './sandbox.ts';
 
@@ -91,11 +91,7 @@ export async function privateKeyring(
       {
         stdout: string;
         stderr: string;
-        finish: (value: {
-          status: number;
-          stdout: string;
-          stderr: string;
-        }) => void;
+        finish: (value: CommandResult) => void;
       }
     >();
     let readyResolve: (bus: string) => void;
@@ -114,7 +110,11 @@ export async function privateKeyring(
       if (message.stream === 'stderr') state.stderr += message.data;
       if (message.status !== undefined) {
         running.delete(message.id);
-        state.finish({ ...state, status: message.status });
+        state.finish({
+          ...state,
+          status: message.status,
+          ...(message.signal ? { signal: message.signal } : {}),
+        });
       }
     });
     host.on('close', () => {
@@ -153,16 +153,8 @@ export async function privateKeyring(
         throw new Error('Private bus overrides are forbidden.');
       testEnvironment(home, extra, bus);
       const current = ++id;
-      let finish: (value: {
-        status: number;
-        stdout: string;
-        stderr: string;
-      }) => void;
-      const done = new Promise<{
-        status: number;
-        stdout: string;
-        stderr: string;
-      }>((accept) => {
+      let finish: (value: CommandResult) => void;
+      const done = new Promise<CommandResult>((accept) => {
         finish = accept;
       });
       const state = { stdout: '', stderr: '', finish: finish! };

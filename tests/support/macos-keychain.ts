@@ -11,7 +11,12 @@ import { testEnvironment } from '../../scripts/lib/test-environment.ts';
 import { stopMacFixtureGroups } from './macos-command-cleanup.ts';
 import { testBuild } from './runtime.ts';
 
-export type CommandResult = { status: number; stdout: string; stderr: string };
+export type CommandResult = {
+  status: number;
+  stdout: string;
+  stderr: string;
+  signal?: NodeJS.Signals;
+};
 
 async function observeSecurity(args: string[], env: NodeJS.ProcessEnv) {
   const command = startCommand('/usr/bin/security', args, env);
@@ -82,8 +87,13 @@ function startCommand(
     child.on('error', () =>
       accept({ status: 1, stdout: '', stderr: 'Fixture command unavailable.' }),
     );
-    child.on('close', (status) =>
-      accept({ status: status ?? 1, stdout, stderr }),
+    child.on('close', (status, signal) =>
+      accept({
+        status: status ?? 1,
+        stdout,
+        stderr,
+        ...(signal ? { signal } : {}),
+      }),
     );
   });
   child.stdin.end(input);
