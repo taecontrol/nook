@@ -60,14 +60,18 @@ async function nativeSignal(parent: number, signal: NodeJS.Signals) {
     app.token,
     app.key,
   ]);
-  const reason = result.stderr.includes('No such process')
+  const diagnostic = result.stderr.toLowerCase();
+  const reason = diagnostic.includes('no such process')
     ? 'target missing'
-    : result.stderr.includes('Operation not permitted')
+    : diagnostic.includes('operation not permitted')
       ? 'permission denied'
-      : result.stderr.includes('invalid') || result.stderr.includes('usage:')
+      : diagnostic.includes('invalid') || diagnostic.includes('usage:')
         ? 'command usage'
         : 'unclassified refusal';
-  expect(result.status, `Native signal ${signal}: ${reason}`).toBe(0);
+  expect(
+    result.status,
+    `Native signal ${signal}: ${reason}; exited by ${result.signal ?? 'code'}; stderr bytes ${Buffer.byteLength(result.stderr)}`,
+  ).toBe(0);
 }
 async function keyringTranscript() {
   try {
@@ -186,6 +190,30 @@ it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
       'child-ready\n' + (signal === 'SIGINT' ? 'SIGTERM' : signal),
       true,
     );
+  },
+);
+it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
+  'E3: the private fixture distinguishes %s termination from exit code 1',
+  async (signal) => {
+    const exited = await keyring.command(process.execPath, [
+      '-e',
+      'process.exit(1)',
+    ]).done;
+    const terminated = await keyring.command(process.execPath, [
+      '-e',
+      'process.kill(process.pid, process.argv[1])',
+      signal,
+    ]).done;
+    expectNoValue(
+      exited.stdout + exited.stderr + terminated.stdout + terminated.stderr,
+      [app.input.value, app.token, app.key],
+    );
+    expect(exited.status).toBe(1);
+    expect(terminated.status).toBe(1);
+    expect(exited.signal === undefined).toBe(true);
+    expect(terminated.signal === signal).toBe(true);
+    expectOutput(exited.stdout + exited.stderr, '', true);
+    expectOutput(terminated.stdout + terminated.stderr, '', true);
   },
 );
 it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
