@@ -1,4 +1,4 @@
-import { createServer } from 'node:http';
+import { createServer, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { jsonRequest } from './authorizations.ts';
 import type { TestRuntime } from './runtime.ts';
@@ -36,6 +36,38 @@ export const createArgs = (path = createdPath) => [
   'token from provider setup',
 ];
 
+type CreateResponseFault =
+  | 'lost'
+  | 'partial-201'
+  | { readonly rawBody: string }
+  | undefined;
+
+async function replyToCreate(
+  response: ServerResponse,
+  forwarded: Response,
+  fault: CreateResponseFault,
+) {
+  if (fault === 'lost') {
+    await forwarded.body?.cancel();
+    response.destroy();
+    return;
+  }
+  const received = Buffer.from(await forwarded.arrayBuffer());
+  if (fault === 'partial-201') {
+    response.writeHead(forwarded.status, {
+      'Content-Type': 'application/json',
+      'Content-Length': received.length,
+      Connection: 'close',
+    });
+    response.end(received.subarray(0, 1));
+    return;
+  }
+  response.writeHead(forwarded.status, {
+    'Content-Type': 'application/json',
+  });
+  response.end(typeof fault === 'object' ? fault.rawBody : received);
+}
+
 // Only transport faults are synthetic; successful writes use the built Worker.
 export async function createTransport(
   app: TestRuntime,
@@ -47,10 +79,7 @@ export async function createTransport(
     | 'open-error-body'
     | { status: number; body: unknown; rawBody?: string }
     | undefined,
-  after?: (
-    attempt: number,
-    response: Response,
-  ) => Promise<'lost' | 'partial-201' | undefined>,
+  after?: (attempt: number, response: Response) => Promise<CreateResponseFault>,
 ) {
   const bodies: Buffer[] = [];
   const server = createServer(async (request, response) => {
@@ -88,25 +117,7 @@ export async function createTransport(
         body,
       });
       const responseFault = await after?.(attempt, forwarded.clone());
-      if (responseFault === 'lost') {
-        await forwarded.body?.cancel();
-        response.destroy();
-        return;
-      }
-      if (responseFault === 'partial-201') {
-        const received = Buffer.from(await forwarded.arrayBuffer());
-        response.writeHead(forwarded.status, {
-          'Content-Type': 'application/json',
-          'Content-Length': received.length,
-          Connection: 'close',
-        });
-        response.end(received.subarray(0, 1));
-        return;
-      }
-      response.writeHead(forwarded.status, {
-        'Content-Type': 'application/json',
-      });
-      response.end(Buffer.from(await forwarded.arrayBuffer()));
+      await replyToCreate(response, forwarded, responseFault);
     } catch {
       response.writeHead(503).end('{"_tag":"ServiceUnavailable"}');
     }
