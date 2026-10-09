@@ -138,6 +138,7 @@ it.each([
     const bucket = Array.from({ length: 6 }, (_, index) =>
       String.fromCharCode(97 + index).repeat(32),
     ).join('/');
+    const parent = bucket.slice(0, bucket.lastIndexOf('/'));
     const name = 'W'.repeat(64);
     const path = `${bucket}/${name}`;
     const value =
@@ -156,6 +157,18 @@ it.each([
           (await createSecret(app, secretInput({ bucket, name, value })))
             .status,
         ).toBe(201);
+        expect(
+          (
+            await createSecret(
+              app,
+              secretInput({
+                bucket: parent,
+                name: 'INHERITED_KEY',
+                value: 'synthetic inherited value',
+              }),
+            )
+          ).status,
+        ).toBe(201);
       },
     });
     try {
@@ -168,6 +181,26 @@ it.each([
         ),
         animations: 'disabled',
       });
+      await page.screenshot({
+        path: resolve(
+          screenshots,
+          `vault-max-inherited-path-${width}-${colorScheme}.png`,
+        ),
+        fullPage: true,
+        animations: 'disabled',
+      });
+      const inheritedCount = page
+        .getByRole('link', { name: parent, exact: true })
+        .locator('..')
+        .getByText('1 secret', { exact: true });
+      expect(
+        await inheritedCount.evaluate((element) => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          return new Set(Array.from(range.getClientRects(), (rect) => rect.y))
+            .size;
+        }),
+      ).toBe(1);
       await secretRow(page, path).getByRole('button').click();
       const delivered = page.waitForResponse((response) =>
         new URL(response.url()).pathname.endsWith('/reveal'),

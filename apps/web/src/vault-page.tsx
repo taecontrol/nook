@@ -312,7 +312,7 @@ function Inherited({
               >
                 {group.bucket}
               </Link>
-              <span className="text-xs text-muted-foreground">
+              <span className="shrink-0 text-xs text-muted-foreground">
                 {plural(group.secrets.length, 'secret')}
               </span>
             </div>
@@ -615,7 +615,7 @@ function BucketPane({ page }: { page: Page }) {
           <h2 className="font-mono text-lg font-semibold tracking-tight wrap-anywhere">
             {selected}
           </h2>
-          <p className="text-sm text-muted-foreground wrap-anywhere">
+          <p className="text-sm text-muted-foreground">
             {reachText(selected, page.parents.has(selected), 'its secrets')}
           </p>
         </div>
@@ -750,7 +750,10 @@ export function VaultPage() {
         <TreePane page={page} />
         <section
           aria-label={`Secrets in ${page.selected}`}
-          className={cn('min-w-0 flex-1', !drilled && 'hidden lg:block')}
+          className={cn(
+            'min-w-0 flex-1 wrap-anywhere',
+            !drilled && 'hidden lg:block',
+          )}
         >
           <BucketPane page={page} />
         </section>
