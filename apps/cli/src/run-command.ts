@@ -65,37 +65,38 @@ export function runCommand(
   env: NodeJS.ProcessEnv,
 ) {
   return Effect.tryPromise({
-    try: () =>
-      new Promise<number>((accept, reject) => {
-        const child = spawn(file, command.slice(1), {
+    try: () => {
+      let child: ReturnType<typeof spawn>;
+      const interrupt = () => {};
+      const terminate = () => {
+        child.kill('SIGTERM');
+      };
+      const hangup = () => {
+        child.kill('SIGHUP');
+      };
+      const cleanup = () => {
+        process.off('SIGINT', interrupt);
+        process.off('SIGTERM', terminate);
+        process.off('SIGHUP', hangup);
+      };
+      // A child can become ready before a synchronous launcher returns.
+      process.on('SIGINT', interrupt);
+      process.on('SIGTERM', terminate);
+      process.on('SIGHUP', hangup);
+      return new Promise<number>((accept, reject) => {
+        child = spawn(file, command.slice(1), {
           env,
           stdio: 'inherit',
           argv0: command[0],
         });
-        const interrupt = () => {};
-        const terminate = () => {
-          child.kill('SIGTERM');
-        };
-        const hangup = () => {
-          child.kill('SIGHUP');
-        };
-        const cleanup = () => {
-          process.off('SIGINT', interrupt);
-          process.off('SIGTERM', terminate);
-          process.off('SIGHUP', hangup);
-        };
-        process.on('SIGINT', interrupt);
-        process.on('SIGTERM', terminate);
-        process.on('SIGHUP', hangup);
         child.once('error', (error) => {
-          cleanup();
           reject(spawnFailure(error, command[0]));
         });
         child.once('exit', (code, signal) => {
-          cleanup();
           accept(childExit(code, signal));
         });
-      }),
+      }).finally(cleanup);
+    },
     catch: (error) =>
       error instanceof CommandFailure ? error : spawnFailure(error, command[0]),
   });
