@@ -177,8 +177,10 @@ it('E19: subtree/exact filters, URL reload and Back, cleared stale secret and hi
   }
 });
 it('E20/E21: recorded denial reason, Deleted and Revoked use historical identity after deletion/revocation', async () => {
+  const machineRead = deferred();
+  const machineReadReady = deferred();
   const visit = await visitAudit(browser, {
-    configure: async (_page, app) => {
+    configure: async (page, app) => {
       const denied = await issueGrant(app, ['work/acme']);
       expect(
         (
@@ -192,12 +194,19 @@ it('E20/E21: recorded denial reason, Deleted and Revoked use historical identity
       );
       await deleteSecret(app, secret.path, secret.version);
       for (const machine of await listMachines(app))
-        await revokeMachine(app, machine.id);
+        expect((await revokeMachine(app, machine.id)).ok).toBe(true);
+      expect(await listMachines(app)).toEqual([]);
+      await page.route('**/api/machines', async (route) => {
+        machineReadReady.resolve();
+        await machineRead.promise;
+        await route.continue().catch(() => {});
+      });
     },
   });
   try {
     const { page } = visit;
     await auditEntries(page).first().waitFor();
+    await machineReadReady.promise;
     const denied = auditEntries(page).filter({ hasText: 'Denied' }).first();
     expect(
       await denied
@@ -209,6 +218,9 @@ it('E20/E21: recorded denial reason, Deleted and Revoked use historical identity
     expect(await denied.innerText()).toContain(
       'Outside this machine’s bucket grant. No value was delivered.',
     );
+    expect(await denied.innerText()).not.toContain('Revoked');
+    machineRead.resolve();
+    await denied.getByText('Revoked', { exact: true }).first().waitFor();
     expect(await denied.innerText()).toContain('Revoked');
     const delivered = auditEntries(page)
       .filter({ hasText: 'GH_TOKEN' })
@@ -222,6 +234,8 @@ it('E20/E21: recorded denial reason, Deleted and Revoked use historical identity
       .click();
     expect(new URL(page.url()).searchParams.get('bucket')).toBe('work/acme');
   } finally {
+    machineRead.resolve();
+    await visit.page.unrouteAll({ behavior: 'wait' });
     await visit.close();
   }
 });
