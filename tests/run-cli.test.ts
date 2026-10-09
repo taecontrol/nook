@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import {
   chmod,
   mkdir,
@@ -11,6 +12,8 @@ import {
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { dirname, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { build, stop } from 'esbuild';
 import { beforeEach, expect, it } from 'vitest';
 import { evidenceRoot } from '../scripts/lib/instrument.ts';
 import {
@@ -46,6 +49,15 @@ const runArgs = (
   '--',
   ...command,
 ];
+async function nativeSignal(
+  running: { kill(signal: NodeJS.Signals): boolean | Promise<boolean> },
+  signal: NodeJS.Signals,
+) {
+  expect(
+    await running.kill(signal),
+    `Native signal ${signal} must be delivered`,
+  ).toBe(true);
+}
 async function keyringTranscript() {
   try {
     return await readFile(resolve(keyring.home, 'argv'), 'utf8');
@@ -163,6 +175,180 @@ it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
       'child-ready\n' + (signal === 'SIGINT' ? 'SIGTERM' : signal),
       true,
     );
+  },
+);
+it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
+  'E3: the private fixture distinguishes %s termination from exit code 1',
+  async (signal) => {
+    const exited = await keyring.command(process.execPath, [
+      '-e',
+      'process.exit(1)',
+    ]).done;
+    const terminated = await keyring.command(process.execPath, [
+      '-e',
+      'process.kill(process.pid, process.argv[1])',
+      signal,
+    ]).done;
+    expectNoValue(
+      exited.stdout + exited.stderr + terminated.stdout + terminated.stderr,
+      [app.input.value, app.token, app.key],
+    );
+    expect(exited.status).toBe(1);
+    expect(terminated.status).toBe(1);
+    expect(exited.signal === undefined).toBe(true);
+    expect(terminated.signal === signal).toBe(true);
+    expectOutput(exited.stdout + exited.stderr, '', true);
+    expectOutput(terminated.stdout + terminated.stderr, '', true);
+  },
+);
+it.each(['exited', 'closed'] as const)(
+  'E3: the private fixture refuses native delivery after the command is %s',
+  async (state) => {
+    const command = keyring.command(process.execPath, [
+      '-e',
+      'process.exit(0)',
+    ]);
+    const result = await command.done;
+    expectNoValue(result.stdout + result.stderr, [
+      app.input.value,
+      app.token,
+      app.key,
+    ]);
+    expect(result.status).toBe(0);
+    if (state === 'closed') await keyring.close();
+    expect(await command.kill('SIGTERM')).toBe(false);
+  },
+);
+it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
+  'E3: native %s survives the real child launch window',
+  async (signal) => {
+    const release = resolve(keyring.home, 'spawn-release');
+    const held = resolve(keyring.home, 'spawn-held');
+    const returned = resolve(keyring.home, 'spawn-returned');
+    const imports = [
+      ...(process.platform === 'darwin'
+        ? [resolve(keyring.home, 'process-groups.mjs')]
+        : []),
+      resolve('tests/support/run-spawn-gate.ts'),
+    ]
+      .map((file) => `--import=${pathToFileURL(file).href}`)
+      .join(' ');
+    const running = keyring.start(
+      runArgs([process.execPath, childFile, 'startup-wait']),
+      { NODE_OPTIONS: imports },
+    );
+    try {
+      await expect
+        .poll(
+          () => existsSync(held) && running.output().includes('child-ready'),
+        )
+        .toBe(true);
+      const parent = Number(await readFile(held, 'utf8'));
+      expect(Number.isSafeInteger(parent) && parent > 0).toBe(true);
+      expect(existsSync(returned)).toBe(false);
+      await nativeSignal(running, signal);
+      expect(existsSync(returned)).toBe(false);
+      await writeFile(release, '');
+      if (signal === 'SIGINT') {
+        await expect.poll(() => existsSync(returned)).toBe(true);
+        running.kill('SIGTERM');
+      }
+      const result = await running.done;
+      expectNoValue(result.stdout + result.stderr, [
+        app.input.value,
+        app.token,
+        app.key,
+      ]);
+      expect(result.status).toBe(0);
+      expectOutput(
+        result.stdout,
+        'child-ready\n' + (signal === 'SIGINT' ? 'SIGTERM' : signal),
+        true,
+      );
+    } finally {
+      await writeFile(release, '');
+    }
+  },
+);
+it.each(
+  (['SIGTERM', 'SIGHUP', 'SIGINT'] as const).flatMap((signal) => [
+    { signal, kind: 'completes', code: 0 },
+    { signal, kind: 'fails', code: 127 },
+    { signal, kind: 'exceeds launch limits', code: 126 },
+  ]),
+)(
+  'E3: native $signal remains native after the real run $kind',
+  async ({ signal, kind, code }) => {
+    const ready = resolve(keyring.home, 'run-completed');
+    const imports = [
+      ...(process.platform === 'darwin'
+        ? [resolve(keyring.home, 'process-groups.mjs')]
+        : []),
+      resolve('tests/support/run-completion-gate.ts'),
+    ]
+      .map((file) => `--import=${pathToFileURL(file).href}`)
+      .join(' ');
+    const command =
+      kind === 'fails'
+        ? resolve(keyring.home, 'missing-interpreter')
+        : '/usr/bin/true';
+    if (kind === 'fails')
+      await writeFile(command, '#!/nook-fixture-missing-interpreter\n', {
+        mode: 0o700,
+      });
+    const nativeFile = resolve(keyring.home, 'large-environment.mjs');
+    if (kind === 'exceeds launch limits') {
+      // The registered outer Node process owns the native E2BIG-only attempt.
+      try {
+        await build({
+          entryPoints: [resolve('tests/support/run-large-environment.ts')],
+          outfile: nativeFile,
+          bundle: true,
+          format: 'esm',
+          platform: 'node',
+          target: 'node26',
+          external: ['node:*'],
+          banner: {
+            js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+          },
+        });
+      } finally {
+        stop();
+      }
+    }
+    const running =
+      kind === 'exceeds launch limits'
+        ? keyring.command(process.execPath, [nativeFile], {
+            NODE_OPTIONS: `--import=${pathToFileURL(resolve('tests/support/run-completion-gate.ts')).href}`,
+          })
+        : keyring.start(runArgs([command]), { NODE_OPTIONS: imports });
+    await expect
+      .poll(
+        () => existsSync(ready) && running.output().includes('run-completed:'),
+      )
+      .toBe(true);
+    const parent = Number(await readFile(ready, 'utf8'));
+    expect(Number.isSafeInteger(parent) && parent > 0).toBe(true);
+    await nativeSignal(running, signal);
+    const result = await running.done;
+    expectNoValue(result.stdout + result.stderr, [
+      app.input.value,
+      app.token,
+      app.key,
+    ]);
+    // Both private platform fixtures map native termination to status 1.
+    expect(result.status).toBe(1);
+    expect(result.signal === signal).toBe(true);
+    const failure =
+      code === 127
+        ? `Command not found: ${command}\n`
+        : code === 126
+          ? `Command is not executable: ${command}\n`
+          : '';
+    expectOutput(result.stdout, failure + `run-completed:${code}`, true);
+    expectOutput(result.stderr, '', true);
+    if (kind !== 'exceeds launch limits')
+      expect(await auditRows(app)).toHaveLength(1);
   },
 );
 it('E4: command resolution precedes keyring/network, with 127 and 126', async () => {

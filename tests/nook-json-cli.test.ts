@@ -17,6 +17,7 @@ import {
   auditPageData,
   auditRows,
   runFixture,
+  useEntry,
 } from './support/audit.ts';
 import { privateKeyring } from './support/cli.ts';
 import { revokeMachine } from './support/machines.ts';
@@ -236,7 +237,7 @@ it('E4: aliases fetch once and audit each distinct path once with one purpose an
   const { entries } = await auditPageData(app);
   expectPrivate(JSON.stringify(entries));
   expect(entries).toHaveLength(2);
-  expect(new Set(entries.map((entry) => entry.runId)).size).toBe(1);
+  expect(new Set(entries.map((entry) => useEntry(entry).runId)).size).toBe(1);
   for (const entry of entries)
     expect(entry).toMatchObject({
       outcome: 'delivered',

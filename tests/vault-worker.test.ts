@@ -429,7 +429,7 @@ it('E10: API and MCP delete refuse secrets atomically and preserve child-bucket 
   );
   expect((await remove('work/globex')).status).toBe(204);
 });
-it('E11: Nook Bearers authenticate no owner route and the machine API exposes no writes', async () => {
+it('E11: Nook Bearers authenticate no owner route and the machine API exposes no replace or delete', async () => {
   const { token } = await issueGrant(app, ['work/acme']);
   await app.setBindings({ VAULT_KEY: app.key });
   const headers = { Authorization: `Bearer ${token}` };
@@ -443,14 +443,14 @@ it('E11: Nook Bearers authenticate no owner route and the machine API exposes no
       (await fetch(`${app.origin}${path}`, { method, headers })).status,
     ).toBe(401);
   }
-  for (const [method, path] of [
-    ['POST', '/api/machine/secrets'],
-    ['PUT', '/api/machine/secrets/work%2Facme%2FSTRIPE_KEY'],
-    ['DELETE', '/api/machine/secrets/work%2Facme%2FSTRIPE_KEY'],
-  ]) {
+  for (const [method, path, status] of [
+    ['POST', '/api/machine/secrets', 400],
+    ['PUT', '/api/machine/secrets/work%2Facme%2FSTRIPE_KEY', 404],
+    ['DELETE', '/api/machine/secrets/work%2Facme%2FSTRIPE_KEY', 404],
+  ] as const) {
     expect(
       (await fetch(`${app.origin}${path}`, { method, headers })).status,
-    ).toBe(404);
+    ).toBe(status);
   }
 });
 it('E11: foreign Origin rejects every owner write, including PUT', async () => {

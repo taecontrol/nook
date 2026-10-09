@@ -54,5 +54,10 @@ if (mode === 'streams') {
       process.exit(0);
     });
   process.stdout.write('child-ready\n');
+  if (mode === 'startup-wait')
+    setTimeout(() => {
+      process.stdout.write('signal-not-received\n');
+      process.exit(23);
+    }, 8000);
   setInterval(() => {}, 1000);
 }

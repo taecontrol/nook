@@ -25,6 +25,7 @@ export function auditOptions(filters: AuditFilters) {
       ),
     getNextPageParam: (page) => page.next,
     retry: false,
+    retryOnMount: false,
     staleTime: 0,
   });
 }

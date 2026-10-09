@@ -8,5 +8,6 @@ export class ServerFailure {
     readonly tag: string,
     readonly message?: string,
     readonly paths: readonly string[] = [],
+    readonly retryable: boolean = false,
   ) {}
 }

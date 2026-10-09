@@ -172,6 +172,20 @@ Runtime binding updates retain the last successful output observers and outbound
 
 Control JSON requests close their HTTP connections so temporary runtimes cannot inherit a stale pooled socket. `runtime-lifecycle.test.ts` forwards real authorization creations and a denial through the existing closing-connection fixture, which rejects socket reuse, and checks their D1 state. This regression protects the fixture transport while retaining the authorization assertions.
 
+## Agent secret creation
+
+Issue #7 runs the built CLI with the existing private Linux/macOS keyring, the built Worker over HTTP, the MCP driver, and Chromium. Every value and identity is synthetic.
+
+| Examples | Evidence |
+| --- | --- |
+| E1–E8, E10–E11, E14–E20 | `agent-create-cli.test.ts`: exact child digest after create, metadata discovery, one-final-newline behavior, hidden Linux PTY input, realpath cwd, local validation before keyring/HTTP, grant denials, reconnect guidance, stable UUID/payload retries, timeout/network/503/unknown-5xx handling, owner replacement after a lost response, unconfirmed negatives, and plaintext exclusion. |
+| E1, E4–E7, E9, E11–E16, E20 | `agent-create-worker.test.ts`: public metadata with no version/value, independent envelope decryption, denied ancestors and unrelated subtrees before SQL, immutable duplicates, invalid payloads, owner-only mutations, machine capability type, atomic audit failures/replays, private errors/logs, and populated audit migration/index preservation. |
+| E20–E21 | `vault-mcp.test.ts` plus creation discovery in `agent-create-worker.test.ts`: names-only results, no secret write tool, and stdin creation guidance in `list_secrets`. |
+| E22–E23 | `agent-create-audit.test.ts`: ordered Created/Delivered/Denied entries at phone/desktop widths, creation-only facts, existing bucket/secret filters, activity links, and fresh-state copy. Existing Audit browser regressions remain mandatory. |
+| E24 | `audit-captures.test.ts`'s `created` scenario: phone/desktop in both themes, long row content and expanded wrapped details, without overflow. The eight `audit-created-*.png` captures live in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. |
+
+The first acceptance commit ran against the previous production build: missing behavior failed at its public boundary; existing owner-only and discovery protections remained green. `pnpm verify:migrations` also replays the new table rebuild against the previous schema. All checks run through the unchanged `pnpm verify` gate.
+
 ## Migrations
 
 `migrations/NNNN_name.sql` files are applied in order using Wrangler's SQL splitter and one atomic D1 batch per file, including its `d1_migrations` record. `migrations/schema.sql` is a snapshot, not a migration. The D1 binding's `migrations_pattern` selects only numbered files; a local Wrangler acceptance test proves that it excludes the snapshot and preserves replay. Verification uses fresh Miniflare databases, checks an idempotent replay, and applies the latest file to the previous schema containing a sentinel bucket. Both final normalized schemas must match the snapshot, and the sentinel must remain unchanged. A second migration enforces the reserved `me` invariant at the database boundary.

@@ -1,6 +1,6 @@
 import { Schema } from 'effect';
 import { validateBucketPath } from './buckets.ts';
-import { SecretValue, validateSecretName } from './vault.ts';
+import { CreateSecret, SecretValue, validateSecretName } from './vault.ts';
 
 export function splitSecretPath(path: string) {
   const separator = path.lastIndexOf('/');
@@ -20,7 +20,7 @@ export function validatePurpose(purpose: string): string | undefined {
     return 'Purpose must be one line of 1 to 200 characters.';
 }
 const byteLength = (value: string) => new TextEncoder().encode(value).length;
-function validDirectory(directory: string) {
+export function validateWorkingDirectory(directory: string) {
   if (
     !directory.startsWith('/') ||
     directory.includes('\0') ||
@@ -46,10 +46,16 @@ export const RunSecrets = Schema.Struct({
   secrets: Schema.Array(Schema.String),
 });
 export type RunSecrets = typeof RunSecrets.Type;
+export const CreateMachineSecret = CreateSecret.mapFields((fields) => ({
+  ...fields,
+  purpose: Schema.String,
+  workingDirectory: Schema.String,
+}));
+export type CreateMachineSecret = typeof CreateMachineSecret.Type;
 export function validateRunSecrets(input: RunSecrets): string | undefined {
   return (
     validatePurpose(input.purpose) ??
-    validDirectory(input.workingDirectory) ??
+    validateWorkingDirectory(input.workingDirectory) ??
     validExecutable(input.executable) ??
     validateSecretPaths(input.secrets)
   );

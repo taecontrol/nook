@@ -77,7 +77,7 @@ it('E17/E18/E28: chronological ledger, named facts, details and historical links
       visit.entries[0].runId,
     ])
       expect(text).toContain(fact);
-    await first.getByRole('link', { name: 'Uses of this secret' }).click();
+    await first.getByRole('link', { name: 'Activity for this secret' }).click();
     expect(new URL(page.url()).searchParams.get('secret')).toBe(acmePath);
     expectNoValue(await page.content(), visit.values);
   } finally {
@@ -217,7 +217,9 @@ it('E20/E21: recorded denial reason, Deleted and Revoked use historical identity
     await expect.poll(() => delivered.innerText()).toContain('Deleted');
     expect(await delivered.innerText()).toContain('Revoked');
     expect(await delivered.innerText()).toContain('work-laptop');
-    await delivered.getByRole('link', { name: 'Uses in this bucket' }).click();
+    await delivered
+      .getByRole('link', { name: 'Activity in this bucket' })
+      .click();
     expect(new URL(page.url()).searchParams.get('bucket')).toBe('work/acme');
   } finally {
     await visit.close();
@@ -226,20 +228,24 @@ it('E20/E21: recorded denial reason, Deleted and Revoked use historical identity
 it('E22: fresh and filtered-empty copy, clear filters and one skeleton status', async () => {
   const fresh = await visitAudit(browser, { count: 0 });
   try {
-    await fresh.page.getByText('No secret uses yet', { exact: true }).waitFor();
+    await fresh.page
+      .getByText('No secret uses or creations yet', { exact: true })
+      .waitFor();
     expect(await fresh.page.locator('body').innerText()).toContain('nook run');
     expect(await fresh.page.locator('body').innerText()).toContain(
-      'Denied requests appear here too.',
+      'Denied uses appear here too.',
     );
     await selectAudit(fresh.page, 'Bucket', 'work');
     await fresh.page
-      .getByText('No uses match these filters', { exact: true })
+      .getByText('No activity matches these filters', { exact: true })
       .waitFor();
     await fresh.page
       .getByRole('link', { name: 'Clear filters' })
       .last()
       .click();
-    await fresh.page.getByText('No secret uses yet', { exact: true }).waitFor();
+    await fresh.page
+      .getByText('No secret uses or creations yet', { exact: true })
+      .waitFor();
   } finally {
     await fresh.close();
   }
@@ -265,13 +271,24 @@ it('E22: fresh and filtered-empty copy, clear filters and one skeleton status', 
   }
 });
 it('E22: genuine D1 load failure retries, and older-page failure keeps loaded entries', async () => {
+  const failedPrefetch = deferred();
+  let componentHeld = false;
   const visit = await visitAudit(browser, {
-    configure: async (_page, app) => {
+    configure: async (page, app) => {
       await (await app.mf.getD1Database('DB'))
         .prepare(
           'ALTER TABLE audit_entries RENAME TO unavailable_audit_entries',
         )
         .run();
+      page.on('response', (response) => {
+        if (new URL(response.url()).pathname === '/api/audit')
+          void response.finished().then(() => failedPrefetch.resolve());
+      });
+      await page.route('**/assets/audit-page-*.js', async (route) => {
+        componentHeld = true;
+        await failedPrefetch.promise;
+        await route.continue();
+      });
     },
   });
   try {
@@ -279,6 +296,7 @@ it('E22: genuine D1 load failure retries, and older-page failure keeps loaded en
     await page
       .getByText('Couldn’t load audit entries', { exact: true })
       .waitFor();
+    expect(componentHeld).toBe(true);
     expect(
       visit.requests.filter((request) => request.startsWith('/api/audit'))
         .length,
@@ -331,64 +349,106 @@ it('E23: pagination appends 25 without duplicates or gaps while new uses arrive'
     await visit.close();
   }
 });
-it('E24: Audit intent loads all four queries, filter pointer intent caches instantly then refreshes', async () => {
-  const gate = deferred();
-  let hold = false;
-  const visit = await visitAudit(browser, {
-    start: '/',
-    configure: async (page) => {
-      await page.route('**/api/audit**', async (route) => {
-        if (hold) await gate.promise;
-        await route.continue().catch(() => {});
-      });
-    },
-  });
-  try {
-    const { page } = visit;
-    const link = page.getByRole('link', { name: 'Audit', exact: true });
-    await link.hover();
-    await page.waitForLoadState('networkidle');
-    for (const path of [
-      '/api/audit',
-      '/api/buckets',
-      '/api/secrets',
-      '/api/machines',
-    ])
-      expect(visit.requests.some((request) => request.startsWith(path))).toBe(
-        true,
+it.each([0, 600])(
+  'E24: Audit intent loads all four queries, filter pointer intent caches instantly then refreshes (fetch scheduling %sms)',
+  async (delay) => {
+    const gate = deferred();
+    let hold = false;
+    const visit = await visitAudit(browser, {
+      start: '/',
+      configure: async (page) => {
+        await page.addInitScript((delay) => {
+          const request = window.fetch.bind(window);
+          window.fetch = async (input, init) => {
+            const url = new URL(
+              input instanceof Request ? input.url : String(input),
+              location.href,
+            );
+            if (
+              url.pathname === '/api/audit' &&
+              url.searchParams.get('bucket') === 'work/acme'
+            )
+              await new Promise<void>((accept) => setTimeout(accept, delay));
+            return request(input, init);
+          };
+        }, delay);
+        await page.route('**/api/audit**', async (route) => {
+          if (hold) await gate.promise;
+          await route.continue().catch(() => {});
+        });
+      },
+    });
+    try {
+      const { page } = visit;
+      const link = page.getByRole('link', { name: 'Audit', exact: true });
+      const paths = [
+        '/api/audit',
+        '/api/buckets',
+        '/api/secrets',
+        '/api/machines',
+      ];
+      const preloaded = paths.map((path) =>
+        page.waitForResponse(
+          (response) => new URL(response.url()).pathname === path,
+        ),
       );
-    await link.click();
-    await auditEntries(page).first().waitFor();
-    await page.getByRole('combobox', { name: 'Bucket', exact: true }).click();
-    await page.getByRole('option', { name: 'work/acme', exact: true }).hover();
-    await page.waitForLoadState('networkidle');
-    expect(
-      visit.requests.some((request) => request.includes('bucket=work%2Facme')),
-    ).toBe(true);
-    const beforeRefresh = visit.requests.filter((request) =>
-      request.includes('bucket=work%2Facme'),
-    ).length;
-    hold = true;
-    await page.getByRole('option', { name: 'work/acme', exact: true }).click();
-    expect(
-      await page.getByRole('status', { name: 'Loading audit entries' }).count(),
-    ).toBe(0);
-    expect(await auditEntries(page).count()).toBeGreaterThan(0);
-    await expect
-      .poll(
-        () =>
-          visit.requests.filter((request) =>
-            request.includes('bucket=work%2Facme'),
-          ).length,
-      )
-      .toBeGreaterThan(beforeRefresh);
-    gate.resolve();
-    await page.waitForLoadState('networkidle');
-  } finally {
-    gate.resolve();
-    await visit.close();
-  }
-});
+      await link.hover();
+      for (const response of await Promise.all(preloaded))
+        await response.finished();
+      await page.waitForLoadState('networkidle');
+      for (const path of paths)
+        expect(visit.requests.some((request) => request.startsWith(path))).toBe(
+          true,
+        );
+      await link.click();
+      await auditEntries(page).first().waitFor();
+      await page.getByRole('combobox', { name: 'Bucket', exact: true }).click();
+      const filtered = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname === '/api/audit' &&
+          url.searchParams.get('bucket') === 'work/acme'
+        );
+      });
+      await page
+        .getByRole('option', { name: 'work/acme', exact: true })
+        .hover();
+      await (await filtered).finished();
+      await page.waitForLoadState('networkidle');
+      expect(
+        visit.requests.some((request) =>
+          request.includes('bucket=work%2Facme'),
+        ),
+      ).toBe(true);
+      const beforeRefresh = visit.requests.filter((request) =>
+        request.includes('bucket=work%2Facme'),
+      ).length;
+      hold = true;
+      await page
+        .getByRole('option', { name: 'work/acme', exact: true })
+        .click();
+      expect(
+        await page
+          .getByRole('status', { name: 'Loading audit entries' })
+          .count(),
+      ).toBe(0);
+      expect(await auditEntries(page).count()).toBeGreaterThan(0);
+      await expect
+        .poll(
+          () =>
+            visit.requests.filter((request) =>
+              request.includes('bucket=work%2Facme'),
+            ).length,
+        )
+        .toBeGreaterThan(beforeRefresh);
+      gate.resolve();
+      await page.waitForLoadState('networkidle');
+    } finally {
+      gate.resolve();
+      await visit.close();
+    }
+  },
+);
 
 it('E19: the valid all bucket is distinct from All buckets in selection and intent', async () => {
   const visit = await visitAudit(browser, {
@@ -502,7 +562,7 @@ it('E19: historical URL selections remain visible even when no matching entry is
   try {
     const { page } = visit;
     await page
-      .getByText('No uses match these filters', { exact: true })
+      .getByText('No activity matches these filters', { exact: true })
       .waitFor();
     expect(
       await page
@@ -574,7 +634,7 @@ it('E24: intent on historical detail links preloads their URL filters before nav
     const row = auditEntries(page).first();
     await row.waitFor();
     await row.getByRole('button', { name: /Show details/ }).click();
-    const secret = row.getByRole('link', { name: 'Uses of this secret' });
+    const secret = row.getByRole('link', { name: 'Activity for this secret' });
     await secret.hover();
     await expect
       .poll(() =>
@@ -583,7 +643,7 @@ it('E24: intent on historical detail links preloads their URL filters before nav
         ),
       )
       .toBe(true);
-    const bucket = row.getByRole('link', { name: 'Uses in this bucket' });
+    const bucket = row.getByRole('link', { name: 'Activity in this bucket' });
     await bucket.hover();
     await expect
       .poll(() =>

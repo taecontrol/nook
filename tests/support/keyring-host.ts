@@ -95,9 +95,13 @@ reader.on('line', (line) => {
     env?: Record<string, string>;
     unset?: string[];
     signal?: NodeJS.Signals;
+    signalId?: number;
   };
   if (request.signal) {
-    children.get(request.id)?.kill(request.signal);
+    send({
+      signalId: request.signalId,
+      delivered: children.get(request.id)?.kill(request.signal) ?? false,
+    });
     return;
   }
   const overrides: NodeJS.ProcessEnv = Object.fromEntries(
@@ -122,9 +126,13 @@ reader.on('line', (line) => {
   child.on('error', () =>
     send({ id: request.id, stream: 'stderr', data: 'Process unavailable' }),
   );
-  child.on('close', (status) => {
+  child.on('close', (status, signal) => {
     children.delete(request.id);
-    send({ id: request.id, status: status ?? 1 });
+    send({
+      id: request.id,
+      status: status ?? 1,
+      ...(signal ? { signal } : {}),
+    });
   });
   child.stdin.end(request.input ?? '');
 });

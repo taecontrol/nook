@@ -13,35 +13,51 @@ import { HttpApiError } from 'effect/http-api';
 import type { BucketGrant } from './authorization.ts';
 
 export type AuditMachine = { id: string; machine: string; grant: BucketGrant };
-const Row = Schema.Struct({
+const Facts = Schema.Struct({
   id: Schema.String,
   at: Schema.String,
-  outcome: Schema.Literals(['delivered', 'denied']),
   path: Schema.String,
   purpose: Schema.String,
   machine_id: Schema.String,
   machine_name: Schema.String,
   working_directory: Schema.String,
-  executable: Schema.String,
-  run_id: Schema.String,
 });
+const Row = Schema.Union([
+  Facts.mapFields((fields) => ({
+    ...fields,
+    outcome: Schema.Literals(['delivered', 'denied']),
+    executable: Schema.String,
+    run_id: Schema.String,
+  })),
+  Facts.mapFields((fields) => ({
+    ...fields,
+    outcome: Schema.Literal('created'),
+    executable: Schema.Null,
+    run_id: Schema.Null,
+  })),
+]);
 type Row = typeof Row.Type;
 const unavailable = Effect.mapError(
   () => new HttpApiError.ServiceUnavailable(),
 );
 function entry(row: Row): AuditEntry {
-  return {
+  const facts = {
     id: row.id,
     at: row.at,
-    outcome: row.outcome,
     path: row.path,
     ...splitSecretPath(row.path),
     purpose: row.purpose,
     machine: { id: row.machine_id, name: row.machine_name },
     workingDirectory: row.working_directory,
-    executable: row.executable,
-    runId: row.run_id,
   };
+  return row.outcome === 'created'
+    ? { ...facts, outcome: row.outcome }
+    : {
+        ...facts,
+        outcome: row.outcome,
+        executable: row.executable,
+        runId: row.run_id,
+      };
 }
 function encodeCursor(row: { at: string; id: string }) {
   return btoa(JSON.stringify({ at: row.at, id: row.id }))

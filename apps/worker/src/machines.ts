@@ -278,7 +278,7 @@ export const machineOperations = Effect.gen(function* () {
           .batch([sql`DELETE FROM machine_tokens WHERE id=${id}`])
           .pipe(unavailable);
       }),
-    forRun: (authorization: string) =>
+    forAudit: (authorization: string) =>
       authenticated(authorization).pipe(
         Effect.flatMap((row) =>
           identity(row).pipe(

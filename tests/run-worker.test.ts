@@ -10,6 +10,7 @@ import {
   fetchValues,
   runFixture,
   runInput,
+  useEntry,
 } from './support/audit.ts';
 import { issueGrant, machineMcp } from './support/grants.ts';
 import { deferred, listMachines, revokeMachine } from './support/machines.ts';
@@ -48,7 +49,9 @@ it('E10/E28: distinct values are delivered only after a complete private audit, 
   expect(body.values[1].value === other.value).toBe(true);
   const page = await auditPageData(app);
   expect(page.entries).toHaveLength(2);
-  expect(new Set(page.entries.map((entry) => entry.runId)).size).toBe(1);
+  expect(new Set(page.entries.map((entry) => useEntry(entry).runId)).size).toBe(
+    1,
+  );
   for (const entry of page.entries) {
     expect(entry).toMatchObject({
       outcome: 'delivered',
