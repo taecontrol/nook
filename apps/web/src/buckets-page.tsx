@@ -101,7 +101,7 @@ function writeFailure(
         : `Couldn't create ${write.path}`,
       description: unknown
         ? `Nook couldn't confirm whether the bucket was created${statusText(write.error)}. The path is back in the field; press Enter to try again.`
-        : `Nook is unavailable right now${statusText(write.error)}. Nothing was created. The path is back in the field; press Enter to try again.`,
+        : `Nook couldn't complete this request${statusText(write.error)}. The path is back in the field; press Enter to try again.`,
     };
   return {
     title: unknown
@@ -112,13 +112,16 @@ function writeFailure(
 }
 
 function deleteFailure(error: Error | null) {
-  if (error instanceof ApiError && error.outcomeUnknown)
-    return `Nook couldn't confirm whether the bucket was deleted${statusText(error)}. Check the outline before trying again.`;
-  if (error instanceof ApiError && error.tag === 'BucketHasSecrets')
-    return error.message;
-  if (error instanceof ApiError && error.status === 409)
-    return 'Nook reports that it has child buckets, so the tree changed since you loaded it. Delete its child buckets first. The outline has been refreshed.';
-  return `Nook is unavailable right now${statusText(error)}. The bucket is still there.`;
+  if (error instanceof ApiError) {
+    if (error.outcomeUnknown)
+      return `Nook couldn't confirm whether the bucket was deleted${statusText(error)}. Check the outline before trying again.`;
+    if (error.tag === 'BucketHasSecrets') return error.message;
+    if (error.tag === 'BucketNotFound')
+      return 'Nook reports that this bucket no longer exists. Check the outline before trying again.';
+    if (error.status === 409)
+      return 'Nook reports that it has child buckets, so the tree changed since you loaded it. Delete its child buckets first. Check the outline before trying again.';
+  }
+  return `Nook couldn't complete this request${statusText(error)}. Check the outline before trying again.`;
 }
 
 function PlanPreview({ plan }: { plan: CreatePlan }) {

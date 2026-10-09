@@ -246,10 +246,10 @@ function revokeHeading(write: MachineRevoke) {
     return "Couldn't confirm revocation of ";
   return "Couldn't revoke ";
 }
-function revokeProblem(error: Error | null, machine: Machine) {
+function revokeProblem(error: Error | null) {
   if (error instanceof ApiError && error.outcomeUnknown)
     return `${loadProblem(error)} The machine may already be revoked. Try again to confirm it is revoked.`;
-  return `${loadProblem(error)} The machine approved ${formatDate(machine.approvedAt)} is still connected and its token still works.`;
+  return `${loadProblem(error)} Check the machine list before trying again.`;
 }
 function RevokeFeedback({
   write,
@@ -281,7 +281,7 @@ function RevokeFeedback({
       <AlertDescription>
         {failed ? (
           <>
-            <p>{revokeProblem(write.error, machine)}</p>
+            <p>{revokeProblem(write.error)}</p>
             <Button
               variant="outline"
               size="sm"
