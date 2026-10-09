@@ -31,6 +31,7 @@ it('Home does not describe Vault as unavailable when its tool link opens the rea
     await expect
       .poll(() =>
         page
+          .getByRole('region', { name: 'Secrets in me', exact: true })
           .getByRole('button', { name: 'New secret', exact: true })
           .isEnabled(),
       )
