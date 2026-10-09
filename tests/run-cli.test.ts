@@ -49,6 +49,26 @@ const runArgs = (
   '--',
   ...command,
 ];
+async function nativeSignal(parent: number, signal: NodeJS.Signals) {
+  const result = await keyring.command('/bin/kill', [
+    '-s',
+    signal,
+    String(parent),
+  ]).done;
+  expectNoValue(result.stdout + result.stderr, [
+    app.input.value,
+    app.token,
+    app.key,
+  ]);
+  const reason = result.stderr.includes('No such process')
+    ? 'target missing'
+    : result.stderr.includes('Operation not permitted')
+      ? 'permission denied'
+      : result.stderr.includes('invalid') || result.stderr.includes('usage:')
+        ? 'command usage'
+        : 'unclassified refusal';
+  expect(result.status, `Native signal ${signal}: ${reason}`).toBe(0);
+}
 async function keyringTranscript() {
   try {
     return await readFile(resolve(keyring.home, 'argv'), 'utf8');
@@ -195,12 +215,7 @@ it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
       const parent = Number(await readFile(held, 'utf8'));
       expect(Number.isSafeInteger(parent) && parent > 0).toBe(true);
       expect(existsSync(returned)).toBe(false);
-      expect(
-        (
-          await keyring.command('/bin/kill', ['-s', signal, String(parent)])
-            .done
-        ).status,
-      ).toBe(0);
+      await nativeSignal(parent, signal);
       await writeFile(release, '');
       if (signal === 'SIGINT') {
         await expect.poll(() => existsSync(returned)).toBe(true);
@@ -282,10 +297,7 @@ it.each(
       .toBe(true);
     const parent = Number(await readFile(ready, 'utf8'));
     expect(Number.isSafeInteger(parent) && parent > 0).toBe(true);
-    expect(
-      (await keyring.command('/bin/kill', ['-s', signal, String(parent)]).done)
-        .status,
-    ).toBe(0);
+    await nativeSignal(parent, signal);
     const result = await running.done;
     expectNoValue(result.stdout + result.stderr, [
       app.input.value,
