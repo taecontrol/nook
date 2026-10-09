@@ -248,7 +248,7 @@ function revokeHeading(write: MachineRevoke) {
 }
 function revokeProblem(error: Error | null, machine: Machine) {
   if (error instanceof ApiError && error.outcomeUnknown)
-    return 'The connection was interrupted. The machine may already be revoked. Try again to confirm it is revoked.';
+    return `${loadProblem(error)} The machine may already be revoked. Try again to confirm it is revoked.`;
   return `${loadProblem(error)} The machine approved ${formatDate(machine.approvedAt)} is still connected and its token still works.`;
 }
 function RevokeFeedback({

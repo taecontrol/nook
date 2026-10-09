@@ -93,18 +93,27 @@ function createdStatus(result: CreatedBucket) {
 function writeFailure(
   write: NonNullable<ReturnType<typeof useBuckets>['write']>,
 ): Failure {
+  const unknown = write.error instanceof ApiError && write.error.outcomeUnknown;
   if (write.operation === 'create')
     return {
-      title: `Couldn't create ${write.path}`,
-      description: `Nook is unavailable right now${statusText(write.error)}. Nothing was created. The path is back in the field; press Enter to try again.`,
+      title: unknown
+        ? `Couldn't confirm creation of ${write.path}`
+        : `Couldn't create ${write.path}`,
+      description: unknown
+        ? `Nook couldn't confirm whether the bucket was created${statusText(write.error)}. The path is back in the field; press Enter to try again.`
+        : `Nook is unavailable right now${statusText(write.error)}. Nothing was created. The path is back in the field; press Enter to try again.`,
     };
   return {
-    title: `Couldn't delete ${write.path}`,
+    title: unknown
+      ? `Couldn't confirm deletion of ${write.path}`
+      : `Couldn't delete ${write.path}`,
     description: deleteFailure(write.error),
   };
 }
 
 function deleteFailure(error: Error | null) {
+  if (error instanceof ApiError && error.outcomeUnknown)
+    return `Nook couldn't confirm whether the bucket was deleted${statusText(error)}. Check the outline before trying again.`;
   if (error instanceof ApiError && error.tag === 'BucketHasSecrets')
     return error.message;
   if (error instanceof ApiError && error.status === 409)

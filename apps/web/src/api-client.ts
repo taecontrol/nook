@@ -1,5 +1,5 @@
 import { Api } from '@nook/contract';
-import { Effect } from 'effect';
+import { Effect, Schema } from 'effect';
 import { FetchHttpClient, HttpClientError } from 'effect/http';
 import { HttpApiClient } from 'effect/http-api';
 
@@ -42,7 +42,10 @@ export function runApi<A, E>(
         (error) =>
           new ApiError(
             statusByTag[(error as { _tag: string })._tag] ?? 503,
-            HttpClientError.isHttpClientError(error),
+            // Failed delivery or decoding and storage errors can follow commit.
+            HttpClientError.isHttpClientError(error) ||
+              Schema.isSchemaError(error) ||
+              (error as { _tag: string })._tag === 'ServiceUnavailable',
             (error as { _tag?: string })._tag ?? 'ServiceUnavailable',
             publicMessage(error),
           ),
