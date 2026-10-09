@@ -271,13 +271,24 @@ it('E22: fresh and filtered-empty copy, clear filters and one skeleton status', 
   }
 });
 it('E22: genuine D1 load failure retries, and older-page failure keeps loaded entries', async () => {
+  const failedPrefetch = deferred();
+  let componentHeld = false;
   const visit = await visitAudit(browser, {
-    configure: async (_page, app) => {
+    configure: async (page, app) => {
       await (await app.mf.getD1Database('DB'))
         .prepare(
           'ALTER TABLE audit_entries RENAME TO unavailable_audit_entries',
         )
         .run();
+      page.on('response', (response) => {
+        if (new URL(response.url()).pathname === '/api/audit')
+          void response.finished().then(() => failedPrefetch.resolve());
+      });
+      await page.route('**/assets/audit-page-*.js', async (route) => {
+        componentHeld = true;
+        await failedPrefetch.promise;
+        await route.continue();
+      });
     },
   });
   try {
@@ -285,6 +296,7 @@ it('E22: genuine D1 load failure retries, and older-page failure keeps loaded en
     await page
       .getByText('Couldn’t load audit entries', { exact: true })
       .waitFor();
+    expect(componentHeld).toBe(true);
     expect(
       visit.requests.filter((request) => request.startsWith('/api/audit'))
         .length,

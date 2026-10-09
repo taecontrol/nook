@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import {
   chmod,
   mkdir,
@@ -11,6 +12,7 @@ import {
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { dirname, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { beforeEach, expect, it } from 'vitest';
 import { evidenceRoot } from '../scripts/lib/instrument.ts';
 import {
@@ -163,6 +165,60 @@ it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
       'child-ready\n' + (signal === 'SIGINT' ? 'SIGTERM' : signal),
       true,
     );
+  },
+);
+it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
+  'E3: native %s survives the real child launch window',
+  async (signal) => {
+    const release = resolve(keyring.home, 'spawn-release');
+    const held = resolve(keyring.home, 'spawn-held');
+    const returned = resolve(keyring.home, 'spawn-returned');
+    const imports = [
+      ...(process.platform === 'darwin'
+        ? [resolve(keyring.home, 'process-groups.mjs')]
+        : []),
+      resolve('tests/support/run-spawn-gate.ts'),
+    ]
+      .map((file) => `--import=${pathToFileURL(file).href}`)
+      .join(' ');
+    const running = keyring.start(
+      runArgs([process.execPath, childFile, 'startup-wait']),
+      { NODE_OPTIONS: imports },
+    );
+    try {
+      await expect
+        .poll(
+          () => existsSync(held) && running.output().includes('child-ready'),
+        )
+        .toBe(true);
+      const parent = Number(await readFile(held, 'utf8'));
+      expect(Number.isSafeInteger(parent) && parent > 0).toBe(true);
+      expect(
+        (
+          await keyring.command('/bin/kill', ['-s', signal, String(parent)])
+            .done
+        ).status,
+      ).toBe(0);
+      await writeFile(release, '');
+      if (signal === 'SIGINT') {
+        await expect.poll(() => existsSync(returned)).toBe(true);
+        running.kill('SIGTERM');
+      }
+      const result = await running.done;
+      expectNoValue(result.stdout + result.stderr, [
+        app.input.value,
+        app.token,
+        app.key,
+      ]);
+      expect(result.status).toBe(0);
+      expectOutput(
+        result.stdout,
+        'child-ready\n' + (signal === 'SIGINT' ? 'SIGTERM' : signal),
+        true,
+      );
+    } finally {
+      await writeFile(release, '');
+    }
   },
 );
 it('E4: command resolution precedes keyring/network, with 127 and 126', async () => {
