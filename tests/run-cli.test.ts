@@ -204,7 +204,10 @@ it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
 it.each(['exited', 'closed'] as const)(
   'E3: the private fixture refuses native delivery after the command is %s',
   async (state) => {
-    const command = keyring.command(process.execPath, ['-e', 'process.exit(0)']);
+    const command = keyring.command(process.execPath, [
+      '-e',
+      'process.exit(0)',
+    ]);
     const result = await command.done;
     expectNoValue(result.stdout + result.stderr, [
       app.input.value,
