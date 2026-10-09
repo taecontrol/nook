@@ -49,29 +49,14 @@ const runArgs = (
   '--',
   ...command,
 ];
-async function nativeSignal(parent: number, signal: NodeJS.Signals) {
-  const result = await keyring.command('/bin/kill', [
-    '-s',
-    signal,
-    String(parent),
-  ]).done;
-  expectNoValue(result.stdout + result.stderr, [
-    app.input.value,
-    app.token,
-    app.key,
-  ]);
-  const diagnostic = result.stderr.toLowerCase();
-  const reason = diagnostic.includes('no such process')
-    ? 'target missing'
-    : diagnostic.includes('operation not permitted')
-      ? 'permission denied'
-      : diagnostic.includes('invalid') || diagnostic.includes('usage:')
-        ? 'command usage'
-        : 'unclassified refusal';
+async function nativeSignal(
+  running: { kill(signal: NodeJS.Signals): boolean | Promise<boolean> },
+  signal: NodeJS.Signals,
+) {
   expect(
-    result.status,
-    `Native signal ${signal}: ${reason}; exited by ${result.signal ?? 'code'}; stderr bytes ${Buffer.byteLength(result.stderr)}`,
-  ).toBe(0);
+    await running.kill(signal),
+    `Native signal ${signal} must be delivered`,
+  ).toBe(true);
 }
 async function keyringTranscript() {
   try {
@@ -243,7 +228,7 @@ it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
       const parent = Number(await readFile(held, 'utf8'));
       expect(Number.isSafeInteger(parent) && parent > 0).toBe(true);
       expect(existsSync(returned)).toBe(false);
-      await nativeSignal(parent, signal);
+      await nativeSignal(running, signal);
       await writeFile(release, '');
       if (signal === 'SIGINT') {
         await expect.poll(() => existsSync(returned)).toBe(true);
@@ -325,7 +310,7 @@ it.each(
       .toBe(true);
     const parent = Number(await readFile(ready, 'utf8'));
     expect(Number.isSafeInteger(parent) && parent > 0).toBe(true);
-    await nativeSignal(parent, signal);
+    await nativeSignal(running, signal);
     const result = await running.done;
     expectNoValue(result.stdout + result.stderr, [
       app.input.value,
@@ -334,6 +319,7 @@ it.each(
     ]);
     // Both private platform fixtures map native termination to status 1.
     expect(result.status).toBe(1);
+    expect(result.signal === signal).toBe(true);
     const failure =
       code === 127
         ? `Command not found: ${command}\n`
