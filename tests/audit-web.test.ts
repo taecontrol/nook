@@ -381,23 +381,39 @@ it.each([0, 600])(
     try {
       const { page } = visit;
       const link = page.getByRole('link', { name: 'Audit', exact: true });
-      await link.hover();
-      await page.waitForLoadState('networkidle');
-      for (const path of [
+      const paths = [
         '/api/audit',
         '/api/buckets',
         '/api/secrets',
         '/api/machines',
-      ])
+      ];
+      const preloaded = paths.map((path) =>
+        page.waitForResponse(
+          (response) => new URL(response.url()).pathname === path,
+        ),
+      );
+      await link.hover();
+      for (const response of await Promise.all(preloaded))
+        await response.finished();
+      await page.waitForLoadState('networkidle');
+      for (const path of paths)
         expect(visit.requests.some((request) => request.startsWith(path))).toBe(
           true,
         );
       await link.click();
       await auditEntries(page).first().waitFor();
       await page.getByRole('combobox', { name: 'Bucket', exact: true }).click();
+      const filtered = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname === '/api/audit' &&
+          url.searchParams.get('bucket') === 'work/acme'
+        );
+      });
       await page
         .getByRole('option', { name: 'work/acme', exact: true })
         .hover();
+      await (await filtered).finished();
       await page.waitForLoadState('networkidle');
       expect(
         visit.requests.some((request) =>
