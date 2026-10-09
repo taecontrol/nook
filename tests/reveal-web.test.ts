@@ -338,7 +338,7 @@ it('E13: a committed audit with a lost response shows failure; explicit retry ma
     },
     undefined,
     true,
-    true,
+    { observeStatements: true },
   );
   const visit = await revealPage(browser, { app });
   try {

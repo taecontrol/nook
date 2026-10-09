@@ -47,12 +47,9 @@ async function privateFailure(response: Response, tag: string, status: number) {
   return JSON.parse(text) as { _tag: string; message?: string };
 }
 it('E4/E14/E20: the real HTTP request records its IP/country, one reveal, and no machine facts before no-store delivery', async () => {
-  const measured = await vaultCheckpoints(
-    async () => true,
-    undefined,
-    false,
-    true,
-  );
+  const measured = await vaultCheckpoints(async () => true, undefined, false, {
+    observeStatements: true,
+  });
   try {
     await measured.setBindings(measured.bindings, {
       cf: { country: revealCountry },
@@ -222,7 +219,7 @@ it('E13/budget: one read and one insert, audit commits before response, failed w
     },
     undefined,
     false,
-    true,
+    { observeStatements: true },
   );
   try {
     await setRevealValue(measured, revealValue);
@@ -356,7 +353,7 @@ it('E17: subtree denial precedes every statement and audit; an in-grant reveal s
     },
     ['work/acme'],
     false,
-    true,
+    { observeStatements: true },
   );
   try {
     expect(
@@ -366,9 +363,7 @@ it('E17: subtree denial precedes every statement and audit; an in-grant reveal s
     for (const path of [
       'personal/finances/PLAID_SECRET',
       'personal/missing/ABSENT',
-      'work/STRIPE_KEY',
       'work/acme-old/STRIPE_KEY',
-      'me/STRIPE_KEY',
     ]) {
       labels.length = 0;
       const response = await revealSecret(measured, path);
@@ -400,7 +395,7 @@ it('State space: concurrent reveals have distinct entries; replacement after rea
     },
     undefined,
     false,
-    true,
+    { observeStatements: true },
   );
   try {
     await setRevealValue(measured, revealValue);

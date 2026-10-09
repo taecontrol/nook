@@ -18,20 +18,34 @@ const Facts = Schema.Struct({
   at: Schema.String,
   path: Schema.String,
   purpose: Schema.String,
+});
+const MachineFacts = Facts.mapFields((fields) => ({
+  ...fields,
   machine_id: Schema.String,
   machine_name: Schema.String,
   working_directory: Schema.String,
-});
+}));
 const Row = Schema.Union([
-  Facts.mapFields((fields) => ({
+  MachineFacts.mapFields((fields) => ({
     ...fields,
     outcome: Schema.Literals(['delivered', 'denied']),
     executable: Schema.String,
     run_id: Schema.String,
   })),
-  Facts.mapFields((fields) => ({
+  MachineFacts.mapFields((fields) => ({
     ...fields,
     outcome: Schema.Literal('created'),
+    executable: Schema.Null,
+    run_id: Schema.Null,
+  })),
+  Facts.mapFields((fields) => ({
+    ...fields,
+    outcome: Schema.Literal('revealed'),
+    ip: Schema.NullOr(Schema.String),
+    country: Schema.NullOr(Schema.String),
+    machine_id: Schema.Null,
+    machine_name: Schema.Null,
+    working_directory: Schema.Null,
     executable: Schema.Null,
     run_id: Schema.Null,
   })),
@@ -47,13 +61,18 @@ function entry(row: Row): AuditEntry {
     path: row.path,
     ...splitSecretPath(row.path),
     purpose: row.purpose,
+  };
+  if (row.outcome === 'revealed')
+    return { ...facts, outcome: row.outcome, ip: row.ip, country: row.country };
+  const machineFacts = {
+    ...facts,
     machine: { id: row.machine_id, name: row.machine_name },
     workingDirectory: row.working_directory,
   };
   return row.outcome === 'created'
-    ? { ...facts, outcome: row.outcome }
+    ? { ...machineFacts, outcome: row.outcome }
     : {
-        ...facts,
+        ...machineFacts,
         outcome: row.outcome,
         executable: row.executable,
         runId: row.run_id,
@@ -100,6 +119,14 @@ function filters(input: AuditFilters) {
 export const auditStore = Effect.gen(function* () {
   const sql = yield* D1Client.D1Client;
   return {
+    recordReveal: (
+      path: string,
+      facts: { ip: string | null; country: string | null },
+    ) =>
+      sql`INSERT INTO audit_entries(id, at, outcome, path, purpose, ip, country) VALUES (${crypto.randomUUID()}, ${new Date().toISOString()}, 'revealed', ${path}, 'Revealed in web app', ${facts.ip}, ${facts.country})`.pipe(
+        unavailable,
+        Effect.asVoid,
+      ),
     record: (
       machine: AuditMachine,
       input: RunSecrets,

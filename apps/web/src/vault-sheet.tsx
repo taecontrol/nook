@@ -213,8 +213,8 @@ function ValueField({
             {replacing
               ? 'Overwrites the current value. '
               : 'Up to 64 KiB, several lines are fine. '}
-            You see it only while you type; once saved, Nook never shows it
-            again.
+            Once saved, it is encrypted; reveal it from the list when you need
+            it.
           </FieldDescription>
         )}
       </div>
@@ -295,7 +295,7 @@ function SheetIntro({
   return (
     <SheetDescription>
       {create ? (
-        'Store a value your agents find by name. After you save it, Nook never shows it again.'
+        'Store a value your agents find by name. It is encrypted once saved.'
       ) : (
         <>
           <Path>{secretPath(draft)}</Path>

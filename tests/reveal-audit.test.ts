@@ -15,6 +15,7 @@ import {
   revealPath,
   revealSecret,
 } from './support/reveal.ts';
+import { vaultCheckpoints } from './support/vault-checkpoints.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
@@ -159,7 +160,14 @@ it.each([
 ])(
   'E24: missing request facts show Unknown and unrecognized countries fall back to their raw code ($country)',
   async ({ country, ip, expectedCountry, expectedIp }) => {
+    const absentFacts =
+      country === null
+        ? await vaultCheckpoints(async () => true, undefined, false, {
+            omitIp: true,
+          })
+        : undefined;
     const visit = await visitAudit(browser, {
+      app: absentFacts,
       count: 0,
       configure: async (_page, app) => {
         await app.setBindings(app.bindings, {
@@ -167,11 +175,9 @@ it.each([
         });
         expect(
           (
-            await revealSecret(
-              app,
-              revealPath,
-              ip ? { 'CF-Connecting-IP': ip } : {},
-            )
+            await revealSecret(app, revealPath, {
+              'CF-Connecting-IP': ip ?? '',
+            })
           ).status,
         ).toBe(200);
       },

@@ -3,9 +3,17 @@ import { resolve } from 'node:path';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
+import { fetchValues } from './support/audit.ts';
 import { auditEntries } from './support/audit-browser.ts';
+import { issueGrant } from './support/grants.ts';
 import { deferred } from './support/machines.ts';
-import { openReveal, revealPage, valueField } from './support/reveal.ts';
+import {
+  openReveal,
+  revealPage,
+  revealPath,
+  revealSecret,
+  valueField,
+} from './support/reveal.ts';
 
 const directory = resolve('.local/verification/screenshots');
 let browser: Browser;
@@ -51,6 +59,31 @@ it.each(matrix)(
       colorScheme: theme,
       configure: async (page, app) => {
         page.on('pageerror', (error) => errors.push(error.name));
+        if (state.startsWith('audit')) {
+          expect(
+            (
+              await revealSecret(app, 'me/GITHUB_TOKEN', {
+                'CF-Connecting-IP': '192.0.2.7',
+              })
+            ).status,
+          ).toBe(200);
+          const { token } = await issueGrant(app);
+          expect(
+            (
+              await fetchValues(app, token, {
+                secrets: [revealPath],
+                purpose:
+                  'Run billing integration tests against Stripe test mode',
+                executable: 'pnpm',
+              })
+            ).status,
+          ).toBe(200);
+          await (await app.mf.getD1Database('DB'))
+            .prepare(
+              "UPDATE audit_entries SET at=CASE WHEN outcome='delivered' THEN '2026-10-09T11:13:00.000Z' ELSE '2026-10-08T10:00:00.000Z' END",
+            )
+            .run();
+        }
         if (state === 'key-missing')
           await app.setBindings({ ...app.bindings, VAULT_KEY: '' });
         if (state === 'failed')
@@ -83,9 +116,22 @@ it.each(matrix)(
           .waitFor();
       }
       if (state === 'audit-row' || state === 'audit-details') {
+        await (await visit.app.mf.getD1Database('DB'))
+          .prepare(
+            "UPDATE audit_entries SET at='2026-10-09T11:58:00.000Z' WHERE path=? AND outcome='revealed'",
+          )
+          .bind(revealPath)
+          .run();
         await dialog.getByRole('link', { name: 'Audit', exact: true }).click();
+        await page
+          .getByRole('link', { name: 'Clear filters', exact: true })
+          .first()
+          .click();
         const row = auditEntries(page).first();
-        await row.getByText('Revealed', { exact: true }).first().waitFor();
+        await row
+          .getByText('Revealed', { exact: true })
+          .filter({ visible: true })
+          .waitFor();
         if (state === 'audit-details') {
           await row.getByRole('button', { name: /Show details/ }).click();
           await row.getByText('Colombia', { exact: true }).waitFor();

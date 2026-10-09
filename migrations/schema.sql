@@ -4,16 +4,21 @@ CREATE UNIQUE INDEX machine_tokens_id ON machine_tokens(id);
 CREATE TABLE "audit_entries" (
   id TEXT PRIMARY KEY NOT NULL,
   at TEXT NOT NULL,
-  outcome TEXT NOT NULL CHECK (outcome IN ('delivered', 'denied', 'created')),
+  outcome TEXT NOT NULL CHECK (outcome IN ('delivered', 'denied', 'created', 'revealed')),
   path TEXT NOT NULL,
   purpose TEXT NOT NULL,
-  machine_id TEXT NOT NULL,
-  machine_name TEXT NOT NULL,
-  working_directory TEXT NOT NULL,
+  machine_id TEXT,
+  machine_name TEXT,
+  working_directory TEXT,
   executable TEXT,
   run_id TEXT,
-  CHECK ((outcome = 'created' AND executable IS NULL AND run_id IS NULL)
-    OR (outcome IN ('delivered', 'denied') AND executable IS NOT NULL AND run_id IS NOT NULL))
+  ip TEXT,
+  country TEXT,
+  CHECK (
+    (outcome = 'revealed' AND machine_id IS NULL AND machine_name IS NULL AND working_directory IS NULL AND executable IS NULL AND run_id IS NULL)
+    OR (outcome = 'created' AND machine_id IS NOT NULL AND machine_name IS NOT NULL AND working_directory IS NOT NULL AND executable IS NULL AND run_id IS NULL AND ip IS NULL AND country IS NULL)
+    OR (outcome IN ('delivered', 'denied') AND machine_id IS NOT NULL AND machine_name IS NOT NULL AND working_directory IS NOT NULL AND executable IS NOT NULL AND run_id IS NOT NULL AND ip IS NULL AND country IS NULL)
+  )
 );
 CREATE TABLE authorizations (
   device_hash TEXT PRIMARY KEY NOT NULL,

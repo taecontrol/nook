@@ -15,6 +15,7 @@ import {
   ReservedBucket,
 } from './buckets.ts';
 import { Machine } from './machines.ts';
+import { SecretKeyUnavailable } from './run.ts';
 import {
   BucketHasSecrets,
   CreateSecret,
@@ -24,6 +25,7 @@ import {
   SecretChanged,
   SecretExists,
   SecretNotFound,
+  SecretValue,
   VaultNotConfigured,
   WriteId,
 } from './vault.ts';
@@ -91,6 +93,20 @@ export const Api = HttpApi.make('nook')
   )
   .add(
     HttpApiGroup.make('vault')
+      .add(
+        HttpApiEndpoint.post('reveal', '/api/secrets/:path/reveal', {
+          params: Schema.Struct({ path: Schema.String }),
+          success: Schema.Struct({ value: SecretValue }),
+          error: [
+            ...errors,
+            InvalidBucketPath,
+            InvalidSecret,
+            SecretNotFound,
+            VaultNotConfigured,
+            SecretKeyUnavailable,
+          ],
+        }),
+      )
       .add(
         HttpApiEndpoint.get('list', '/api/secrets', {
           success: Schema.Struct({ secrets: Schema.Array(OwnerSecret) }),

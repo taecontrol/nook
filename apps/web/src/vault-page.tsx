@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { cn } from 'cn';
 import {
   ChevronLeft,
+  Eye,
   KeyRound,
   MoreHorizontal,
   Plus,
@@ -10,7 +11,7 @@ import {
   ServerCrash,
   Trash2,
 } from 'lucide-react';
-import { useRef } from 'react';
+import { lazy, Suspense, useRef } from 'react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   AlertDialog,
@@ -64,6 +65,8 @@ import { reachText, SecretSheet } from './vault-sheet';
 
 import { BucketTree, BucketTreeSkeleton } from './vault-tree';
 
+const RevealDialog = lazy(() => import('./reveal-dialog'));
+
 const sectionLabel =
   'text-xs font-medium tracking-wider text-muted-foreground uppercase';
 
@@ -86,11 +89,13 @@ function Paths({ paths }: { paths: readonly string[] }) {
 function SecretMenu({
   secret,
   busy,
+  onReveal,
   onReplace,
   onDelete,
 }: {
   secret: Secret;
   busy: boolean;
+  onReveal: (secret: Secret) => void;
   onReplace: (secret: Secret) => void;
   onDelete: (secret: Secret, trigger: HTMLButtonElement | null) => void;
 }) {
@@ -117,6 +122,10 @@ function SecretMenu({
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem disabled={busy} onSelect={() => onReveal(secret)}>
+          <Eye />
+          Reveal value…
+        </DropdownMenuItem>
         <DropdownMenuItem disabled={busy} onSelect={() => onReplace(secret)}>
           <Replace />
           Replace value…
@@ -394,7 +403,8 @@ function NoSecretsAnywhere({ onCreate }: { onCreate: () => void }) {
           <EmptyTitle>No secrets yet</EmptyTitle>
           <EmptyDescription>
             Store an API key or token in a bucket. Agents on your machines find
-            it by name, and after you save it Nook never shows its value again.
+            it by name. Values are encrypted; you can reveal one here when you
+            need it.
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
@@ -558,6 +568,7 @@ function StoredSecrets({
                   <SecretMenu
                     secret={secret}
                     busy={busy}
+                    onReveal={page.openReveal}
                     onReplace={page.openReplace}
                     onDelete={page.requestDelete}
                   />
@@ -683,14 +694,7 @@ function TreePane({ page }: { page: Page }) {
 
 export function VaultPage() {
   const page = useVaultPage();
-  const { ui, setUi, patch, drilled, loaded, busy } = page;
-  const draft = ui.sheet?.draft;
-  const replacing =
-    draft?.mode === 'replace'
-      ? (page.list?.find(
-          (secret) => secretPath(secret) === secretPath(draft),
-        ) ?? null)
-      : null;
+  const { ui, drilled, loaded, busy } = page;
   return (
     <div className="w-full max-w-6xl px-4 pb-24 sm:px-6 md:px-12">
       <div className="flex items-center gap-3 pt-6 pb-2 md:pt-8">
@@ -717,7 +721,8 @@ export function VaultPage() {
         )}
       >
         Agents find secrets by name, in their bucket and the buckets above it.
-        Once saved, a value is encrypted and never shown again.
+        Values are encrypted. You can reveal one here; every reveal is recorded
+        in Audit.
       </p>
       <div className="mb-6 empty:hidden">
         {ui.feedback && (
@@ -750,6 +755,22 @@ export function VaultPage() {
           <BucketPane page={page} />
         </section>
       </div>
+      <VaultDialogs page={page} />
+    </div>
+  );
+}
+
+function VaultDialogs({ page }: { page: Page }) {
+  const { ui, setUi, patch } = page;
+  const draft = ui.sheet?.draft;
+  const replacing =
+    draft?.mode === 'replace'
+      ? (page.list?.find(
+          (secret) => secretPath(secret) === secretPath(draft),
+        ) ?? null)
+      : null;
+  return (
+    <>
       <SecretSheet
         sheet={ui.sheet}
         buckets={page.buckets}
@@ -779,6 +800,11 @@ export function VaultPage() {
           else page.heading.current?.focus();
         }}
       />
-    </div>
+      {page.revealing && (
+        <Suspense fallback={null}>
+          <RevealDialog secret={page.revealing} onClose={page.closeReveal} />
+        </Suspense>
+      )}
+    </>
   );
 }

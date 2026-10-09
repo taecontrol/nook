@@ -29,6 +29,7 @@ const statusByTag: Record<string, number> = {
   SecretChanged: 409,
   SecretNotFound: 404,
   VaultNotConfigured: 503,
+  SecretKeyUnavailable: 503,
 };
 const client = HttpApiClient.make(Api);
 export function runApi<A, E>(
@@ -59,6 +60,7 @@ function publicMessage(error: unknown) {
     'SecretChanged',
     'SecretNotFound',
     'VaultNotConfigured',
+    'SecretKeyUnavailable',
     'BucketHasSecrets',
   ].includes(typed._tag ?? '')
     ? typed.message

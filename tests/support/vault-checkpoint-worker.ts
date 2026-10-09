@@ -45,12 +45,12 @@ export function vaultCheckpointWorker(
     fetch(request: Request, env: { DB: D1Database }): Promise<Response>;
   },
   observeRequests = false,
-  observeStatements = false,
+  options: { observeStatements?: boolean; omitIp?: boolean } = {},
 ) {
   return {
     async fetch(request: Request, env: { DB: D1Database }) {
       if (
-        observeStatements &&
+        options.observeStatements &&
         new URL(request.url).pathname === '/api/__test/request-facts'
       )
         return Response.json({
@@ -68,9 +68,16 @@ export function vaultCheckpointWorker(
           await checkpoint('listing-request');
         if (path.endsWith('/reveal')) await checkpoint('reveal-request');
       }
+      if (options.omitIp && new URL(request.url).pathname.endsWith('/reveal')) {
+        // Miniflare supplies a loopback IP even if the HTTP header is omitted.
+        // Remove that synthetic default to exercise an actually absent fact.
+        const headers = new Headers(request.headers);
+        headers.delete('CF-Connecting-IP');
+        request = new Request(request, { headers });
+      }
       return worker.fetch(request, {
         ...env,
-        DB: decorate(env.DB, observeStatements),
+        DB: decorate(env.DB, options.observeStatements ?? false),
       });
     },
   };
