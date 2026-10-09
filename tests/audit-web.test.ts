@@ -229,7 +229,7 @@ it('E22: fresh and filtered-empty copy, clear filters and one skeleton status', 
   const fresh = await visitAudit(browser, { count: 0 });
   try {
     await fresh.page
-      .getByText('No secret uses or creations yet', { exact: true })
+      .getByText('No secret activity yet', { exact: true })
       .waitFor();
     expect(await fresh.page.locator('body').innerText()).toContain('nook run');
     expect(await fresh.page.locator('body').innerText()).toContain(
@@ -244,7 +244,7 @@ it('E22: fresh and filtered-empty copy, clear filters and one skeleton status', 
       .last()
       .click();
     await fresh.page
-      .getByText('No secret uses or creations yet', { exact: true })
+      .getByText('No secret activity yet', { exact: true })
       .waitFor();
   } finally {
     await fresh.close();
