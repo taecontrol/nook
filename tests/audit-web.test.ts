@@ -349,64 +349,90 @@ it('E23: pagination appends 25 without duplicates or gaps while new uses arrive'
     await visit.close();
   }
 });
-it('E24: Audit intent loads all four queries, filter pointer intent caches instantly then refreshes', async () => {
-  const gate = deferred();
-  let hold = false;
-  const visit = await visitAudit(browser, {
-    start: '/',
-    configure: async (page) => {
-      await page.route('**/api/audit**', async (route) => {
-        if (hold) await gate.promise;
-        await route.continue().catch(() => {});
-      });
-    },
-  });
-  try {
-    const { page } = visit;
-    const link = page.getByRole('link', { name: 'Audit', exact: true });
-    await link.hover();
-    await page.waitForLoadState('networkidle');
-    for (const path of [
-      '/api/audit',
-      '/api/buckets',
-      '/api/secrets',
-      '/api/machines',
-    ])
-      expect(visit.requests.some((request) => request.startsWith(path))).toBe(
-        true,
-      );
-    await link.click();
-    await auditEntries(page).first().waitFor();
-    await page.getByRole('combobox', { name: 'Bucket', exact: true }).click();
-    await page.getByRole('option', { name: 'work/acme', exact: true }).hover();
-    await page.waitForLoadState('networkidle');
-    expect(
-      visit.requests.some((request) => request.includes('bucket=work%2Facme')),
-    ).toBe(true);
-    const beforeRefresh = visit.requests.filter((request) =>
-      request.includes('bucket=work%2Facme'),
-    ).length;
-    hold = true;
-    await page.getByRole('option', { name: 'work/acme', exact: true }).click();
-    expect(
-      await page.getByRole('status', { name: 'Loading audit entries' }).count(),
-    ).toBe(0);
-    expect(await auditEntries(page).count()).toBeGreaterThan(0);
-    await expect
-      .poll(
-        () =>
-          visit.requests.filter((request) =>
-            request.includes('bucket=work%2Facme'),
-          ).length,
-      )
-      .toBeGreaterThan(beforeRefresh);
-    gate.resolve();
-    await page.waitForLoadState('networkidle');
-  } finally {
-    gate.resolve();
-    await visit.close();
-  }
-});
+it.each([0, 600])(
+  'E24: Audit intent loads all four queries, filter pointer intent caches instantly then refreshes (fetch scheduling %sms)',
+  async (delay) => {
+    const gate = deferred();
+    let hold = false;
+    const visit = await visitAudit(browser, {
+      start: '/',
+      configure: async (page) => {
+        await page.addInitScript((delay) => {
+          const request = window.fetch.bind(window);
+          window.fetch = async (input, init) => {
+            const url = new URL(
+              input instanceof Request ? input.url : String(input),
+              location.href,
+            );
+            if (
+              url.pathname === '/api/audit' &&
+              url.searchParams.get('bucket') === 'work/acme'
+            )
+              await new Promise<void>((accept) => setTimeout(accept, delay));
+            return request(input, init);
+          };
+        }, delay);
+        await page.route('**/api/audit**', async (route) => {
+          if (hold) await gate.promise;
+          await route.continue().catch(() => {});
+        });
+      },
+    });
+    try {
+      const { page } = visit;
+      const link = page.getByRole('link', { name: 'Audit', exact: true });
+      await link.hover();
+      await page.waitForLoadState('networkidle');
+      for (const path of [
+        '/api/audit',
+        '/api/buckets',
+        '/api/secrets',
+        '/api/machines',
+      ])
+        expect(visit.requests.some((request) => request.startsWith(path))).toBe(
+          true,
+        );
+      await link.click();
+      await auditEntries(page).first().waitFor();
+      await page.getByRole('combobox', { name: 'Bucket', exact: true }).click();
+      await page
+        .getByRole('option', { name: 'work/acme', exact: true })
+        .hover();
+      await page.waitForLoadState('networkidle');
+      expect(
+        visit.requests.some((request) =>
+          request.includes('bucket=work%2Facme'),
+        ),
+      ).toBe(true);
+      const beforeRefresh = visit.requests.filter((request) =>
+        request.includes('bucket=work%2Facme'),
+      ).length;
+      hold = true;
+      await page
+        .getByRole('option', { name: 'work/acme', exact: true })
+        .click();
+      expect(
+        await page
+          .getByRole('status', { name: 'Loading audit entries' })
+          .count(),
+      ).toBe(0);
+      expect(await auditEntries(page).count()).toBeGreaterThan(0);
+      await expect
+        .poll(
+          () =>
+            visit.requests.filter((request) =>
+              request.includes('bucket=work%2Facme'),
+            ).length,
+        )
+        .toBeGreaterThan(beforeRefresh);
+      gate.resolve();
+      await page.waitForLoadState('networkidle');
+    } finally {
+      gate.resolve();
+      await visit.close();
+    }
+  },
+);
 
 it('E19: the valid all bucket is distinct from All buckets in selection and intent', async () => {
   const visit = await visitAudit(browser, {
