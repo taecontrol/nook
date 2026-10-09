@@ -8,6 +8,7 @@ import { unstable_splitSqlQuery } from 'wrangler';
 import type { machineVault } from '../apps/worker/src/vault.ts';
 import { applyMigrations } from '../scripts/lib/migrations.ts';
 import { access, accessFixture } from './support/access.ts';
+import { machineCreate } from './support/agent-create.ts';
 import { auditPageData, auditRows } from './support/audit.ts';
 import { issueGrant, machineMcp } from './support/grants.ts';
 import { deferred } from './support/machines.ts';
@@ -165,6 +166,49 @@ class PrivateRevealLog extends Log {
     this.messages.push(message);
   }
 }
+it('E19: successful reveal output remains private in Worker logs, audit and URLs', async () => {
+  const log = new PrivateRevealLog();
+  let attached = false;
+  await app.setBindings(app.bindings, {
+    log,
+    handleRuntimeStdio: (stdout, stderr) => {
+      attached = true;
+      for (const input of [stdout, stderr])
+        createInterface({ input }).on('line', (line) =>
+          log.messages.push(line),
+        );
+    },
+  });
+  const url = `/api/secrets/${encodeURIComponent(revealPath)}/reveal`;
+  const response = await revealSecret(app);
+  expect(response.status).toBe(200);
+  expect(
+    ((await response.json()) as { value: string }).value === revealValue,
+  ).toBe(true);
+  const rows = await auditRows(app);
+  expect(rows).toHaveLength(1);
+  expect(attached).toBe(true);
+  expectNoValue(JSON.stringify({ output: log.messages, rows, url }), [
+    revealValue,
+    app.key,
+  ]);
+});
+it('E11/E19: a malformed persisted envelope is a fixed private 503 before audit', async () => {
+  const db = await app.mf.getD1Database('DB');
+  await db
+    .prepare('UPDATE secrets SET iv=? WHERE name=?')
+    .bind(new Uint8Array(16).buffer, 'STRIPE_KEY')
+    .run();
+  expect(
+    await db
+      .prepare('SELECT typeof(iv) AS kind FROM secrets WHERE name=?')
+      .bind('STRIPE_KEY')
+      .first('kind'),
+  ).toBe('blob');
+  expect(
+    await privateFailure(await revealSecret(app), 'ServiceUnavailable', 503),
+  ).toEqual({ _tag: 'ServiceUnavailable' });
+});
 it.each(['read', 'audit'])(
   'E11/E12/E19: genuine D1 %s failure returns only a fixed 503, with private logs and no audit',
   async (kind) => {
@@ -378,6 +422,37 @@ it('E17: subtree denial precedes every statement and audit; an in-grant reveal s
     await measured.close();
   }
 });
+it('E17: invalid reveal paths fail before every statement and audit', async () => {
+  const labels: string[] = [];
+  const measured = await vaultCheckpoints(
+    async (label) => {
+      labels.push(label);
+      return true;
+    },
+    undefined,
+    false,
+    { observeStatements: true },
+  );
+  try {
+    await setRevealValue(measured, revealValue);
+    for (const [path, tag] of [
+      ['work/acme/not-valid', 'InvalidSecret'],
+      ['work/acme/', 'InvalidSecret'],
+      ['work//acme/STRIPE_KEY', 'InvalidBucketPath'],
+    ]) {
+      labels.length = 0;
+      const response = await revealSecret(measured, path);
+      expect(response.status).toBe(400);
+      const text = await response.text();
+      expect(JSON.parse(text)._tag).toBe(tag);
+      expectNoValue(text, [revealValue, measured.key]);
+      expect(labels).toEqual([]);
+      expect(await auditRows(measured)).toEqual([]);
+    }
+  } finally {
+    await measured.close();
+  }
+});
 it('State space: concurrent reveals have distinct entries; replacement after read returns the read value and retry returns the new value', async () => {
   const responses = await Promise.all([revealSecret(app), revealSecret(app)]);
   expect(responses.map((response) => response.status)).toEqual([200, 200]);
@@ -485,6 +560,30 @@ it('E26: populated previous audit schema upgrades losslessly with both indexes a
   expect(
     (await auditPageData(app)).entries.map((entry) => entry.outcome),
   ).toEqual(['revealed', 'created', 'denied', 'delivered']);
+});
+it('E4/E26: the new audit schema rejects mixed reveal/machine facts without changing existing entries', async () => {
+  expect((await revealSecret(app)).status).toBe(200);
+  const { token } = await issueGrant(app);
+  expect((await machineCreate(app, token)).status).toBe(201);
+  const before = await auditRows(app);
+  expect(before).toHaveLength(2);
+  const db = await app.mf.getD1Database('DB');
+  await expect(
+    db
+      .prepare(
+        "UPDATE audit_entries SET machine_id='synthetic-machine' WHERE outcome='revealed'",
+      )
+      .run(),
+  ).rejects.toThrow(/constraint/i);
+  await expect(
+    db
+      .prepare(
+        "UPDATE audit_entries SET ip='192.0.2.1', country='CO' WHERE outcome='created'",
+      )
+      .run(),
+  ).rejects.toThrow(/constraint/i);
+  expect(await auditRows(app)).toEqual(before);
+  expect((await auditPageData(app)).entries).toHaveLength(2);
 });
 it('E19: request URLs and successful audit/list responses contain metadata only', async () => {
   const url = `${app.origin}/api/secrets/${encodeURIComponent(revealPath)}/reveal`;

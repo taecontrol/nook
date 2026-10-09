@@ -25,6 +25,27 @@ beforeAll(async () => {
 afterAll(async () => {
   await closeBrowser?.();
 });
+it('E24: the reveal outcome label is independent of the purpose text', async () => {
+  const visit = await visitAudit(browser, {
+    count: 0,
+    configure: async (_page, app) => {
+      expect((await revealSecret(app)).status).toBe(200);
+    },
+  });
+  try {
+    const row = auditEntries(visit.page).first();
+    await row
+      .getByText('Revealed', { exact: true })
+      .filter({ visible: true })
+      .waitFor();
+    expect(await row.getByText('Delivered', { exact: true }).count()).toBe(0);
+    expect(
+      await row.getByText('Revealed in web app', { exact: true }).count(),
+    ).toBe(1);
+  } finally {
+    await visit.close();
+  }
+});
 it.each([
   { width: 390, height: 844 },
   { width: 1440, height: 900 },

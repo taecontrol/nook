@@ -8,7 +8,9 @@ import {
   revealPage,
   revealPath,
   revealRequests,
+  revealSecret,
   revealValue,
+  setRevealValue,
   storageHasValue,
   valueField,
 } from './support/reveal.ts';
@@ -16,6 +18,7 @@ import { deleteSecret, listSecrets, vaultRuntime } from './support/vault.ts';
 import {
   createDraft,
   privateClientState,
+  replaceDraft,
   secretRow,
 } from './support/vault-browser.ts';
 import { vaultCheckpoints } from './support/vault-checkpoints.ts';
@@ -146,6 +149,159 @@ it('E3: Copy writes exact bytes and shows Copied/live feedback for three seconds
     expect(await live.locator('span').getAttribute('class')).toContain(
       'text-destructive',
     );
+    expect(await auditRows(visit.app)).toHaveLength(1);
+  } finally {
+    await visit.close();
+  }
+});
+it('E2/E3: CR and CRLF retain exact 64 KiB in the raw readonly field, HTTP and real clipboard', async () => {
+  const prefix = '  synthetic CR\rCRLF\r\n秘密🔐\r\n';
+  const suffix = '  \r';
+  const value =
+    prefix + 'x'.repeat(65536 - Buffer.byteLength(prefix + suffix)) + suffix;
+  const visit = await revealPage(browser, {
+    value,
+    viewport: { width: 390, height: 844 },
+  });
+  try {
+    const response = await revealSecret(visit.app);
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as { value: string }).value === value).toBe(
+      true,
+    );
+    const dialog = await openReveal(visit.page);
+    const field = valueField(visit.page);
+    await field.waitFor();
+    expect(await field.getAttribute('readonly')).not.toBeNull();
+    expect(
+      await field.evaluate(
+        (element, original) =>
+          element.textContent === original &&
+          (element as HTMLTextAreaElement).defaultValue === original,
+        value,
+      ),
+    ).toBe(true);
+    // Native textarea API values normalize newlines; its raw DOM value does not.
+    expect((await field.inputValue()) === value.replace(/\r\n?/g, '\n')).toBe(
+      true,
+    );
+    await dialog.getByRole('button', { name: 'Copy', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Copied', exact: true }).waitFor();
+    expect(
+      (await visit.page.evaluate(() => navigator.clipboard.readText())) ===
+        value,
+    ).toBe(true);
+    await dialog
+      .getByRole('button', { name: 'Close', exact: true })
+      .first()
+      .click();
+    await expect
+      .poll(() => privateClientState(visit.page, [value]))
+      .toEqual({ found: true, absentFromCache: true, absentFromDom: true });
+    expect(await storageHasValue(visit.page, value)).toBe(false);
+  } finally {
+    await visit.close();
+  }
+});
+it('E1/E7/E25: the stored updated date, monospace field, guidance and Audit link describe this secret', async () => {
+  const visit = await revealPage(browser, {
+    configure: async (_page, app) => {
+      await (await app.mf.getD1Database('DB'))
+        .prepare('UPDATE secrets SET updated_at=? WHERE name=?')
+        .bind('2023-04-05T06:07:08.000Z', 'STRIPE_KEY')
+        .run();
+      expect(
+        (await revealSecret(app, 'personal/finances/PLAID_SECRET')).status,
+      ).toBe(200);
+    },
+  });
+  try {
+    const { page } = visit;
+    const sheet = await createDraft(page);
+    expect(await sheet.locator('#secret-value-feedback').innerText()).toContain(
+      'Once saved, it is encrypted; reveal it from the list when you need it.',
+    );
+    await page.keyboard.press('Escape');
+    await expect.poll(() => page.getByRole('dialog').count()).toBe(0);
+    const dialog = await openReveal(page);
+    await valueField(page).waitFor();
+    expect(
+      await dialog.locator('[data-slot="dialog-description"]').innerText(),
+    ).toBe('work/acme/STRIPE_KEY · Updated Apr 5, 2023');
+    expect(
+      await valueField(page).evaluate(
+        (element) => getComputedStyle(element).fontFamily,
+      ),
+    ).toMatch(/monospace/);
+    await dialog
+      .getByText(
+        'This reveal is recorded in Audit. The value is hidden again when you close this.',
+        { exact: true },
+      )
+      .waitFor();
+    await dialog.getByRole('link', { name: 'Audit', exact: true }).click();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get('secret'))
+      .toBe(revealPath);
+    const entries = page.locator('[data-entry]');
+    await expect.poll(() => entries.count()).toBe(1);
+    expect(await entries.first().innerText()).toContain('STRIPE_KEY');
+    expect(await entries.first().innerText()).not.toContain('PLAID_SECRET');
+    expect(await auditRows(visit.app)).toHaveLength(2);
+  } finally {
+    await visit.close();
+  }
+});
+it('E3: clipboard feedback is reset at three seconds and restarts after another real copy', async () => {
+  const visit = await revealPage(browser, {
+    configure: async (page) => {
+      await page.clock.install({ time: new Date('2026-10-09T12:00:00Z') });
+    },
+  });
+  try {
+    const { page } = visit;
+    const dialog = await openReveal(page);
+    await valueField(page).waitFor();
+    await page.evaluate(() => {
+      const writeText = navigator.clipboard.writeText.bind(navigator.clipboard);
+      let writes = 0;
+      navigator.clipboard.writeText = async (value) => {
+        await writeText(value);
+        document.documentElement.dataset.clipboardWrites = String(++writes);
+      };
+    });
+    const pauseTime = await page.evaluate(() => Date.now() + 60_000);
+    await page.clock.pauseAt(pauseTime);
+    const live = dialog.locator('[aria-live="polite"]');
+    await dialog.getByRole('button', { name: 'Copy', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Copied', exact: true }).waitFor();
+    expect(
+      (await page.evaluate(() => navigator.clipboard.readText())) ===
+        revealValue,
+    ).toBe(true);
+    await page.clock.runFor(2900);
+    expect(await live.innerText()).toBe('Copied to the clipboard.');
+    expect(
+      await dialog.getByRole('button', { name: 'Copied', exact: true }).count(),
+    ).toBe(1);
+    await page.clock.runFor(200);
+    await expect.poll(() => live.innerText()).toBe('');
+    await dialog.getByRole('button', { name: 'Copy', exact: true }).click();
+    await expect
+      .poll(() => page.locator('html').getAttribute('data-clipboard-writes'))
+      .toBe('2');
+    await dialog.getByRole('button', { name: 'Copied', exact: true }).waitFor();
+    await page.clock.runFor(2000);
+    await dialog.getByRole('button', { name: 'Copied', exact: true }).click();
+    await expect
+      .poll(() => page.locator('html').getAttribute('data-clipboard-writes'))
+      .toBe('3');
+    await page.clock.runFor(1001);
+    expect(await live.innerText()).toBe('Copied to the clipboard.');
+    await page.clock.runFor(1899);
+    expect(await live.innerText()).toBe('Copied to the clipboard.');
+    await page.clock.runFor(200);
+    await expect.poll(() => live.innerText()).toBe('');
     expect(await auditRows(visit.app)).toHaveLength(1);
   } finally {
     await visit.close();
@@ -371,6 +527,57 @@ it('E13: a committed audit with a lost response shows failure; explicit retry ma
     await visit.close();
   }
 });
+it('E5/E11: an explicit held retry resets pending UI and recovers after the D1 failure is repaired', async () => {
+  const gate = deferred();
+  let requests = 0;
+  const visit = await revealPage(browser, {
+    configure: async (page) => {
+      await page.route('**/api/secrets/*/reveal', async (route) => {
+        if (++requests === 2) await gate.promise;
+        await route.continue().catch(() => {});
+      });
+    },
+  });
+  try {
+    const { page } = visit;
+    await secretRow(page, revealPath).waitFor();
+    await (await visit.app.mf.getD1Database('DB'))
+      .prepare('ALTER TABLE secrets RENAME TO unavailable_secrets')
+      .run();
+    const dialog = await openReveal(page);
+    await dialog
+      .getByRole('button', { name: 'Try again', exact: true })
+      .waitFor();
+    await (await visit.app.mf.getD1Database('DB'))
+      .prepare('ALTER TABLE unavailable_secrets RENAME TO secrets')
+      .run();
+    await dialog
+      .getByRole('button', { name: 'Try again', exact: true })
+      .click();
+    await expect.poll(() => requests).toBe(2);
+    await dialog.getByText('Revealing…', { exact: true }).waitFor();
+    expect(
+      await dialog
+        .getByRole('button', { name: 'Try again', exact: true })
+        .count(),
+    ).toBe(0);
+    expect(
+      await dialog
+        .getByRole('button', { name: 'Copy', exact: true })
+        .isEnabled(),
+    ).toBe(false);
+    expect(await valueField(page).count()).toBe(0);
+    expect(await auditRows(visit.app)).toEqual([]);
+    gate.resolve();
+    await valueField(page).waitFor();
+    expect((await valueField(page).inputValue()) === revealValue).toBe(true);
+    expect(revealRequests(visit.requests)).toHaveLength(2);
+    expect(await auditRows(visit.app)).toHaveLength(1);
+  } finally {
+    gate.resolve();
+    await visit.close();
+  }
+});
 it('E6/E7: closing an in-flight reveal and navigating away cannot restore its late response', async () => {
   const gate = deferred();
   const committed = deferred();
@@ -401,6 +608,62 @@ it('E6/E7: closing an in-flight reveal and navigating away cannot restore its la
     expect(
       (await privateClientState(visit.page, [revealValue])).absentFromCache,
     ).toBe(true);
+  } finally {
+    gate.resolve();
+    await visit.close();
+  }
+});
+it('E6/E8: closing and reopening before the old response arrives preserves only the new dialog value', async () => {
+  const gate = deferred();
+  const committed = deferred();
+  let requests = 0;
+  const replacement = 'synthetic-new-dialog-value';
+  const visit = await revealPage(browser, {
+    configure: async (page) => {
+      await page.route('**/api/secrets/*/reveal', async (route) => {
+        if (++requests !== 1) {
+          await route.continue();
+          return;
+        }
+        const response = await route.fetch();
+        committed.resolve();
+        await gate.promise;
+        await route.fulfill({ response }).catch(() => {});
+      });
+    },
+  });
+  try {
+    const { page } = visit;
+    const first = await openReveal(page);
+    await committed.promise;
+    await first
+      .getByRole('button', { name: 'Close', exact: true })
+      .first()
+      .click();
+    await expect.poll(() => page.getByRole('dialog').count()).toBe(0);
+    await setRevealValue(visit.app, replacement);
+    const reopened = await openReveal(page);
+    await valueField(page).waitFor();
+    expect((await valueField(page).inputValue()) === replacement).toBe(true);
+    gate.resolve();
+    await page.waitForLoadState('networkidle');
+    expect((await valueField(page).inputValue()) === replacement).toBe(true);
+    expect((await privateClientState(page, [revealValue])).absentFromDom).toBe(
+      true,
+    );
+    expect(
+      (await privateClientState(page, [revealValue, replacement]))
+        .absentFromCache,
+    ).toBe(true);
+    expect(revealRequests(visit.requests)).toHaveLength(2);
+    expect(await auditRows(visit.app)).toHaveLength(2);
+    await reopened
+      .getByRole('button', { name: 'Close', exact: true })
+      .first()
+      .click();
+    await expect
+      .poll(() => privateClientState(page, [revealValue, replacement]))
+      .toEqual({ found: true, absentFromCache: true, absentFromDom: true });
   } finally {
     gate.resolve();
     await visit.close();
@@ -467,6 +730,34 @@ it('E22: Reveal is disabled during a real write, and the saving row has no menu'
     await page.getByRole('alert').filter({ hasText: 'Secret saved' }).waitFor();
     await openReveal(page);
     await valueField(page).waitFor();
+  } finally {
+    gate.resolve();
+    await visit.close();
+  }
+});
+it('E22: a saving replacement row has no menu after the sheet has completely closed', async () => {
+  const gate = deferred();
+  const visit = await revealPage(browser, {
+    configure: async (page) => {
+      await page.route('**/api/secrets/*', async (route) => {
+        if (route.request().method() === 'PUT') await gate.promise;
+        await route.continue().catch(() => {});
+      });
+    },
+  });
+  try {
+    await replaceDraft(visit.page);
+    await visit.page
+      .getByRole('alertdialog')
+      .getByRole('button', { name: 'Replace value', exact: true })
+      .click();
+    await expect.poll(() => visit.page.getByRole('dialog').count()).toBe(0);
+    const row = secretRow(visit.page, revealPath);
+    await expect.poll(() => row.innerText()).toContain('Saving…');
+    expect(await row.locator('button').count()).toBe(0);
+    expect(revealRequests(visit.requests)).toEqual([]);
+    gate.resolve();
+    await expect.poll(() => row.getByRole('button').count()).toBe(1);
   } finally {
     gate.resolve();
     await visit.close();
