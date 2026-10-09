@@ -56,6 +56,10 @@ function responseFailure(error: HttpClientError.HttpClientError) {
 }
 function serverFailure(error: unknown) {
   if (HttpClientError.isHttpClientError(error)) return responseFailure(error);
+  if (Schema.isSchemaError(error))
+    return Effect.succeed(
+      new ServerFailure('Unavailable', undefined, [], true),
+    );
   const typed = error as {
     _tag?: string;
     message?: string;
