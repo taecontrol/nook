@@ -201,6 +201,21 @@ it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
     expectOutput(terminated.stdout + terminated.stderr, '', true);
   },
 );
+it.each(['exited', 'closed'] as const)(
+  'E3: the private fixture refuses native delivery after the command is %s',
+  async (state) => {
+    const command = keyring.command('/bin/true', []);
+    const result = await command.done;
+    expectNoValue(result.stdout + result.stderr, [
+      app.input.value,
+      app.token,
+      app.key,
+    ]);
+    expect(result.status).toBe(0);
+    if (state === 'closed') await keyring.close();
+    expect(await command.kill('SIGTERM')).toBe(false);
+  },
+);
 it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
   'E3: native %s survives the real child launch window',
   async (signal) => {
