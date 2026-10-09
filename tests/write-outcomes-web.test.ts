@@ -265,3 +265,153 @@ it.each(['successful', 'failed'] as const)(
     }
   },
 );
+
+it('a genuine BucketNotFound after another session deletes a bucket never claims it is still there', async () => {
+  const app = await ownerRuntime(await runtime());
+  let visit: Awaited<ReturnType<typeof ownerPage>> | undefined;
+  try {
+    const path = 'work/stale-deletion';
+    expect((await jsonRequest(app, '/api/buckets', { path })).status).toBe(200);
+    visit = await ownerPage(app, '/buckets');
+    const { page } = visit;
+    const row = page.getByRole('button', {
+      name: `Actions for ${path}`,
+      exact: true,
+    });
+    await row.waitFor();
+    await page.waitForLoadState('networkidle');
+    await row.click();
+    await page.getByRole('menuitem', { name: 'Delete bucket…' }).click();
+    const confirmation = page
+      .getByRole('alertdialog')
+      .getByRole('button', { name: 'Delete bucket', exact: true });
+    await confirmation.waitFor();
+    // A second owner session removes the real row while this dialog is open.
+    const removed = await jsonRequest(
+      app,
+      `/api/buckets/${encodeURIComponent(path)}`,
+      undefined,
+      {},
+      'DELETE',
+    );
+    expect(removed.status).toBe(204);
+    await removed.body?.cancel();
+    const rejected = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'DELETE' &&
+        new URL(response.url()).pathname.startsWith('/api/buckets/'),
+    );
+    const recovered = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' &&
+        new URL(response.url()).pathname === '/api/buckets',
+    );
+    await confirmation.click();
+    const reply = await rejected;
+    expect(reply.status()).toBe(404);
+    expect((await reply.json())._tag).toBe('BucketNotFound');
+    const recovery = await recovered;
+    expect(recovery.status()).toBe(200);
+    await recovery.finished();
+    await expect.poll(() => row.count()).toBe(0);
+    const stored = await (await app.mf.getD1Database('DB'))
+      .prepare('SELECT path FROM buckets WHERE path=?')
+      .bind(path)
+      .first();
+    expect(stored, 'The bucket really is absent from D1').toBeNull();
+    const feedback = page.getByRole('alert').filter({ hasText: path });
+    await expect.poll(() => feedback.count()).toBe(1);
+    expect(
+      await feedback.innerText(),
+      'A genuine missing bucket is neither still present nor unavailable',
+    ).not.toMatch(/The bucket is still there|Nook is unavailable/i);
+  } finally {
+    try {
+      await visit?.close();
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+it('an Unauthorized retry after committed revocation with a lost reply never claims the revoked token works', async () => {
+  const app = await ownerRuntime(await runtime());
+  let visit: Awaited<ReturnType<typeof ownerPage>> | undefined;
+  try {
+    const { token } = await issueToken(app, 'expired-retry-machine');
+    const [machine] = await listMachines(app);
+    visit = await ownerPage(app, '/machines');
+    const { page } = visit;
+    await machineRow(page, machine.id).waitFor();
+    await page.waitForLoadState('networkidle');
+    let committedStatus: number | undefined;
+    await page.route('**/api/machines/*', async (route) => {
+      const response = await route.fetch();
+      committedStatus = response.status();
+      // Only the first committed response is lost. The retry reaches the Worker.
+      await route.abort('failed');
+    });
+    const recovered = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' &&
+        new URL(response.url()).pathname === '/api/machines',
+    );
+    await confirmRevoke(page, machine.id);
+    const recovery = await recovered;
+    expect(recovery.status()).toBe(200);
+    await recovery.finished();
+    expect(committedStatus).toBe(204);
+    await expect.poll(() => machineRow(page, machine.id).count()).toBe(0);
+    const identity = await machineIdentity(app, token);
+    expect(identity.status, 'The first DELETE really revoked the token').toBe(
+      401,
+    );
+    await identity.body?.cancel();
+    const feedback = page.getByRole('alert').filter({ hasText: machine.name });
+    await expect
+      .poll(() => feedback.innerText())
+      .toContain("Couldn't confirm revocation");
+    await expect
+      .poll(() => page.locator('[data-slot="alert-dialog-overlay"]').count())
+      .toBe(0);
+    await page.unroute('**/api/machines/*');
+    // Expiring only the synthetic owner session makes the next refusal genuine.
+    await app.setBindings({ LOCAL_ORIGIN: app.origin });
+    await feedback
+      .getByRole('button', { name: 'Try again', exact: true })
+      .click();
+    const rejected = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'DELETE' &&
+        new URL(response.url()).pathname === `/api/machines/${machine.id}`,
+    );
+    await page
+      .getByRole('alertdialog')
+      .getByRole('button', { name: 'Revoke machine', exact: true })
+      .click();
+    const reply = await rejected;
+    expect(reply.status()).toBe(401);
+    expect((await reply.json())._tag).toBe('Unauthorized');
+    await expect
+      .poll(() => feedback.innerText())
+      .toContain('Your owner session expired');
+    const stored = await (await app.mf.getD1Database('DB'))
+      .prepare('SELECT id FROM machine_tokens WHERE id=?')
+      .bind(machine.id)
+      .first();
+    expect(
+      stored,
+      'The rejected retry cannot restore the revoked token',
+    ).toBeNull();
+    expect(
+      await feedback.innerText(),
+      'Rejecting a retry does not establish that an earlier revoke rolled back',
+    ).not.toMatch(/is still connected|token still works/i);
+  } finally {
+    try {
+      await visit?.close();
+    } finally {
+      await app.close();
+    }
+  }
+});
