@@ -204,9 +204,10 @@ jobs:
           git tag "v$VERSION" "$GITHUB_SHA"
           git -c core.sshCommand="$ssh_command" push "$remote" "refs/tags/v$VERSION"
           tagged=true
-          gh release create "v$VERSION" release-assets/* --draft --verify-tag --title "Nook v$VERSION" \
+          gh release create "v$VERSION" --draft --verify-tag --title "Nook v$VERSION" \
             --notes "MIT source release with attested Node single-executable CLI binaries for Linux and macOS on x64 and arm64, for mise. The macOS Homebrew formula builds the CLI from source."
           released=true
+          gh release upload "v$VERSION" release-assets/*
           gh release edit "v$VERSION" --draft=false
           trap - EXIT
   mise:
