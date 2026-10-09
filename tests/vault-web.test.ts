@@ -73,9 +73,9 @@ it('E19: the outline counts secrets and URL selection separates stored and inher
     await page.getByRole('link', { name: 'Vault', exact: true }).click();
     await page.getByRole('heading', { name: 'me', exact: true }).waitFor();
     const tree = page.getByRole('list', { name: 'Buckets', exact: true });
-    expect(await tree.locator('[data-path="work/acme"]').innerText()).toMatch(
-      /4\s*secrets/,
-    );
+    await expect
+      .poll(() => tree.locator('[data-path="work/acme"]').innerText())
+      .toMatch(/4\s*secrets/);
     await tree.locator('[data-path="work/acme"]').getByRole('link').click();
     expect(new URL(page.url()).searchParams.get('bucket')).toBe('work/acme');
     const own = page.getByRole('region', { name: 'Stored here' });
