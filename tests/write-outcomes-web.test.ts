@@ -139,6 +139,9 @@ it.each([
       }
       const feedback = page.getByRole('alert').filter({ hasText: path });
       await expect.poll(() => feedback.count()).toBe(1);
+      expect(await feedback.innerText()).toContain(
+        `Couldn't confirm ${operation === 'create' ? 'creation' : 'deletion'} of ${path}`,
+      );
       expect(
         await feedback.innerText(),
         'Losing a committed write reply cannot prove that nothing changed',
