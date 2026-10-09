@@ -67,6 +67,22 @@ console.info({ bucket, createStatus: stored.status, blockedStatus: blocked.statu
 
 Require create `201`, blocked bucket delete `409`, and both cleanup deletes `204`. If a check fails, retain the temporary bucket's name for cleanup and report the status without response payloads or credentials. Record the foreign-key result and smoke outcomes on the PR. Finally, open Vault and confirm the stored/inherited grouping, then use `list_secrets({ bucket: 'me' })` or `nook vault list me` to discover names and descriptions. These interfaces never return values; CLI writes and value delivery are later features.
 
+### Reveal a value in the web app
+
+After deploying the reveal migration, sign in as the owner and store a temporary
+synthetic value in Vault. Choose **Reveal value…** from its menu, copy it, close
+the dialog, and confirm that reopening it adds a second **Revealed** entry in
+Audit. The details should show **Web app**, **Revealed in web app**, and the
+request's IP address and country. These facts come from Cloudflare at the edge;
+local tests supply synthetic equivalents. Remove the temporary secret when
+finished. Record statuses and audit metadata only on the PR.
+
+The reveal route belongs to the existing whole-hostname Access application,
+outside the machine Bypass. It needs no new Access configuration. A missing
+`VAULT_KEY` prevents revealing, just as it prevents storing or replacing a
+value. The owner's accepted level-1 scope also admits Access Managed OAuth
+assertions; the origin cannot distinguish them from browser sessions.
+
 ## Remote MCP and Access Managed OAuth
 
 Nook serves `list_buckets`, `create_bucket`, `delete_bucket`, and `list_secrets` at `https://<hostname>/mcp`. The owner authenticates through the existing Access application with access to the whole bucket tree. The Worker verifies the forwarded Access assertion before MCP. Nook machine tokens use the separate `/api/machine/mcp` endpoint described below.

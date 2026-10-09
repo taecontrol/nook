@@ -11,6 +11,7 @@ import {
   type Secret,
   SecretChanged,
   SecretExists,
+  SecretKeyUnavailable,
   SecretNotFound,
   secretLineage,
   secretPath,
@@ -24,9 +25,9 @@ import {
 import { Effect, Redacted, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
 import { SqlSchema } from 'effect/sql';
-import type { AuditMachine } from './audit.ts';
+import { type AuditMachine, auditStore } from './audit.ts';
 import { type BucketGrant, canRead, canWrite } from './authorization.ts';
-import { parseKeyring, seal } from './vault-keyring.ts';
+import { open, parseKeyring, seal } from './vault-keyring.ts';
 
 const Row = Schema.Struct({
   bucket: Schema.String,
@@ -36,6 +37,11 @@ const Row = Schema.Struct({
   version: Schema.String,
 });
 type Row = typeof Row.Type;
+const Envelope = Schema.Struct({
+  key_id: Schema.String,
+  iv: Schema.String,
+  ciphertext: Schema.String,
+});
 type CreateState = Partial<Row> & { has_bucket: number };
 const unavailable = Effect.mapError(
   () => new HttpApiError.ServiceUnavailable(),
@@ -79,12 +85,12 @@ function validValue(input: CreateSecret | ReplaceSecret) {
     validateSecretValue(Redacted.value(input.value));
   return message ? Effect.fail(new InvalidSecret({ message })) : Effect.void;
 }
-function target(grant: BucketGrant, path: string) {
+function target(grant: BucketGrant, path: string, write = true) {
   return Effect.gen(function* () {
     const separator = path.lastIndexOf('/');
     const bucket = path.slice(0, separator);
     const name = path.slice(separator + 1);
-    yield* authorized(grant, bucket, true);
+    yield* authorized(grant, bucket, write);
     yield* validName(name);
     return { bucket, name };
   });
@@ -214,6 +220,7 @@ export function ownerVault(binding = '', grant: BucketGrant = 'all') {
     const sql = yield* D1Client.D1Client;
     const read = yield* readStore;
     const create = yield* createStore(binding, grant);
+    const audit = yield* auditStore;
     const listRows = SqlSchema.findAll({
       Request: Schema.Void,
       Result: Row,
@@ -221,6 +228,32 @@ export function ownerVault(binding = '', grant: BucketGrant = 'all') {
         sql`SELECT bucket, name, description, updated_at, version FROM secrets ORDER BY bucket, name`,
     });
     return {
+      reveal: (
+        path: string,
+        facts: { ip: string | null; country: string | null },
+      ) =>
+        Effect.gen(function* () {
+          const { bucket, name } = yield* target(grant, path, false);
+          const rows =
+            yield* sql`SELECT key_id, iv, ciphertext FROM secrets WHERE bucket = ${bucket} AND name = ${name}`.pipe(
+              unavailable,
+            );
+          if (!rows.length) return yield* Effect.fail(missingSecret());
+          const envelope = yield* Schema.decodeUnknownEffect(Envelope)(
+            rows[0],
+          ).pipe(unavailable);
+          const ring = yield* parseKeyring(binding);
+          const value = yield* open(ring, path, envelope).pipe(
+            Effect.mapError(
+              () =>
+                new SecretKeyUnavailable({
+                  message: `Cannot open a secret encrypted with key ${envelope.key_id}.`,
+                }),
+            ),
+          );
+          yield* audit.recordReveal(path, facts);
+          return { value };
+        }),
       list: (bucket: string) => read(grant, bucket),
       listAll: () =>
         grant === 'all'

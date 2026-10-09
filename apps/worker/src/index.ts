@@ -1,8 +1,8 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import { D1Client } from '@effect/sql-d1';
-import { Api } from '@nook/contract';
+import { Api, secretLimits } from '@nook/contract';
 import { Effect, Layer } from 'effect';
-import { HttpRouter, HttpServer } from 'effect/http';
+import { HttpRouter, HttpServer, HttpServerRequest } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
 import { auditStore } from './audit.ts';
 import { type AuthBindings, authenticate } from './auth.ts';
@@ -47,6 +47,18 @@ export function handlerForPrincipal(
     Effect.gen(function* () {
       const store = yield* ownerVault(vaultKey, grant);
       return handlers
+        .handle('reveal', ({ params }) =>
+          Effect.gen(function* () {
+            const request = yield* HttpServerRequest.HttpServerRequest;
+            const source = request.source as Request & {
+              cf?: { country?: string };
+            };
+            return yield* store.reveal(params.path, {
+              ip: source.headers.get('CF-Connecting-IP') || null,
+              country: source.cf?.country || null,
+            });
+          }),
+        )
         .handle('list', () => store.listAll())
         .handle('create', ({ payload }) => store.create(payload))
         .handle('replace', ({ params, payload }) =>
@@ -69,6 +81,8 @@ export function handlerForPrincipal(
   );
   const apiHandler = HttpRouter.toWebHandler(routes, {
     disableLogger: true,
+    // The router checks decoded params: six 32-character segments plus the name.
+    routerConfig: { maxParamLength: 6 * (32 + 1) + secretLimits.name },
   }).handler;
   return (request: Request) =>
     new URL(request.url).pathname === '/mcp'
@@ -114,6 +128,9 @@ function foreignOrigin(request: Request, url: URL) {
     origin !== url.origin
   );
 }
+function isRevealPath(path: string) {
+  return path.startsWith('/api/secrets/') && path.endsWith('/reveal');
+}
 function knownRoute(path: string, method: string) {
   return (
     [
@@ -124,7 +141,9 @@ function knownRoute(path: string, method: string) {
       '/api/audit',
       '/mcp',
     ].includes(path) ||
-    (path.startsWith('/api/secrets/') && ['PUT', 'DELETE'].includes(method)) ||
+    (path.startsWith('/api/secrets/') &&
+      (['PUT', 'DELETE'].includes(method) ||
+        (method === 'POST' && isRevealPath(path)))) ||
     ((path.startsWith('/api/buckets/') || path.startsWith('/api/machines/')) &&
       method === 'DELETE')
   );
@@ -260,7 +279,7 @@ export default {
       return sanitized(routesFor(env.DB, url.origin).owner(request));
     if (!knownRoute(url.pathname, request.method))
       return Response.json({ error: 'Not found' }, { status: 404 });
-    return sanitized(
+    const response = await sanitized(
       handlerFor(
         identity.email,
         env.DB,
@@ -268,5 +287,8 @@ export default {
         env.VAULT_KEY,
       )(request),
     );
+    if (isRevealPath(url.pathname))
+      response.headers.set('Cache-Control', 'no-store');
+    return response;
   },
 };

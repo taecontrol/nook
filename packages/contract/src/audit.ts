@@ -7,19 +7,28 @@ const EntryFacts = Schema.Struct({
   bucket: Schema.String,
   name: Schema.String,
   purpose: Schema.String,
+});
+const MachineFacts = EntryFacts.mapFields((fields) => ({
+  ...fields,
   machine: Schema.Struct({ id: Schema.String, name: Schema.String }),
   workingDirectory: Schema.String,
-});
+}));
 export const AuditEntry = Schema.Union([
-  EntryFacts.mapFields((fields) => ({
+  MachineFacts.mapFields((fields) => ({
     ...fields,
     outcome: Schema.Literals(['delivered', 'denied']),
     executable: Schema.String,
     runId: Schema.String,
   })),
-  EntryFacts.mapFields((fields) => ({
+  MachineFacts.mapFields((fields) => ({
     ...fields,
     outcome: Schema.Literal('created'),
+  })),
+  EntryFacts.mapFields((fields) => ({
+    ...fields,
+    outcome: Schema.Literal('revealed'),
+    ip: Schema.NullOr(Schema.String),
+    country: Schema.NullOr(Schema.String),
   })),
 ]);
 export type AuditEntry = typeof AuditEntry.Type;

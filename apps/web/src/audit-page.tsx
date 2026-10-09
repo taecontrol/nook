@@ -6,6 +6,7 @@ import {
   ArrowDown,
   ChevronRight,
   CircleCheck,
+  Eye,
   History,
   SearchX,
   ServerCrash,
@@ -226,8 +227,16 @@ function Outcome({ entry }: { entry: AuditEntry }) {
     </Badge>
   ) : (
     <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-      <CircleCheck className="size-3" aria-hidden />
-      {entry.outcome === 'created' ? 'Created' : 'Delivered'}
+      {entry.outcome === 'revealed' ? (
+        <Eye className="size-3" aria-hidden />
+      ) : (
+        <CircleCheck className="size-3" aria-hidden />
+      )}
+      {entry.outcome === 'revealed'
+        ? 'Revealed'
+        : entry.outcome === 'created'
+          ? 'Created'
+          : 'Delivered'}
     </span>
   );
 }
@@ -245,6 +254,17 @@ function Fact({
     </div>
   );
 }
+function entrySource(entry: AuditEntry) {
+  if (entry.outcome === 'revealed')
+    return {
+      name: 'Web app',
+      detail: `${entry.ip ?? 'Unknown'} · ${entry.country ?? 'Unknown'}`,
+    };
+  return {
+    name: entry.machine.name,
+    detail: entry.outcome === 'created' ? '' : entry.executable,
+  };
+}
 function Entry({
   entry,
   revoked,
@@ -255,7 +275,7 @@ function Entry({
   deleted: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const executable = entry.outcome === 'created' ? '' : entry.executable;
+  const { name: machineName, detail: executable } = entrySource(entry);
   return (
     <li
       data-entry={entry.id}
@@ -303,13 +323,13 @@ function Entry({
                 {entry.purpose}
               </p>
               <p className="mt-1 truncate text-xs text-muted-foreground lg:hidden">
-                {entry.machine.name}
+                {machineName}
                 {executable && ` · ${executable}`}
               </p>
             </div>
             <div className="hidden w-40 min-w-0 shrink-0 lg:block">
-              <p className="truncate text-sm" title={entry.machine.name}>
-                {entry.machine.name}
+              <p className="truncate text-sm" title={machineName}>
+                {machineName}
               </p>
               <p
                 className="truncate font-mono text-xs text-muted-foreground"
@@ -337,6 +357,18 @@ function Entry({
       </Collapsible>
     </li>
   );
+}
+const regions = new Intl.DisplayNames('en', {
+  type: 'region',
+  fallback: 'code',
+});
+function countryName(country: string | null) {
+  if (!country) return 'Unknown';
+  try {
+    return regions.of(country) ?? country;
+  } catch {
+    return country;
+  }
 }
 function EntryDetails({
   entry,
@@ -367,30 +399,45 @@ function EntryDetails({
         <Fact label="Recorded">
           <time dateTime={entry.at}>{exactTime(entry.at)}</time>
         </Fact>
-        <Fact label="Machine">
-          {entry.machine.name}
-          {revoked && (
-            <div className="mt-1">
-              <Badge variant="outline">Revoked</Badge>
-            </div>
-          )}
-        </Fact>
-        <div className="min-w-0 sm:col-span-2 lg:col-span-3">
-          <Fact label="Purpose">{entry.purpose}</Fact>
-        </div>
-        <div className="min-w-0 sm:col-span-2">
-          <Fact label="Working directory">
-            <span className="font-mono">{entry.workingDirectory}</span>
-          </Fact>
-        </div>
-        {entry.outcome !== 'created' && (
+        {entry.outcome === 'revealed' ? (
           <>
-            <Fact label="Executable">
-              <span className="font-mono">{entry.executable}</span>
+            <Fact label="Source">Web app</Fact>
+            <div className="min-w-0 sm:col-span-2 lg:col-span-3">
+              <Fact label="Purpose">{entry.purpose}</Fact>
+            </div>
+            <Fact label="IP address">
+              <span className="font-mono">{entry.ip ?? 'Unknown'}</span>
             </Fact>
-            <Fact label="Run">
-              <span className="font-mono text-xs">{entry.runId}</span>
+            <Fact label="Country">{countryName(entry.country)}</Fact>
+          </>
+        ) : (
+          <>
+            <Fact label="Machine">
+              {entry.machine.name}
+              {revoked && (
+                <div className="mt-1">
+                  <Badge variant="outline">Revoked</Badge>
+                </div>
+              )}
             </Fact>
+            <div className="min-w-0 sm:col-span-2 lg:col-span-3">
+              <Fact label="Purpose">{entry.purpose}</Fact>
+            </div>
+            <div className="min-w-0 sm:col-span-2">
+              <Fact label="Working directory">
+                <span className="font-mono">{entry.workingDirectory}</span>
+              </Fact>
+            </div>
+            {entry.outcome !== 'created' && (
+              <>
+                <Fact label="Executable">
+                  <span className="font-mono">{entry.executable}</span>
+                </Fact>
+                <Fact label="Run">
+                  <span className="font-mono text-xs">{entry.runId}</span>
+                </Fact>
+              </>
+            )}
           </>
         )}
       </dl>
@@ -441,12 +488,12 @@ function NoEntries({ filtered }: { filtered: boolean }) {
           <EmptyTitle>
             {filtered
               ? 'No activity matches these filters'
-              : 'No secret uses or creations yet'}
+              : 'No secret activity yet'}
           </EmptyTitle>
           <EmptyDescription>
             {filtered
               ? 'Try another bucket or secret, or return to all activity.'
-              : 'When a machine uses a secret through nook run or stores one through nook vault create, it appears here. Denied uses appear here too.'}
+              : 'When a machine uses a secret through nook run or stores one through nook vault create, or you reveal a value in the web app, it appears here. Denied uses appear here too.'}
           </EmptyDescription>
         </EmptyHeader>
         {filtered && (
@@ -480,8 +527,8 @@ export function AuditPage() {
         Audit
       </h1>
       <p className="max-w-2xl text-sm text-muted-foreground">
-        Every secret use and creation, newest first. Review what happened, why,
-        and by which machine.
+        Every secret use, creation, and reveal, newest first. Review what
+        happened, why, and by which machine.
       </p>
       <Filters
         filters={filters}
@@ -567,10 +614,13 @@ function AuditResults({
           <Entry
             key={entry.id}
             entry={entry}
-            revoked={missingFrom(
-              machines,
-              (machine) => machine.id === entry.machine.id,
-            )}
+            revoked={
+              entry.outcome !== 'revealed' &&
+              missingFrom(
+                machines,
+                (machine) => machine.id === entry.machine.id,
+              )
+            }
             deleted={missingFrom(
               secrets,
               (secret) => secret.path === entry.path,

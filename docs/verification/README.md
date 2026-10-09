@@ -186,6 +186,45 @@ Issue #7 runs the built CLI with the existing private Linux/macOS keyring, the b
 
 The first acceptance commit ran against the previous production build: missing behavior failed at its public boundary; existing owner-only and discovery protections remained green. `pnpm verify:migrations` also replays the new table rebuild against the previous schema. All checks run through the unchanged `pnpm verify` gate.
 
+## Reveal
+
+Issue #8 runs owner reveal requests against the built Worker under workerd with
+real migrated D1, and the web app in Chromium with temporary profiles. Access,
+the encryption key, values, IP addresses, and countries are synthetic. The first
+HTTP case observes the request facts that Miniflare actually supplies; a fixed
+`cf` object keeps every reveal fixture independent of network-fetched geography.
+
+| Examples | Evidence |
+| --- | --- |
+| E1–E3, E5–E8, E21–E22, E25 | `reveal-web.test.ts`: exact read-only values up to 64 KiB, internal scrolling at both widths, clipboard round-trip and rejected writes, loading, every dismissal, route changes including bucket Back, no value in query/mutation caches or storage, late-response cancellation, intent safety, write guards, and encrypted-value guidance. |
+| E4, E9–E20, E23, E26 | `reveal-worker.test.ts`: genuine request facts, exactly one reveal entry, safe missing/key/storage failures, owner/Access/Origin/machine/MCP boundaries, subtree denial before SQL, no-store, log/error/audit/URL privacy, populated previous-schema upgrade, old filters/indexes, and one-read/one-insert budgets. Concurrent reveals and replacement between read and audit preserve the spec's state space. |
+| E9–E13 | `reveal-web.test.ts`: deleted secrets, missing/mismatched keys, genuine D1 read/audit failures, explicit retries, and a committed audit followed by a lost response. Each retry is one new request; the client never retries automatically. |
+| E24–E26 | `reveal-audit.test.ts`: Revealed/Created/Denied/Delivered chronology at phone and desktop widths, eye icon, Web app source, purpose, exact time, IP/country details, unknown/raw-code fallbacks, secret/bucket filters, and fresh Audit copy. Existing audit suites remain mandatory. |
+| E27 | `reveal-captures.test.ts`: eight states at 1440×900 and 390×844 in light and dark, 32 viewport PNGs and two full-page phone details captures, from genuine reveal requests and D1 audit rows. |
+| Budgets | `pnpm verify:load-time` and the existing Vault/Audit load-time suites retain the five-sample 4G medians: cold opens within 1000 ms and navigation after intent within 100 ms. Reveal code loads only when the owner selects the action. |
+
+The `reveal-*` PNGs live in `.local/verification/screenshots/` and CI's
+`web-shell-I` artifacts. Compare short, long multi-line, revealing, failed,
+key-missing, copied, audit-row, and audit-details captures with the chosen
+`.work/prototypes/reveal/shots/` reference. The prototype's request stub,
+fabricated audit entries, scenario selector, and insecure clipboard fallback
+do not enter production. Loading holds a real request; failed captures use an
+aborting D1 trigger, and key-missing removes only the synthetic binding.
+
+The shadcn CLI adds Dialog unchanged. Textarea's explicit `secret` variant owns
+the prototype's monospace field; Textarea therefore enters authored
+coverage instead of the generated inventory. The reveal value stays redacted
+through Worker decryption and response encoding, and lives only in the mounted
+dialog on the client. Closing or changing routes unmounts it and aborts any
+pending request. Copies do not add audit entries.
+
+The new audit table rebuild preserves historical machine facts and indexes,
+adds nullable IP/country only for reveals, and enforces each outcome's facts
+with a database CHECK. The checkpoint decorator observes fixed labels only,
+including the point after a statement commits; it never records SQL, bindings,
+rows, or values. A lost response can leave a committed entry, and a retry adds
+another: recorded reveals may exceed displayed values, never the reverse.
+
 ## Migrations
 
 `migrations/NNNN_name.sql` files are applied in order using Wrangler's SQL splitter and one atomic D1 batch per file, including its `d1_migrations` record. `migrations/schema.sql` is a snapshot, not a migration. The D1 binding's `migrations_pattern` selects only numbered files; a local Wrangler acceptance test proves that it excludes the snapshot and preserves replay. Verification uses fresh Miniflare databases, checks an idempotent replay, and applies the latest file to the previous schema containing a sentinel bucket. Both final normalized schemas must match the snapshot, and the sentinel must remain unchanged. A second migration enforces the reserved `me` invariant at the database boundary.

@@ -175,7 +175,7 @@ it.each(matrix)(
           .waitFor();
       else if (state === 'fresh')
         await page
-          .getByText('No secret uses or creations yet', { exact: true })
+          .getByText('No secret activity yet', { exact: true })
           .waitFor();
       else if (state === 'filter-empty')
         await page
