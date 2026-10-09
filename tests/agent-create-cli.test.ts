@@ -817,10 +817,10 @@ it.each([
       ).toBe(true);
       expectOutput(
         result.stdout,
-        recovered ? `Stored ${createdPath}.` : '',
+        recovered ? `Stored ${createdPath}.` : unconfirmed,
         true,
       );
-      expectOutput(result.stderr, recovered ? '' : unconfirmed, true);
+      expectOutput(result.stderr, '', true);
     } finally {
       await transport.close();
     }
