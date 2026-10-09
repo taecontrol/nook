@@ -13,7 +13,7 @@ children.spawn = ((
   const args = Array.isArray(parameters) ? parameters : [];
   const settings = Array.isArray(parameters)
     ? options
-    : (parameters as SpawnOptions | undefined);
+    : ((parameters as SpawnOptions | undefined) ?? options);
   if (!args.includes('startup-wait'))
     return original(file, args, settings ?? {});
   const home = process.env.HOME;

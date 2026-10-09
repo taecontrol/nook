@@ -13,6 +13,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { build, stop } from 'esbuild';
 import { beforeEach, expect, it } from 'vitest';
 import { evidenceRoot } from '../scripts/lib/instrument.ts';
 import {
@@ -193,6 +194,7 @@ it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
         .toBe(true);
       const parent = Number(await readFile(held, 'utf8'));
       expect(Number.isSafeInteger(parent) && parent > 0).toBe(true);
+      expect(existsSync(returned)).toBe(false);
       expect(
         (
           await keyring.command('/bin/kill', ['-s', signal, String(parent)])
@@ -219,6 +221,89 @@ it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
     } finally {
       await writeFile(release, '');
     }
+  },
+);
+it.each(
+  (['SIGTERM', 'SIGHUP', 'SIGINT'] as const).flatMap((signal) => [
+    { signal, kind: 'completes', code: 0 },
+    { signal, kind: 'fails', code: 127 },
+    { signal, kind: 'exceeds launch limits', code: 126 },
+  ]),
+)(
+  'E3: native $signal remains native after the real run $kind',
+  async ({ signal, kind, code }) => {
+    const ready = resolve(keyring.home, 'run-completed');
+    const imports = [
+      ...(process.platform === 'darwin'
+        ? [resolve(keyring.home, 'process-groups.mjs')]
+        : []),
+      resolve('tests/support/run-completion-gate.ts'),
+    ]
+      .map((file) => `--import=${pathToFileURL(file).href}`)
+      .join(' ');
+    const command =
+      kind === 'fails'
+        ? resolve(keyring.home, 'missing-interpreter')
+        : '/usr/bin/true';
+    if (kind === 'fails')
+      await writeFile(command, '#!/nook-fixture-missing-interpreter\n', {
+        mode: 0o700,
+      });
+    const nativeFile = resolve(keyring.home, 'large-environment.mjs');
+    if (kind === 'exceeds launch limits') {
+      // The registered outer Node process owns the native E2BIG-only attempt.
+      try {
+        await build({
+          entryPoints: [resolve('tests/support/run-large-environment.ts')],
+          outfile: nativeFile,
+          bundle: true,
+          format: 'esm',
+          platform: 'node',
+          target: 'node26',
+          external: ['node:*'],
+          banner: {
+            js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+          },
+        });
+      } finally {
+        stop();
+      }
+    }
+    const running =
+      kind === 'exceeds launch limits'
+        ? keyring.command(process.execPath, [nativeFile], {
+            NODE_OPTIONS: `--import=${pathToFileURL(resolve('tests/support/run-completion-gate.ts')).href}`,
+          })
+        : keyring.start(runArgs([command]), { NODE_OPTIONS: imports });
+    await expect
+      .poll(
+        () => existsSync(ready) && running.output().includes('run-completed:'),
+      )
+      .toBe(true);
+    const parent = Number(await readFile(ready, 'utf8'));
+    expect(Number.isSafeInteger(parent) && parent > 0).toBe(true);
+    expect(
+      (await keyring.command('/bin/kill', ['-s', signal, String(parent)]).done)
+        .status,
+    ).toBe(0);
+    const result = await running.done;
+    expectNoValue(result.stdout + result.stderr, [
+      app.input.value,
+      app.token,
+      app.key,
+    ]);
+    // Both private platform fixtures map native termination to status 1.
+    expect(result.status).toBe(1);
+    const failure =
+      code === 127
+        ? `Command not found: ${command}\n`
+        : code === 126
+          ? `Command is not executable: ${command}\n`
+          : '';
+    expectOutput(result.stdout, failure + `run-completed:${code}`, true);
+    expectOutput(result.stderr, '', true);
+    if (kind !== 'exceeds launch limits')
+      expect(await auditRows(app)).toHaveLength(1);
   },
 );
 it('E4: command resolution precedes keyring/network, with 127 and 126', async () => {
