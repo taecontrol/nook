@@ -552,6 +552,58 @@ function useAuditEntries(filters: AuditFilters) {
     auditOptions({ bucket: filters.bucket, secret: filters.secret }),
   );
 }
+function AuditLoadFailure({
+  query,
+}: {
+  query: ReturnType<typeof useAuditEntries>;
+}) {
+  if (!query.isError) return null;
+  const retry = (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={query.isFetching}
+      onClick={() =>
+        void (query.isFetchNextPageError
+          ? query.fetchNextPage()
+          : query.refetch())
+      }
+    >
+      Try again
+    </Button>
+  );
+  if (query.data)
+    return (
+      <Alert variant="destructive" className="mb-4">
+        <ServerCrash />
+        <AlertTitle>
+          {query.isFetchNextPageError
+            ? 'Couldn’t load more entries'
+            : 'Couldn’t refresh audit entries'}
+        </AlertTitle>
+        <AlertDescription>
+          Showing the last loaded activity. {query.error.message}
+          {retry}
+        </AlertDescription>
+      </Alert>
+    );
+  return (
+    <div className="rounded-lg border border-dashed">
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <ServerCrash />
+          </EmptyMedia>
+          <EmptyTitle>Couldn’t load audit entries</EmptyTitle>
+          <EmptyDescription>
+            {query.error.message} Try again in a moment.
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>{retry}</EmptyContent>
+      </Empty>
+    </div>
+  );
+}
 function AuditResults({
   query,
   entries,
@@ -567,91 +619,67 @@ function AuditResults({
 }) {
   return query.isPending ? (
     <Loading />
-  ) : query.isError && !query.data ? (
-    <div className="rounded-lg border border-dashed">
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <ServerCrash />
-          </EmptyMedia>
-          <EmptyTitle>Couldn’t load audit entries</EmptyTitle>
-          <EmptyDescription>
-            {query.error.message} Try again in a moment.
-          </EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={query.isFetching}
-            onClick={() => void query.refetch()}
-          >
-            Try again
-          </Button>
-        </EmptyContent>
-      </Empty>
-    </div>
-  ) : entries.length === 0 ? (
-    <NoEntries filtered={filtered} />
+  ) : !query.data ? (
+    <AuditLoadFailure query={query} />
   ) : (
-    <section aria-label="Secret activity">
-      <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
-        <span>{entries.length} entries loaded</span>
-        <span>Newest first</span>
-      </div>
-      <div className="hidden items-center gap-2.5 border-b px-4 py-2 text-xs text-muted-foreground lg:flex">
-        <span className="w-20 shrink-0">When</span>
-        <span className="w-24 shrink-0">Outcome</span>
-        <div className="flex flex-1 gap-4">
-          <span className="flex-1">Secret / bucket</span>
-          <span className="flex-1">Purpose</span>
-          <span className="w-40 shrink-0">Machine / executable</span>
-        </div>
-        <span className="w-8" />
-      </div>
-      <ul className="divide-y rounded-lg border">
-        {entries.map((entry) => (
-          <Entry
-            key={entry.id}
-            entry={entry}
-            revoked={
-              entry.outcome !== 'revealed' &&
-              missingFrom(
-                machines,
-                (machine) => machine.id === entry.machine.id,
-              )
-            }
-            deleted={missingFrom(
-              secrets,
-              (secret) => secret.path === entry.path,
+    <>
+      <AuditLoadFailure query={query} />
+      {entries.length === 0 ? (
+        <NoEntries filtered={filtered} />
+      ) : (
+        <section aria-label="Secret activity">
+          <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+            <span>{entries.length} entries loaded</span>
+            <span>Newest first</span>
+          </div>
+          <div className="hidden items-center gap-2.5 border-b px-4 py-2 text-xs text-muted-foreground lg:flex">
+            <span className="w-20 shrink-0">When</span>
+            <span className="w-24 shrink-0">Outcome</span>
+            <div className="flex flex-1 gap-4">
+              <span className="flex-1">Secret / bucket</span>
+              <span className="flex-1">Purpose</span>
+              <span className="w-40 shrink-0">Machine / executable</span>
+            </div>
+            <span className="w-8" />
+          </div>
+          <ul className="divide-y rounded-lg border">
+            {entries.map((entry) => (
+              <Entry
+                key={entry.id}
+                entry={entry}
+                revoked={
+                  entry.outcome !== 'revealed' &&
+                  missingFrom(
+                    machines,
+                    (machine) => machine.id === entry.machine.id,
+                  )
+                }
+                deleted={missingFrom(
+                  secrets,
+                  (secret) => secret.path === entry.path,
+                )}
+              />
+            ))}
+          </ul>
+          <div className="mt-4 flex flex-col items-center gap-2">
+            {query.hasNextPage ? (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={query.isFetching}
+                onClick={() => void query.fetchNextPage()}
+              >
+                {query.isFetchingNextPage ? <Spinner /> : <ArrowDown />}Load
+                older entries
+              </Button>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                You’ve reached the first entry.
+              </p>
             )}
-          />
-        ))}
-      </ul>
-      {query.isError && (
-        <Alert variant="destructive" className="mt-4">
-          <ServerCrash />
-          <AlertTitle>Couldn’t load more entries</AlertTitle>
-          <AlertDescription>{query.error.message}</AlertDescription>
-        </Alert>
+          </div>
+        </section>
       )}
-      <div className="mt-4 flex flex-col items-center gap-2">
-        {query.hasNextPage ? (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={query.isFetching}
-            onClick={() => void query.fetchNextPage()}
-          >
-            {query.isFetchingNextPage ? <Spinner /> : <ArrowDown />}Load older
-            entries
-          </Button>
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            You’ve reached the first entry.
-          </p>
-        )}
-      </div>
-    </section>
+    </>
   );
 }

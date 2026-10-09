@@ -535,7 +535,7 @@ it.each(['revoked machine', 'unavailable storage'] as const)(
     expectOutput(
       result.stdout + result.stderr,
       failure === 'revoked machine'
-        ? `This machine's token is no longer valid. Run: nook login ${app.origin}`
+        ? `This machine's token is no longer valid. Run: nook logout && nook login ${app.origin}`
         : `Could not reach ${app.origin}. Try again.`,
       true,
     );

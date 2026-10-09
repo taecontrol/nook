@@ -288,6 +288,7 @@ it('E22: genuine D1 load failure retries, and older-page failure keeps loaded en
   const failedPrefetch = deferred();
   let componentHeld = false;
   const visit = await visitAudit(browser, {
+    count: 50,
     configure: async (page, app) => {
       await (await app.mf.getD1Database('DB'))
         .prepare(
@@ -332,6 +333,16 @@ it('E22: genuine D1 load failure retries, and older-page failure keeps loaded en
       .getByText('Couldn’t load more entries', { exact: true })
       .waitFor();
     expect(await auditEntries(page).count()).toBe(before);
+    await db
+      .prepare('ALTER TABLE unavailable_audit_entries RENAME TO audit_entries')
+      .run();
+    await page.getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.poll(() => auditEntries(page).count()).toBe(before + 25);
+    expect(
+      await page
+        .getByText('Couldn’t load more entries', { exact: true })
+        .count(),
+    ).toBe(0);
   } finally {
     await visit.close();
   }

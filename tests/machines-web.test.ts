@@ -413,8 +413,11 @@ it('E22: a real D1 revoke failure restores the original group and Try again conf
     gate.resolve();
     await expect
       .poll(() => page.getByRole('alert').innerText())
-      .toContain("Couldn't revoke framework-13");
+      .toContain("Couldn't confirm revocation of framework-13");
     expect(await page.getByRole('alert').innerText()).toContain(
+      'The machine may already be revoked.',
+    );
+    expect(await page.getByRole('alert').innerText()).not.toContain(
       'is still connected and its token still works',
     );
     expect(
@@ -611,7 +614,7 @@ it('E21/E22: a lost response after committed revocation never claims the token s
       'its token still works',
     );
     expect(await page.getByRole('alert').innerText()).toContain(
-      'The connection was interrupted. The machine may already be revoked.',
+      'The machine may already be revoked.',
     );
     await expect.poll(() => machineRow(page, machines[2].id).count()).toBe(0);
     await expect

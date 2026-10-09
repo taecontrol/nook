@@ -6,18 +6,13 @@ import {
 } from '@nook/contract';
 import { Effect } from 'effect';
 import { readConfig } from './config.ts';
-import { CliFailure, type ServerFailure } from './errors.ts';
+import { CliFailure, invalidToken, type ServerFailure } from './errors.ts';
 import { readSecretInput } from './secret-input.ts';
 import { session } from './session.ts';
 import { parseCreate } from './vault-create-arguments.ts';
 
-function reconnect(url: string) {
-  return new CliFailure(
-    `This machine's token is no longer valid. Run: nook login ${url}`,
-  );
-}
 function refused(error: ServerFailure, path: string, url: string) {
-  if (error.tag === 'Unauthorized') return reconnect(url);
+  if (error.tag === 'Unauthorized') return invalidToken(url);
   if (error.tag === 'Forbidden')
     return new CliFailure(`Access to ${path} is forbidden.`);
   if (error.message) return new CliFailure(error.message);
@@ -27,7 +22,13 @@ const createSession = session.pipe(
   Effect.catch((error) =>
     error.message.startsWith('Not logged in.')
       ? readConfig.pipe(
-          Effect.flatMap((url) => Effect.fail(reconnect(url ?? '<url>'))),
+          Effect.flatMap((url) =>
+            Effect.fail(
+              new CliFailure(
+                `This machine's token is no longer valid. Run: nook login ${url ?? '<url>'}`,
+              ),
+            ),
+          ),
         )
       : Effect.fail(error),
   ),

@@ -134,7 +134,7 @@ it.each(matrix)(
             state === 'revoking'
               ? 'Revoking framework-13…'
               : state === 'revoke-failed'
-                ? "Couldn't revoke framework-13"
+                ? "Couldn't confirm revocation of framework-13"
                 : 'Revoked framework-13',
           );
         expect(await machineRow(page, target.id).count()).toBe(

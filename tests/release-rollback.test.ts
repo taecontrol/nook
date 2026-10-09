@@ -53,6 +53,14 @@ async function runStep(
       .some((step) => step.uses?.startsWith('actions/checkout@'))
   )
     git(workspace, 'clone', '-q', remote, '.');
+  if (job === 'publish') {
+    const assets = resolve(workspace, 'release-assets');
+    await mkdir(assets);
+    await writeFile(
+      resolve(assets, 'nook-0.1.0-fixture.tar.gz'),
+      'synthetic release asset',
+    );
+  }
   return spawnSync(
     'bash',
     ['--noprofile', '--norc', '-eo', 'pipefail', '-c', steps[index].run ?? ''],
@@ -79,9 +87,34 @@ beforeEach(async () => {
     resolve(bin, 'gh'),
     `#!/bin/sh
 printf 'gh %s\\n' "$*" >> "$RELEASE_LOG"
+fail_upload() {
+  if [ "$RELEASE_FAIL" != asset-upload ]; then return 0; fi
+  has_asset=false
+  for argument; do
+    if [ -f "$argument" ]; then has_asset=true; fi
+  done
+  if [ "$has_asset" != true ] || [ ! -f "$RELEASE_LOG.draft" ]; then return 0; fi
+  printf 'draft exists; asset upload attempted\\n' > "$RELEASE_LOG.upload-failure"
+  printf 'Synthetic asset upload failure.\\n' >&2
+  return 42
+}
 case "$1 $2" in
   'api meta') echo 'ssh-ed25519 AAAAfixture' ;;
   "release $RELEASE_FAIL") exit 1 ;;
+  'release create')
+    touch "$RELEASE_LOG.draft"
+    if ! fail_upload "$@"; then
+      explicit_draft=false
+      for argument; do
+        case "$argument" in --draft|--draft=true) explicit_draft=true ;; esac
+      done
+      # gh cleans up its implicit draft after upload failure, but not an explicit --draft.
+      if [ "$explicit_draft" != true ]; then rm -f "$RELEASE_LOG.draft"; fi
+      exit 42
+    fi
+    ;;
+  'release upload') fail_upload "$@" ;;
+  'release delete') rm -f "$RELEASE_LOG.draft" ;;
 esac
 `,
   );
@@ -138,7 +171,8 @@ it('publish pushes the tag for the dispatched commit and publishes the draft rel
   expect(result.status, result.stderr).toBe(0);
   expect(remoteTags()).toBe(`${commit}\t${tag}`);
   const calls = await readFile(log, 'utf8');
-  expect(calls).toContain('gh release create v0.1.0 release-assets/* --draft');
+  expect(calls).toContain('gh release create v0.1.0 ');
+  expect(calls).toContain('release-assets/nook-0.1.0-fixture.tar.gz');
   expect(calls).toContain('gh release edit v0.1.0 --draft=false');
   expect(calls).not.toContain('gh release delete');
 });
@@ -173,6 +207,22 @@ it('unpublish deletes the published release and its tag after a failed mise smok
   expect(await readFile(log, 'utf8')).toContain(
     'gh release delete v0.1.0 --repo synthetic/nook --yes',
   );
+});
+
+it('publish removes the draft and tag after an asset upload fails', async () => {
+  const result = await runStep(
+    'publish',
+    'Tag and publish, deleting both if either fails',
+    'asset-upload',
+  );
+  expect(result.status).not.toBe(0);
+  expect(await readFile(`${log}.upload-failure`, 'utf8')).toBe(
+    'draft exists; asset upload attempted\n',
+  );
+  expect(remoteTags()).toBe('');
+  await expect(readFile(`${log}.draft`)).rejects.toMatchObject({
+    code: 'ENOENT',
+  });
 });
 
 it('validate refuses to release while either release secret is missing', async () => {

@@ -61,7 +61,7 @@ function SessionAction({ session }: { session: Session }) {
   if (session.state === 'signed-in')
     return (
       <p className="text-sm text-muted-foreground">
-        Memory and Vault are not available yet.
+        Manage your buckets, machines, and secrets.
       </p>
     );
   if (session.state === 'not-owner')

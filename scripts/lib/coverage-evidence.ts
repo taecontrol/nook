@@ -25,6 +25,8 @@ function validateCount(
   expected: number | number[],
   actual: number | number[] | undefined,
 ) {
+  if (Array.isArray(actual) && !Array.isArray(expected))
+    throw new Error('Scalar shape mismatch');
   if (
     Array.isArray(expected) &&
     (!Array.isArray(actual) || actual.length !== expected.length)

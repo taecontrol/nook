@@ -1,16 +1,13 @@
 import { NodeServices } from '@effect/platform-node';
 import { Effect, Redacted } from 'effect';
-import { CliFailure, type ServerFailure } from './errors.ts';
+import { CliFailure, invalidToken, type ServerFailure } from './errors.ts';
 import { currentDirectory, projectSecrets } from './project-secrets.ts';
 import { parseRun } from './run-arguments.ts';
 import { CommandFailure, resolveCommand, runCommand } from './run-command.ts';
 import { session } from './session.ts';
 
 function runFailure(error: ServerFailure, url: string) {
-  if (error.tag === 'Unauthorized')
-    return new CliFailure(
-      `This machine's token is no longer valid. Run: nook login ${url}`,
-    );
+  if (error.tag === 'Unauthorized') return invalidToken(url);
   if (error.tag === 'SecretsForbidden')
     return new CliFailure(
       error.paths.map((path) => `Access to ${path} is forbidden.`).join(' '),

@@ -202,7 +202,7 @@ it.each([200, 503])(
       if (status === 503) {
         await expect
           .poll(() => page.getByRole('alert').innerText())
-          .toContain("Couldn't create work/acme");
+          .toContain("Couldn't confirm creation of work/acme");
         expect(await field.inputValue()).toBe('work/acme');
         expect(await row(page, 'work/acme').innerText()).toContain('new');
         expect(await page.getByRole('alert').innerText()).toContain('(503)');
@@ -307,7 +307,7 @@ it.each([204, 503, 409])(
           .toContain(
             status === 409
               ? 'Delete its child buckets first.'
-              : "Couldn't delete work/taecontrol/nook",
+              : "Couldn't confirm deletion of work/taecontrol/nook",
           );
         if (status === 503)
           expect(await page.getByRole('alert').innerText()).toContain('(503)');
@@ -547,7 +547,7 @@ it.each(['POST', 'DELETE'])(
       await expect
         .poll(() => page.getByRole('alert').innerText())
         .toContain(
-          `Couldn't ${method === 'POST' ? 'create' : 'delete'} ${path}`,
+          `Couldn't confirm ${method === 'POST' ? 'creation' : 'deletion'} of ${path}`,
         );
       expect(await field.inputValue()).toBe(method === 'POST' ? path : '');
       expect(await field.isDisabled()).toBe(false);
@@ -827,7 +827,7 @@ it.each([false, true])(
         await expect.poll(() => field.isEnabled()).toBe(true);
         await expect
           .poll(() => page.getByRole('alert').innerText())
-          .toContain("Couldn't create work/second");
+          .toContain("Couldn't confirm creation of work/second");
         expect(await field.inputValue()).toBe('work/second');
         expect(await row(page, 'work/second').innerText()).toContain('new');
         expect(
@@ -905,7 +905,7 @@ it.each(['POST', 'DELETE'])(
         await page
           .getByRole('alert')
           .filter({
-            hasText: `Couldn't ${method === 'POST' ? 'create' : 'delete'} ${path}`,
+            hasText: path,
           })
           .count(),
       ).toBe(0);

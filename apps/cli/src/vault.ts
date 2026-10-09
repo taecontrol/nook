@@ -4,7 +4,7 @@ import {
   validateBucketPath,
 } from '@nook/contract';
 import { Effect } from 'effect';
-import { CliFailure, type ServerFailure } from './errors.ts';
+import { CliFailure, invalidToken, type ServerFailure } from './errors.ts';
 import {
   currentDirectory,
   projectSecrets,
@@ -13,10 +13,7 @@ import {
 import { session } from './session.ts';
 
 function listFailure(error: ServerFailure, url: string) {
-  if (error.tag === 'Unauthorized')
-    return new CliFailure(
-      `This machine's token is no longer valid. Run: nook login ${url}`,
-    );
+  if (error.tag === 'Unauthorized') return invalidToken(url);
   if (error.tag === 'Forbidden')
     return new CliFailure('Access to this bucket is forbidden.');
   if (error.tag === 'BucketNotFound')

@@ -489,7 +489,7 @@ it('E8/E9: missing keys, absent login, revoked tokens and offline Worker keep re
   expect(result.status).toBe(1);
   expectOutput(
     result.stdout + result.stderr,
-    `This machine's token is no longer valid. Run: nook login ${app.origin}`,
+    `This machine's token is no longer valid. Run: nook logout && nook login ${app.origin}`,
     true,
   );
   await writeFile(

@@ -563,7 +563,9 @@ it.each(['absent', 'revoked'])(
     expect(result.status).toBe(1);
     expectOutput(
       result.stdout + result.stderr,
-      `This machine's token is no longer valid. Run: nook login ${app.origin}`,
+      mode === 'revoked'
+        ? `This machine's token is no longer valid. Run: nook logout && nook login ${app.origin}`
+        : `This machine's token is no longer valid. Run: nook login ${app.origin}`,
       true,
     );
     expect(await secretRows(app)).toEqual([]);
@@ -768,6 +770,59 @@ it.each([
       expect(result.status).toBe(1);
       expectOutput(result.stdout + result.stderr, unconfirmed, true);
       expect(transport.bodies.length).toBe(2);
+    } finally {
+      await transport.close();
+    }
+  },
+);
+it.each([
+  { shape: 'malformed JSON', failures: 1, outcome: 'recovered' },
+  { shape: 'invalid metadata', failures: 1, outcome: 'recovered' },
+  { shape: 'malformed JSON', failures: 3, outcome: 'unconfirmed' },
+  { shape: 'invalid metadata', failures: 3, outcome: 'unconfirmed' },
+])(
+  'complete 201 $shape: a committed create remains $outcome',
+  async ({ shape, failures }) => {
+    const value = secretInput().value;
+    const rawBody =
+      shape === 'malformed JSON'
+        ? `{"path":${JSON.stringify(value)}`
+        : JSON.stringify({ path: { value } });
+    const statuses: number[] = [];
+    const transport = await createTransport(
+      app,
+      () => undefined,
+      async (attempt, response) => {
+        statuses.push(response.status);
+        return attempt <= failures ? { rawBody } : undefined;
+      },
+    );
+    try {
+      await configure(transport.origin);
+      const result = await keyring.start(createArgs(), {}, value).done;
+      expectNoValue(result.stdout + result.stderr, [value, token, app.key]);
+      const recovered = failures === 1;
+      expect({
+        status: result.status,
+        requests: transport.bodies.length,
+        stored: (await secretRows(app)).length,
+        audits: (await auditRows(app)).length,
+      }).toEqual({
+        status: recovered ? 0 : 1,
+        requests: recovered ? 2 : 3,
+        stored: 1,
+        audits: 1,
+      });
+      expect(statuses.every((status) => status === 201)).toBe(true);
+      expect(
+        transport.bodies.every((body) => body.equals(transport.bodies[0])),
+      ).toBe(true);
+      expectOutput(
+        result.stdout,
+        recovered ? `Stored ${createdPath}.` : unconfirmed,
+        true,
+      );
+      expectOutput(result.stderr, '', true);
     } finally {
       await transport.close();
     }
