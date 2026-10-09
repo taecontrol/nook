@@ -110,11 +110,9 @@ it('E23: fresh Audit explains uses and creations without adding a kind control',
   const visit = await visitAudit(browser, { count: 0 });
   try {
     const { page } = visit;
-    await page
-      .getByText('No secret uses or creations yet', { exact: true })
-      .waitFor();
+    await page.getByText('No secret activity yet', { exact: true }).waitFor();
     expect(await page.locator('h1 + p').innerText()).toContain(
-      'Every secret use and creation, newest first.',
+      'Every secret use, creation, and reveal, newest first.',
     );
     expect(
       await page.locator('[data-slot="empty-description"]').innerText(),

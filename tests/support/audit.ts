@@ -15,7 +15,7 @@ import { vaultCheckpoints } from './vault-checkpoints.ts';
 export const auditNow = new Date('2026-10-08T12:00:00.000Z');
 export const acmePath = 'work/acme/GH_TOKEN';
 export function useEntry(entry: AuditEntry) {
-  if (entry.outcome === 'created')
+  if (entry.outcome !== 'delivered' && entry.outcome !== 'denied')
     throw new Error('This fixture expects a secret use.');
   return entry;
 }

@@ -13,13 +13,14 @@ export async function vaultPage(
     start?: string;
     viewport?: { width: number; height: number };
     colorScheme?: 'light' | 'dark';
+    app?: Awaited<ReturnType<typeof vaultRuntime>>;
     configure?: (
       page: Page,
       app: Awaited<ReturnType<typeof vaultRuntime>>,
     ) => Promise<void>;
   } = {},
 ) {
-  const app = await vaultRuntime();
+  const app = options.app ?? (await vaultRuntime());
   const context = await browser.newContext({
     viewport: options.viewport ?? { width: 1440, height: 900 },
     colorScheme: options.colorScheme ?? 'light',

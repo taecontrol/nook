@@ -374,7 +374,7 @@ it('Migration preserves populated use rows and chronology/path indexes while all
     db.prepare('DROP TABLE audit_entries'),
     ...old.map((sql) => db.prepare(sql)),
     db.prepare(
-      "DELETE FROM d1_migrations WHERE name='0007_secret_creations.sql'",
+      "DELETE FROM d1_migrations WHERE name IN ('0007_secret_creations.sql', '0008_secret_reveals.sql')",
     ),
   ]);
   const id = randomUUID();
@@ -394,8 +394,17 @@ it('Migration preserves populated use rows and chronology/path indexes while all
     )
     .run();
   const before = await auditRows(app);
-  expect(await applyMigrations(db)).toEqual(['0007_secret_creations.sql']);
-  expect(await auditRows(app)).toEqual(before);
+  expect(await applyMigrations(db)).toEqual([
+    '0007_secret_creations.sql',
+    '0008_secret_reveals.sql',
+  ]);
+  const after = await auditRows(app);
+  expect(
+    after.map(({ ip: _ip, country: _country, ...facts }) => facts),
+  ).toEqual(before);
+  expect(after.every((row) => row.ip === null && row.country === null)).toBe(
+    true,
+  );
   expect(
     (
       await db
@@ -424,7 +433,7 @@ it('Migration preserves denied use history with all recorded facts', async () =>
     db.prepare('DROP TABLE audit_entries'),
     ...old.map((sql) => db.prepare(sql)),
     db.prepare(
-      "DELETE FROM d1_migrations WHERE name='0007_secret_creations.sql'",
+      "DELETE FROM d1_migrations WHERE name IN ('0007_secret_creations.sql', '0008_secret_reveals.sql')",
     ),
   ]);
   await db
@@ -444,8 +453,17 @@ it('Migration preserves denied use history with all recorded facts', async () =>
     .run();
   const before = await auditRows(app);
   expect(before).toHaveLength(1);
-  expect(await applyMigrations(db)).toEqual(['0007_secret_creations.sql']);
-  expect(await auditRows(app)).toEqual(before);
+  expect(await applyMigrations(db)).toEqual([
+    '0007_secret_creations.sql',
+    '0008_secret_reveals.sql',
+  ]);
+  const after = await auditRows(app);
+  expect(
+    after.map(({ ip: _ip, country: _country, ...facts }) => facts),
+  ).toEqual(before);
+  expect(after.every((row) => row.ip === null && row.country === null)).toBe(
+    true,
+  );
   expect(
     (await auditPageData(app)).entries.map((entry) => entry.outcome),
   ).toEqual(['denied']);

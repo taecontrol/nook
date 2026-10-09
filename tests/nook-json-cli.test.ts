@@ -282,7 +282,8 @@ it('E5: discovery starts at the real directory when entered through a symlink', 
   expectOutput(result.stdout, 'true', true);
   expect(
     (await auditPageData(app)).entries.every(
-      (entry) => entry.workingDirectory === nested,
+      (entry) =>
+        entry.outcome !== 'revealed' && entry.workingDirectory === nested,
     ),
   ).toBe(true);
 });

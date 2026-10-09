@@ -33,7 +33,7 @@ it.each([
           .getByText(
             filtered
               ? 'No activity matches these filters'
-              : 'No secret uses or creations yet',
+              : 'No secret activity yet',
             { exact: true },
           )
           .waitFor();

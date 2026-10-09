@@ -147,6 +147,8 @@ it('delete and recreate with the same writeId records a new creation while retri
   const path = `${input.bucket}/${input.name}`;
   expect((await machineCreate(app, token, input)).status).toBe(201);
   const [original] = (await auditPageData(app)).entries;
+  if (original.outcome !== 'created')
+    throw new Error('The initial machine creation must be audited as created.');
   expect((await deleteSecret(app, path, input.writeId)).status).toBe(204);
   expect((await auditPageData(app)).entries).toEqual([original]);
   const recreated = {

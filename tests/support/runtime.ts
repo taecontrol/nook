@@ -94,6 +94,7 @@ export async function runtime(
         outboundService?: (request: Request) => Promise<Response>;
         log?: Log;
         handleRuntimeStdio?: (stdout: Readable, stderr: Readable) => void;
+        cf?: Record<string, unknown> | false;
       } = {},
     ) {
       const options = { ...currentOptions, bindings, ...overrides };

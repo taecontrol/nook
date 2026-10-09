@@ -364,9 +364,9 @@ it('E13/E15: stable newest-first keyset pages and historical filters survive del
   ]) {
     const entries = (await auditPageData(app, query)).entries;
     expect(entries).toHaveLength(25);
-    expect(entries.every((entry) => entry.machine.name === 'work-laptop')).toBe(
-      true,
-    );
+    expect(
+      entries.every((entry) => useEntry(entry).machine.name === 'work-laptop'),
+    ).toBe(true);
   }
   expect((await auditPageData(app, '?bucket=work%2Facme-old')).entries).toEqual(
     [],

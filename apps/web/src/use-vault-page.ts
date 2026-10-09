@@ -1,6 +1,6 @@
 import { validateSecretDescription } from '@nook/contract';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate, useSearch } from '@tanstack/react-router';
+import { useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from './api-client';
 import { bucketsOptions } from './buckets-api';
@@ -111,6 +111,13 @@ function duplicateHandler(
 export function useVaultPage() {
   const search = useSearch({ strict: false }) as { bucket?: string };
   const navigate = useNavigate();
+  const location = useLocation();
+  const [reveal, setReveal] = useState<{ href: string; secret: Secret } | null>(
+    null,
+  );
+  useEffect(() => {
+    setReveal((current) => (current?.href === location.href ? current : null));
+  }, [location.href]);
   const bucketsQuery = useQuery(bucketsOptions);
   const vault = useVault();
   const { secrets, busy } = vault;
@@ -234,6 +241,11 @@ export function useVaultPage() {
         ?.scrollIntoView({ block: 'nearest' });
   }, [highlighted]);
   return {
+    revealing: reveal?.href === location.href ? reveal.secret : null,
+    openReveal: (secret: Secret) => {
+      if (!busy) setReveal({ href: location.href, secret });
+    },
+    closeReveal: () => setReveal(null),
     ui: { ...state, feedback },
     setUi,
     patch,
