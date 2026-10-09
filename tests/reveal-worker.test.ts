@@ -10,6 +10,7 @@ import { applyMigrations } from '../scripts/lib/migrations.ts';
 import { access, accessFixture } from './support/access.ts';
 import { machineCreate } from './support/agent-create.ts';
 import { auditPageData, auditRows } from './support/audit.ts';
+import { jsonRequest } from './support/authorizations.ts';
 import { issueGrant, machineMcp } from './support/grants.ts';
 import { deferred } from './support/machines.ts';
 import { mcpDriver } from './support/mcp.ts';
@@ -27,6 +28,7 @@ import {
   expectNoValue,
   keyFingerprint,
   listSecrets,
+  replaceSecret,
   secretInput,
   vaultRuntime,
 } from './support/vault.ts';
@@ -115,6 +117,73 @@ it('E2: reveal preserves all 64 KiB of UTF-8, spaces and trailing newline', asyn
   expect(((await response.json()) as { value: string }).value === value).toBe(
     true,
   );
+});
+it('E1/E2: maximum accepted paths reveal exact values and keep existing owner path operations usable', async () => {
+  const bucket = Array.from({ length: 6 }, (_, index) =>
+    String.fromCharCode(97 + index).repeat(32),
+  ).join('/');
+  const name = 'W'.repeat(64);
+  const path = `${bucket}/${name}`;
+  const value =
+    '  synthetic maximum path\n' +
+    'x'.repeat(65536 - Buffer.byteLength('  synthetic maximum path\n  \n')) +
+    '  \n';
+  expect(path).toHaveLength(262);
+  expect(encodeURIComponent(path)).toHaveLength(274);
+  expect(
+    (await jsonRequest(app, '/api/buckets', { path: bucket })).status,
+  ).toBe(200);
+  expect(
+    (await createSecret(app, secretInput({ bucket, name, value }))).status,
+  ).toBe(201);
+  const stored = (await listSecrets(app)).find(
+    (secret) => secret.path === path,
+  );
+  expect(stored).toMatchObject({ bucket, name, path });
+  const response = await revealSecret(app, path);
+  expect(response.status).toBe(200);
+  expect(response.headers.get('Cache-Control')).toBe('no-store');
+  expect(((await response.json()) as { value: string }).value === value).toBe(
+    true,
+  );
+  const replacement = '  synthetic maximum path replacement\n';
+  expect(
+    (
+      await replaceSecret(app, path, {
+        ...secretInput({ bucket, name, value: replacement }),
+        expectedVersion: stored?.version,
+      })
+    ).status,
+  ).toBe(200);
+  const replaced = await revealSecret(app, path);
+  expect(replaced.status).toBe(200);
+  expect(
+    ((await replaced.json()) as { value: string }).value === replacement,
+  ).toBe(true);
+  expect((await auditRows(app)).map((entry) => entry.path)).toEqual([
+    path,
+    path,
+  ]);
+  const current = (await listSecrets(app)).find(
+    (secret) => secret.path === path,
+  );
+  expect((await deleteSecret(app, path, current?.version ?? '')).status).toBe(
+    204,
+  );
+  expect((await listSecrets(app)).some((secret) => secret.path === path)).toBe(
+    false,
+  );
+  expect(
+    (
+      await jsonRequest(
+        app,
+        `/api/buckets/${encodeURIComponent(bucket)}`,
+        undefined,
+        {},
+        'DELETE',
+      )
+    ).status,
+  ).toBe(204);
 });
 it('E9: deletion after metadata load returns the safe not-found error and no entry', async () => {
   const [secret] = await listSecrets(app);

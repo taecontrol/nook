@@ -615,7 +615,7 @@ function BucketPane({ page }: { page: Page }) {
           <h2 className="font-mono text-lg font-semibold tracking-tight wrap-anywhere">
             {selected}
           </h2>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-muted-foreground wrap-anywhere">
             {reachText(selected, page.parents.has(selected), 'its secrets')}
           </p>
         </div>

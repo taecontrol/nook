@@ -1,6 +1,6 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import { D1Client } from '@effect/sql-d1';
-import { Api } from '@nook/contract';
+import { Api, secretLimits } from '@nook/contract';
 import { Effect, Layer } from 'effect';
 import { HttpRouter, HttpServer, HttpServerRequest } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
@@ -81,6 +81,8 @@ export function handlerForPrincipal(
   );
   const apiHandler = HttpRouter.toWebHandler(routes, {
     disableLogger: true,
+    // The router checks decoded params: six 32-character segments plus the name.
+    routerConfig: { maxParamLength: 6 * (32 + 1) + secretLimits.name },
   }).handler;
   return (request: Request) =>
     new URL(request.url).pathname === '/mcp'

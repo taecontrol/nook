@@ -1,7 +1,10 @@
+import { mkdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { auditRows } from './support/audit.ts';
+import { jsonRequest } from './support/authorizations.ts';
 import { deferred } from './support/machines.ts';
 import {
   openReveal,
@@ -14,7 +17,13 @@ import {
   storageHasValue,
   valueField,
 } from './support/reveal.ts';
-import { deleteSecret, listSecrets, vaultRuntime } from './support/vault.ts';
+import {
+  createSecret,
+  deleteSecret,
+  listSecrets,
+  secretInput,
+  vaultRuntime,
+} from './support/vault.ts';
 import {
   createDraft,
   privateClientState,
@@ -25,7 +34,9 @@ import { vaultCheckpoints } from './support/vault-checkpoints.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
+const screenshots = resolve('.local/verification/screenshots');
 beforeAll(async () => {
+  await mkdir(screenshots, { recursive: true });
   ({ browser, close: closeBrowser } = await launchTestBrowser());
 });
 afterAll(async () => {
@@ -111,6 +122,122 @@ it.each([
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth),
       ).toBe(width);
+    } finally {
+      await visit.close();
+    }
+  },
+);
+it.each([
+  { width: 390, height: 844, colorScheme: 'light' as const },
+  { width: 390, height: 844, colorScheme: 'dark' as const },
+  { width: 1440, height: 900, colorScheme: 'light' as const },
+  { width: 1440, height: 900, colorScheme: 'dark' as const },
+])(
+  'E1/E2/E3: maximum accepted metadata uses the real reveal URL and keeps value/actions within the viewport ($width, $colorScheme)',
+  async ({ width, height, colorScheme }) => {
+    const bucket = Array.from({ length: 6 }, (_, index) =>
+      String.fromCharCode(97 + index).repeat(32),
+    ).join('/');
+    const name = 'W'.repeat(64);
+    const path = `${bucket}/${name}`;
+    const value =
+      '  synthetic maximum path\n' +
+      'x'.repeat(65536 - Buffer.byteLength('  synthetic maximum path\n  \n')) +
+      '  \n';
+    const visit = await revealPage(browser, {
+      start: `/vault?bucket=${encodeURIComponent(bucket)}`,
+      viewport: { width, height },
+      colorScheme,
+      configure: async (_page, app) => {
+        expect(
+          (await jsonRequest(app, '/api/buckets', { path: bucket })).status,
+        ).toBe(200);
+        expect(
+          (await createSecret(app, secretInput({ bucket, name, value })))
+            .status,
+        ).toBe(201);
+      },
+    });
+    try {
+      const { page } = visit;
+      await secretRow(page, path).getByRole('button').waitFor();
+      await page.screenshot({
+        path: resolve(
+          screenshots,
+          `vault-max-path-${width}-${colorScheme}.png`,
+        ),
+        animations: 'disabled',
+      });
+      await secretRow(page, path).getByRole('button').click();
+      const delivered = page.waitForResponse((response) =>
+        new URL(response.url()).pathname.endsWith('/reveal'),
+      );
+      await page
+        .getByRole('menuitem', { name: 'Reveal value…', exact: true })
+        .click();
+      expect((await delivered).status()).toBe(200);
+      const dialog = page.getByRole('dialog', { name, exact: true });
+      const field = valueField(page);
+      await field.waitFor();
+      expect((await field.inputValue()) === value).toBe(true);
+      await page.screenshot({
+        path: resolve(
+          screenshots,
+          `reveal-max-path-${width}-${colorScheme}.png`,
+        ),
+        animations: 'disabled',
+      });
+      expect(
+        await dialog.locator('[data-slot="dialog-description"]').innerText(),
+      ).toContain(`${path} · Updated `);
+      expect(revealRequests(visit.requests)).toEqual([
+        {
+          method: 'POST',
+          path: `/api/secrets/${encodeURIComponent(path)}/reveal`,
+        },
+      ]);
+      expect(
+        await field.evaluate(
+          (element) =>
+            element.scrollHeight > element.clientHeight &&
+            element.scrollWidth <= element.clientWidth,
+        ),
+      ).toBe(true);
+      for (const control of [
+        dialog,
+        dialog.getByRole('button', { name: 'Copy', exact: true }),
+        dialog.getByRole('button', { name: 'Close', exact: true }).first(),
+        dialog.getByRole('button', { name: 'Close', exact: true }).last(),
+        dialog.getByRole('link', { name: 'Audit', exact: true }),
+      ]) {
+        const box = await control.boundingBox();
+        expect(
+          box !== null &&
+            box.x >= 0 &&
+            box.y >= 0 &&
+            box.x + box.width <= width &&
+            box.y + box.height <= height,
+        ).toBe(true);
+      }
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+      ).toBe(width);
+      await dialog.getByRole('button', { name: 'Copy', exact: true }).click();
+      await dialog
+        .getByRole('button', { name: 'Copied', exact: true })
+        .waitFor();
+      expect(
+        (await page.evaluate(() => navigator.clipboard.readText())) === value,
+      ).toBe(true);
+      expect(await auditRows(visit.app)).toHaveLength(1);
+      await dialog
+        .getByRole('button', { name: 'Close', exact: true })
+        .last()
+        .click();
+      await expect
+        .poll(() => privateClientState(page, [value]))
+        .toEqual({ found: true, absentFromCache: true, absentFromDom: true });
+      expect(await storageHasValue(page, value)).toBe(false);
     } finally {
       await visit.close();
     }
