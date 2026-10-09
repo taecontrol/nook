@@ -166,6 +166,24 @@ it.each([0.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN])(
   },
 );
 
+it.each(
+  (['s', 'f'] as const).flatMap((counter) =>
+    [[], [0], [1], [1, 1]].map((counts) => ({ counter, counts })),
+  ),
+)(
+  'coverage rejects an array in scalar $counter before merging: $counts',
+  ({ counter, counts }) => {
+    const fresh = baseline('function choice(a) { return a ? 1 : 2; }');
+    const observed = structuredClone(fresh);
+    const id = Object.keys(observed[counter])[0];
+    Reflect.set(observed[counter], id, counts);
+    expect(() => validateCounters(fresh, observed)).toThrow(/count|shape/);
+    const target = structuredClone(fresh);
+    expect(() => mergeCounters(target, observed)).toThrow(/count|shape/);
+    expect(target).toEqual(fresh);
+  },
+);
+
 it('coverage inventories original TypeScript, omits unchanged generated primitives and hashes the exact source', async () => {
   const paths = await inventory();
   expect(paths).toContain('apps/worker/src/auth.ts');
