@@ -51,13 +51,14 @@ async function deleteBucket(page: Page, path: string) {
 }
 
 it.each([
-  { operation: 'create', recovery: 'successful' },
-  { operation: 'create', recovery: 'failed' },
-  { operation: 'delete', recovery: 'successful' },
-  { operation: 'delete', recovery: 'failed' },
+  { operation: 'create', recovery: 'successful', reply: 'lost' },
+  { operation: 'create', recovery: 'failed', reply: 'lost' },
+  { operation: 'delete', recovery: 'successful', reply: 'lost' },
+  { operation: 'delete', recovery: 'failed', reply: 'lost' },
+  { operation: 'create', recovery: 'successful', reply: 'malformed' },
 ] as const)(
-  'a lost reply after a committed bucket $operation does not claim rollback with a $recovery recovery read',
-  async ({ operation, recovery }) => {
+  'a $reply reply after a committed bucket $operation does not claim rollback with a $recovery recovery read',
+  async ({ operation, recovery, reply }) => {
     const app = await ownerRuntime(await runtime());
     let visit: Awaited<ReturnType<typeof ownerPage>> | undefined;
     let tableUnavailable = false;
@@ -89,8 +90,10 @@ it.each([
             .run();
           tableUnavailable = true;
         }
-        // The genuine Worker has already committed; only its reply is lost.
-        await route.abort('failed');
+        // The genuine Worker has already committed; only its reply changes.
+        if (reply === 'lost') await route.abort('failed');
+        // A complete 200 response cannot be decoded as CreatedBucket.
+        else await route.fulfill({ status: 200, json: { path } });
       });
       const recovered = page.waitForResponse(
         (response) =>
