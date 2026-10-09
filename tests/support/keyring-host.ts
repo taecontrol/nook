@@ -124,7 +124,11 @@ reader.on('line', (line) => {
   );
   child.on('close', (status, signal) => {
     children.delete(request.id);
-    send({ id: request.id, status: status ?? 1, ...(signal ? { signal } : {}) });
+    send({
+      id: request.id,
+      status: status ?? 1,
+      ...(signal ? { signal } : {}),
+    });
   });
   child.stdin.end(request.input ?? '');
 });
