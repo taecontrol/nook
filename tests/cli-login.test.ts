@@ -253,7 +253,7 @@ it('E7: externally revoked tokens report invalid identity and logout clears the 
   expect(identity.status).toBe(1);
   expectOutput(
     identity.stdout + identity.stderr,
-    `This machine's token is no longer valid. Run: nook login ${app.origin}`,
+    `This machine's token is no longer valid. Run: nook logout && nook login ${app.origin}`,
     true,
   );
   const logout = await keyring.start(['logout']).done;

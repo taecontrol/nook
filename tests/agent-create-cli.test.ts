@@ -563,7 +563,9 @@ it.each(['absent', 'revoked'])(
     expect(result.status).toBe(1);
     expectOutput(
       result.stdout + result.stderr,
-      `This machine's token is no longer valid. Run: nook login ${app.origin}`,
+      mode === 'revoked'
+        ? `This machine's token is no longer valid. Run: nook logout && nook login ${app.origin}`
+        : `This machine's token is no longer valid. Run: nook login ${app.origin}`,
       true,
     );
     expect(await secretRows(app)).toEqual([]);

@@ -4,7 +4,7 @@ import { Effect } from 'effect';
 import cliPackage from '../package.json' with { type: 'json' };
 import { machineApi } from './api.ts';
 import { installationOrigin, readConfig, writeConfig } from './config.ts';
-import { CliFailure } from './errors.ts';
+import { CliFailure, invalidToken } from './errors.ts';
 import {
   checkKeyring,
   clearToken,
@@ -169,11 +169,7 @@ export function whoami(write: Write) {
       api.machine.whoami({ headers: { authorization: `Bearer ${token}` } }),
     ).pipe(
       Effect.mapError((error) =>
-        error.tag === 'Unauthorized'
-          ? new CliFailure(
-              `This machine's token is no longer valid. Run: nook login ${url}`,
-            )
-          : networkError(url),
+        error.tag === 'Unauthorized' ? invalidToken(url) : networkError(url),
       ),
     );
     const access =
