@@ -95,9 +95,13 @@ reader.on('line', (line) => {
     env?: Record<string, string>;
     unset?: string[];
     signal?: NodeJS.Signals;
+    signalId?: number;
   };
   if (request.signal) {
-    children.get(request.id)?.kill(request.signal);
+    send({
+      signalId: request.signalId,
+      delivered: children.get(request.id)?.kill(request.signal) ?? false,
+    });
     return;
   }
   const overrides: NodeJS.ProcessEnv = Object.fromEntries(

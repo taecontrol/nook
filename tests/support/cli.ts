@@ -86,6 +86,7 @@ export async function privateKeyring(
       }
     }
     let id = 0;
+    const signals = new Map<number, (delivered: boolean) => void>();
     const running = new Map<
       number,
       {
@@ -104,6 +105,11 @@ export async function privateKeyring(
     lines.on('line', (line) => {
       const message = JSON.parse(line);
       if (message.ready) return readyResolve(message.bus);
+      if (message.signalId !== undefined) {
+        signals.get(message.signalId)?.(message.delivered === true);
+        signals.delete(message.signalId);
+        return;
+      }
       const state = running.get(message.id);
       if (!state) return;
       if (message.stream === 'stdout') state.stdout += message.data;
@@ -118,6 +124,8 @@ export async function privateKeyring(
       }
     });
     host.on('close', () => {
+      for (const accept of signals.values()) accept(false);
+      signals.clear();
       readyReject(started.failure('Private bus setup failed.'));
       for (const state of running.values())
         state.finish({ ...state, status: 1 });
@@ -166,7 +174,14 @@ export async function privateKeyring(
         done,
         output: () => state.stdout + state.stderr,
         kill(signal: NodeJS.Signals = 'SIGTERM') {
-          host.stdin.write(`${JSON.stringify({ id: current, signal })}\n`);
+          if (!host.stdin.writable) return Promise.resolve(false);
+          return new Promise<boolean>((accept) => {
+            const signalId = ++id;
+            signals.set(signalId, accept);
+            host.stdin.write(
+              `${JSON.stringify({ id: current, signal, signalId })}\n`,
+            );
+          });
         },
       };
     }

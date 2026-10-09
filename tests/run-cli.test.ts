@@ -244,6 +244,7 @@ it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
       expect(Number.isSafeInteger(parent) && parent > 0).toBe(true);
       expect(existsSync(returned)).toBe(false);
       await nativeSignal(running, signal);
+      expect(existsSync(returned)).toBe(false);
       await writeFile(release, '');
       if (signal === 'SIGINT') {
         await expect.poll(() => existsSync(returned)).toBe(true);
