@@ -11,10 +11,14 @@ children.spawn = ((
   options?: SpawnOptions,
 ) => {
   const args = Array.isArray(parameters) ? parameters : [];
+  const settings = Array.isArray(parameters)
+    ? options
+    : (parameters as SpawnOptions | undefined);
   if (!args.includes('startup-wait'))
-    return original(file, parameters as readonly string[], options);
-  const child = original(file, args, { ...options, detached: true });
-  const home = process.env.HOME!;
+    return original(file, args, settings ?? {});
+  const home = process.env.HOME;
+  if (!home) throw new Error('The launch gate requires a private HOME.');
+  const child = original(file, args, { ...settings, detached: true });
   writeFileSync(resolve(home, 'spawn-held'), String(process.pid));
   const release = resolve(home, 'spawn-release');
   const deadline = Date.now() + 8000;
