@@ -112,3 +112,31 @@ it('the CLI, private bus, host, daemon, and shims never inherit owner environmen
     vi.unstubAllEnvs();
   }
 });
+
+it.runIf(process.platform === 'linux')(
+  'a child that closes stdin leaves the private fixture usable',
+  async () => {
+    const fixture = await privateKeyring('absent');
+    try {
+      const result = await fixture.command(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          "import { closeSync } from 'node:fs'; closeSync(0); process.stdout.write('stdin-closed'); setTimeout(() => {}, 50);",
+        ],
+        {},
+        'x'.repeat(2 * 1024 * 1024),
+      ).done;
+      expect(result).toMatchObject({ status: 0, stdout: 'stdin-closed' });
+      expect(
+        await fixture.command(process.execPath, [
+          '-e',
+          "process.stdout.write('fixture-survived')",
+        ]).done,
+      ).toMatchObject({ status: 0, stdout: 'fixture-survived' });
+    } finally {
+      await fixture.close();
+    }
+  },
+);
