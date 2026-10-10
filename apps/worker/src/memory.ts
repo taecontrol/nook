@@ -100,53 +100,64 @@ function validInput(input: Remember) {
   return message ? Effect.fail(new InvalidMemory({ message })) : Effect.void;
 }
 type Cursor = { bucket: string; scope: MemoryScope; at: string; id: string };
-function encodeCursor(cursor: Cursor) {
-  return btoa(JSON.stringify(cursor))
+// Versioned checksums detect altered opaque cursors; grants authorize each page.
+async function encodeCursor({ bucket, scope, at, id }: Cursor) {
+  const payload = { bucket, scope, at, id };
+  const checksum = await sha256(JSON.stringify(payload));
+  return btoa(JSON.stringify({ v: 1, ...payload, checksum }))
     .replaceAll('+', '-')
     .replaceAll('/', '_')
     .replaceAll('=', '');
 }
-function cursorMatches(
-  cursor: Cursor,
-  bucket: string,
-  scope: MemoryScope,
-  encoded: string,
-) {
+function cursorMatches(cursor: Cursor, bucket: string, scope: MemoryScope) {
   return (
     cursor.bucket === bucket &&
     cursor.scope === scope &&
+    typeof cursor.id === 'string' &&
     uuid.test(cursor.id) &&
-    new Date(cursor.at).toISOString() === cursor.at &&
-    encodeCursor(cursor) === encoded
+    typeof cursor.at === 'string' &&
+    new Date(cursor.at).toISOString() === cursor.at
   );
 }
 function decodeCursor(bucket: string, scope: MemoryScope, cursor?: string) {
-  return Effect.try({
-    try: () => {
+  return Effect.tryPromise({
+    try: async () => {
       if (cursor === undefined) return undefined;
       if (!cursor || cursor.length > 1024) throw new InvalidMemoryCursor();
       const decoded = JSON.parse(
         atob(cursor.replaceAll('-', '+').replaceAll('_', '/')),
       ) as Cursor;
-      if (!cursorMatches(decoded, bucket, scope, cursor))
+      if (
+        !cursorMatches(decoded, bucket, scope) ||
+        (await encodeCursor(decoded)) !== cursor
+      )
         throw new InvalidMemoryCursor();
       return decoded;
     },
     catch: () => new InvalidMemoryCursor(),
   });
 }
-function memoryPage(rows: readonly Row[], bucket: string, scope: MemoryScope) {
+async function memoryPage(
+  rows: readonly Row[],
+  bucket: string,
+  scope: MemoryScope,
+) {
   const page = rows.slice(0, 25);
   const last = page.at(-1);
   return {
     memories: page.map(summary),
     next:
       rows.length > 25 && last
-        ? encodeCursor({ bucket, scope, at: last.created_at, id: last.id })
+        ? await encodeCursor({
+            bucket,
+            scope,
+            at: last.created_at,
+            id: last.id,
+          })
         : null,
   };
 }
-async function contentHash(content: string) {
+async function sha256(content: string) {
   const bytes = await crypto.subtle.digest(
     'SHA-256',
     new TextEncoder().encode(content),
@@ -197,7 +208,7 @@ export const memoryStore = (grant: BucketGrant) =>
           if (!canWrite(grant, input.bucket))
             return yield* Effect.fail(new HttpApiError.Forbidden());
           yield* validInput(input);
-          const hash = yield* Effect.promise(() => contentHash(input.content));
+          const hash = yield* Effect.promise(() => sha256(input.content));
           const id = crypto.randomUUID();
           const now = new Date().toISOString();
           const machineId = principal.kind === 'machine' ? principal.id : null;
@@ -261,7 +272,9 @@ export const memoryStore = (grant: BucketGrant) =>
           const rows = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(
             raw,
           ).pipe(unavailable);
-          return memoryPage(rows, bucket, scope);
+          return yield* Effect.tryPromise(() =>
+            memoryPage(rows, bucket, scope),
+          ).pipe(unavailable);
         }),
       counts: () =>
         Effect.gen(function* () {

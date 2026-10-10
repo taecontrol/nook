@@ -146,8 +146,11 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
     it.each([
       ['none', undefined, ''],
       ['controls', undefined, 'client\tbad/1'],
+      ['comment controls', undefined, 'client/1 (sdk\tbad)'],
+      ['invalid product', undefined, 'bad:client/1'],
       ['long', undefined, `${'x'.repeat(129)}/1`],
       ['bad envelope', { name: 'bad\nclient', version: '1' }, ''],
+      ['blank name', { name: '   ', version: '1' }, ''],
       ['surrogate name', { name: 'client\ud800', version: '1' }, ''],
       ['surrogate version', { name: 'client', version: '1\udfff' }, ''],
       ['long version', undefined, `client/${'1'.repeat(65)}`],
@@ -175,6 +178,7 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
     );
     it.each([
       ['controls', { name: 'invalid\tclient', version: '1' }],
+      ['version controls', { name: 'valid-client', version: 'bad\nversion' }],
       ['surrogate name', { name: 'client\ud800', version: '1' }],
       ['surrogate version', { name: 'client', version: '1\udfff' }],
     ])(
@@ -218,6 +222,43 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
           ?.provenance,
       ).toMatchObject({ client: { name: 'client🦉', version: 'v🦉' } });
     });
+    it('E3: a User-Agent product without a version reports null', async () => {
+      const reported = memoryClient(app, version, {
+        machine: endpoint === 'machine',
+        removeClientInfo: true,
+        headers: {
+          ...(endpoint === 'machine'
+            ? { Authorization: `Bearer ${token}` }
+            : { 'Cf-Access-Jwt-Assertion': assertion }),
+          'User-Agent': 'valid-client',
+        },
+      });
+      const m = stored(
+        await reported.call('remember', { bucket: 'work/acme', content }),
+      );
+      expect(
+        (await reported.call('get', { id: m.id })).structuredContent
+          ?.provenance,
+      ).toMatchObject({ client: { name: 'valid-client', version: null } });
+    });
+    if (version === '2025-06-18')
+      it('E3: a legacy envelope without a reported client version preserves null', async () => {
+        const reported = memoryClient(app, version, {
+          machine: endpoint === 'machine',
+          headers:
+            endpoint === 'machine'
+              ? { Authorization: `Bearer ${token}` }
+              : { 'Cf-Access-Jwt-Assertion': assertion },
+          clientInfo: { name: 'valid-client' },
+        });
+        const m = stored(
+          await reported.call('remember', { bucket: 'work/acme', content }),
+        );
+        expect(
+          (await reported.call('get', { id: m.id })).structuredContent
+            ?.provenance,
+        ).toMatchObject({ client: { name: 'valid-client', version: null } });
+      });
     it('E5: a lost-response retry preserves id, tags and both row counts', async () => {
       const first = stored(
         await call('remember', {
@@ -312,22 +353,28 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
       );
     });
     it.each([
-      ['16385 bytes', { content: `${'é'.repeat(8192)}a` }],
+      [
+        '16385 bytes',
+        { content: `${'é'.repeat(8192)}a` },
+        'Memory content can be at most 16 KiB.',
+      ],
       ['blank', { content: ' \n\t ' }],
       ['NUL', { content: 'a\0b' }],
       ['surrogate', { content: 'a\ud800b' }],
       [
         'eleven tags',
         { tags: Array.from({ length: 11 }, (_, i) => `tag-${i}`) },
+        'A memory can have at most 10 tags.',
       ],
       ['uppercase', { tags: ['Deploy'] }],
       ['duplicate', { tags: ['deploy', 'deploy'] }],
       ['33 characters', { tags: ['a'.repeat(33)] }],
       ['grammar', { tags: ['bad--tag'] }],
+      ['path tag', { tags: ['work/acme'] }],
       ['relative directory', { workingDirectory: 'code/acme' }],
     ])(
       'E11/E33: invalid %s writes nothing and never echoes content',
-      async (label, input) => {
+      async (label, input, message?: string) => {
         const result = await call('remember', {
           bucket: 'work/acme',
           content: 'synthetic-failed-write-content',
@@ -336,12 +383,44 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
         expect(result.isError).toBe(true);
         if (label === 'uppercase')
           expectToolError(result, 'Use lowercase letters: deploy');
+        if (message) expectToolError(result, message);
         expectPrivate(JSON.stringify(result) + logs.join('\n'), [
           'synthetic-failed-write-content',
           token,
           assertion,
         ]);
         expect(await memoryCounts(app)).toEqual({ memories: 0, versions: 0 });
+      },
+    );
+    it('E10/E33: remember inherits bucket grammar before storage and writes nothing', async () => {
+      const result = await call('remember', {
+        bucket: 'WORK',
+        content: 'synthetic-invalid-bucket-write',
+      });
+      expectToolError(result, 'Use lowercase letters: work');
+      expect(await memoryCounts(app)).toEqual({ memories: 0, versions: 0 });
+      expectPrivate(JSON.stringify(result) + logs.join('\n'), [
+        'synthetic-invalid-bucket-write',
+        token,
+        assertion,
+      ]);
+    });
+    it.each(['array', 'object'] as const)(
+      'E33: malformed %s content remains private before the remember handler',
+      async (shape) => {
+        const marker = `synthetic-private-input-${endpoint}-${version}-${shape}`;
+        const result = await call('remember', {
+          bucket: 'work/acme',
+          content: shape === 'array' ? [marker] : { text: marker },
+        });
+        expect(result.isError).toBe(true);
+        expect(result.structuredContent).toBeUndefined();
+        expect(await memoryCounts(app)).toEqual({ memories: 0, versions: 0 });
+        expectPrivate(JSON.stringify(result) + logs.join('\n'), [
+          marker,
+          token,
+          assertion,
+        ]);
       },
     );
     it('E12: discovery documents explicit buckets, safe retries and read annotations', async () => {

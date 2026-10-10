@@ -257,7 +257,7 @@ Issue #10 runs against the migrated production Worker in workerd and real local 
 | E15 | `memory-worker.test.ts`: HTTP/MCP deletion blockers, precedence and direct foreign-key enforcement. |
 | E16 | `memory-worker.test.ts`: remember/delete races in either order leave no orphan. |
 | E17 | `memory-worker.test.ts`: exact lineage, ordering, compact summaries and excluded siblings/descendants. |
-| E18 | `memory-worker.test.ts`: 25/25/25/15 paging with tied dates and invalid/cross-bucket cursors. |
+| E18 | `memory-worker.test.ts`: 25/25/25/15 paging with tied dates, a terminal 25-item page, and altered, malformed, noncanonical, cross-bucket and cross-scope cursors. |
 | E19 | `memory-worker.test.ts`: bucket-only paging and ordering. |
 | E20 | `memory-worker.test.ts`: restricted list/detail/counts authorization and owner-only HTTP routes. |
 | E21 | `memory-worker.test.ts`: shared title derivation, including CR, LF, CRLF and a first nonblank line beyond 512 characters. |
@@ -272,9 +272,11 @@ Issue #10 runs against the migrated production Worker in workerd and real local 
 | E30 | `memory-web.test.ts`, `memory-refresh-web.test.ts`, `memory-reader-regressions.test.ts`: hover/focus detail prefetch, real-tab agent-write refresh and preservation of a pending optimistic bucket through refocus. |
 | E31 | `memory-load-time.test.ts`, `pnpm verify:load-time`: mandatory five-sample Memory budgets, production 4G cold open and intent navigation, with 60 bucket memories. |
 | E32 | `memory-captures.test.ts`: seven states at 1440×900 and 390×844, light/dark, plus full phone detail. |
-| E33 | `memory-mcp.test.ts`, `memory-worker.test.ts`, `memory-web.test.ts`: private denials, failed writes and console/network behavior. |
+| E33 | `memory-mcp.test.ts`, `memory-worker.test.ts`, `memory-web.test.ts`: private denials, failed writes, malformed array/object content under both protocols and endpoints, and console/network behavior. |
 
 `tests/journeys/owner.e2e.ts` additionally remembers through MCP and opens the stored memory using deterministic locators under strict cache replay and zero retries. `memory-worker.test.ts` observes real D1 calls through the existing test checkpoint wrapper: one three-statement batch for remember and duplicate retries, one statement for get, one two-statement batch per list page without per-item reads, and one aggregate statement for counts. Observations contain labels and batch sizes, never SQL, bindings or rows.
+
+Paging cursors are versioned, checksummed Base64url JSON bound to the bucket, scope and existing ordering pair. The checksum classifies ordinary payload alterations as malformed; authorization remains the bucket grant on every request. Native D1 tests also prove schema constraints, version deletion cascading and current-version joins without introducing an update API.
 
 The 28 viewport PNGs and two full phone detail PNGs are `memory-*` files in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. The selected hybrid's three independent desktop columns, shared Vault bucket tree, phone push flow, scope toggle, and nonclickable image chip are the visual reference. Captures omit the prototype scenario selector. A plain first heading already shown in full by the detail title is omitted from the body; long, multiline and formatted headings are retained. Long row titles remain available through the link's title attribute.
 

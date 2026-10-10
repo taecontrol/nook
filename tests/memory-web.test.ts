@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
@@ -40,6 +41,15 @@ it('E22: desktop expands the selected bucket, labels the ordered lineage and rel
       '2 memories',
     );
     expect(
+      await tree
+        .locator('[data-path="work/acme/api"] a > span')
+        .first()
+        .evaluate((node) => {
+          const line = Number.parseFloat(getComputedStyle(node).lineHeight);
+          return node.getBoundingClientRect().height <= line + 1;
+        }),
+    ).toBe(true);
+    expect(
       await memoryRows(page).evaluateAll((rows) =>
         rows.map((r) => r.getAttribute('data-memory-row')),
       ),
@@ -61,6 +71,13 @@ it('E22: desktop expands the selected bucket, labels the ordered lineage and rel
     expect(new URL(page.url()).searchParams.get('bucket')).toBe('work/acme');
     expect(new URL(page.url()).searchParams.get('memory')).toBe(memoryId(2));
     await tree.locator('[data-path="personal"] a').click();
+    await expect
+      .poll(() =>
+        memoryRows(page).evaluateAll((rows) =>
+          rows.map((row) => row.getAttribute('data-memory-row')),
+        ),
+      )
+      .toEqual([6, 7].map(memoryId));
     await tree
       .getByRole('button', { name: 'Collapse work', exact: true })
       .click();
@@ -73,6 +90,22 @@ it('E22: desktop expands the selected bucket, labels the ordered lineage and rel
     expect(await tree.locator('[data-path="work/acme"]').isVisible()).toBe(
       true,
     );
+  } finally {
+    await visit.close();
+  }
+});
+it('E22: collapsing an ancestor keeps the selected bucket reachable until another bucket is chosen', async () => {
+  const visit = await memoryPage(browser);
+  try {
+    const tree = visit.page.getByRole('navigation', { name: 'Memory buckets' });
+    const selected = tree.locator('[data-path="work/acme"]');
+    await selected.waitFor();
+    await tree
+      .getByRole('button', { name: 'Collapse work', exact: true })
+      .click();
+    expect(await selected.isVisible()).toBe(true);
+    await tree.locator('[data-path="personal"] a').click();
+    await expect.poll(() => selected.isVisible()).toBe(false);
   } finally {
     await visit.close();
   }
@@ -93,6 +126,16 @@ it('E23: a phone starts with the list, pushes detail and returns to the same buc
     const { page } = visit;
     await memoryRows(page).first().waitFor();
     expect(
+      await page.locator('[data-memory-list]').evaluate((node) => {
+        const layout = node.closest('[data-memory-layout]');
+        if (!layout) throw new Error('Memory layout is missing.');
+        return (
+          layout.getBoundingClientRect().width -
+          node.getBoundingClientRect().width
+        );
+      }),
+    ).toBeLessThanOrEqual(2);
+    expect(
       await page.getByRole('article', { name: 'Memory detail' }).count(),
     ).toBe(0);
     await page.getByRole('link', { name: 'All buckets', exact: true }).click();
@@ -107,6 +150,15 @@ it('E23: a phone starts with the list, pushes detail and returns to the same buc
       await detail.locator('[data-memory-tags] [data-slot="badge"]').count(),
     ).toBe(10);
     expect(
+      await detail.locator('[data-memory-tags]').evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        return [...node.children].every((child) => {
+          const bounds = child.getBoundingClientRect();
+          return bounds.left >= box.left - 1 && bounds.right <= box.right + 1;
+        });
+      }),
+    ).toBe(true);
+    expect(
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBe(390);
     expect(
@@ -114,6 +166,12 @@ it('E23: a phone starts with the list, pushes detail and returns to the same buc
         .locator('pre')
         .evaluate((node) => node.scrollWidth > node.clientWidth),
     ).toBe(true);
+    expect(
+      await detail.locator('pre').evaluate((node) => {
+        node.scrollLeft = 100;
+        return node.scrollLeft;
+      }),
+    ).toBeGreaterThan(0);
     await page.getByRole('link', { name: 'Memories', exact: true }).click();
     await memoryRows(page).first().waitFor();
     expect(new URL(page.url()).searchParams.get('bucket')).toBe('work/acme');
@@ -152,6 +210,12 @@ it('E24/E33: untrusted Markdown remains inert, image URLs are nonclickable and n
       '<img src=x onerror=alert(1)>',
     );
     expect(await markdown.locator('img, script, iframe').count()).toBe(0);
+    expect(await markdown.getByRole('table').count()).toBe(1);
+    expect(
+      await detail
+        .getByRole('heading', { name: 'Release process', exact: true })
+        .count(),
+    ).toBe(1);
     expect(await markdown.locator('a').count()).toBe(1);
     const link = markdown.getByRole('link', {
       name: 'Nook releases',
@@ -207,6 +271,9 @@ it('E26: scope is preserved in the URL and swaps the actual lineage queries', as
       .getByRole('button', { name: 'Only this bucket', exact: true })
       .click();
     await expect.poll(() => memoryRows(page).count()).toBe(3);
+    await page
+      .getByText('3 memories · newest first', { exact: true })
+      .waitFor();
     expect(new URL(page.url()).searchParams.get('scope')).toBe('bucket');
     await page.reload();
     await expect.poll(() => memoryRows(page).count()).toBe(3);
@@ -215,6 +282,9 @@ it('E26: scope is preserved in the URL and swaps the actual lineage queries', as
       .click();
     await expect.poll(() => memoryRows(page).count()).toBe(7);
     expect(new URL(page.url()).searchParams.get('scope')).toBe('inherited');
+    await page
+      .getByText('7 memories · newest first', { exact: true })
+      .waitFor();
   } finally {
     await visit.close();
   }
@@ -380,6 +450,9 @@ it('paging: 90 memories load in four real pages and retain long title access', a
   const visit = await memoryPage(browser, { seeds: manyMemories });
   try {
     const { page } = visit;
+    await page
+      .getByText('90 memories · newest first', { exact: true })
+      .waitFor();
     for (const count of [25, 50, 75, 90]) {
       await expect.poll(() => memoryRows(page).count()).toBe(count);
       if (count < 90)
@@ -396,6 +469,219 @@ it('paging: 90 memories load in four real pages and retain long title access', a
         .count(),
     ).toBe(0);
   } finally {
+    await visit.close();
+  }
+});
+
+it('E23: resizing from phone to desktop selects the newest memory', async () => {
+  const visit = await memoryPage(browser, {
+    viewport: { width: 390, height: 844 },
+  });
+  try {
+    await memoryRows(visit.page).first().waitFor();
+    expect(
+      await visit.page.getByRole('article', { name: 'Memory detail' }).count(),
+    ).toBe(0);
+    await visit.page.setViewportSize({ width: 1440, height: 900 });
+    await visit.page.getByRole('article', { name: 'Memory detail' }).waitFor();
+    expect(new URL(visit.page.url()).searchParams.get('memory')).toBe(
+      memoryId(1),
+    );
+  } finally {
+    await visit.close();
+  }
+});
+it('E26/E27: an ancestor URL selection remains outside bucket-only scope', async () => {
+  const visit = await memoryPage(browser, {
+    seeds: [
+      memoryFixture(1),
+      memoryFixture(6, {
+        bucket: 'me',
+        content: '# Excluded ancestor\nNot in this scope.',
+      }),
+    ],
+    start: `/memory?bucket=work/acme&scope=bucket&memory=${memoryId(6)}`,
+  });
+  try {
+    await visit.page.getByText('Choose a memory', { exact: true }).waitFor();
+    expect(
+      await visit.page.getByRole('article', { name: 'Memory detail' }).count(),
+    ).toBe(0);
+  } finally {
+    await visit.close();
+  }
+});
+it('E28: an empty lineage in a populated installation is not the first-run state', async () => {
+  const visit = await memoryPage(browser, {
+    seeds: [memoryFixture(1)],
+    start: '/memory?bucket=personal',
+  });
+  try {
+    await visit.page
+      .getByText('Agents working in personal have no memories to read yet.', {
+        exact: true,
+      })
+      .waitFor();
+    expect(
+      await visit.page
+        .getByText('Agents have not stored any memories yet.', { exact: true })
+        .count(),
+    ).toBe(0);
+  } finally {
+    await visit.close();
+  }
+});
+it('E28: a pending genuine detail shows its skeleton and phone back link', async () => {
+  const gate = deferred();
+  const visit = await memoryPage(browser, {
+    viewport: { width: 390, height: 844 },
+    start: `/memory?bucket=work/acme&memory=${memoryId(1)}`,
+    configure: async (page) => {
+      await page.route(`**/api/memories/${memoryId(1)}`, async (route) => {
+        const response = await route.fetch();
+        await gate.promise;
+        await route.fulfill({ response }).catch(() => {});
+      });
+    },
+  });
+  try {
+    await visit.page
+      .getByRole('status', { name: 'Loading memory', exact: true })
+      .waitFor();
+    expect(
+      await visit.page
+        .getByRole('status', { name: 'Loading memory', exact: true })
+        .count(),
+    ).toBe(1);
+    expect(
+      await visit.page
+        .getByRole('link', { name: 'Memories', exact: true })
+        .isVisible(),
+    ).toBe(true);
+    gate.resolve();
+    await visit.page.getByRole('article', { name: 'Memory detail' }).waitFor();
+  } finally {
+    gate.resolve();
+    await visit.close();
+  }
+});
+it('E28: Retry memory recovers a failed detail after real D1 recovery', async () => {
+  let unavailable = false;
+  const visit = await memoryPage(browser, {
+    viewport: { width: 390, height: 844 },
+    start: `/memory?bucket=work/acme&memory=${memoryId(1)}`,
+    configure: async (_, app) => {
+      await (await app.mf.getD1Database('DB'))
+        .prepare('ALTER TABLE memory_versions RENAME TO unavailable_versions')
+        .run();
+      unavailable = true;
+    },
+  });
+  try {
+    await visit.page
+      .getByText('Could not load memory', { exact: true })
+      .waitFor();
+    const retry = visit.page.getByRole('button', {
+      name: 'Retry memory',
+      exact: true,
+    });
+    expect(await retry.isVisible()).toBe(true);
+    expect(
+      await visit.page
+        .getByRole('link', { name: 'Memories', exact: true })
+        .isVisible(),
+    ).toBe(true);
+    await (await visit.app.mf.getD1Database('DB'))
+      .prepare('ALTER TABLE unavailable_versions RENAME TO memory_versions')
+      .run();
+    unavailable = false;
+    await retry.click();
+    await visit.page.getByRole('article', { name: 'Memory detail' }).waitFor();
+  } finally {
+    if (unavailable)
+      await (await visit.app.mf.getD1Database('DB'))
+        .prepare('ALTER TABLE unavailable_versions RENAME TO memory_versions')
+        .run();
+    await visit.close();
+  }
+});
+it('E27: a nonexistent UUID remains in Choose a memory', async () => {
+  const visit = await memoryPage(browser, {
+    start: `/memory?bucket=work/acme&memory=${randomUUID()}`,
+  });
+  try {
+    await visit.page.getByText('Choose a memory', { exact: true }).waitFor();
+    expect(
+      await visit.page
+        .getByText('Could not load memory', { exact: true })
+        .count(),
+    ).toBe(0);
+  } finally {
+    await visit.close();
+  }
+});
+it('E28: Retry buckets recovers its tree after real D1 recovery', async () => {
+  let unavailable = false;
+  const visit = await memoryPage(browser, {
+    start: `/memory?bucket=work/acme&memory=${memoryId(1)}`,
+    configure: async (_, app) => {
+      await (await app.mf.getD1Database('DB'))
+        .prepare('ALTER TABLE buckets RENAME TO unavailable_buckets')
+        .run();
+      unavailable = true;
+    },
+  });
+  try {
+    const retry = visit.page.getByRole('button', {
+      name: 'Retry buckets',
+      exact: true,
+    });
+    await retry.waitFor();
+    await (await visit.app.mf.getD1Database('DB'))
+      .prepare('ALTER TABLE unavailable_buckets RENAME TO buckets')
+      .run();
+    unavailable = false;
+    await retry.click();
+    await visit.page
+      .getByRole('navigation', { name: 'Memory buckets' })
+      .locator('[data-path="work/acme"] a')
+      .waitFor();
+  } finally {
+    if (unavailable)
+      await (await visit.app.mf.getD1Database('DB'))
+        .prepare('ALTER TABLE unavailable_buckets RENAME TO buckets')
+        .run();
+    await visit.close();
+  }
+});
+it('paging: a pending next page disables repeat submissions', async () => {
+  const gate = deferred();
+  const visit = await memoryPage(browser, {
+    seeds: manyMemories,
+    configure: async (page) => {
+      await page.route('**/api/memories?*', async (route) => {
+        const response = await route.fetch();
+        if (new URL(route.request().url()).searchParams.has('cursor'))
+          await gate.promise;
+        await route.fulfill({ response }).catch(() => {});
+      });
+    },
+  });
+  try {
+    await expect.poll(() => memoryRows(visit.page).count()).toBe(25);
+    await visit.page
+      .getByRole('button', { name: 'Load more', exact: true })
+      .click();
+    const pending = visit.page.getByRole('button', {
+      name: 'Loading…',
+      exact: true,
+    });
+    await pending.waitFor();
+    expect(await pending.isDisabled()).toBe(true);
+    gate.resolve();
+    await expect.poll(() => memoryRows(visit.page).count()).toBe(50);
+  } finally {
+    gate.resolve();
     await visit.close();
   }
 });

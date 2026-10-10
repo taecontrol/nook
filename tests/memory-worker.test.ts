@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 import { handlerForPrincipal } from '../apps/worker/src/index.ts';
 import { expectToolError } from './support/mcp.ts';
@@ -156,6 +156,117 @@ it('E19: bucket-only paging excludes ancestors with the same ordering and page s
   expect(lengths).toEqual([25, 25, 10]);
   expect(all).toEqual(manyMemories.slice(0, 60).map((m) => m.id));
 });
+it('E18: an issued cursor rejects a change to another existing ordering pair without skipping its memory', async () => {
+  const at = '2026-10-09T14:00:00.000Z';
+  await seedMemories(
+    app,
+    manyMemories.map((memory) => ({ ...memory, createdAt: at })),
+  );
+  const first = await listMemoryPage(app);
+  expect(first.memories.map((memory) => memory.id)).toEqual(
+    Array.from({ length: 25 }, (_, index) => memoryId(189 - index)),
+  );
+  expect(first.next).toBeTypeOf('string');
+  const issued = first.next as string;
+  const second = await listMemoryPage(
+    app,
+    `bucket=work/acme&cursor=${encodeURIComponent(issued)}`,
+  );
+  expect(second.memories.map((memory) => memory.id)).toEqual(
+    Array.from({ length: 25 }, (_, index) => memoryId(164 - index)),
+  );
+  const modified = JSON.parse(
+    Buffer.from(issued, 'base64url').toString('utf8'),
+  );
+  expect(modified).toMatchObject({
+    bucket: 'work/acme',
+    scope: 'inherited',
+    at,
+    id: memoryId(165),
+  });
+  modified.id = memoryId(164);
+  const cursor = Buffer.from(JSON.stringify(modified)).toString('base64url');
+  const response = await fetch(
+    `${app.origin}/api/memories?bucket=work/acme&cursor=${encodeURIComponent(cursor)}`,
+  );
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({ _tag: 'InvalidMemoryCursor' });
+});
+it('E18/E19: cursors reject mismatched scope, malformed encodings and fabricated native ordering pairs', async () => {
+  const at = '2026-10-09T14:00:00.000Z';
+  await seedMemories(app, [
+    ...manyMemories.map((memory) => ({ ...memory, createdAt: at })),
+    memoryFixture(1, { bucket: 'personal', createdAt: at }),
+  ]);
+  const own = await listMemoryPage(app, 'bucket=work/acme&scope=bucket');
+  expect(own.next).toBeTypeOf('string');
+  const encodedPair = (id: unknown, time: string) => {
+    const payload = { bucket: 'work/acme', scope: 'inherited', at: time, id };
+    const checksum = createHash('sha256')
+      .update(JSON.stringify(payload))
+      .digest('hex');
+    return Buffer.from(JSON.stringify({ v: 1, ...payload, checksum })).toString(
+      'base64url',
+    );
+  };
+  const page = await listMemoryPage(app);
+  const issued = page.next as string;
+  const malformed = [
+    '',
+    'x'.repeat(1025),
+    Buffer.from('{').toString('base64url'),
+    `${issued}=`,
+    Buffer.from(
+      JSON.stringify(
+        JSON.parse(Buffer.from(issued, 'base64url').toString('utf8')),
+        null,
+        1,
+      ),
+    ).toString('base64url'),
+    own.next as string,
+    encodedPair(randomUUID(), at),
+    encodedPair(memoryId(165), '2026-10-09T23:00:00.000Z'),
+    encodedPair(memoryId(1), at),
+    encodedPair([memoryId(165)], at),
+    encodedPair(memoryId(165), '2026-10-09T14:00:00Z'),
+    encodedPair('malformed', at),
+  ];
+  for (const cursor of malformed) {
+    const response = await fetch(
+      `${app.origin}/api/memories?bucket=work/acme&cursor=${encodeURIComponent(cursor)}`,
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      _tag: 'InvalidMemoryCursor',
+    });
+  }
+  const db = await app.mf.getD1Database('DB');
+  await db.prepare('ALTER TABLE memories RENAME TO unavailable_memories').run();
+  try {
+    const valid = await fetch(
+      `${app.origin}/api/memories?bucket=work/acme&cursor=${encodeURIComponent(issued)}`,
+    );
+    expect(valid.status).toBe(503);
+    expect(await valid.json()).toEqual({ _tag: 'ServiceUnavailable' });
+    for (const cursor of [
+      encodedPair('malformed', at),
+      encodedPair(memoryId(165), '2026-10-09T14:00:00Z'),
+      encodedPair([memoryId(165)], at),
+    ]) {
+      const response = await fetch(
+        `${app.origin}/api/memories?bucket=work/acme&cursor=${encodeURIComponent(cursor)}`,
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        _tag: 'InvalidMemoryCursor',
+      });
+    }
+  } finally {
+    await db
+      .prepare('ALTER TABLE unavailable_memories RENAME TO memories')
+      .run();
+  }
+});
 it('E20/E33: restricted handlers forbid sibling lists and mask detail; the owner routes reject Nook tokens', async () => {
   await seedMemories(app, [
     memoryFixture(1, {
@@ -211,6 +322,8 @@ it.each([
   ['\r\n\r\n## CRLF release\r\nSecond line', 'CRLF release'],
   [' > - * ## Prefer pnpm  \nDetails', 'Prefer pnpm'],
   ['a'.repeat(121), 'a'.repeat(120)],
+  ['😀'.repeat(121), '😀'.repeat(120)],
+  [' > - * ##   \nDetails', 'Untitled memory'],
   [`${'\n'.repeat(600)}## After blank lines\nDetails`, 'After blank lines'],
 ])(
   'E21: title derives from the first nonblank line of %j',
@@ -219,6 +332,99 @@ it.each([
     expect((await listMemoryPage(app)).memories[0].title).toBe(title);
   },
 );
+it('E17: list inherits bucket grammar and a valid missing bucket stays not found', async () => {
+  await seedMemories(app, typicalMemories);
+  for (const [bucket, status, tag] of [
+    ['WORK', 400, 'InvalidBucketPath'],
+    ['work/missing', 404, 'BucketNotFound'],
+  ] as const) {
+    const response = await fetch(`${app.origin}/api/memories?bucket=${bucket}`);
+    expect(response.status).toBe(status);
+    expect(await response.json()).toMatchObject({ _tag: tag });
+  }
+});
+it('E9/E14: a malformed id remains not found while memory storage is unavailable', async () => {
+  const db = await app.mf.getD1Database('DB');
+  await db
+    .prepare('ALTER TABLE memory_versions RENAME TO unavailable_versions')
+    .run();
+  try {
+    const response = await fetch(`${app.origin}/api/memories/malformed`);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ _tag: 'MemoryNotFound' });
+  } finally {
+    await db
+      .prepare('ALTER TABLE unavailable_versions RENAME TO memory_versions')
+      .run();
+  }
+});
+it('storage reads: get and list use the persisted current version and its provenance', async () => {
+  await seedMemories(app, [memoryFixture(1)]);
+  const db = await app.mf.getD1Database('DB');
+  const content = '# Current version\nThe current body.';
+  const at = '2026-10-09T20:00:00.000Z';
+  await db
+    .prepare(
+      'INSERT INTO memory_versions(memory_id,version,content,tags,client_name,client_version,principal,machine_id,machine_name,working_directory,created_at) SELECT memory_id,2,?,\'["current"]\',client_name,client_version,principal,machine_id,machine_name,working_directory,? FROM memory_versions WHERE memory_id=?',
+    )
+    .bind(content, at, memoryId(1))
+    .run();
+  await db
+    .prepare(
+      'UPDATE memories SET current_version=2, content_hash=?, updated_at=? WHERE id=?',
+    )
+    .bind(createHash('sha256').update(content).digest('hex'), at, memoryId(1))
+    .run();
+  const detail = await memoryClient(app, '2026-07-28').call('get', {
+    id: memoryId(1),
+  });
+  expect(detail.structuredContent).toMatchObject({
+    content,
+    tags: ['current'],
+    version: 2,
+    updatedAt: at,
+    provenance: { at },
+  });
+  expect((await listMemoryPage(app)).memories).toEqual([
+    expect.objectContaining({
+      title: 'Current version',
+      tags: ['current'],
+      version: 2,
+      provenance: expect.objectContaining({ at }),
+    }),
+  ]);
+});
+it('E5/E14/E33: a hash-conflict row with different bytes fails privately without changing either memory', async () => {
+  const stored = memoryFixture(1, {
+    content: 'synthetic-existing-conflict-content',
+  });
+  const submitted = 'synthetic-submitted-conflict-content';
+  await seedMemories(app, [stored]);
+  const db = await app.mf.getD1Database('DB');
+  // Seed the storage state a hash collision presents; no crypto replacement.
+  await db
+    .prepare('UPDATE memories SET content_hash=? WHERE id=?')
+    .bind(createHash('sha256').update(submitted).digest('hex'), stored.id)
+    .run();
+  const result = await memoryClient(app, '2026-07-28').call('remember', {
+    bucket: stored.bucket,
+    content: submitted,
+  });
+  expectToolError(result, 'Service unavailable. Try again later.');
+  expect(JSON.stringify(result)).not.toContain(stored.content);
+  expect(JSON.stringify(result)).not.toContain(submitted);
+  expect(await memoryCounts(app)).toEqual({ memories: 1, versions: 1 });
+  expect(
+    (await memoryClient(app, '2026-07-28').call('get', { id: stored.id }))
+      .structuredContent?.content,
+  ).toBe(stored.content);
+});
+it('E18: a terminal page with exactly 25 memories has no next cursor', async () => {
+  await seedMemories(app, manyMemories.slice(0, 25));
+  const page = await listMemoryPage(app);
+  expect(page.memories).toHaveLength(25);
+  expect(page.next).toBeNull();
+});
 it('Memory SQL budgets: remember uses one batch, get one statement and each feed page one batch', async () => {
   const labels: string[] = [];
   const measured = await vaultCheckpoints(
@@ -387,6 +593,65 @@ it('schema: the unique index and version checks independently enforce the settle
     await expect(db.prepare(query).bind(memoryId(1)).run()).rejects.toThrow(
       /CHECK/i,
     );
+});
+it('schema: native D1 rejects invalid head, version, client and tag facts', async () => {
+  await seedMemories(app, [memoryFixture(1)]);
+  const db = await app.mf.getD1Database('DB');
+  const invalidFacts: [string, string | number][] = [
+    ['UPDATE memories SET current_version=? WHERE id=?', 0],
+    ['UPDATE memories SET content_hash=? WHERE id=?', 'not-a-hash'],
+    ['UPDATE memories SET content_hash=? WHERE id=?', 'A'.repeat(64)],
+    ['UPDATE memory_versions SET version=? WHERE memory_id=?', 0],
+    ['UPDATE memory_versions SET content=? WHERE memory_id=?', ''],
+    [
+      'UPDATE memory_versions SET content=? WHERE memory_id=?',
+      'é'.repeat(8192) + 'a',
+    ],
+    ['UPDATE memory_versions SET tags=? WHERE memory_id=?', '{"a":"b"}'],
+    ['UPDATE memory_versions SET client_name=? WHERE memory_id=?', ''],
+    [
+      'UPDATE memory_versions SET client_name=? WHERE memory_id=?',
+      'a'.repeat(129),
+    ],
+    ['UPDATE memory_versions SET client_version=? WHERE memory_id=?', ''],
+    [
+      'UPDATE memory_versions SET client_version=? WHERE memory_id=?',
+      '1'.repeat(65),
+    ],
+    ['UPDATE memory_versions SET principal=? WHERE memory_id=?', 'other'],
+  ];
+  for (const [query, value] of invalidFacts)
+    await expect(
+      db.prepare(query).bind(value, memoryId(1)).run(),
+    ).rejects.toThrow(/CHECK/i);
+  await expect(
+    db
+      .prepare(
+        'INSERT INTO memories(id,bucket,current_version,content_hash,created_at,updated_at) VALUES (?,?,1,?,?,?)',
+      )
+      .bind(
+        'bad',
+        'work/acme',
+        '0'.repeat(64),
+        '2026-10-09T20:00:00.000Z',
+        '2026-10-09T20:00:00.000Z',
+      )
+      .run(),
+  ).rejects.toThrow(/CHECK/i);
+  await expect(
+    db
+      .prepare(
+        'INSERT INTO memory_versions SELECT * FROM memory_versions WHERE memory_id=?',
+      )
+      .bind(memoryId(1))
+      .run(),
+  ).rejects.toThrow(/UNIQUE/i);
+});
+it('schema: removing a memory head cascades to its stored versions', async () => {
+  await seedMemories(app, [memoryFixture(1)]);
+  const db = await app.mf.getD1Database('DB');
+  await db.prepare('DELETE FROM memories WHERE id=?').bind(memoryId(1)).run();
+  expect(await memoryCounts(app)).toEqual({ memories: 0, versions: 0 });
 });
 it('E14/E33: failed HTTP reads have fixed public errors with no title, content or storage cause', async () => {
   await seedMemories(app, [
