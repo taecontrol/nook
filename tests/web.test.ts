@@ -375,8 +375,8 @@ it.each(visualMatrix)(
       }
       expect(
         await page
-          .getByRole('button', { name: 'Memory Not available yet' })
-          .isDisabled(),
+          .getByRole('link', { name: 'Memory', exact: true })
+          .isEnabled(),
       ).toBe(true);
       expect(
         await page

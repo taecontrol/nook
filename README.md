@@ -5,7 +5,7 @@ Tools that AI agents use from any machine, running in your own Cloudflare accoun
 - **Memory:** a general memory organized in buckets (`me`, `work/project`, `personal`) that agents read and write over MCP and you browse in a web UI.
 - **Vault:** secrets agents use through `nook run` without you pasting them into a conversation.
 
-Nook is in early development. The owner manages hierarchical buckets and connected machines in the web app, and stores encrypted secrets in Vault. After saving, Vault shows only names and descriptions; replacing or deleting a value requires confirmation. Agents discover secrets in a bucket and its ancestors through MCP `list_secrets` or `nook vault list <bucket>`, within their grant. Agents use values through `nook run`; the owner reviews delivered uses and grant denials on Audit. Memory follows in a later change.
+Nook is in early development. The owner manages hierarchical buckets and connected machines in the web app, and stores encrypted secrets in Vault. After saving, Vault shows only names and descriptions; replacing or deleting a value requires confirmation. Agents discover secrets in a bucket and its ancestors through MCP `list_secrets` or `nook vault list <bucket>`, within their grant. Agents use values through `nook run`; the owner reviews delivered uses and grant denials on Audit. Agents store memories over MCP, and the owner reads them in Memory with their recorded provenance.
 
 When approving CLI login on Linux or macOS, the owner chooses specific bucket subtrees or all buckets. Agents on that machine connect over MCP using `nook mcp-header`, which reads its credential from the system keyring. The CLI shows the grant with `whoami` and revokes it with `logout`; the owner can also revoke it from Machines.
 
@@ -17,6 +17,23 @@ brew install taecontrol/tap/nook            # macOS
 ```
 
 `nook login https://<hostname>` connects a machine to an installation. See [deployment](docs/deployment.md#cli-and-the-machine-api-bypass) for the agent configuration and [releasing](docs/releasing.md) for how versions ship.
+
+## Remember and read
+
+The MCP `remember` tool takes an explicit existing bucket, Markdown content, optional tags, and an optional absolute `workingDirectory`:
+
+```json
+{
+  "bucket": "work/acme",
+  "content": "# Release process\nRun the release workflow from a green main.",
+  "tags": ["deploy"],
+  "workingDirectory": "/Users/luis/code/acme-api"
+}
+```
+
+The result contains the memory id and metadata. `get({"id": "…"})` reads its exact content and provenance. Retrying byte-identical content in the same bucket returns that memory with `created: false`, preserves its tags, and writes nothing. A changed byte or a different bucket creates another memory. Content is limited to 16 KiB of UTF-8; tags are unique lowercase bucket segments, at most ten tags of 32 characters each.
+
+Memory reads include the selected bucket, its ancestors, and `me`, within the caller's grant. In the web app, switch between that view and "Only this bucket". Each memory records the authenticated principal, client as reported, optional working directory, and server time. Markdown renders without executing HTML or fetching remote images. Buckets holding memories cannot be deleted. Search, editing, and forgetting are not available yet.
 
 ## Run a command with secrets
 

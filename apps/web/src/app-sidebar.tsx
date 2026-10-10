@@ -26,7 +26,6 @@ import {
 import type { Session } from './identity';
 import { OwnerMenu } from './owner-menu';
 
-const tools = [{ label: 'Memory', icon: Brain }];
 const footerText = {
   loading: 'Checking session…',
   'session-expired': 'Session expired',
@@ -92,22 +91,14 @@ export function AppSidebar({ session }: { session: Session }) {
           <SidebarGroupLabel>Tools</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {tools.map(({ label, icon: Icon }) => (
-                <SidebarMenuItem key={label}>
-                  <SidebarMenuButton
-                    disabled
-                    className="h-auto items-start py-3 disabled:opacity-60"
-                  >
-                    <Icon className="mt-0.5" />
-                    <span className="flex flex-col gap-1">
-                      <span>{label}</span>
-                      <span className="text-xs font-normal text-muted-foreground">
-                        Not available yet
-                      </span>
-                    </span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={pathname === '/memory'}>
+                  <Link to="/memory" search={{}} onClick={close}>
+                    <Brain />
+                    <span>Memory</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton asChild isActive={pathname === '/vault'}>
                   <Link to="/vault" search={{}} onClick={close}>

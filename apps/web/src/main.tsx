@@ -14,6 +14,7 @@ import { preloadBuckets } from './buckets-api';
 import { Home } from './home';
 import { identityOptions } from './identity';
 import { preloadMachines } from './machines-api';
+import { type MemorySearch, preloadMemory } from './memory-api';
 import { Shell } from './shell';
 import { preloadVault } from './vault-api';
 import './index.css';
@@ -55,6 +56,29 @@ const router = createRouter({
     owner.addChildren([
       home,
       buckets,
+      createRoute({
+        getParentRoute: () => owner,
+        path: '/memory',
+        component: lazyRouteComponent(
+          () => import('./memory-page'),
+          'MemoryPage',
+        ),
+        validateSearch: (search: Record<string, unknown>): MemorySearch => ({
+          ...(typeof search.bucket === 'string'
+            ? { bucket: search.bucket }
+            : {}),
+          ...(typeof search.memory === 'string'
+            ? { memory: search.memory }
+            : {}),
+          ...(search.scope === 'bucket' || search.scope === 'inherited'
+            ? { scope: search.scope }
+            : {}),
+        }),
+        loaderDeps: ({ search }) => search,
+        loader: ({ context, deps }) => {
+          preloadMemory(context.queryClient, deps);
+        },
+      }),
       createRoute({
         getParentRoute: () => owner,
         path: '/vault',

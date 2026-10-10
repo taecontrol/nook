@@ -23,6 +23,8 @@ it('E18/E19: cold-open and intent navigation budgets use the median of five samp
       vaultNavigation: Array(5).fill(20),
       audit: Array(5).fill(500),
       auditNavigation: Array(5).fill(20),
+      memory: Array(5).fill(500),
+      memoryNavigation: Array(5).fill(20),
     }),
   ).not.toThrow();
 });
@@ -74,6 +76,8 @@ it.each([
         vaultNavigation: Array(5).fill(20),
         audit: Array(5).fill(500),
         auditNavigation: Array(5).fill(20),
+        memory: Array(5).fill(500),
+        memoryNavigation: Array(5).fill(20),
         [String(kind)]: values,
       }),
     ).toThrow(message);
@@ -92,6 +96,8 @@ it('E20: gzip bytes are printed as diagnostics and never used as a budget', asyn
     vaultNavigation: Array(5).fill(20),
     audit: Array(5).fill(500),
     auditNavigation: Array(5).fill(20),
+    memory: Array(5).fill(500),
+    memoryNavigation: Array(5).fill(20),
     gzipBytes: 900_000,
   };
   expect(() => assertLoadTimes(measured)).not.toThrow();

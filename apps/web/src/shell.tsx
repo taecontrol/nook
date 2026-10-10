@@ -23,6 +23,7 @@ const titles: Record<string, string> = {
   '/machines': 'Machines',
   '/audit': 'Audit',
   '/vault': 'Vault',
+  '/memory': 'Memory',
 };
 
 export function Shell() {

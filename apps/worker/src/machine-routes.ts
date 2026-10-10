@@ -15,7 +15,7 @@ export function machineMcpHandler(db: D1Database, request: Request) {
   return Effect.runPromise(
     machineOperations.pipe(
       Effect.flatMap((store) =>
-        store.whoami(request.headers.get('Authorization') ?? ''),
+        store.forAudit(request.headers.get('Authorization') ?? ''),
       ),
       Effect.matchEffect({
         onFailure: (error) =>
@@ -24,8 +24,13 @@ export function machineMcpHandler(db: D1Database, request: Request) {
               ? Response.json({ _tag: 'Unauthorized' }, { status: 401 })
               : unavailable(),
           ),
-        onSuccess: ({ grant }) =>
-          Effect.promise(() => mcpHandler(db, grant).fetch(request)),
+        onSuccess: ({ grant, id, machine }) =>
+          Effect.promise(() =>
+            mcpHandler(db, {
+              grant,
+              principal: { kind: 'machine', id, name: machine },
+            }).fetch(request),
+          ),
       }),
       Effect.provide(D1Client.layer({ db })),
       Effect.catchCause(() => Effect.succeed(unavailable())),

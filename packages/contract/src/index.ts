@@ -15,6 +15,16 @@ import {
   ReservedBucket,
 } from './buckets.ts';
 import { Machine } from './machines.ts';
+import {
+  BucketHasMemories,
+  InvalidMemory,
+  InvalidMemoryCursor,
+  Memory,
+  MemoryCounts,
+  MemoryNotFound,
+  MemoryPage,
+  MemoryQuery,
+} from './memory.ts';
 import { SecretKeyUnavailable } from './run.ts';
 import {
   BucketHasSecrets,
@@ -34,6 +44,7 @@ export * from './audit.ts';
 export * from './buckets.ts';
 export * from './grants.ts';
 export * from './machines.ts';
+export * from './memory.ts';
 export * from './run.ts';
 export * from './vault.ts';
 export const Owner = Schema.Struct({ email: Schema.String });
@@ -44,6 +55,35 @@ const errors = [
   HttpApiError.ServiceUnavailable,
 ];
 export const Api = HttpApi.make('nook')
+  .add(
+    HttpApiGroup.make('memories')
+      .add(
+        HttpApiEndpoint.get('counts', '/api/memories/counts', {
+          success: MemoryCounts,
+          error: errors,
+        }),
+      )
+      .add(
+        HttpApiEndpoint.get('list', '/api/memories', {
+          query: MemoryQuery,
+          success: MemoryPage,
+          error: [
+            ...errors,
+            InvalidBucketPath,
+            InvalidMemory,
+            InvalidMemoryCursor,
+            BucketNotFound,
+          ],
+        }),
+      )
+      .add(
+        HttpApiEndpoint.get('get', '/api/memories/:id', {
+          params: Schema.Struct({ id: Schema.String }),
+          success: Memory,
+          error: [...errors, MemoryNotFound],
+        }),
+      ),
+  )
   .add(
     HttpApiGroup.make('audit').add(
       HttpApiEndpoint.get('list', '/api/audit', {
@@ -86,6 +126,7 @@ export const Api = HttpApi.make('nook')
             ReservedBucket,
             BucketHasChildren,
             BucketHasSecrets,
+            BucketHasMemories,
             BucketNotFound,
           ],
         }),

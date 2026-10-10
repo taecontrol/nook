@@ -16,6 +16,8 @@ const measured = {
   vaultNavigation: Array(5).fill(20),
   audit: Array(5).fill(500),
   auditNavigation: Array(5).fill(20),
+  memory: Array(5).fill(500),
+  memoryNavigation: Array(5).fill(20),
 };
 it.each(['machines', 'machinesNavigation'])(
   'E25: an over-budget %s fails for its own timing',

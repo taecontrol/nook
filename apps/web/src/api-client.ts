@@ -19,6 +19,10 @@ const statusByTag: Record<string, number> = {
   Forbidden: 403,
   ServiceUnavailable: 503,
   InvalidBucketPath: 400,
+  InvalidMemory: 400,
+  InvalidMemoryCursor: 400,
+  MemoryNotFound: 404,
+  BucketHasMemories: 409,
   InvalidAuditFilter: 400,
   ReservedBucket: 400,
   BucketNotFound: 404,
@@ -65,6 +69,7 @@ function publicMessage(error: unknown) {
     'VaultNotConfigured',
     'SecretKeyUnavailable',
     'BucketHasSecrets',
+    'BucketHasMemories',
   ].includes(typed._tag ?? '')
     ? typed.message
     : undefined;

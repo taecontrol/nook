@@ -8,7 +8,11 @@ export async function vaultCheckpoints(
   onCheckpoint: (label: string) => Promise<boolean>,
   grant?: readonly string[],
   observeRequests = false,
-  options: { observeStatements?: boolean; omitIp?: boolean } = {},
+  options: {
+    observeStatements?: boolean;
+    observeBatchSize?: boolean;
+    omitIp?: boolean;
+  } = {},
 ) {
   await mkdir('.local', { recursive: true });
   const directory = await mkdtemp(resolve('.local', 'vault-checkpoints-'));

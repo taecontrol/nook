@@ -16,6 +16,8 @@ const measured = {
   vaultNavigation: Array(5).fill(20),
   audit: Array(5).fill(1000),
   auditNavigation: Array(5).fill(100),
+  memory: Array(5).fill(500),
+  memoryNavigation: Array(5).fill(20),
 };
 it.each(['audit', 'auditNavigation'])(
   'E25: Audit medians independently enforce the fixed budget (%s)',

@@ -53,8 +53,10 @@ it('E1: discovery preserves the three bucket tools alongside Vault discovery', a
   expect(tools.map((tool) => tool.name).sort()).toEqual([
     'create_bucket',
     'delete_bucket',
+    'get',
     'list_buckets',
     'list_secrets',
+    'remember',
   ]);
   const byName = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
   expect(byName.list_buckets.annotations).toMatchObject({ readOnlyHint: true });
@@ -139,7 +141,7 @@ it('E2: discovered descriptions retain explicit buckets, owner choices and write
       'delete_bucket',
       [
         'Delete an empty bucket to correct a mistaken creation.',
-        'The me bucket and buckets with children or secrets cannot be deleted.',
+        'The me bucket and buckets with children, secrets, or memories cannot be deleted.',
         'Confirm with the owner before deleting.',
       ],
     ],

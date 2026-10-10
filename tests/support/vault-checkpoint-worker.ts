@@ -7,7 +7,11 @@ async function checkpoint(stage: string) {
   const result = await fetch(`https://nook-vault-checkpoints.invalid/${stage}`);
   if (!result.ok) throw new Error('Synthetic D1 failure');
 }
-function decorate(db: D1Database, observeStatements: boolean): D1Database {
+function decorate(
+  db: D1Database,
+  observeStatements: boolean,
+  observeBatchSize: boolean,
+): D1Database {
   const originals = new WeakMap<D1PreparedStatement, D1PreparedStatement>();
   function wrap(statement: D1PreparedStatement): D1PreparedStatement {
     const wrapped: D1PreparedStatement = {
@@ -29,6 +33,7 @@ function decorate(db: D1Database, observeStatements: boolean): D1Database {
     prepare: (query) => wrap(db.prepare(query)),
     async batch<T>(statements: D1PreparedStatement[]) {
       await checkpoint('before-batch');
+      if (observeBatchSize) await checkpoint(`batch-${statements.length}`);
       const result = await db.batch<T>(
         statements.map((statement) => originals.get(statement) ?? statement),
       );
@@ -45,7 +50,11 @@ export function vaultCheckpointWorker(
     fetch(request: Request, env: { DB: D1Database }): Promise<Response>;
   },
   observeRequests = false,
-  options: { observeStatements?: boolean; omitIp?: boolean } = {},
+  options: {
+    observeStatements?: boolean;
+    observeBatchSize?: boolean;
+    omitIp?: boolean;
+  } = {},
 ) {
   return {
     async fetch(request: Request, env: { DB: D1Database }) {
@@ -77,7 +86,11 @@ export function vaultCheckpointWorker(
       }
       return worker.fetch(request, {
         ...env,
-        DB: decorate(env.DB, options.observeStatements ?? false),
+        DB: decorate(
+          env.DB,
+          options.observeStatements ?? false,
+          options.observeBatchSize ?? false,
+        ),
       });
     },
   };

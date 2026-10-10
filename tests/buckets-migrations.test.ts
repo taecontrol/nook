@@ -77,6 +77,7 @@ it('E22/E23: Wrangler applies only the numbered migrations and preserves the loc
       { name: '0006_audit_entries.sql' },
       { name: '0007_secret_creations.sql' },
       { name: '0008_secret_reveals.sql' },
+      { name: '0009_memories.sql' },
     ]);
     expect(first[1].results).toEqual([
       { path: 'me', created_at: expect.any(String) },

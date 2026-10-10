@@ -2,6 +2,7 @@ import type { CreatedBucket } from '@nook/contract';
 import {
   type QueryClient,
   queryOptions,
+  useIsMutating,
   useMutation,
   useMutationState,
   useQuery,
@@ -107,6 +108,16 @@ export function preloadBuckets(queryClient: QueryClient) {
   if (!isWriting(queryClient)) void queryClient.prefetchQuery(bucketsOptions);
 }
 
+export function useBucketList() {
+  const busy = useIsMutating({ mutationKey: writeKey }) > 0;
+  return useQuery({
+    ...bucketsOptions,
+    enabled: !busy,
+    staleTime: busy ? Infinity : bucketsOptions.staleTime,
+    refetchOnWindowFocus: busy ? false : bucketsOptions.refetchOnWindowFocus,
+  });
+}
+
 export function useBuckets() {
   const queryClient = useQueryClient();
   // The native mutation cache retains the operation across route unmounts.
@@ -133,12 +144,7 @@ export function useBuckets() {
     return true;
   };
   return {
-    buckets: useQuery({
-      ...bucketsOptions,
-      enabled: !busy,
-      staleTime: busy ? Infinity : bucketsOptions.staleTime,
-      refetchOnWindowFocus: busy ? false : bucketsOptions.refetchOnWindowFocus,
-    }),
+    buckets: useBucketList(),
     create: (path: string) => start('create', path),
     remove: (path: string) => start('delete', path),
     busy,

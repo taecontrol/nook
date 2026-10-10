@@ -1,5 +1,5 @@
 import { Schema } from 'effect';
-import { bucketLineage } from './buckets.ts';
+import { readLineage } from './buckets.ts';
 
 export const secretLimits = {
   name: 64,
@@ -32,8 +32,7 @@ export function secretPath(secret: { bucket: string; name: string }) {
   return `${secret.bucket}/${secret.name}`;
 }
 export function secretLineage(bucket: string) {
-  const paths = bucketLineage(bucket).reverse();
-  return paths.includes('me') ? paths : [...paths, 'me'];
+  return readLineage(bucket);
 }
 export const WriteId = Schema.String.check(Schema.isUUID(4));
 export const Secret = Schema.Struct({

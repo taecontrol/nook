@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import {
+  Brain,
   ChevronRight,
   History,
   KeyRound,
@@ -80,8 +81,24 @@ export function Home() {
           </Link>
         </Item>
       </section>
-      <section aria-label="Tools" className="mt-12">
+      <section aria-label="Tools" className="mt-12 space-y-3">
         <div className={label}>Tools</div>
+        <Item variant="outline" asChild>
+          <Link to="/memory" search={{}}>
+            <ItemMedia variant="icon">
+              <Brain />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Memory</ItemTitle>
+              <ItemDescription>
+                Read what agents stored, with its provenance.
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <ChevronRight className="size-4 text-muted-foreground" />
+            </ItemActions>
+          </Link>
+        </Item>
         <Item variant="outline" asChild>
           <Link to="/vault">
             <ItemMedia variant="icon">
