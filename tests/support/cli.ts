@@ -34,7 +34,14 @@ export async function privateKeyring(
       );
     return keychain;
   }
-  const home = await mkdtemp(resolve(options.tempRoot ?? '/tmp', 'nook-cli-'));
+  const run = process.env.NOOK_TEST_RUN;
+  if (!run)
+    throw new Error(
+      'Linux CLI fixtures require an isolated test run identity.',
+    );
+  const home = await mkdtemp(
+    resolve(options.tempRoot ?? '/tmp', `nook-cli-${run}-`),
+  );
   let sandbox: ReturnType<typeof launchSandbox> | undefined;
   try {
     const shim = resolve(home, 'bin');

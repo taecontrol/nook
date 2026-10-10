@@ -69,7 +69,6 @@ export async function startHostIsolation(
     pid: process.pid,
     home,
     uid: userInfo().uid,
-    parentId: original.NOOK_TEST_RUN,
   };
   const env = testEnvironment(home, {
     NOOK_TEST_RUN: run.id,

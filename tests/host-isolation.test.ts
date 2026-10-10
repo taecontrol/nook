@@ -344,7 +344,9 @@ const processFixture = (
 it('orphan detection preserves existing owner daemons and catches adopted and descendant test daemons', () => {
   const owner = processFixture(10, { name: 'gnome-keyring-d' });
   const root = processFixture(20);
-  const adopted = processFixture(30, { home: '/tmp/nook-cli-orphan' });
+  const adopted = processFixture(30, {
+    home: '/tmp/nook-cli-synthetic-run-orphan',
+  });
   const tagged = processFixture(40, {
     name: 'gnome-keyring-d',
     run: 'synthetic-run',
@@ -363,10 +365,13 @@ it('orphan detection preserves existing owner daemons and catches adopted and de
     home: '/tmp/nook-cli-parent',
     run: 'parent-run',
   });
+  const childAdopted = {
+    ...adopted,
+    home: '/tmp/nook-cli-child-run-orphan',
+  };
   expect(
-    orphanedProcesses([], [parentFixture, adopted], {
+    orphanedProcesses([], [parentFixture, childAdopted], {
       id: 'child-run',
-      parentId: 'parent-run',
       pid: 20,
       home: '/tmp/nook-test-run-child',
     }).map((item) => item.pid),
@@ -397,7 +402,9 @@ it('nested isolation cleanup preserves the workerd runtime and private bus of an
 });
 
 it('the tripwire kills a real orphan and fails the run with only its PID', async () => {
-  const home = await temporaryTestHome('/tmp/nook-cli-orphan-');
+  const id = process.env.NOOK_TEST_RUN;
+  if (!id) throw new Error('The isolated runner needs a run identity.');
+  const home = await temporaryTestHome(`/tmp/nook-cli-${id}-orphan-`);
   const before = await snapshotProcesses();
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
     env: testEnvironment(home),
@@ -410,7 +417,7 @@ it('the tripwire kills a real orphan and fails the run with only its PID', async
     const info = await readHostProcess(pid);
     expect(info?.home).toBe(home);
     const orphans = orphanedProcesses(before, await snapshotProcesses(), {
-      id: 'synthetic-run',
+      id,
       pid: process.pid,
       home,
     });

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { startHostIsolation } from '../scripts/lib/host-isolation.ts';
@@ -143,10 +143,7 @@ it.each(['parent-run', ''])(
     const own = fixture(12346, {
       home: '/tmp/nook-cli-this-run-fixture',
     });
-    const signal = await signals([parent], [parent, own], {
-      ...run,
-      parentId: 'parent-run',
-    });
+    const signal = await signals([parent], [parent, own]);
     expect(signal).not.toHaveBeenCalledWith(parent.pid, 'SIGKILL');
     expect(signal).toHaveBeenCalledTimes(1);
     expect(signal).toHaveBeenCalledWith(own.pid, 'SIGKILL');
@@ -206,6 +203,29 @@ it('a run HOME or fixture-name lookalike does not establish ownership', async ()
     await signals([], [homeLookalike, nameLookalike]),
   ).not.toHaveBeenCalled();
 });
+
+it.runIf(process.platform === 'linux')(
+  'a missing run identity refuses CLI fixture creation',
+  async () => {
+    const root = await mkdtemp('/tmp/nook-fixture-');
+    const previous = process.env.NOOK_TEST_RUN;
+    delete process.env.NOOK_TEST_RUN;
+    try {
+      await expect(
+        privateKeyring('absent', { tempRoot: root }).then(async (created) => {
+          await created.close();
+          return 'fixture-created';
+        }),
+      ).rejects.toThrow(
+        'Linux CLI fixtures require an isolated test run identity.',
+      );
+      expect(await readdir(root)).toEqual([]);
+    } finally {
+      if (previous !== undefined) process.env.NOOK_TEST_RUN = previous;
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 async function foreignFixture() {
   const previous = process.env.NOOK_TEST_RUN;
