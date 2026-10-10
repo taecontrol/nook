@@ -585,3 +585,51 @@ it.runIf(process.platform === 'linux').each([
   },
   20_000,
 );
+
+it.each([
+  { tag: 'parent-run', owned: false },
+  { tag: run.id, owned: true },
+  { tag: '', owned: true },
+])(
+  'Linux daemon ancestry respects a fixture ancestor with run tag $tag',
+  async ({ tag, owned }) => {
+    const ancestor = fixture(12344, { parent: run.pid, run: tag });
+    const daemon = fixture(12345, {
+      parent: ancestor.pid,
+      home: '/tmp/nook-cli-parent-fixture',
+      name: 'dbus-daemon',
+    });
+    const signal = await signals([ancestor], [ancestor, daemon]);
+    expect(signal.mock.calls).toEqual(owned ? [[daemon.pid, 'SIGKILL']] : []);
+  },
+);
+
+it('Linux ancestry accepts the isolation root despite its startup run tag', async () => {
+  const root = fixture(run.pid, { run: 'worker-startup-run' });
+  const daemon = fixture(12345, {
+    parent: root.pid,
+    name: 'dbus-daemon',
+  });
+  const signal = await signals([root], [root, daemon]);
+  expect(signal.mock.calls).toEqual([[daemon.pid, 'SIGKILL']]);
+});
+
+it('macOS ancestry keeps its existing behavior across a foreign run tag', () => {
+  const identity = { ...run, uid: 999 };
+  const ancestor = fixture(12344, {
+    parent: run.pid,
+    run: 'parent-run',
+    uid: identity.uid,
+  });
+  const daemon = fixture(12345, {
+    parent: ancestor.pid,
+    home: '/tmp/nook-cli-parent-fixture',
+    name: 'dbus-daemon',
+    uid: identity.uid,
+  });
+  expect(
+    orphanedProcesses([ancestor], [ancestor, daemon], identity, 'darwin').map(
+      (item) => item.pid,
+    ),
+  ).toEqual([daemon.pid]);
+});
