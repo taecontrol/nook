@@ -94,6 +94,7 @@ it('authorization recovery from a rejected optimistic grant preserves the pendin
         bucketCount: await bucketCheck(page, path).count(),
       }))
       .toEqual({ gets: initial, bucketCount: 1 });
+    expect(await bucketCheck(page, path).isChecked()).toBe(true);
     expect(writes).toBe(1);
     const finished = page.waitForResponse(
       (response) =>
@@ -109,12 +110,16 @@ it('authorization recovery from a rejected optimistic grant preserves the pendin
     expect((await finished).status()).toBe(200);
     expect((await recovered).status()).toBe(200);
     expect(gets).toBe(initial + 1);
-    await bucketCheck(page, path).check();
+    expect(await bucketCheck(page, path).isChecked()).toBe(true);
     const approved = page.waitForResponse((response) =>
       new URL(response.url()).pathname.endsWith('/approve'),
     );
     await page.getByRole('button', { name: 'Approve', exact: true }).click();
     expect((await approved).status()).toBe(204);
+    expect(approvals).toEqual([
+      { machineName: 'omarchy', grant: [path] },
+      { machineName: 'omarchy', grant: [path] },
+    ]);
     await page.getByRole('heading', { name: 'Machine approved' }).waitFor();
     expect(writes).toBe(1);
   } finally {
