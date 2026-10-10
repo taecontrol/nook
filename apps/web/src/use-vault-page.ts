@@ -1,9 +1,8 @@
 import { validateSecretDescription } from '@nook/contract';
-import { useQuery } from '@tanstack/react-query';
 import { useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from './api-client';
-import { bucketsOptions } from './buckets-api';
+import { useBucketList } from './buckets-api';
 import { RESERVED } from './paths';
 import { type SecretWrite, unconfirmed, useVault } from './vault-api';
 import { feedbackFor } from './vault-feedback';
@@ -118,7 +117,7 @@ export function useVaultPage() {
   useEffect(() => {
     setReveal((current) => (current?.href === location.href ? current : null));
   }, [location.href]);
-  const bucketsQuery = useQuery(bucketsOptions);
+  const bucketsQuery = useBucketList();
   const vault = useVault();
   const { secrets, busy } = vault;
   const [state, setUi] = useState<VaultUi>(idleUi);

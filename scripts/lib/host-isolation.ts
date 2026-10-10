@@ -16,6 +16,7 @@ import {
   type HostResources,
   ownerResources,
 } from './host-resources.ts';
+import { readLinuxFixtureHomes } from './linux-fixture-homes.ts';
 import { readMacProcessGroups } from './macos-process-groups.ts';
 import { temporaryTestHome, testEnvironment } from './test-environment.ts';
 
@@ -23,11 +24,16 @@ async function cleanupProcesses(
   processes: HostProcess[],
   run: ProcessRun,
   groups: string,
+  homes: string,
 ) {
   const recorded =
     process.platform === 'darwin' ? await readMacProcessGroups(groups) : [];
+  const registeredHomes =
+    process.platform === 'darwin'
+      ? []
+      : await readLinuxFixtureHomes(homes, run.id);
   const afterProcesses = await snapshotProcesses();
-  const identity = { ...run, groups: recorded };
+  const identity = { ...run, groups: recorded, homes: registeredHomes };
   const orphans = orphanedProcesses(processes, afterProcesses, identity);
   for (const orphan of orphans)
     console.log(
@@ -63,13 +69,14 @@ export async function startHostIsolation(
   const original = Object.fromEntries(Object.entries(process.env));
   const home = await temporaryTestHome();
   const groups = resolve(home, 'process-groups');
+  const homes = resolve(home, 'fixture-homes');
   if (process.platform === 'darwin') await mkdir(groups, { mode: 0o700 });
+  else await mkdir(homes, { mode: 0o700 });
   const run = {
     id: crypto.randomUUID(),
     pid: process.pid,
     home,
     uid: userInfo().uid,
-    parentId: original.NOOK_TEST_RUN,
   };
   const env = testEnvironment(home, {
     NOOK_TEST_RUN: run.id,
@@ -89,13 +96,13 @@ export async function startHostIsolation(
           NOOK_TEST_PROCESS_GROUPS: groups,
           NOOK_TEST_ROOT_PID: String(run.pid),
         }
-      : {}),
+      : { NOOK_TEST_FIXTURE_HOMES: homes }),
   });
   for (const name of Object.keys(process.env)) delete process.env[name];
   Object.assign(process.env, env);
   const close = async () => {
     try {
-      const messages = await cleanupProcesses(processes, run, groups);
+      const messages = await cleanupProcesses(processes, run, groups, homes);
       const after = await fingerprintHost(resources);
       if (after.keychain)
         console.log(

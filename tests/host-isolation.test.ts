@@ -273,6 +273,7 @@ it('fresh child environments reject unallowlisted values and owner directory or 
     for (const override of [
       { HOME: '/tmp/owner' },
       { XDG_DATA_HOME: '/tmp/owner/data' },
+      { NOOK_TEST_FIXTURE_HOMES: '/tmp/owner/fixture-homes' },
       { DBUS_SESSION_BUS_ADDRESS: 'unix:path=/tmp/owner/bus' },
       { NOOK_LEAK_SENTINEL: 'synthetic-only' },
     ])
@@ -344,7 +345,9 @@ const processFixture = (
 it('orphan detection preserves existing owner daemons and catches adopted and descendant test daemons', () => {
   const owner = processFixture(10, { name: 'gnome-keyring-d' });
   const root = processFixture(20);
-  const adopted = processFixture(30, { home: '/tmp/nook-cli-orphan' });
+  const adopted = processFixture(30, {
+    home: '/tmp/nook-cli-synthetic-run-orphan',
+  });
   const tagged = processFixture(40, {
     name: 'gnome-keyring-d',
     run: 'synthetic-run',
@@ -356,19 +359,28 @@ it('orphan detection preserves existing owner daemons and catches adopted and de
   const result = orphanedProcesses(
     [owner],
     [owner, root, adopted, tagged, child, daemon, unrelated, cycle],
-    { id: 'synthetic-run', pid: 20, home: '/tmp/nook-test-run-synthetic' },
+    {
+      id: 'synthetic-run',
+      pid: 20,
+      home: '/tmp/nook-test-run-synthetic',
+      homes: [adopted.home],
+    },
   );
   expect(result.map((item) => item.pid)).toEqual([30, 40, 60]);
   const parentFixture = processFixture(90, {
     home: '/tmp/nook-cli-parent',
     run: 'parent-run',
   });
+  const childAdopted = {
+    ...adopted,
+    home: '/tmp/nook-cli-child-run-orphan',
+  };
   expect(
-    orphanedProcesses([], [parentFixture, adopted], {
+    orphanedProcesses([], [parentFixture, childAdopted], {
       id: 'child-run',
-      parentId: 'parent-run',
       pid: 20,
       home: '/tmp/nook-test-run-child',
+      homes: [childAdopted.home],
     }).map((item) => item.pid),
   ).toEqual([30]);
 });
@@ -397,6 +409,8 @@ it('nested isolation cleanup preserves the workerd runtime and private bus of an
 });
 
 it('the tripwire kills a real orphan and fails the run with only its PID', async () => {
+  const id = process.env.NOOK_TEST_RUN;
+  if (!id) throw new Error('The isolated runner needs a run identity.');
   const home = await temporaryTestHome('/tmp/nook-cli-orphan-');
   const before = await snapshotProcesses();
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
@@ -410,9 +424,10 @@ it('the tripwire kills a real orphan and fails the run with only its PID', async
     const info = await readHostProcess(pid);
     expect(info?.home).toBe(home);
     const orphans = orphanedProcesses(before, await snapshotProcesses(), {
-      id: 'synthetic-run',
+      id,
       pid: process.pid,
       home,
+      homes: [home],
     });
     expect(orphans.some((item) => item.pid === child.pid)).toBe(true);
     const messages = await killOrphans(

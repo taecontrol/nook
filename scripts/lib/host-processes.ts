@@ -62,26 +62,32 @@ function belongsToRun(
   item: HostProcess,
   processes: HostProcess[],
   root: number,
+  runId?: string,
 ) {
   const visited = new Set<number>();
   let parent = item.parent;
   while (parent && !visited.has(parent)) {
     if (parent === root) return true;
     visited.add(parent);
-    parent = processes.find((process) => process.pid === parent)?.parent ?? 0;
+    const ancestor = processes.find((process) => process.pid === parent);
+    if (runId && ancestor?.run && ancestor.run !== runId) return false;
+    parent = ancestor?.parent ?? 0;
   }
   return false;
 }
 
-function isParentRun(item: HostProcess, parentId?: string) {
-  return parentId !== undefined && item.run === parentId;
+function ownsFixtureHome(item: HostProcess, run: ProcessRun) {
+  return (
+    (run.homes ?? []).includes(item.home) ||
+    item.home.startsWith(`${run.home}/`)
+  );
 }
 
 export type ProcessRun = {
   id: string;
   pid: number;
   home: string;
-  parentId?: string;
+  homes?: string[];
   groups?: MacProcessGroup[];
   uid?: number;
 };
@@ -170,17 +176,13 @@ export function orphanedProcesses(
   }
   return after.filter((item) => {
     if (item.pid === run.pid) return false;
-    if (isParentRun(item, run.parentId)) return false;
-    if (
-      item.home.startsWith('/tmp/nook-cli-') ||
-      item.home.startsWith(`${run.home}/`)
-    )
-      return true;
+    if (baseline.has(`${item.pid}:${item.started}`)) return false;
+    if (item.run && item.run !== run.id) return false;
+    if (ownsFixtureHome(item, run)) return true;
     const daemon = ['gnome-keyring-d', 'dbus-daemon'].includes(item.name);
     return (
       daemon &&
-      !baseline.has(`${item.pid}:${item.started}`) &&
-      (item.run === run.id || belongsToRun(item, after, run.pid))
+      (item.run === run.id || belongsToRun(item, after, run.pid, run.id))
     );
   });
 }

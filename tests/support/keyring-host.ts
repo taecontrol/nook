@@ -9,6 +9,14 @@ const home = process.env.HOME;
 const bus = process.env.DBUS_SESSION_BUS_ADDRESS;
 const childEnvironment = () => testEnvironment(home, {}, bus);
 
+function endCommandInput(child: ChildProcessWithoutNullStreams, input: string) {
+  // A child may close stdin early; report its actual exit status.
+  child.stdin.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code !== 'EPIPE') throw error;
+  });
+  child.stdin.end(input);
+}
+
 function command(file: string, args: string[], input = '') {
   return new Promise<{ status: number; stdout: string; stderr: string }>(
     (resolve) => {
@@ -30,7 +38,7 @@ function command(file: string, args: string[], input = '') {
       child.on('close', (status) =>
         resolve({ status: status ?? 1, stdout, stderr }),
       );
-      child.stdin.end(input);
+      endCommandInput(child, input);
     },
   );
 }
@@ -134,7 +142,7 @@ reader.on('line', (line) => {
       ...(signal ? { signal } : {}),
     });
   });
-  child.stdin.end(request.input ?? '');
+  endCommandInput(child, request.input ?? '');
 });
 reader.on('close', () => {
   daemon?.kill();
