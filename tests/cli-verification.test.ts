@@ -27,7 +27,12 @@ it('E24: the approval cold-open median is enforced at 1000 ms without changing e
   const passing = { ...measured, authorize: [700, 800, 900, 1000, 1001] };
   expect(() => assertLoadTimes(passing)).not.toThrow();
   expect(JSON.parse(formatMeasurements(passing)).medianMs.authorize).toBe(900);
-  const stage = await readFile('scripts/load-time.ts', 'utf8');
+  const stage = (
+    await Promise.all([
+      readFile('scripts/load-time.ts', 'utf8'),
+      readFile('scripts/load-time-browser.ts', 'utf8'),
+    ])
+  ).join('\n');
   expect(stage).toContain('/cli/authorize');
   expect(stage).toContain('authorize');
 });
