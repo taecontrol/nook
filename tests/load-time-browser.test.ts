@@ -86,3 +86,88 @@ it('#21: navigation waits for a fresh 500 ms quiet window after the hover preloa
     await closeBrowserPage(page, context);
   }
 });
+
+it('#21: a new request resets the quiet window and its failure permits navigation', async () => {
+  const { context, page } = await phonePage(browser, 'navigation');
+  let identityReads = 0;
+  try {
+    await page.route('**/api/whoami', async (route) => {
+      if (identityReads++ === 0) return route.continue();
+      await delay(200);
+      await route.abort('failed');
+    });
+    const preload = page
+      .waitForResponse((response) => response.url().endsWith('/api/buckets'))
+      .then((response) => response.finished());
+    const failure = preload.then(async () => {
+      // A real background read begins inside the post-preload quiet window.
+      await delay(200);
+      const failed = page.waitForEvent('requestfailed', {
+        predicate: (request) => request.url().endsWith('/api/whoami'),
+      });
+      await page.evaluate(() => {
+        void fetch('/api/whoami').catch(() => {});
+      });
+      await failed;
+    });
+    await Promise.all([
+      measureScreen(page, app.origin, '', 'navigation'),
+      failure,
+    ]);
+    const timing = await page.evaluate(() => {
+      const failed = performance
+        .getEntriesByType('resource')
+        .filter((entry) => new URL(entry.name).pathname === '/api/whoami')
+        .at(-1);
+      const click = performance.getEntriesByName('nook-navigation-start')[0];
+      if (!(failed instanceof PerformanceResourceTiming) || !click)
+        throw new Error(
+          'A failed background read and a measured click are required.',
+        );
+      return {
+        responseEnd: failed.responseEnd,
+        quiet: click.startTime - failed.responseEnd,
+      };
+    });
+    expect(timing.responseEnd).toBeGreaterThan(0);
+    expect(timing.quiet).toBeGreaterThanOrEqual(500);
+    expect(new URL(page.url()).pathname).toBe('/buckets');
+  } finally {
+    await closeBrowserPage(page, context);
+  }
+});
+
+it('#21: an unfinished preload times out before clicking', async () => {
+  const { context, page } = await phonePage(browser, 'navigation');
+  const gate = deferred();
+  try {
+    await page.route('**/api/buckets', async (route) => {
+      await gate.promise;
+      await route.continue().catch(() => {});
+    });
+    await expect(
+      measureScreen(page, app.origin, '', 'navigation'),
+    ).rejects.toThrow('Intent preload did not reach 500 ms of network quiet.');
+    expect(new URL(page.url()).pathname).toBe('/');
+    expect(
+      await page.evaluate(
+        () => performance.getEntriesByName('nook-navigation-start').length,
+      ),
+    ).toBe(0);
+  } finally {
+    gate.resolve();
+    await closeBrowserPage(page, context);
+  }
+});
+
+it('#21: a failed initial navigation preserves the browser error', async () => {
+  const { context, page } = await phonePage(browser, 'navigation');
+  try {
+    await page.route(`${app.origin}/`, (route) => route.abort('failed'));
+    await expect(
+      measureScreen(page, app.origin, '', 'navigation'),
+    ).rejects.toThrow('net::ERR_FAILED');
+  } finally {
+    await context.close();
+  }
+});

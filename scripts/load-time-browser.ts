@@ -1,4 +1,4 @@
-import type { Browser, Page } from 'playwright';
+import type { Browser, Page, Request } from 'playwright';
 import { loadTimeBudgets, type Measurements } from './lib/load-time.ts';
 
 export async function phonePage(browser: Browser, kind: string) {
@@ -141,30 +141,73 @@ async function approvalNavigation(page: Page, origin: string, code: string) {
       ).duration,
   );
 }
+async function settleNetworkAfter<T>(page: Page, action: () => Promise<T>) {
+  const active = new Set<Request>();
+  let quietTimer: ReturnType<typeof setTimeout> | undefined;
+  let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+  let finish: (() => void) | undefined;
+  const restartQuietWindow = () => {
+    clearTimeout(quietTimer);
+    if (active.size === 0 && finish) quietTimer = setTimeout(finish, 500);
+  };
+  const started = (request: Request) => {
+    active.add(request);
+    clearTimeout(quietTimer);
+  };
+  const ended = (request: Request) => {
+    if (active.delete(request)) restartQuietWindow();
+  };
+  page.on('request', started);
+  page.on('requestfinished', ended);
+  page.on('requestfailed', ended);
+  try {
+    const result = await action();
+    await new Promise<void>((resolve, reject) => {
+      finish = resolve;
+      timeoutTimer = setTimeout(
+        () =>
+          reject(
+            new Error('Intent preload did not reach 500 ms of network quiet.'),
+          ),
+        15_000,
+      );
+      restartQuietWindow();
+    });
+    return result;
+  } finally {
+    page.off('request', started);
+    page.off('requestfinished', ended);
+    page.off('requestfailed', ended);
+    clearTimeout(quietTimer);
+    clearTimeout(timeoutTimer);
+  }
+}
 async function navigate(
   page: Page,
   origin: string,
   kind: 'buckets' | 'machines' | 'vault' | 'audit' | 'memory',
 ) {
-  await page.goto(origin);
-  await page.getByRole('heading', { name: "You're signed in" }).waitFor();
-  const link = page
-    .getByRole('region', {
-      name: ['vault', 'memory'].includes(kind) ? 'Tools' : 'Platform',
-    })
-    .getByRole('link', {
-      name: new RegExp(
-        {
-          buckets: 'Buckets',
-          machines: 'Machines',
-          vault: 'Vault',
-          audit: 'Audit',
-          memory: 'Memory',
-        }[kind],
-      ),
-    });
-  await link.hover();
-  await page.waitForLoadState('networkidle');
+  const link = await settleNetworkAfter(page, async () => {
+    await page.goto(origin);
+    await page.getByRole('heading', { name: "You're signed in" }).waitFor();
+    const link = page
+      .getByRole('region', {
+        name: ['vault', 'memory'].includes(kind) ? 'Tools' : 'Platform',
+      })
+      .getByRole('link', {
+        name: new RegExp(
+          {
+            buckets: 'Buckets',
+            machines: 'Machines',
+            vault: 'Vault',
+            audit: 'Audit',
+            memory: 'Memory',
+          }[kind],
+        ),
+      });
+    await link.hover();
+    return link;
+  });
   await page.evaluate(
     (selector) => {
       document.addEventListener(
