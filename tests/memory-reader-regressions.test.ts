@@ -1,4 +1,4 @@
-import type { Browser } from 'playwright';
+import type { APIResponse, Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { observeBrowserPage } from './support/buckets-browser.ts';
@@ -178,6 +178,7 @@ it('E22/E28: Retry recovers failed counts and the feed with an existing URL sele
 it('E22/E28: a counts-only failure labels loaded rows and permits an independent retry', async () => {
   const countFailed = deferred();
   const tableRestored = deferred();
+  let failedResponse: APIResponse | undefined;
   let heldChunk = false;
   const visit = await memoryPage(browser, {
     seeds: manyMemories,
@@ -187,6 +188,12 @@ it('E22/E28: a counts-only failure labels loaded rows and permits an independent
       await db
         .prepare('ALTER TABLE memories RENAME TO unavailable_memories')
         .run();
+      await page.route('**/api/memories/counts', async (route) => {
+        // Keep the genuine failure through mount retries while the list recovers.
+        failedResponse ??= await route.fetch();
+        expect(failedResponse.status()).toBe(503);
+        await route.fulfill({ response: failedResponse });
+      });
       page.on('response', (response) => {
         if (new URL(response.url()).pathname === '/api/memories/counts')
           countFailed.resolve();
@@ -231,6 +238,7 @@ it('E22/E28: a counts-only failure labels loaded rows and permits an independent
     expect(await page.locator('[data-memory-list]').innerText()).toContain(
       '25 memories loaded · newest first',
     );
+    await page.unroute('**/api/memories/counts');
     await page
       .getByRole('button', { name: 'Retry counts', exact: true })
       .click();
