@@ -34,6 +34,17 @@ it('#21: navigation waits for a fresh 500 ms quiet window after the hover preloa
       async () => {
         await page.waitForLoadState('networkidle');
         await page.evaluate(() => performance.mark('nook-home-idle'));
+        const link = page
+          .getByRole('region', { name: 'Platform', exact: true })
+          .getByRole('link', { name: /Buckets/ });
+        const box = await link.boundingBox();
+        if (!box) throw new Error('The Buckets intent target must be visible.');
+        const started = page.waitForRequest((request) =>
+          request.url().endsWith('/api/buckets'),
+        );
+        // Start real intent preload before the outer hover resolves.
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await started;
       },
       { noWaitAfter: true, times: 1 },
     );
@@ -93,7 +104,7 @@ it('#21: a new request resets the quiet window and its failure permits navigatio
   try {
     await page.route('**/api/whoami', async (route) => {
       if (identityReads++ === 0) return route.continue();
-      await delay(200);
+      await delay(800);
       await route.abort('failed');
     });
     const preload = page
