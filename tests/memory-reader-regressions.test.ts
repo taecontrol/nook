@@ -177,6 +177,8 @@ it('E22/E28: Retry recovers failed counts and the feed with an existing URL sele
 
 it('E22/E28: a counts-only failure labels loaded rows and permits an independent retry', async () => {
   const countFailed = deferred();
+  const tableRestored = deferred();
+  let heldChunk = false;
   const visit = await memoryPage(browser, {
     seeds: manyMemories,
     start: `/memory?bucket=work/acme&memory=${memoryId(100)}`,
@@ -194,12 +196,34 @@ it('E22/E28: a counts-only failure labels loaded rows and permits an independent
         await db
           .prepare('ALTER TABLE unavailable_memories RENAME TO memories')
           .run();
+        tableRestored.resolve();
+        await route.continue();
+      });
+      await page.route('**/memory-page-*.js', async (route) => {
+        heldChunk = true;
+        await tableRestored.promise;
+        await page.waitForFunction(() =>
+          performance
+            .getEntriesByType('resource')
+            .some(
+              (entry) =>
+                new URL(entry.name).pathname === '/api/memories/counts' &&
+                (entry as PerformanceResourceTiming).responseEnd > 0,
+            ),
+        );
+        await page.evaluate(
+          () =>
+            new Promise((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(resolve)),
+            ),
+        );
         await route.continue();
       });
     },
   });
   try {
     const { page } = visit;
+    await expect.poll(() => heldChunk).toBe(true);
     await page
       .getByText('Could not load memory counts', { exact: true })
       .waitFor();
