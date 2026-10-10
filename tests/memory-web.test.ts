@@ -307,16 +307,9 @@ it('E28: a real failed list shows Retry and recovers after D1 is restored', asyn
   const visit = await memoryPage(browser, {
     configure: async (_, app) => {
       const db = await app.mf.getD1Database('DB');
-      if (
-        await db
-          .prepare(
-            "SELECT name FROM sqlite_master WHERE name='memory_versions'",
-          )
-          .first()
-      )
-        await db
-          .prepare('ALTER TABLE memory_versions RENAME TO unavailable_versions')
-          .run();
+      await db
+        .prepare('ALTER TABLE memory_versions RENAME TO unavailable_versions')
+        .run();
     },
   });
   try {

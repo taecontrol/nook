@@ -145,6 +145,7 @@ export const manyMemories = Array.from({ length: 90 }, (_, i) =>
   }),
 );
 export async function seedMemories(app: TestRuntime, seeds = typicalMemories) {
+  if (seeds.length === 0) return;
   const db = await app.mf.getD1Database('DB');
   await db.batch(
     seeds.flatMap((m) => [
@@ -193,7 +194,7 @@ export async function seedMemoryMachine(
   app: TestRuntime,
   grant: unknown = ['work'],
 ) {
-  const token = randomBytes(32).toString('base64url');
+  const token = `nook_${randomBytes(32).toString('base64url')}`;
   const id = randomUUID();
   await (await app.mf.getD1Database('DB'))
     .prepare(
@@ -274,11 +275,7 @@ export async function memoryPage(
     }
   };
   try {
-    // The storage migration is part of the behavior under delivery.
-    const table = await (await app.mf.getD1Database('DB'))
-      .prepare("SELECT name FROM sqlite_master WHERE name='memories'")
-      .first();
-    if (table) await seedMemories(app, options.seeds);
+    await seedMemories(app, options.seeds);
     await options.configure?.(page, app);
     await page.goto(app.origin + (options.start ?? '/memory?bucket=work/acme'));
     return { page, app, context, close };

@@ -50,12 +50,7 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
     });
     beforeEach(async () => {
       const db = await app.mf.getD1Database('DB');
-      if (
-        await db
-          .prepare("SELECT name FROM sqlite_master WHERE name='memories'")
-          .first()
-      )
-        await db.prepare('DELETE FROM memories').run();
+      await db.prepare('DELETE FROM memories').run();
       await db.prepare('DELETE FROM machine_tokens').run();
       ({ token, id: machineId } = await seedMemoryMachine(app));
       client = memoryClient(app, version, {
@@ -73,8 +68,11 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
       });
     });
     afterAll(async () => {
-      expectPrivate(logs.join('\n') + outputs.join('\n'), [token, assertion]);
-      await app?.close();
+      try {
+        expectPrivate(logs.join('\n') + outputs.join('\n'), [token, assertion]);
+      } finally {
+        await app?.close();
+      }
     });
     async function call(name: string, args: Record<string, unknown>) {
       const result = await client.call(name, args);
@@ -154,7 +152,7 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
     ])(
       'E3: unusable %s client identity becomes unknown',
       async (_, clientInfo, userAgent) => {
-        const headers =
+        const headers: Record<string, string> =
           endpoint === 'machine'
             ? { Authorization: `Bearer ${token}` }
             : { 'Cf-Access-Jwt-Assertion': assertion };

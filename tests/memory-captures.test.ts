@@ -69,18 +69,11 @@ it.each(matrix)(
           });
         if (state === 'error') {
           const db = await app.mf.getD1Database('DB');
-          if (
-            await db
-              .prepare(
-                "SELECT name FROM sqlite_master WHERE name='memory_versions'",
-              )
-              .first()
-          )
-            await db
-              .prepare(
-                'ALTER TABLE memory_versions RENAME TO unavailable_versions',
-              )
-              .run();
+          await db
+            .prepare(
+              'ALTER TABLE memory_versions RENAME TO unavailable_versions',
+            )
+            .run();
         }
       },
     });
@@ -102,7 +95,7 @@ it.each(matrix)(
           })
           .waitFor();
       else {
-        await memoryRows(page).first().waitFor();
+        if (state !== 'detail') await memoryRows(page).first().waitFor();
         if (state === 'detail' || size.name === 'desktop')
           await page.getByRole('article', { name: 'Memory detail' }).waitFor();
       }

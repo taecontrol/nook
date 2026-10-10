@@ -21,12 +21,7 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   const db = await app.mf.getD1Database('DB');
-  if (
-    await db
-      .prepare("SELECT name FROM sqlite_master WHERE name='memories'")
-      .first()
-  )
-    await db.prepare('DELETE FROM memories').run();
+  await db.prepare('DELETE FROM memories').run();
 });
 afterAll(() => app?.close());
 const deleteBucket = (path: string) =>
@@ -189,15 +184,24 @@ it('E20/E33: restricted handlers forbid sibling lists and mask detail; the owner
     new Request(`http://nook.test/api/memories/${memoryId(2)}`),
   );
   expect(allowed.status).toBe(200);
-  for (const path of [
-    '/api/memories?bucket=work',
-    `/api/memories/${memoryId(2)}`,
-  ]) {
-    const rejected = await fetch(`${app.origin}${path}`, {
-      headers: { Authorization: 'Bearer synthetic-nook-credential' },
+  // Remove only the local owner bypass: a Nook bearer cannot stand in for Access.
+  await app.setBindings({});
+  try {
+    for (const path of [
+      '/api/memories?bucket=work',
+      `/api/memories/${memoryId(2)}`,
+    ]) {
+      const rejected = await fetch(`${app.origin}${path}`, {
+        headers: { Authorization: 'Bearer synthetic-nook-credential' },
+      });
+      expect(rejected.status).toBe(401);
+      expect(await rejected.text()).not.toContain('synthetic-nook-credential');
+    }
+  } finally {
+    await app.setBindings({
+      LOCAL_OWNER: 'synthetic-owner',
+      LOCAL_ORIGIN: app.origin,
     });
-    expect(rejected.status).toBe(401);
-    expect(await rejected.text()).not.toContain('synthetic-nook-credential');
   }
 });
 it.each([
