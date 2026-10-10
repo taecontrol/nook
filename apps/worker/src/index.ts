@@ -15,6 +15,7 @@ import {
 } from './machine-routes.ts';
 import { machineOperations } from './machines.ts';
 import { mcpHandler } from './mcp.ts';
+import { memoryStore } from './memory.ts';
 import { ownerVault } from './vault.ts';
 
 export function handlerForPrincipal(
@@ -26,6 +27,17 @@ export function handlerForPrincipal(
   const session = HttpApiBuilder.group(Api, 'session', (handlers) =>
     handlers.handle('whoami', () => Effect.succeed({ email })),
   );
+  const memories = HttpApiBuilder.group(Api, 'memories', (handlers) =>
+    Effect.gen(function* () {
+      const store = yield* memoryStore(grant);
+      return handlers
+        .handle('counts', () => store.counts())
+        .handle('list', ({ query }) =>
+          store.list(query.bucket, query.cursor, query.scope),
+        )
+        .handle('get', ({ params }) => store.get(params.id));
+    }),
+  ).pipe(Layer.provide(D1Client.layer({ db })));
   const buckets = HttpApiBuilder.group(Api, 'buckets', (handlers) =>
     Effect.gen(function* () {
       const store = yield* bucketOperations;
@@ -76,7 +88,7 @@ export function handlerForPrincipal(
     }),
   ).pipe(Layer.provide(D1Client.layer({ db })));
   const routes = HttpApiBuilder.layer(Api).pipe(
-    Layer.provide([session, buckets, machines, vault, audit]),
+    Layer.provide([session, buckets, machines, vault, audit, memories]),
     Layer.provide(HttpServer.layerServices),
   );
   const apiHandler = HttpRouter.toWebHandler(routes, {
@@ -86,7 +98,7 @@ export function handlerForPrincipal(
   }).handler;
   return (request: Request) =>
     new URL(request.url).pathname === '/mcp'
-      ? mcpHandler(db, grant).fetch(request)
+      ? mcpHandler(db, { grant, principal: { kind: 'owner' } }).fetch(request)
       : apiHandler(request);
 }
 let cached:
@@ -131,6 +143,16 @@ function foreignOrigin(request: Request, url: URL) {
 function isRevealPath(path: string) {
   return path.startsWith('/api/secrets/') && path.endsWith('/reveal');
 }
+function isMemoryRead(path: string, method: string) {
+  return path.startsWith('/api/memories/') && method === 'GET';
+}
+function isSecretOperation(path: string, method: string) {
+  return (
+    path.startsWith('/api/secrets/') &&
+    (['PUT', 'DELETE'].includes(method) ||
+      (method === 'POST' && isRevealPath(path)))
+  );
+}
 function knownRoute(path: string, method: string) {
   return (
     [
@@ -139,11 +161,11 @@ function knownRoute(path: string, method: string) {
       '/api/machines',
       '/api/secrets',
       '/api/audit',
+      '/api/memories',
       '/mcp',
     ].includes(path) ||
-    (path.startsWith('/api/secrets/') &&
-      (['PUT', 'DELETE'].includes(method) ||
-        (method === 'POST' && isRevealPath(path)))) ||
+    isMemoryRead(path, method) ||
+    isSecretOperation(path, method) ||
     ((path.startsWith('/api/buckets/') || path.startsWith('/api/machines/')) &&
       method === 'DELETE')
   );
@@ -194,6 +216,8 @@ async function sanitized(response: Promise<Response>, creation = false) {
         'InvalidSecret',
         'InvalidRun',
         'InvalidAuditFilter',
+        'InvalidMemory',
+        'InvalidMemoryCursor',
         'InvalidBucketPath',
         'ReservedBucket',
       ].includes(body?._tag ?? '')

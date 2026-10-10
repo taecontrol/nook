@@ -1,3 +1,4 @@
+import type { MemoryScope } from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import { cn } from 'cn';
 import { ChevronRight, Dot } from 'lucide-react';
@@ -13,6 +14,9 @@ import { buildOutline, Guides, type OutlineNode } from './outline';
 import { lineage } from './paths';
 
 type TreeState = {
+  to: '/vault' | '/memory';
+  noun: 'secret' | 'memory';
+  scope: MemoryScope;
   /** The bucket shown on the right; null on a phone's bucket list. */
   selected: string | null;
   counts: Map<string, number> | null;
@@ -32,10 +36,23 @@ function Count({ path, state }: { path: string; state: TreeState }) {
         count === 0 && 'text-muted-foreground/60',
       )}
     >
-      {count}
-      <span className="sr-only">{count === 1 ? ' secret' : ' secrets'}</span>
+      <span className="sr-only">
+        {count}{' '}
+        {count === 1
+          ? state.noun
+          : state.noun === 'memory'
+            ? 'memories'
+            : 'secrets'}
+      </span>
+      <span aria-hidden>{count}</span>
     </span>
   );
+}
+
+function bucketSearch(state: TreeState, path: string) {
+  return state.to === '/memory'
+    ? { bucket: path, scope: state.scope }
+    : { bucket: path };
 }
 
 function Row({
@@ -76,8 +93,8 @@ function Row({
         )}
       </div>
       <Link
-        to="/vault"
-        search={{ bucket: node.path }}
+        to={state.to}
+        search={bucketSearch(state, node.path)}
         aria-current={selected ? 'page' : undefined}
         className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-2 pl-1 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       >
@@ -127,11 +144,17 @@ export function BucketTree({
   selected,
   counts,
   loading,
+  to = '/vault',
+  noun = 'secret',
+  scope = 'inherited',
 }: {
   buckets: readonly string[];
   selected: string | null;
   counts: Map<string, number> | null;
   loading: boolean;
+  to?: '/vault' | '/memory';
+  noun?: 'secret' | 'memory';
+  scope?: MemoryScope;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const nodes = useMemo(
@@ -150,6 +173,9 @@ export function BucketTree({
     return next;
   }, [collapsed, selected]);
   const state: TreeState = {
+    to,
+    noun,
+    scope,
     selected,
     counts,
     loading,

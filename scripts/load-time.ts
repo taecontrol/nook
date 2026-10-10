@@ -2,6 +2,7 @@ import type { Browser, Page } from 'playwright';
 import { acmePath, fetchValues } from '../tests/support/audit.ts';
 import { createAuthorization } from '../tests/support/authorizations.ts';
 import { issueGrant, seedGrantTree } from '../tests/support/grants.ts';
+import { manyMemories, seedMemories } from '../tests/support/memory.ts';
 import { seedSecrets, vaultRuntime } from '../tests/support/vault.ts';
 import { startHostIsolation } from './lib/host-isolation.ts';
 import {
@@ -22,6 +23,8 @@ async function phonePage(browser: Browser, kind: string) {
       'approvalNavigation',
       'audit',
       'auditNavigation',
+      'memory',
+      'memoryNavigation',
     ].includes(kind)
       ? { viewport: { width: 390, height: 844 } }
       : {}),
@@ -40,13 +43,15 @@ type ColdScreen =
   | 'authorize'
   | 'machines'
   | 'vault'
-  | 'audit';
+  | 'audit'
+  | 'memory';
 function markFirstScreen(kind: ColdScreen) {
   const selectors = {
     buckets: '[aria-label="All buckets"] [data-path]',
     authorize: '#authorization-code',
     machines: '[data-machine]',
     audit: '[data-entry]',
+    memory: '[data-memory-row]',
     home: '',
     vault: '',
   };
@@ -83,6 +88,7 @@ async function cold(page: Page, origin: string, kind: ColdScreen) {
     machines: '/machines',
     vault: '/vault?bucket=work/acme',
     audit: '/audit',
+    memory: '/memory?bucket=work/acme',
   };
   await page.goto(origin + paths[kind]);
   await page.waitForFunction(
@@ -151,12 +157,14 @@ async function approvalNavigation(page: Page, origin: string, code: string) {
 async function navigate(
   page: Page,
   origin: string,
-  kind: 'buckets' | 'machines' | 'vault' | 'audit',
+  kind: 'buckets' | 'machines' | 'vault' | 'audit' | 'memory',
 ) {
   await page.goto(origin);
   await page.getByRole('heading', { name: "You're signed in" }).waitFor();
   const link = page
-    .getByRole('region', { name: kind === 'vault' ? 'Tools' : 'Platform' })
+    .getByRole('region', {
+      name: ['vault', 'memory'].includes(kind) ? 'Tools' : 'Platform',
+    })
     .getByRole('link', {
       name: new RegExp(
         {
@@ -164,6 +172,7 @@ async function navigate(
           machines: 'Machines',
           vault: 'Vault',
           audit: 'Audit',
+          memory: 'Memory',
         }[kind],
       ),
     });
@@ -190,6 +199,7 @@ async function navigate(
       vault: '[data-secret="me/GITHUB_TOKEN"]',
       machines: '[data-machine]',
       audit: '[data-entry]',
+      memory: '[aria-label="Memory buckets"] [data-path="me"]',
     }[kind],
   );
   await link.click();
@@ -216,6 +226,7 @@ async function measureScreen(
     machinesNavigation: 'machines',
     vaultNavigation: 'vault',
     auditNavigation: 'audit',
+    memoryNavigation: 'memory',
   } as const;
   const destination = destinations[kind as keyof typeof destinations];
   if (kind === 'approvalNavigation')
@@ -230,6 +241,7 @@ try {
   const db = await app.mf.getD1Database('DB');
   await seedGrantTree(app);
   await seedSecrets(app);
+  await seedMemories(app, manyMemories);
   const { token } = await issueGrant(app);
   const used = await fetchValues(app, token, { secrets: [acmePath] });
   if (used.status !== 200)
@@ -262,6 +274,8 @@ try {
       vaultNavigation: [],
       audit: [],
       auditNavigation: [],
+      memory: [],
+      memoryNavigation: [],
       gzipBytes: (await measureInitialJs('dist/assets')).gzipBytes,
     };
     for (const kind of [
@@ -276,6 +290,8 @@ try {
       'vaultNavigation',
       'audit',
       'auditNavigation',
+      'memory',
+      'memoryNavigation',
     ] as const) {
       for (let run = 0; run < loadTimeBudgets.runs; run++) {
         const { context, page } = await phonePage(browser, kind);

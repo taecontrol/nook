@@ -1,7 +1,7 @@
 # ADR-0004: A minimal memory model with explicit writes
 
 Date: 2026-10-03
-Status: Accepted
+Status: Accepted; repository provenance partially superseded by [ADR-0012](0012-memory-retries-use-exact-content-and-request-provenance.md).
 
 ## Context
 
