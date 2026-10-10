@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { userInfo } from 'node:os';
-import { basename, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import type { MacProcessGroup } from './macos-process-groups.ts';
 import { macProcesses } from './macos-processes.ts';
 
@@ -74,11 +74,9 @@ function belongsToRun(
 }
 
 function ownsFixtureHome(item: HostProcess, run: ProcessRun) {
-  if (item.home.startsWith(`${run.home}/`)) return true;
-  const name = basename(item.home);
   return (
-    name.startsWith(`nook-cli-${run.id}-`) ||
-    (name.startsWith('nook-cli-') && item.run === run.id)
+    (run.homes ?? []).includes(item.home) ||
+    item.home.startsWith(`${run.home}/`)
   );
 }
 
@@ -86,6 +84,7 @@ export type ProcessRun = {
   id: string;
   pid: number;
   home: string;
+  homes?: string[];
   groups?: MacProcessGroup[];
   uid?: number;
 };

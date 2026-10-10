@@ -7,10 +7,11 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { expect } from 'vitest';
 import { evidenceRoot } from '../../scripts/lib/instrument.ts';
+import { registerLinuxFixtureHome } from '../../scripts/lib/linux-fixture-homes.ts';
 import { testEnvironment } from '../../scripts/lib/test-environment.ts';
 import { type CommandResult, privateMacKeychain } from './macos-keychain.ts';
 import { testBuild } from './runtime.ts';
@@ -39,11 +40,13 @@ export async function privateKeyring(
     throw new Error(
       'Linux CLI fixtures require an isolated test run identity.',
     );
-  const home = await mkdtemp(
-    resolve(options.tempRoot ?? '/tmp', `nook-cli-${run}-`),
-  );
+  const homes = process.env.NOOK_TEST_FIXTURE_HOMES;
+  if (!homes || !isAbsolute(homes))
+    throw new Error('Linux CLI fixtures require an isolated HOME registry.');
+  const home = await mkdtemp(resolve(options.tempRoot ?? '/tmp', 'nook-cli-'));
   let sandbox: ReturnType<typeof launchSandbox> | undefined;
   try {
+    await registerLinuxFixtureHome(homes, run, home);
     const shim = resolve(home, 'bin');
     for (const path of ['bin', 'config', 'data', 'state', 'cache', 'runtime'])
       await mkdir(resolve(home, path), { mode: 0o700 });

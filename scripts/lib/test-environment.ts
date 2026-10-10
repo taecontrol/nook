@@ -7,6 +7,7 @@ const inheritedNames = [
   'LANG',
   'TZ',
   'NOOK_TEST_RUN',
+  'NOOK_TEST_FIXTURE_HOMES',
   'COVERAGE_RUN',
   'NOOK_BUILD',
   'PLAYWRIGHT_BROWSERS_PATH',
@@ -77,7 +78,11 @@ function applyOverrides(
   overrides: NodeJS.ProcessEnv,
 ) {
   for (const [name, value] of Object.entries(overrides)) {
-    if (Object.hasOwn(directories, name) || name === 'NOOK_TEST_PROCESS_GROUPS')
+    if (
+      Object.hasOwn(directories, name) ||
+      name === 'NOOK_TEST_PROCESS_GROUPS' ||
+      name === 'NOOK_TEST_FIXTURE_HOMES'
+    )
       safeDirectory(home, name, value);
     else if (!overrideNames.has(name) && !/^LC_[A-Z_]+$/.test(name))
       throw new Error('Test environment override is not allowlisted.');

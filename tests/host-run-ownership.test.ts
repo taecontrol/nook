@@ -1,6 +1,16 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
+import os, { userInfo } from 'node:os';
 import { resolve } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { startHostIsolation } from '../scripts/lib/host-isolation.ts';
@@ -16,6 +26,7 @@ import {
   assertHostUnchanged,
   fingerprintHost,
 } from '../scripts/lib/host-resources.ts';
+import { readLinuxFixtureHomes } from '../scripts/lib/linux-fixture-homes.ts';
 import {
   temporaryTestHome,
   testEnvironment,
@@ -26,6 +37,11 @@ const run: ProcessRun = {
   id: 'this-run',
   pid: 54321,
   home: '/tmp/nook-test-run-this-run',
+  homes: [
+    '/tmp/nook-cli-this-run',
+    '/tmp/nook-cli-this-run-fixture',
+    '/tmp/nook-cli-this-run-old',
+  ],
 };
 
 function fixture(pid: number, changes: Partial<HostProcess> = {}): HostProcess {
@@ -76,15 +92,15 @@ it.each(['preexisting', 'concurrent'])(
 );
 
 it.each([
-  '/tmp/nook-cli-this-run-fixture',
-  '/tmp/custom-fixtures/nook-cli-this-run-fixture',
-  '/checkout/.local/fixtures/nook-cli-this-run-fixture',
-  `${run.home}/fixtures/nook-cli-fixture`,
+  '/tmp/nook-cli-aB12cD',
+  '/tmp/custom-fixtures/nook-cli-aB12cD',
+  '/checkout/.local/fixtures/nook-cli-aB12cD',
+  `${run.home}/fixtures/nook-cli-aB12cD`,
 ])(
   'an untagged adopted fixture retains its run provenance at %s',
   async (home) => {
     const own = fixture(12346, { home });
-    const signal = await signals([], [own]);
+    const signal = await signals([], [own], { ...run, homes: [home] });
     expect(signal).toHaveBeenCalledTimes(1);
     expect(signal).toHaveBeenCalledWith(own.pid, 'SIGKILL');
   },
@@ -227,6 +243,172 @@ it.runIf(process.platform === 'linux')(
   },
 );
 
+it.runIf(process.platform === 'linux').each(['missing', 'unwritable'])(
+  'a %s HOME registry refuses fixture launch and leaves no fixture HOME',
+  async (failure) => {
+    const root = await mkdtemp('/tmp/nook-registration-');
+    const previous = process.env.NOOK_TEST_FIXTURE_HOMES;
+    try {
+      if (failure === 'missing') delete process.env.NOOK_TEST_FIXTURE_HOMES;
+      else {
+        const file = resolve(root, 'not-a-registry');
+        await writeFile(file, '', { mode: 0o600 });
+        process.env.NOOK_TEST_FIXTURE_HOMES = file;
+      }
+      const before = await readdir(root);
+      await expect(
+        privateKeyring('absent', { tempRoot: root }).then(async (created) => {
+          await created.close();
+          return 'fixture-created';
+        }),
+      ).rejects.toThrow(
+        failure === 'missing'
+          ? 'Linux CLI fixtures require an isolated HOME registry.'
+          : 'Linux CLI fixture HOME could not be registered.',
+      );
+      expect(await readdir(root)).toEqual(before);
+    } finally {
+      if (previous === undefined) delete process.env.NOOK_TEST_FIXTURE_HOMES;
+      else process.env.NOOK_TEST_FIXTURE_HOMES = previous;
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+it('a private HOME registry authorizes only records of its own run', async () => {
+  const directory = await mkdtemp('/tmp/nook-registry-');
+  try {
+    await writeFile(
+      resolve(directory, 'owned.json'),
+      JSON.stringify({ run: run.id, home: '/tmp/nook-cli-owned-fixture' }),
+    );
+    await writeFile(
+      resolve(directory, 'foreign.json'),
+      JSON.stringify({
+        run: 'other-run',
+        home: '/tmp/nook-cli-foreign-fixture',
+      }),
+    );
+    const homes = await readLinuxFixtureHomes(directory, run.id);
+    expect(homes).toEqual(['/tmp/nook-cli-owned-fixture']);
+    const own = fixture(12346, { home: homes[0] });
+    const foreign = fixture(12345, { home: '/tmp/nook-cli-foreign-fixture' });
+    expect(
+      (await signals([], [foreign, own], { ...run, homes })).mock.calls,
+    ).toEqual([[own.pid, 'SIGKILL']]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it.each([
+  null,
+  'not-a-record',
+  { home: '/tmp/nook-cli-fixture' },
+  { run: '', home: '/tmp/nook-cli-fixture' },
+  { run: run.id },
+  { run: run.id, home: 'nook-cli-fixture' },
+  { run: run.id, home: '/tmp/../tmp/nook-cli-fixture' },
+  { run: run.id, home: '/tmp/unrelated-home' },
+])(
+  'an invalid HOME record cannot establish cleanup ownership: %j',
+  async (record) => {
+    const directory = await mkdtemp('/tmp/nook-registry-');
+    try {
+      await writeFile(
+        resolve(directory, 'invalid.json'),
+        JSON.stringify(record),
+      );
+      await expect(readLinuxFixtureHomes(directory, run.id)).rejects.toThrow(
+        'Host isolation found an invalid Linux fixture HOME registry.',
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+it('an owner HOME with a fixture-shaped basename cannot authorize cleanup', async () => {
+  const directory = await mkdtemp('/tmp/nook-registry-');
+  const fakeOwnerHome = '/tmp/nook-cli-owner';
+  const owner = vi.spyOn(os, 'userInfo').mockReturnValue({
+    ...userInfo(),
+    homedir: fakeOwnerHome,
+  });
+  syncBuiltinESMExports();
+  try {
+    await writeFile(
+      resolve(directory, 'owner.json'),
+      JSON.stringify({ run: run.id, home: fakeOwnerHome }),
+    );
+    await expect(readLinuxFixtureHomes(directory, run.id)).rejects.toThrow(
+      'Host isolation found an invalid Linux fixture HOME registry.',
+    );
+  } finally {
+    owner.mockRestore();
+    syncBuiltinESMExports();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it.runIf(process.platform === 'linux').each(['malformed', 'nonregular'])(
+  'a %s HOME record fails teardown before it signals fixture processes',
+  async (failure) => {
+    const home = await temporaryTestHome('/tmp/nook-registry-');
+    let created: PrivateKeyring | undefined;
+    const isolation = await startHostIsolation({
+      directories: [resolve(home, 'synthetic-owner/keyrings')],
+    });
+    let closed = false;
+    try {
+      created = await privateKeyring('absent');
+      const fixtureHome = created.home;
+      const processes = (await snapshotProcesses()).filter(
+        (item) => item.home === fixtureHome,
+      );
+      expect(processes.length).toBeGreaterThan(0);
+      const record = resolve(isolation.home, 'fixture-homes/invalid.json');
+      if (failure === 'malformed') await writeFile(record, '{');
+      else {
+        const target = resolve(home, 'valid-outside-record.json');
+        await writeFile(
+          target,
+          JSON.stringify({
+            run: isolation.env.NOOK_TEST_RUN,
+            home: fixtureHome,
+          }),
+        );
+        await symlink(target, record);
+      }
+      try {
+        await expect(isolation.close()).rejects.toThrow(
+          'Host isolation found an invalid Linux fixture HOME registry.',
+        );
+      } finally {
+        closed = true;
+      }
+      for (const item of processes)
+        expect(await readHostProcess(item.pid)).toMatchObject({
+          started: item.started,
+          home: item.home,
+        });
+      expect(
+        await created.command(process.execPath, [
+          '-e',
+          "process.stdout.write('registry-rejection-preserved-fixture')",
+        ]).done,
+      ).toMatchObject({
+        status: 0,
+        stdout: 'registry-rejection-preserved-fixture',
+      });
+    } finally {
+      if (!closed) await isolation.close().catch(() => {});
+      await created?.close();
+      await rm(home, { recursive: true, force: true });
+    }
+  },
+);
+
 it.runIf(process.platform === 'linux')(
   'a deep temporary root retains the previously supported HOME-private bus',
   async () => {
@@ -322,11 +504,11 @@ async function stopKnownFixture(identity: HostProcess | undefined) {
 }
 
 it.runIf(process.platform === 'linux').each([
-  { timing: 'preexisting', customRoot: false },
-  { timing: 'concurrent', customRoot: true },
+  { timing: 'preexisting', customRoot: false, closeOwn: false },
+  { timing: 'concurrent', customRoot: true, closeOwn: true },
 ])(
-  'isolated Linux teardown preserves a $timing foreign fixture and stops an untagged own fixture (custom root: $customRoot)',
-  async ({ timing, customRoot }) => {
+  'isolated Linux teardown preserves a $timing foreign fixture and stops an untagged own fixture (custom root: $customRoot, own closed: $closeOwn)',
+  async ({ timing, customRoot, closeOwn }) => {
     const home = await temporaryTestHome('/tmp/nook-own-');
     const resources = {
       directories: [resolve(home, 'synthetic-owner/keyrings')],
@@ -354,6 +536,13 @@ it.runIf(process.platform === 'linux').each([
         (item) => item.home === foreignHome,
       );
       expect(foreignProcesses.length).toBeGreaterThan(0);
+      if (closeOwn) {
+        await own.close();
+        expect(await readHostProcess(adopted.pid)).toMatchObject({
+          started: adopted.started,
+          home: adopted.home,
+        });
+      }
       try {
         await expect(isolation.close()).rejects.toThrow(
           'orphaned test process PID',
