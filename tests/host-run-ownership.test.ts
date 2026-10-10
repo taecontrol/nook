@@ -227,6 +227,41 @@ it.runIf(process.platform === 'linux')(
   },
 );
 
+it.runIf(process.platform === 'linux')(
+  'a deep temporary root retains the previously supported HOME-private bus',
+  async () => {
+    const parent = await mkdtemp('/tmp/nook-deep-');
+    const root = resolve(
+      parent,
+      'x'.repeat(60 - Buffer.byteLength(parent) - 1),
+    );
+    let created: PrivateKeyring | undefined;
+    try {
+      await mkdir(root);
+      expect(Buffer.byteLength(root)).toBe(60);
+      expect(
+        Buffer.byteLength(resolve(root, 'nook-cli-XXXXXX/bus')),
+      ).toBeLessThan(108);
+      created = await privateKeyring('absent', { tempRoot: root });
+      expect(created.home.startsWith(`${root}/`)).toBe(true);
+      expect(decodeURIComponent(created.bus)).toContain(
+        resolve(created.home, 'bus'),
+      );
+      expect(
+        await created.command(process.execPath, [
+          '-e',
+          "process.stdout.write('deep-fixture-ready')",
+        ]).done,
+      ).toMatchObject({ status: 0, stdout: 'deep-fixture-ready' });
+      await created.close();
+      expect(await readdir(root)).toEqual([]);
+    } finally {
+      await created?.close();
+      await rm(parent, { recursive: true, force: true });
+    }
+  },
+);
+
 async function foreignFixture() {
   const previous = process.env.NOOK_TEST_RUN;
   process.env.NOOK_TEST_RUN = crypto.randomUUID();
