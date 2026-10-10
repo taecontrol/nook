@@ -98,6 +98,45 @@ it('E24: an initial heading keeps inline links, code and emphasis', async () => 
   }
 });
 
+it.each([
+  [
+    'plain first paragraph',
+    'Plain first paragraph\n\nBody remains visible.',
+    'Plain first paragraph',
+  ],
+  ['empty heading', '# \n\nBody remains visible.', 'Body remains visible.'],
+])(
+  'E24: a %s keeps its Markdown paragraph semantics',
+  async (_, content, text) => {
+    const visit = await memoryPage(browser, {
+      seeds: [],
+      configure: async (_, app) => {
+        const client = memoryClient(app, '2026-07-28');
+        const write = await client.call('remember', {
+          bucket: 'work/acme',
+          content,
+        });
+        expect(write.isError).not.toBe(true);
+        expect(
+          (await client.call('get', { id: write.structuredContent?.id }))
+            .structuredContent?.content,
+        ).toBe(content);
+      },
+    });
+    try {
+      const detail = visit.page.getByRole('article', { name: 'Memory detail' });
+      const paragraph = detail.getByRole('paragraph').filter({ hasText: text });
+      await paragraph.waitFor();
+      expect(await paragraph.innerText()).toBe(text);
+      await detail
+        .getByText('Body remains visible.', { exact: true })
+        .waitFor();
+    } finally {
+      await visit.close();
+    }
+  },
+);
+
 it('E22/E28: Retry recovers failed counts and the feed with an existing URL selection', async () => {
   const visit = await memoryPage(browser, {
     seeds: manyMemories,

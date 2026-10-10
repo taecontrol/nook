@@ -676,3 +676,12 @@ it('E14/E33: failed HTTP reads have fixed public errors with no title, content o
       .run();
   }
 });
+it('E14/E33: a database-valid corrupt ordering timestamp keeps cursor encoding failures private', async () => {
+  await seedMemories(
+    app,
+    manyMemories.map((memory) => ({ ...memory, createdAt: '🦉' })),
+  );
+  const response = await fetch(`${app.origin}/api/memories?bucket=work/acme`);
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ _tag: 'ServiceUnavailable' });
+});
