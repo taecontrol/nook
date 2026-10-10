@@ -16,6 +16,8 @@ const measured = {
   vaultNavigation: [100, 100, 100, 100, 100],
   audit: Array(5).fill(500),
   auditNavigation: Array(5).fill(20),
+  memory: Array(5).fill(500),
+  memoryNavigation: Array(5).fill(20),
 };
 it.each(['vault', 'vaultNavigation'])(
   'E23: the existing stage rejects an over-budget %s',
