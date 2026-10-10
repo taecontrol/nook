@@ -253,7 +253,7 @@ Issue #10 runs against the migrated production Worker in workerd and real local 
 | E11 | `memory-mcp.test.ts`: exact UTF-8 byte limit, Unicode, NUL, tags and directory boundaries. |
 | E12 | `memory-mcp.test.ts`, `mcp-worker.test.ts`: tool descriptions, annotations and the four preserved tools plus get/remember. Existing transport, grant, CLI-header and Vault-reveal tests require that six-tool inventory. |
 | E13 | `memory-mcp.test.ts`: revocation rejects writes and retains machine provenance. |
-| E14 | `memory-mcp.test.ts`, `memory-worker.test.ts`: real D1 failures return fixed private errors. |
+| E14 | `memory-mcp.test.ts`, `memory-worker.test.ts`: real D1 and corrupt persisted ordering/encoding failures return fixed private errors. |
 | E15 | `memory-worker.test.ts`: HTTP/MCP deletion blockers, precedence and direct foreign-key enforcement. |
 | E16 | `memory-worker.test.ts`: remember/delete races in either order leave no orphan. |
 | E17 | `memory-worker.test.ts`: exact lineage, ordering, compact summaries and excluded siblings/descendants. |
@@ -263,14 +263,14 @@ Issue #10 runs against the migrated production Worker in workerd and real local 
 | E21 | `memory-worker.test.ts`: shared title derivation, including CR, LF, CRLF and a first nonblank line beyond 512 characters. |
 | E22 | `memory-web.test.ts`: tree counts, expansion, lineage rows, desktop selection and URL reload. |
 | E23 | `memory-web.test.ts`, `memory-reader-regressions.test.ts`: phone list/detail/back flow, unavailable selections, scope, ten tags, maximum bucket paths and code without page overflow. |
-| E24 | `memory-web.test.ts`, `memory-reader-regressions.test.ts`: inert HTML, nonclickable image chip, safe links, no external requests and complete long, multiline or formatted headings. |
+| E24 | `memory-web.test.ts`, `memory-reader-regressions.test.ts`: inert HTML, nonclickable image chip, safe links, no external requests, complete long, multiline or formatted headings, plain paragraph semantics and empty-heading recovery. |
 | E25 | `memory-web.test.ts`: reported client label, authenticated principal, optional directory and absolute UTC time. |
 | E26 | `memory-web.test.ts`: actual bucket/inherited queries and URL scope. |
 | E27 | `memory-web.test.ts`: out-of-lineage detail stays in the Choose a memory state. |
 | E28 | `memory-web.test.ts`, `memory-reader-regressions.test.ts`: genuine loading, inherited-only, first-run and D1 error/retry states, including joint list/detail/counts recovery and a counts-only failure. |
 | E29 | `memory-web.test.ts`, `web.test.ts`: enabled Home/sidebar link, active state and breadcrumb. |
 | E30 | `memory-web.test.ts`, `memory-refresh-web.test.ts`, `memory-reader-regressions.test.ts`: hover/focus detail prefetch, real-tab agent-write refresh and preservation of a pending optimistic bucket through refocus. |
-| E31 | `memory-load-time.test.ts`, `pnpm verify:load-time`: mandatory five-sample Memory budgets, production 4G cold open and intent navigation, with 60 bucket memories. |
+| E31 | `memory-load-time.test.ts`, `pnpm verify:load-time`: mandatory five-sample Memory budgets, real measurement viewport/destination/first-screen checks, production 4G cold open and intent navigation, with 60 bucket memories. |
 | E32 | `memory-captures.test.ts`: seven states at 1440×900 and 390×844, light/dark, plus full phone detail. |
 | E33 | `memory-mcp.test.ts`, `memory-worker.test.ts`, `memory-web.test.ts`: private denials, failed writes, malformed array/object content under both protocols and endpoints, and console/network behavior. |
 
@@ -281,3 +281,5 @@ Paging cursors are versioned, checksummed Base64url JSON bound to the bucket, sc
 The 28 viewport PNGs and two full phone detail PNGs are `memory-*` files in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. The selected hybrid's three independent desktop columns, shared Vault bucket tree, phone push flow, scope toggle, and nonclickable image chip are the visual reference. Captures omit the prototype scenario selector. A plain first heading already shown in full by the detail title is omitted from the body; long, multiline and formatted headings are retained. Long row titles remain available through the link's title attribute.
 
 The load-time stage uses the unchanged 9 Mbps down, 3 Mbps up, 85 ms latency profile at 390×844, cache disabled, without CPU throttling. Cold `/memory?bucket=work/acme` must show real memory rows within 1000 ms. Home-to-Memory navigation after settled hover preloading must show the bucket tree within 100 ms. Both measurements use five animation-frame samples and fail independently when absent, malformed, or over budget.
+
+`scripts/load-time-browser.ts` owns the browser measurement functions used by the production timing command and the measurement-condition tests. The latter run those same functions against the built product, proving the phone viewport, destination URL and visible first screen rather than accepting a finite duration from the wrong route.
