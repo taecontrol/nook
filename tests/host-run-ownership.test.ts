@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { existsSync } from 'node:fs';
 import {
   mkdir,
   mkdtemp,
@@ -11,7 +12,7 @@ import {
 } from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import os, { userInfo } from 'node:os';
-import { resolve } from 'node:path';
+import { relative, resolve } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { startHostIsolation } from '../scripts/lib/host-isolation.ts';
 import {
@@ -92,15 +93,19 @@ it.each(['preexisting', 'concurrent'])(
 );
 
 it.each([
-  '/tmp/nook-cli-aB12cD',
-  '/tmp/custom-fixtures/nook-cli-aB12cD',
-  '/checkout/.local/fixtures/nook-cli-aB12cD',
-  `${run.home}/fixtures/nook-cli-aB12cD`,
+  { home: '/tmp/nook-cli-aB12cD', registered: true },
+  { home: '/tmp/custom-fixtures/nook-cli-aB12cD', registered: true },
+  { home: '/checkout/.local/fixtures/nook-cli-aB12cD', registered: true },
+  { home: `${run.home}/fixtures/nook-cli-aB12cD`, registered: true },
+  { home: `${run.home}/fixture`, registered: false },
 ])(
-  'an untagged adopted fixture retains its run provenance at %s',
-  async (home) => {
+  'an untagged adopted fixture retains its run provenance at $home',
+  async ({ home, registered }) => {
     const own = fixture(12346, { home });
-    const signal = await signals([], [own], { ...run, homes: [home] });
+    const signal = await signals([], [own], {
+      ...run,
+      homes: registered ? [home] : [],
+    });
     expect(signal).toHaveBeenCalledTimes(1);
     expect(signal).toHaveBeenCalledWith(own.pid, 'SIGKILL');
   },
@@ -243,29 +248,49 @@ it.runIf(process.platform === 'linux')(
   },
 );
 
-it.runIf(process.platform === 'linux').each(['missing', 'unwritable'])(
+it
+  .runIf(process.platform === 'linux')
+  .each(['missing', 'unwritable', 'relative'])(
   'a %s HOME registry refuses fixture launch and leaves no fixture HOME',
   async (failure) => {
     const root = await mkdtemp('/tmp/nook-registration-');
     const previous = process.env.NOOK_TEST_FIXTURE_HOMES;
+    const marker = resolve(root, 'launched');
+    let sandboxExecutable: string | undefined;
     try {
       if (failure === 'missing') delete process.env.NOOK_TEST_FIXTURE_HOMES;
-      else {
+      else if (failure === 'relative') {
+        const directory = resolve(root, 'registry');
+        await mkdir(directory);
+        process.env.NOOK_TEST_FIXTURE_HOMES = relative(
+          process.cwd(),
+          directory,
+        );
+      } else {
         const file = resolve(root, 'not-a-registry');
         await writeFile(file, '', { mode: 0o600 });
         process.env.NOOK_TEST_FIXTURE_HOMES = file;
+        sandboxExecutable = resolve(root, 'sandbox');
+        await writeFile(
+          sandboxExecutable,
+          '#!/bin/sh\nprintf "%s" fixture-launched > "$(dirname "$0")/launched"\nexec /usr/bin/bwrap "$@"\n',
+          { mode: 0o700 },
+        );
       }
       const before = await readdir(root);
       await expect(
-        privateKeyring('absent', { tempRoot: root }).then(async (created) => {
-          await created.close();
-          return 'fixture-created';
-        }),
+        privateKeyring('absent', { tempRoot: root, sandboxExecutable }).then(
+          async (created) => {
+            await created.close();
+            return 'fixture-created';
+          },
+        ),
       ).rejects.toThrow(
-        failure === 'missing'
-          ? 'Linux CLI fixtures require an isolated HOME registry.'
-          : 'Linux CLI fixture HOME could not be registered.',
+        failure === 'unwritable'
+          ? 'Linux CLI fixture HOME could not be registered.'
+          : 'Linux CLI fixtures require an isolated HOME registry.',
       );
+      expect(existsSync(marker)).toBe(false);
       expect(await readdir(root)).toEqual(before);
     } finally {
       if (previous === undefined) delete process.env.NOOK_TEST_FIXTURE_HOMES;
@@ -306,6 +331,7 @@ it.each([
   'not-a-record',
   { home: '/tmp/nook-cli-fixture' },
   { run: '', home: '/tmp/nook-cli-fixture' },
+  { run: ' \t ', home: '/tmp/nook-cli-fixture' },
   { run: run.id },
   { run: run.id, home: 'nook-cli-fixture' },
   { run: run.id, home: '/tmp/../tmp/nook-cli-fixture' },
