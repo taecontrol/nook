@@ -1,11 +1,11 @@
 import { type BucketGrant, normalizeGrant } from '@nook/contract';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { bucketsOptions } from './buckets-api';
+import { refreshBucketList, useBucketList } from './buckets-api';
 
 export function useGrantSelection() {
   const queries = useQueryClient();
-  const buckets = useQuery(bucketsOptions);
+  const buckets = useBucketList();
   const [roots, setRoots] = useState<readonly string[]>(['me']);
   const [all, setAll] = useState(false);
   const [error, setError] = useState<string>();
@@ -18,10 +18,7 @@ export function useGrantSelection() {
   };
   const refresh = async () => {
     try {
-      const current = await queries.fetchQuery({
-        ...bucketsOptions,
-        staleTime: 0,
-      });
+      const current = await refreshBucketList(queries);
       const existing = new Set(current.map((bucket) => bucket.path));
       setRoots((chosen) => chosen.filter((path) => existing.has(path)));
     } catch {

@@ -108,6 +108,13 @@ export function preloadBuckets(queryClient: QueryClient) {
   if (!isWriting(queryClient)) void queryClient.prefetchQuery(bucketsOptions);
 }
 
+export async function refreshBucketList(queryClient: QueryClient) {
+  // Pending writes own the cached outline until their recovery read.
+  if (isWriting(queryClient))
+    return queryClient.getQueryData(bucketsOptions.queryKey) ?? [];
+  return queryClient.fetchQuery({ ...bucketsOptions, staleTime: 0 });
+}
+
 export function useBucketList() {
   const busy = useIsMutating({ mutationKey: writeKey }) > 0;
   return useQuery({
