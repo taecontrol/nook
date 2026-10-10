@@ -148,6 +148,8 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
       ['controls', undefined, 'client\tbad/1'],
       ['long', undefined, `${'x'.repeat(129)}/1`],
       ['bad envelope', { name: 'bad\nclient', version: '1' }, ''],
+      ['surrogate name', { name: 'client\ud800', version: '1' }, ''],
+      ['surrogate version', { name: 'client', version: '1\udfff' }, ''],
       ['long version', undefined, `client/${'1'.repeat(65)}`],
     ])(
       'E3: unusable %s client identity becomes unknown',
@@ -171,26 +173,50 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
         ).toMatchObject({ client: { name: 'unknown', version: null } });
       },
     );
-    it('E2: invalid envelope falls back to the first User-Agent product token', async () => {
-      const fallback = memoryClient(app, version, {
+    it.each([
+      ['controls', { name: 'invalid\tclient', version: '1' }],
+      ['surrogate name', { name: 'client\ud800', version: '1' }],
+      ['surrogate version', { name: 'client', version: '1\udfff' }],
+    ])(
+      'E2: invalid %s envelope falls back to the first User-Agent product token',
+      async (_, clientInfo) => {
+        const fallback = memoryClient(app, version, {
+          machine: endpoint === 'machine',
+          headers: {
+            ...(endpoint === 'machine'
+              ? { Authorization: `Bearer ${token}` }
+              : { 'Cf-Access-Jwt-Assertion': assertion }),
+            'User-Agent': 'codex-mcp-client/0.162.0 (sdk, other/9)',
+          },
+          clientInfo,
+        });
+        const m = stored(
+          await fallback.call('remember', { bucket: 'work/acme', content }),
+        );
+        expect(
+          (await fallback.call('get', { id: m.id })).structuredContent
+            ?.provenance,
+        ).toMatchObject({
+          client: { name: 'codex-mcp-client', version: '0.162.0' },
+        });
+      },
+    );
+    it('E1: a well-formed astral Unicode client report remains intact', async () => {
+      const reported = memoryClient(app, version, {
         machine: endpoint === 'machine',
-        headers: {
-          ...(endpoint === 'machine'
+        headers:
+          endpoint === 'machine'
             ? { Authorization: `Bearer ${token}` }
-            : { 'Cf-Access-Jwt-Assertion': assertion }),
-          'User-Agent': 'codex-mcp-client/0.162.0 (sdk, other/9)',
-        },
-        clientInfo: { name: 'invalid\tclient', version: '1' },
+            : { 'Cf-Access-Jwt-Assertion': assertion },
+        clientInfo: { name: 'client🦉', version: 'v🦉' },
       });
       const m = stored(
-        await fallback.call('remember', { bucket: 'work/acme', content }),
+        await reported.call('remember', { bucket: 'work/acme', content }),
       );
       expect(
-        (await fallback.call('get', { id: m.id })).structuredContent
+        (await reported.call('get', { id: m.id })).structuredContent
           ?.provenance,
-      ).toMatchObject({
-        client: { name: 'codex-mcp-client', version: '0.162.0' },
-      });
+      ).toMatchObject({ client: { name: 'client🦉', version: 'v🦉' } });
     });
     it('E5: a lost-response retry preserves id, tags and both row counts', async () => {
       const first = stored(

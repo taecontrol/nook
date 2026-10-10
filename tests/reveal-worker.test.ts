@@ -421,7 +421,7 @@ it('E14/E15/E18/E19: Access owner succeeds; missing assertion, other email, Nook
   expect((await revealSecret(app, revealPath, owner)).status).toBe(200);
   expect(await auditRows(app)).toHaveLength(1);
 });
-it('E16/E23: machines have no reveal route/capability and MCP keeps the same names-only tools', async () => {
+it('E16/E23: machines have no reveal route/capability and MCP keeps names-only Vault tools', async () => {
   type MachineFace = Effect.Success<ReturnType<typeof machineVault>>;
   expectTypeOf<
     Extract<keyof MachineFace, 'reveal' | 'values'>
@@ -438,8 +438,10 @@ it('E16/E23: machines have no reveal route/capability and MCP keeps the same nam
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
       'create_bucket',
       'delete_bucket',
+      'get',
       'list_buckets',
       'list_secrets',
+      'remember',
     ]);
     const result = await driver.call('list_secrets', { bucket: 'work/acme' });
     expectNoValue(JSON.stringify({ tools, result }), [

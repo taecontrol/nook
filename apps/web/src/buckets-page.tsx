@@ -115,7 +115,8 @@ function deleteFailure(error: Error | null) {
   if (error instanceof ApiError) {
     if (error.outcomeUnknown)
       return `Nook couldn't confirm whether the bucket was deleted${statusText(error)}. Check the outline before trying again.`;
-    if (error.tag === 'BucketHasSecrets') return error.message;
+    if (['BucketHasSecrets', 'BucketHasMemories'].includes(error.tag ?? ''))
+      return error.message;
     if (error.tag === 'BucketNotFound')
       return 'Nook reports that this bucket no longer exists. Check the outline before trying again.';
     if (error.status === 409)

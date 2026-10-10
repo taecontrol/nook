@@ -251,7 +251,7 @@ Issue #10 runs against the migrated production Worker in workerd and real local 
 | E9 | `memory-mcp.test.ts`: denied, missing and malformed ids share the not-found result; ancestors remain readable. |
 | E10 | `memory-mcp.test.ts`: missing bucket creates no rows. |
 | E11 | `memory-mcp.test.ts`: exact UTF-8 byte limit, Unicode, NUL, tags and directory boundaries. |
-| E12 | `memory-mcp.test.ts`, `mcp-worker.test.ts`: tool descriptions, annotations and unchanged existing inventory. |
+| E12 | `memory-mcp.test.ts`, `mcp-worker.test.ts`: tool descriptions, annotations and the four preserved tools plus get/remember. Existing transport, grant, CLI-header and Vault-reveal tests require that six-tool inventory. |
 | E13 | `memory-mcp.test.ts`: revocation rejects writes and retains machine provenance. |
 | E14 | `memory-mcp.test.ts`, `memory-worker.test.ts`: real D1 failures return fixed private errors. |
 | E15 | `memory-worker.test.ts`: HTTP/MCP deletion blockers, precedence and direct foreign-key enforcement. |
@@ -260,22 +260,22 @@ Issue #10 runs against the migrated production Worker in workerd and real local 
 | E18 | `memory-worker.test.ts`: 25/25/25/15 paging with tied dates and invalid/cross-bucket cursors. |
 | E19 | `memory-worker.test.ts`: bucket-only paging and ordering. |
 | E20 | `memory-worker.test.ts`: restricted list/detail/counts authorization and owner-only HTTP routes. |
-| E21 | `memory-worker.test.ts`: shared title derivation, including a first nonblank line beyond 512 characters. |
+| E21 | `memory-worker.test.ts`: shared title derivation, including CR, LF, CRLF and a first nonblank line beyond 512 characters. |
 | E22 | `memory-web.test.ts`: tree counts, expansion, lineage rows, desktop selection and URL reload. |
-| E23 | `memory-web.test.ts`: phone list/detail/back flow, scope, ten tags, long paths and code without page overflow. |
-| E24 | `memory-web.test.ts`: inert HTML, nonclickable image chip, safe links and no external requests. |
+| E23 | `memory-web.test.ts`, `memory-reader-regressions.test.ts`: phone list/detail/back flow, unavailable selections, scope, ten tags, maximum bucket paths and code without page overflow. |
+| E24 | `memory-web.test.ts`, `memory-reader-regressions.test.ts`: inert HTML, nonclickable image chip, safe links, no external requests and complete long, multiline or formatted headings. |
 | E25 | `memory-web.test.ts`: reported client label, authenticated principal, optional directory and absolute UTC time. |
 | E26 | `memory-web.test.ts`: actual bucket/inherited queries and URL scope. |
 | E27 | `memory-web.test.ts`: out-of-lineage detail stays in the Choose a memory state. |
-| E28 | `memory-web.test.ts`: genuine loading, inherited-only, first-run and D1 error/retry states. |
+| E28 | `memory-web.test.ts`, `memory-reader-regressions.test.ts`: genuine loading, inherited-only, first-run and D1 error/retry states, including joint list/detail/counts recovery and a counts-only failure. |
 | E29 | `memory-web.test.ts`, `web.test.ts`: enabled Home/sidebar link, active state and breadcrumb. |
-| E30 | `memory-web.test.ts`, `memory-refresh-web.test.ts`: hover/focus detail prefetch and real-tab agent-write refresh. |
+| E30 | `memory-web.test.ts`, `memory-refresh-web.test.ts`, `memory-reader-regressions.test.ts`: hover/focus detail prefetch, real-tab agent-write refresh and preservation of a pending optimistic bucket through refocus. |
 | E31 | `memory-load-time.test.ts`, `pnpm verify:load-time`: mandatory five-sample Memory budgets, production 4G cold open and intent navigation, with 60 bucket memories. |
 | E32 | `memory-captures.test.ts`: seven states at 1440×900 and 390×844, light/dark, plus full phone detail. |
 | E33 | `memory-mcp.test.ts`, `memory-worker.test.ts`, `memory-web.test.ts`: private denials, failed writes and console/network behavior. |
 
-`tests/journeys/owner.e2e.ts` additionally remembers through MCP and opens the stored memory using deterministic locators under strict cache replay and zero retries. Statement budgets are covered by `memory-worker.test.ts`: one batch for remember, one statement for get, and one batch per list page without per-item reads.
+`tests/journeys/owner.e2e.ts` additionally remembers through MCP and opens the stored memory using deterministic locators under strict cache replay and zero retries. `memory-worker.test.ts` observes real D1 calls through the existing test checkpoint wrapper: one three-statement batch for remember and duplicate retries, one statement for get, one two-statement batch per list page without per-item reads, and one aggregate statement for counts. Observations contain labels and batch sizes, never SQL, bindings or rows.
 
-The 28 viewport PNGs and two full phone detail PNGs are `memory-*` files in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. The selected hybrid's three independent desktop columns, shared Vault bucket tree, phone push flow, scope toggle, and nonclickable image chip are the visual reference. Captures omit the prototype scenario selector and avoid repeating the first Markdown heading in the detail body. Long row titles remain available through the link's title attribute.
+The 28 viewport PNGs and two full phone detail PNGs are `memory-*` files in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. The selected hybrid's three independent desktop columns, shared Vault bucket tree, phone push flow, scope toggle, and nonclickable image chip are the visual reference. Captures omit the prototype scenario selector. A plain first heading already shown in full by the detail title is omitted from the body; long, multiline and formatted headings are retained. Long row titles remain available through the link's title attribute.
 
 The load-time stage uses the unchanged 9 Mbps down, 3 Mbps up, 85 ms latency profile at 390×844, cache disabled, without CPU throttling. Cold `/memory?bucket=work/acme` must show real memory rows within 1000 ms. Home-to-Memory navigation after settled hover preloading must show the bucket tree within 100 ms. Both measurements use five animation-frame samples and fail independently when absent, malformed, or over budget.

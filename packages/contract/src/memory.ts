@@ -27,7 +27,7 @@ export function validateTags(tags: readonly string[]): string | undefined {
   }
 }
 export function memoryTitle(content: string) {
-  const line = content.split(/\r?\n/).find((value) => value.trim()) ?? '';
+  const line = content.split(/\r\n?|\n/).find((value) => value.trim()) ?? '';
   const title = line
     .trim()
     .replace(/^(?:[#>*-]+\s*)+/, '')

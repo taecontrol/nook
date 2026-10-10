@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { closeBrowserPage } from './support/buckets-browser.ts';
+import { observeBrowserPage } from './support/buckets-browser.ts';
 import {
   memoryClient,
   memoryRows,
@@ -32,7 +32,7 @@ it('E30: an agent write appears after real tab refocus without reloading', async
       'New from an agent',
     );
   } finally {
-    await closeBrowserPage(page, context);
+    await observeBrowserPage(page);
     await visible.close();
     await app.close();
   }

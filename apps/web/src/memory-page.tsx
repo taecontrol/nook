@@ -63,6 +63,19 @@ function BucketNav({ model }: { model: MemoryPageModel }) {
           />
         )}
       </div>
+      {model.countsQuery.isError && (
+        <div className="pb-3 text-xs text-muted-foreground">
+          <p>Could not load memory counts</p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            onClick={() => void model.countsQuery.refetch()}
+          >
+            Retry counts
+          </Button>
+        </div>
+      )}
       <p className="border-t py-3 text-xs leading-5 text-muted-foreground">
         Open a bucket to see what agents working there can remember.
       </p>
@@ -177,7 +190,11 @@ function ListBody({ model }: { model: MemoryPageModel }) {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void model.list.refetch()}
+            onClick={() => {
+              void model.list.refetch();
+              if (model.countsQuery.isError) void model.countsQuery.refetch();
+              if (model.detail.isError) void model.detail.refetch();
+            }}
           >
             Retry
           </Button>
@@ -188,7 +205,10 @@ function ListBody({ model }: { model: MemoryPageModel }) {
   return (
     <>
       <div className="border-b px-4 py-2 text-xs text-muted-foreground">
-        {model.total ?? model.records.length} memories · newest first
+        {model.total === null
+          ? `${model.records.length} memories loaded`
+          : `${model.total} memories`}{' '}
+        · newest first
       </div>
       <ul>
         {model.records.map((memory) => (
@@ -328,8 +348,7 @@ function ReadingState({ model }: { model: MemoryPageModel }) {
   return (
     <section
       aria-label="Reading pane"
-      data-memory-reading
-      className="flex min-w-0 items-center justify-center px-8 text-center"
+      className="flex min-w-0 flex-1 items-center justify-center px-8 text-center"
     >
       <Empty className="max-w-sm">
         <EmptyHeader>
@@ -345,25 +364,36 @@ function ReadingState({ model }: { model: MemoryPageModel }) {
     </section>
   );
 }
+function MemoryBack({ model }: { model: MemoryPageModel }) {
+  return (
+    <div className="sticky top-0 z-10 border-b bg-background px-5 py-3 lg:hidden">
+      <Button asChild variant="ghost" size="sm">
+        <Link
+          to="/memory"
+          search={{ bucket: model.bucket, scope: model.scope }}
+        >
+          <ArrowLeft />
+          Memories
+        </Link>
+      </Button>
+    </div>
+  );
+}
 function ReadingPane({ model }: { model: MemoryPageModel }) {
   const memory = model.selected;
-  if (!memory) return <ReadingState model={model} />;
+  if (!memory)
+    return (
+      <div data-memory-reading className="flex min-w-0 flex-col">
+        <MemoryBack model={model} />
+        <ReadingState model={model} />
+      </div>
+    );
   return (
     <article aria-label="Memory detail" data-memory-reading className="min-w-0">
-      <div className="sticky top-0 z-10 border-b bg-background px-5 py-3 lg:hidden">
-        <Button asChild variant="ghost" size="sm">
-          <Link
-            to="/memory"
-            search={{ bucket: model.bucket, scope: model.scope }}
-          >
-            <ArrowLeft />
-            Memories
-          </Link>
-        </Button>
-      </div>
+      <MemoryBack model={model} />
       <div className="px-5 pt-6 pb-16 lg:px-8 lg:pt-7">
         <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <Badge variant="outline">
+          <Badge variant="outline" className="max-w-full whitespace-normal">
             <span className="max-w-full font-mono wrap-anywhere">
               {memory.bucket}
             </span>

@@ -144,7 +144,7 @@ it.each(['2026-07-28', '2025-06-18'] as const)(
           expect(result.protocolVersion).toBe(version);
         if (method === 'server/discover')
           expect(result.supportedVersions).toEqual(['2026-07-28']);
-        if (method === 'tools/list') expect(result.tools).toHaveLength(4);
+        if (method === 'tools/list') expect(result.tools).toHaveLength(6);
       }
     }
   },
@@ -293,7 +293,7 @@ it('E15: all machine MCP methods reject foreign Origin before authentication or 
           origin ? { Origin: origin } : {},
         ).listTools()
       ).tools,
-    ).toHaveLength(4);
+    ).toHaveLength(6);
   for (const method of ['POST', 'GET', 'DELETE']) {
     const response = await fetch(`${app.origin}/api/machine/mcp`, {
       method,

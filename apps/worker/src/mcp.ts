@@ -63,6 +63,7 @@ function clientString(value: unknown, limit: number): value is string {
     typeof value === 'string' &&
     value.trim().length > 0 &&
     value.length <= limit &&
+    !/[\uD800-\uDFFF]/u.test(value) &&
     !/\p{Cc}/u.test(value)
   );
 }

@@ -14,6 +14,7 @@ import {
   typicalMemories,
 } from './support/memory.ts';
 import type { TestRuntime } from './support/runtime.ts';
+import { vaultCheckpoints } from './support/vault-checkpoints.ts';
 
 let app: TestRuntime;
 beforeAll(async () => {
@@ -206,6 +207,8 @@ it('E20/E33: restricted handlers forbid sibling lists and mask detail; the owner
 });
 it.each([
   ['\n\n## Release process\nSteps…', 'Release process'],
+  ['\r\r## CR release\rSecond line', 'CR release'],
+  ['\r\n\r\n## CRLF release\r\nSecond line', 'CRLF release'],
   [' > - * ## Prefer pnpm  \nDetails', 'Prefer pnpm'],
   ['a'.repeat(121), 'a'.repeat(120)],
   [`${'\n'.repeat(600)}## After blank lines\nDetails`, 'After blank lines'],
@@ -216,6 +219,62 @@ it.each([
     expect((await listMemoryPage(app)).memories[0].title).toBe(title);
   },
 );
+it('Memory SQL budgets: remember uses one batch, get one statement and each feed page one batch', async () => {
+  const labels: string[] = [];
+  const measured = await vaultCheckpoints(
+    async (label) => {
+      labels.push(label);
+      return true;
+    },
+    undefined,
+    false,
+    { observeBatchSize: true },
+  );
+  try {
+    await seedMemories(measured, manyMemories);
+    const client = memoryClient(measured, '2026-07-28');
+    const write = await client.call('remember', {
+      bucket: 'work/acme',
+      content: '# Statement budget\nOne atomic write batch.',
+    });
+    expect(write.isError).not.toBe(true);
+    expect(labels).toEqual(['/before-batch', '/batch-3', '/after-batch']);
+    labels.length = 0;
+    const retry = await client.call('remember', {
+      bucket: 'work/acme',
+      content: '# Statement budget\nOne atomic write batch.',
+    });
+    expect(retry.structuredContent).toMatchObject({ created: false });
+    expect(labels).toEqual(['/before-batch', '/batch-3', '/after-batch']);
+    labels.length = 0;
+    const detail = await client.call('get', {
+      id: write.structuredContent?.id,
+    });
+    expect(detail.structuredContent).toMatchObject({
+      content: '# Statement budget\nOne atomic write batch.',
+    });
+    expect(labels).toEqual(['/statement']);
+    labels.length = 0;
+    const first = await listMemoryPage(measured);
+    expect(first.memories).toHaveLength(25);
+    expect(first.next).not.toBeNull();
+    expect(labels).toEqual(['/before-batch', '/batch-2', '/after-batch']);
+    labels.length = 0;
+    const second = await listMemoryPage(
+      measured,
+      `bucket=work/acme&cursor=${encodeURIComponent(first.next ?? '')}`,
+    );
+    expect(second.memories).toHaveLength(25);
+    expect(labels).toEqual(['/before-batch', '/batch-2', '/after-batch']);
+    labels.length = 0;
+    expect((await fetch(`${measured.origin}/api/memories/counts`)).status).toBe(
+      200,
+    );
+    expect(labels).toEqual(['/statement']);
+  } finally {
+    await measured.close();
+  }
+});
 it('E15: HTTP and MCP refuse a memory bucket and SQL foreign keys prevent orphans', async () => {
   await seedMemories(app, [memoryFixture(1)]);
   const response = await deleteBucket('work/acme');

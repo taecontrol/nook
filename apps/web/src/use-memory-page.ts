@@ -6,7 +6,7 @@ import {
 } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
-import { bucketsOptions } from './buckets-api';
+import { useBucketList } from './buckets-api';
 import {
   memoriesOptions,
   memoryCountsOptions,
@@ -68,7 +68,7 @@ export function useMemoryPage() {
   const desktop = useDesktop();
   const bucket = search.bucket ?? 'me';
   const scope = search.scope ?? 'inherited';
-  const buckets = useQuery(bucketsOptions);
+  const buckets = useBucketList();
   const countsQuery = useQuery(memoryCountsOptions);
   const list = useInfiniteQuery(memoriesOptions(bucket, scope));
   const records = list.data?.pages.flatMap((page) => page.memories) ?? [];
