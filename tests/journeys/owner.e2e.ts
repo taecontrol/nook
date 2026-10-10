@@ -49,6 +49,7 @@ test('Memory: the owner reads a memory written through MCP with provenance', asy
             name: 'synthetic-journey',
             version: '1',
           },
+          'io.modelcontextprotocol/clientCapabilities': {},
         },
       },
     }),
