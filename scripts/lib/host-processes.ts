@@ -62,13 +62,16 @@ function belongsToRun(
   item: HostProcess,
   processes: HostProcess[],
   root: number,
+  runId?: string,
 ) {
   const visited = new Set<number>();
   let parent = item.parent;
   while (parent && !visited.has(parent)) {
     if (parent === root) return true;
     visited.add(parent);
-    parent = processes.find((process) => process.pid === parent)?.parent ?? 0;
+    const ancestor = processes.find((process) => process.pid === parent);
+    if (runId && ancestor?.run && ancestor.run !== runId) return false;
+    parent = ancestor?.parent ?? 0;
   }
   return false;
 }
@@ -178,7 +181,8 @@ export function orphanedProcesses(
     if (ownsFixtureHome(item, run)) return true;
     const daemon = ['gnome-keyring-d', 'dbus-daemon'].includes(item.name);
     return (
-      daemon && (item.run === run.id || belongsToRun(item, after, run.pid))
+      daemon &&
+      (item.run === run.id || belongsToRun(item, after, run.pid, run.id))
     );
   });
 }

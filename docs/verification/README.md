@@ -36,6 +36,8 @@ The test runner and every host-touching child use environments built from an exp
 
 Every host-touching fixture starts through `tests/support/sandbox.ts`, with no unsandboxed fallback. The sandbox uses `--unshare-user --unshare-pid --unshare-ipc --die-with-parent --new-session --clearenv`, supported by bubblewrap 0.9.0 and later. It sets exactly the allowlisted `testEnvironment` output; `/usr/bin/env --unset=PWD` removes the variable bubblewrap adds before executing the child. Read-only mounts at identical host paths are `/usr`, `/etc`, the resolved Node installation directory, and the repository; `/bin`, `/lib`, `/lib64`, and `/sbin` link into `/usr`. `/proc` and `/dev` are private pseudo-filesystems. `/tmp`, `/home`, and `/run` are empty tmpfs mounts, with an empty owner HOME and `/run/user/<uid>`; only parents of allowlisted mounts appear beneath them. The fixture HOME is bound read-write after the repository, including when `tempRoot` sits within it. Only coverage runs additionally bind `.local/verification/coverage` read-write for CLI execution evidence. Closing the fixture stops its sandbox process group; the PID namespace and `--die-with-parent` stop remaining descendants even after forced termination.
 
+Linux cleanup owns fixture HOME paths registered by its run or beneath its isolated HOME. A foreign run tag defeats apparent ownership, and the daemon ancestry fallback stops at an ancestor tagged for another run. Baseline PID/start generations remain protected.
+
 On Ubuntu 24.04 with restricted unprivileged user namespaces, load the versioned [nook-bwrap AppArmor profile](../../.github/apparmor/nook-bwrap) after installing bubblewrap:
 
 ```sh

@@ -35,6 +35,7 @@ it.runIf(process.platform === 'linux')(
       );
       isolation = await startHostIsolation(resources);
       expect(isolation.env.NOOK_TEST_RUN).not.toBe(parentRun);
+      const launchedAt = Date.now();
       command = parent.command(
         '/usr/bin/dbus-daemon',
         [
@@ -45,7 +46,35 @@ it.runIf(process.platform === 'linux')(
         ],
         { NOOK_TEST_RUN: undefined },
       );
-      await expect.poll(() => command?.output().startsWith('unix:')).toBe(true);
+      let completed: number | undefined;
+      void command.done.then((result) => {
+        completed = result.status;
+      });
+      try {
+        await expect
+          .poll(() => command?.output().startsWith('unix:'))
+          .toBe(true);
+      } catch (error) {
+        console.log(
+          JSON.stringify({
+            lateParentDaemonStartup: {
+              completed: completed ?? 'pending',
+              output: command.output(),
+              elapsedMs: Date.now() - launchedAt,
+              parentIdentity: (await snapshotProcesses())
+                .filter((item) => item.home === parent.home)
+                .map(({ pid, parent, started, name, run }) => ({
+                  pid,
+                  parent,
+                  started,
+                  name,
+                  run,
+                })),
+            },
+          }),
+        );
+        throw error;
+      }
       let daemon: HostProcess | undefined;
       await expect
         .poll(async () => {
