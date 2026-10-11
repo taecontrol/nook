@@ -42,6 +42,7 @@ import {
 
 export * from './audit.ts';
 export * from './buckets.ts';
+export * from './error-status.ts';
 export * from './grants.ts';
 export * from './machines.ts';
 export * from './memory.ts';

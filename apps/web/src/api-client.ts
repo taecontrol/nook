@@ -1,4 +1,4 @@
-import { Api } from '@nook/contract';
+import { Api, errorStatus } from '@nook/contract';
 import { Effect, Schema } from 'effect';
 import { FetchHttpClient, HttpClientError } from 'effect/http';
 import { HttpApiClient } from 'effect/http-api';
@@ -14,27 +14,32 @@ export class ApiError extends Error {
     super(message ?? `Request failed with ${status}`);
   }
 }
-const statusByTag: Record<string, number> = {
-  Unauthorized: 401,
-  Forbidden: 403,
-  ServiceUnavailable: 503,
-  InvalidBucketPath: 400,
-  InvalidMemory: 400,
-  InvalidMemoryCursor: 400,
-  MemoryNotFound: 404,
-  BucketHasMemories: 409,
-  InvalidAuditFilter: 400,
-  ReservedBucket: 400,
-  BucketNotFound: 404,
-  BucketHasChildren: 409,
-  BucketHasSecrets: 409,
-  InvalidSecret: 400,
-  SecretExists: 409,
-  SecretChanged: 409,
-  SecretNotFound: 404,
-  VaultNotConfigured: 503,
-  SecretKeyUnavailable: 503,
-};
+// Preserve the web client's supported tags; other contract errors use its fallback.
+const statusByTag: Record<string, number> = Object.fromEntries(
+  (
+    [
+      'Unauthorized',
+      'Forbidden',
+      'ServiceUnavailable',
+      'InvalidBucketPath',
+      'InvalidMemory',
+      'InvalidMemoryCursor',
+      'MemoryNotFound',
+      'BucketHasMemories',
+      'InvalidAuditFilter',
+      'ReservedBucket',
+      'BucketNotFound',
+      'BucketHasChildren',
+      'BucketHasSecrets',
+      'InvalidSecret',
+      'SecretExists',
+      'SecretChanged',
+      'SecretNotFound',
+      'VaultNotConfigured',
+      'SecretKeyUnavailable',
+    ] as const
+  ).map((tag) => [tag, errorStatus[tag]]),
+);
 const client = HttpApiClient.make(Api);
 export function runApi<A, E>(
   operation: (api: Effect.Success<typeof client>) => Effect.Effect<A, E>,
