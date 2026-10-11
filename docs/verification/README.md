@@ -135,11 +135,12 @@ audit entry is needed. Authentication reads the updated grant on the next reques
 | E2 | The same CLI and MCP suites deny a removed root while retaining the other root. |
 | E3–E10 | `machine-access-worker.test.ts` covers normalization, validation at the batch boundary, lost-response retries, stale writers, revocation, owner/Origin/subtree boundaries, and credential-free failures and logs. |
 | E11–E15 | `machine-access-web.test.ts` covers optimistic rows and stable positions, keyboard focus, every save failure and recovery, disabled/empty drafts, deleted roots, loading retry, and approval/deployment guidance. |
+| E11–E12 cache races | `machine-access-cache.test.ts` holds genuine reads and writes to prove machine-action exclusivity, cancellation of stale reads, and immediate application of the successful machine response before recovery can conceal a cache defect. |
 | E16 | `machine-access-captures.test.ts` captures all eight accepted Side sheet scenarios at 1280×900 and 390×844, including pending writes, outcomes, retries, long names, and stacked phone actions. |
 | E17 | The Worker suite enforces one batch; the browser suite proves lazy intent preloading and write-gated refresh; `machine-access-load-time.test.ts` proves the real phone measurement. `load-time.test.ts` and `pnpm verify:load-time` enforce five-sample medians for cold Machines (1000 ms), intent navigation (100 ms), and the preloaded checked editor tree (100 ms). |
 
 The `machine-access-*` PNGs live in `.local/verification/screenshots/` and CI's
-`web-shell-I` artifacts. Compare them with
+`web-shell-<shard>` artifacts. Compare them with
 `.work/prototypes/machine-access/selected/screenshots/`; scenario controls and
 the prototype's save stub do not enter production. Every write and rejection
 comes from the built Worker and genuine D1, under the existing synthetic owner
@@ -149,6 +150,10 @@ The bucket list and editor chunk load only on Edit access intent. Access saves
 and revokes share the Machines write gate. Sheet adds an explicit `instant`
 opening-motion variant for the 100 ms editor budget; its default slide remains
 unchanged. Sheet now enters authored coverage rather than the generated inventory.
+Confirmed save feedback settles before its recovery list completes. A deleted
+stored root is excluded from the live draft, including when the bucket list
+refreshes during editing. The current-grant summary scrolls within a bounded
+region so long valid grants keep the checked tree and fixed footer reachable.
 
 ## Vault storage and discovery
 
