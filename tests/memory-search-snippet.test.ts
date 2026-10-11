@@ -49,7 +49,7 @@ it.each([
     const found = await httpSearch(app, query);
     expect(found.results).toHaveLength(1);
     const hit = found.results[0];
-    expect(hit.snippet.isWellFormed()).toBe(true);
+    expect(hit.snippet).not.toMatch(/\p{Surrogate}/u);
     expect(hit.highlights).toHaveLength(1);
     const [start, end] = hit.highlights?.[0] ?? [];
     expect(hit.snippet.slice(start, end)).toBe(query);

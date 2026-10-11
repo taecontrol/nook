@@ -1,7 +1,7 @@
 import { cp, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { build } from 'esbuild';
-import type { Browser } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import { expect } from 'vitest';
 import {
   embeddingRecordings,
@@ -120,7 +120,7 @@ export async function searchPage(
     start?: string;
     viewport?: { width: number; height: number };
     colorScheme?: 'light' | 'dark';
-    configure?: (app: SearchRuntime) => Promise<void>;
+    configure?: (app: SearchRuntime, page: Page) => Promise<void>;
   },
 ) {
   const app = await searchRuntime();
@@ -145,7 +145,7 @@ export async function searchPage(
         path.split('/').map((_, i, p) => p.slice(0, i + 1).join('/')),
       );
     await indexMemories(app, options.seeds);
-    await options.configure?.(app);
+    await options.configure?.(app, page);
     await page.goto(app.origin + (options.start ?? '/memory?bucket=work/acme'));
     return { page, app, context, close };
   } catch (error) {

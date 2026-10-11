@@ -62,7 +62,7 @@ it.each(matrix)(
       seeds,
       viewport: size,
       colorScheme: theme,
-      start: `/memory?bucket=${encodeURIComponent(bucket)}`,
+      start: `/memory?bucket=${encodeURIComponent(bucket)}${size.name === 'desktop' && state !== 'fresh-owner' && state !== 'extremes' ? `&memory=${memoryId(21)}` : ''}`,
     });
     const errors: string[] = [];
     visit.page.on('pageerror', (error) => errors.push(error.name));

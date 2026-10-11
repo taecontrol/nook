@@ -107,6 +107,54 @@ describe.each(['owner', 'machine'] as const)(
           expect.arrayContaining([memoryId(21), memoryId(25)]),
         );
       });
+      it('E3: accents, case and prefixes match content independently of tags and alternate spellings', async () => {
+        await seedMemories(app, [
+          memoryFixture(482, {
+            content: '# Despliégue\n\nAccent-only spelling.',
+            tags: [],
+          }),
+          memoryFixture(483, {
+            content: '# DESPLIEGUE\n\nUppercase-only spelling.',
+            tags: [],
+          }),
+          memoryFixture(484, {
+            content: '# Deploying\n\nPrefix-only spelling.',
+            tags: [],
+          }),
+          memoryFixture(485, {
+            content: '# Deployment\n\nAnother prefix-only spelling.',
+            tags: [],
+          }),
+        ]);
+        app.services.failEmbedding = true;
+        expect(
+          results(await search('despliegue')).results.map((r) => r.id),
+        ).toEqual(expect.arrayContaining([memoryId(482), memoryId(483)]));
+        expect(
+          results(await search('deploy')).results.map((r) => r.id),
+        ).toEqual(expect.arrayContaining([memoryId(484), memoryId(485)]));
+      });
+      it('E6: all required tags filter keyword matches as well as meaning matches', async () => {
+        await seedMemories(app, searchMemories);
+        app.services.failEmbedding = true;
+        expect(
+          results(await search('deployment', { tags: ['deploy', 'cli'] }))
+            .results,
+        ).toEqual([]);
+        const found = results(
+          await search('pnpm verify', { tags: ['deploy', 'cli'] }),
+        );
+        expect(found.results.map((r) => r.id)).toEqual([memoryId(23)]);
+        expect(found.results[0].match).toBe('keyword');
+      });
+      it('E6: duplicate required tags are rejected before any meaning-service call', async () => {
+        expectToolError(
+          await search('how do we deploy', { tags: ['deploy', 'deploy'] }),
+          'Use each tag only once.',
+        );
+        expect(app.services.embeddingCalls).toEqual([]);
+        expect(app.services.queries).toEqual([]);
+      });
       it.each([false, true])(
         'E4/E5: D1 enforces lineage even when Vectorize ignores the filter=%s; a narrow grant denies siblings',
         async (ignoreFilter) => {
@@ -310,3 +358,63 @@ describe.each(['owner', 'machine'] as const)(
     });
   },
 );
+
+describe('Memory search owner HTTP', () => {
+  let app: SearchRuntime;
+  beforeAll(async () => {
+    app = await searchRuntime();
+  });
+  beforeEach(async () => {
+    await (await app.mf.getD1Database('DB'))
+      .prepare('DELETE FROM memories')
+      .run();
+    app.services.clear();
+    app.services.failEmbedding = false;
+  });
+  afterAll(() => app?.close());
+  it('E4/E17: Only this bucket excludes ancestors from both search sources', async () => {
+    await indexMemories(
+      app,
+      ['work/acme', 'work', 'me'].map((bucket, i) =>
+        memoryFixture(40 + i, { bucket, content: identicalContent }),
+      ),
+    );
+    const found = await httpSearch(
+      app,
+      'shared deployment',
+      'work/acme',
+      'bucket',
+    );
+    expect(found.results.map((hit) => hit.bucket)).toEqual(['work/acme']);
+    expect(found.results[0].match).toBe('both');
+    app.services.failEmbedding = true;
+    const keywords = await httpSearch(
+      app,
+      'shared deployment',
+      'work/acme',
+      'bucket',
+    );
+    expect(keywords.results.map((hit) => hit.bucket)).toEqual(['work/acme']);
+    expect(keywords.results[0].match).toBe('keyword');
+  });
+  it('ranking: equal fused scores put the newer memory first', async () => {
+    await indexMemories(app, [
+      memoryFixture(40, {
+        bucket: 'work/acme',
+        content: identicalContent,
+        createdAt: '2026-10-10T00:00:00Z',
+      }),
+      memoryFixture(41, {
+        bucket: 'work',
+        content: identicalContent,
+        createdAt: '2026-10-09T00:00:00Z',
+      }),
+    ]);
+    const found = await httpSearch(app, 'shared deployment');
+    expect(found.results.map((hit) => hit.id)).toEqual([
+      memoryId(40),
+      memoryId(41),
+    ]);
+    expect(found.results.every((hit) => hit.match === 'both')).toBe(true);
+  });
+});

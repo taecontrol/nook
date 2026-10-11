@@ -21,7 +21,10 @@ const field = (page: Page) =>
   page.getByRole('textbox', { name: /Search memories visible/ });
 const rows = (page: Page) => page.locator('[data-search-result]');
 it('E17: debounce and Enter put q in the URL; reload, selection, Back, scope and bucket retain it; Esc clears', async () => {
-  const visit = await searchPage(browser, { seeds: searchMemories });
+  const visit = await searchPage(browser, {
+    seeds: searchMemories,
+    start: `/memory?bucket=work/acme&memory=${memoryId(21)}`,
+  });
   try {
     const { page } = visit;
     await memoryRows(page).first().waitFor();
@@ -62,6 +65,7 @@ it('E17: debounce and Enter put q in the URL; reload, selection, Back, scope and
     await page.goBack();
     await rows(page).first().waitFor();
     expect(new URL(page.url()).searchParams.get('q')).toBe('how do we deploy');
+    expect(new URL(page.url()).searchParams.get('memory')).toBe(openBefore);
     await page
       .getByRole('button', { name: 'Only this bucket', exact: true })
       .click();
@@ -98,6 +102,9 @@ it('E18: owner HTTP highlights real keyword ranges, labels meaning and inherited
     await release.waitFor();
     expect(await release.innerText()).toContain('By meaning');
     expect(await release.innerText()).toContain('work');
+    expect(await release.locator('span[title="work"]').innerText()).toBe(
+      'work',
+    );
     expect(await release.locator('mark').count()).toBe(0);
     const response = await httpSearch(app, 'pnpm verify');
     const first = response.results[0];
@@ -266,12 +273,47 @@ it('E19: meaning failures explain incomplete results, no matches clear, and a fr
   }
 });
 it('E20: an idle page has the search affordance and makes zero search requests', async () => {
-  const visit = await searchPage(browser, { seeds: searchMemories });
+  let requests = 0;
+  const visit = await searchPage(browser, {
+    seeds: searchMemories,
+    configure: async (_app, page) => {
+      page.on('request', (request) => {
+        if (new URL(request.url()).pathname === '/api/memories/search')
+          requests++;
+      });
+    },
+  });
   try {
     await field(visit.page).waitFor();
     await memoryRows(visit.page).first().waitFor();
+    expect(requests).toBe(0);
     expect(visit.app.services.embeddingCalls).toEqual([]);
     expect(visit.app.services.queries).toEqual([]);
+  } finally {
+    await visit.close();
+  }
+});
+it('E17: the debounce commits at 250 ms and Enter commits before the timer fires', async () => {
+  const visit = await searchPage(browser, { seeds: searchMemories });
+  try {
+    const { page } = visit;
+    await memoryRows(page).first().waitFor();
+    const time = new Date('2026-10-10T20:00:00Z');
+    await page.clock.install({ time });
+    await page.clock.pauseAt(new Date(time.getTime() + 1000));
+    await field(page).fill('how do we deploy');
+    await page.clock.runFor(249);
+    expect(new URL(page.url()).searchParams.has('q')).toBe(false);
+    await page.clock.runFor(1);
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get('q'))
+      .toBe('how do we deploy');
+    await field(page).fill('pnpm verify');
+    await field(page).press('Enter');
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get('q'))
+      .toBe('pnpm verify');
+    await page.clock.resume();
   } finally {
     await visit.close();
   }
