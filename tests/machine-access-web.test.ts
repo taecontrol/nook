@@ -647,6 +647,12 @@ it('E14: saving an existing grant with a deleted root drops it without another e
     ).toMatch(/Removes\s+work\/old-experiment\s+No longer exists/);
     expect(
       await sheet
+        .locator('[data-slot="sheet-footer"] li')
+        .filter({ hasText: 'work/old-experiment' })
+        .count(),
+    ).toBe(1);
+    expect(
+      await sheet
         .getByRole('button', { name: 'Save access', exact: true })
         .isEnabled(),
     ).toBe(true);
@@ -963,14 +969,41 @@ it('E17: the editor chunk and buckets preload on intent and do not join the Mach
 
 it('E17: an editor chunk transport failure uses the route error boundary and recovers after reload', async () => {
   let failing = true;
+  const errors: string[] = [];
   const visit = await accessPage(browser, {
     configure: async (page) => {
+      page.on('pageerror', (error) => errors.push(error.message));
       await page.route('**/machine-access-sheet-*.js', (route) =>
         failing ? route.abort('failed') : route.continue(),
       );
     },
   });
   try {
+    await visit.page.waitForLoadState('networkidle');
+    const failed = visit.page.waitForEvent('requestfailed', {
+      predicate: (request) =>
+        /machine-access-sheet.*\.js$/.test(new URL(request.url()).pathname),
+    });
+    await machineRow(visit.page, visit.machines[0].id)
+      .getByRole('button', { name: /Edit access/ })
+      .hover();
+    await failed;
+    await visit.page.waitForLoadState('networkidle');
+    await visit.page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    expect(errors).toEqual([]);
+    expect(
+      await visit.page
+        .getByRole('dialog', { name: 'Edit access', exact: true })
+        .count(),
+    ).toBe(0);
+    expect(
+      visit.requests.filter((request) => request.method === 'PUT'),
+    ).toHaveLength(0);
     await machineRow(visit.page, visit.machines[0].id)
       .getByRole('button', { name: /Edit access/ })
       .click();
