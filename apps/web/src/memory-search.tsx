@@ -122,7 +122,7 @@ function listSummary(model: MemoryPageModel) {
   if (model.list.isPending) return 'Loading memories…';
   if (model.list.isError) return 'Memories unavailable';
   const n = model.total ?? model.records.length;
-  return `${n} ${n === 1 ? 'memory' : 'memories'} · newest first`;
+  return `${n} ${n === 1 ? 'memory' : 'memories'}${model.total === null ? ' loaded' : ''} · newest first`;
 }
 function searchSummary(model: MemoryPageModel) {
   if (model.results.isError && !model.results.isFetching)

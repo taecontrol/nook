@@ -11,16 +11,22 @@ export function keywordExpression(query: string) {
     .join(' ');
 }
 type Snippet = { snippet: string; highlights: [number, number][] };
+function codePointBoundary(text: string, index: number) {
+  return (text.codePointAt(index - 1) ?? 0) > 0xffff ? index - 1 : index;
+}
 function clipped(snippet: string, highlights: [number, number][]): Snippet {
   const first = highlights[0]?.[0] ?? 0;
-  const start = first > 70 ? first - 40 : 0;
+  const start = codePointBoundary(snippet, first > 70 ? first - 40 : 0);
   const prefix = start ? '…' : '';
-  const end = start + 238;
+  const end = codePointBoundary(snippet, start + 238);
   return {
     snippet: `${prefix}${snippet.slice(start, end)}${snippet.length > end ? '…' : ''}`,
     highlights: highlights
-      .filter(([s, e]) => s >= start && e <= end)
-      .map(([s, e]) => [s - start + prefix.length, e - start + prefix.length]),
+      .filter(([s, e]) => e > start && s < end)
+      .map(([s, e]) => [
+        Math.max(s, start) - start + prefix.length,
+        Math.min(e, end) - start + prefix.length,
+      ]),
   };
 }
 export function openingSnippet(content: string): Snippet {

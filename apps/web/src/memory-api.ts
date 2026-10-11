@@ -64,6 +64,7 @@ export function memorySearchOptions(
     enabled: Boolean(q.trim()),
     retry: false,
     staleTime: 30_000,
+    refetchOnWindowFocus: 'always',
   });
 }
 export type MemorySearch = {
