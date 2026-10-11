@@ -7,7 +7,8 @@ export async function browserEnvironment() {
   return {
     home,
     options: {
-      env: testEnvironment(home),
+      // Pin the browser's local time so dates render the same on every host.
+      env: testEnvironment(home, { TZ: 'UTC' }),
       args: ['--password-store=basic', '--use-mock-keychain'],
     },
     close: () => rm(home, { recursive: true, force: true }),

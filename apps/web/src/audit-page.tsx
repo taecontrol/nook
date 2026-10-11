@@ -43,32 +43,11 @@ import { Spinner } from '@/components/ui/spinner';
 import { type AuditFilters, auditOptions } from './audit-api';
 import { useBucketList } from './buckets-api';
 import { useMachineList } from './machines-api';
+import { formatDateTime, recentTime } from './time';
 import { useSecretList } from './vault-api';
 
 const allBuckets = '*';
 
-function recentTime(at: string) {
-  const minutes = Math.max(
-    0,
-    Math.floor((Date.now() - Date.parse(at)) / 60_000),
-  );
-  if (minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  if (minutes < 1440) return `${Math.floor(minutes / 60)}h ago`;
-  return new Date(at).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    ...(new Date(at).getFullYear() !== new Date().getFullYear()
-      ? { year: 'numeric' as const }
-      : {}),
-  });
-}
-function exactTime(at: string) {
-  return new Date(at).toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'long',
-  });
-}
 function inBucket(path: string, bucket?: string) {
   return !bucket || path.startsWith(`${bucket}/`);
 }
@@ -286,8 +265,8 @@ function Entry({
     >
       <Collapsible open={open} onOpenChange={setOpen}>
         <Item size="sm" className="flex-nowrap items-start lg:items-center">
-          <div className="hidden w-20 shrink-0 text-xs tabular-nums text-muted-foreground lg:block">
-            <time dateTime={entry.at} title={exactTime(entry.at)}>
+          <div className="hidden w-28 shrink-0 text-xs tabular-nums text-muted-foreground lg:block">
+            <time dateTime={entry.at} title={formatDateTime(entry.at)}>
               {recentTime(entry.at)}
             </time>
           </div>
@@ -397,7 +376,7 @@ function EntryDetails({
           )}
         </Fact>
         <Fact label="Recorded">
-          <time dateTime={entry.at}>{exactTime(entry.at)}</time>
+          <time dateTime={entry.at}>{formatDateTime(entry.at)}</time>
         </Fact>
         {entry.outcome === 'revealed' ? (
           <>
@@ -633,7 +612,7 @@ function AuditResults({
             <span>Newest first</span>
           </div>
           <div className="hidden items-center gap-2.5 border-b px-4 py-2 text-xs text-muted-foreground lg:flex">
-            <span className="w-20 shrink-0">When</span>
+            <span className="w-28 shrink-0">When</span>
             <span className="w-24 shrink-0">Outcome</span>
             <div className="flex flex-1 gap-4">
               <span className="flex-1">Secret / bucket</span>

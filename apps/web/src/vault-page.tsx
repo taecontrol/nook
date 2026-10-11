@@ -52,7 +52,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { ApiError } from './api-client';
-import { formatDate } from './paths';
+import { formatDate } from './time';
 import { useVaultPage } from './use-vault-page';
 import { WriteFeedback } from './vault-feedback';
 import { ancestorsOf, plural, type Secret, secretsIn } from './vault-model';

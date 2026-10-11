@@ -283,7 +283,7 @@ Issue #10 runs against the migrated production Worker in workerd and real local 
 | E22 | `memory-web.test.ts`: tree counts, expansion, lineage rows, desktop selection and URL reload. |
 | E23 | `memory-web.test.ts`, `memory-reader-regressions.test.ts`: phone list/detail/back flow, unavailable selections, scope, ten tags, maximum bucket paths and code without page overflow. |
 | E24 | `memory-web.test.ts`, `memory-reader-regressions.test.ts`: inert HTML, nonclickable image chip, safe links, no external requests, complete long, multiline or formatted headings, plain paragraph semantics and empty-heading recovery. |
-| E25 | `memory-web.test.ts`: reported client label, authenticated principal, optional directory and absolute UTC time. |
+| E25 | `memory-web.test.ts`: reported client label, authenticated principal, optional directory and absolute local time. |
 | E26 | `memory-web.test.ts`: actual bucket/inherited queries and URL scope. |
 | E27 | `memory-web.test.ts`: out-of-lineage detail stays in the Choose a memory state. |
 | E28 | `memory-web.test.ts`, `memory-reader-regressions.test.ts`: genuine loading, inherited-only, first-run and D1 error/retry states, including joint list/detail/counts recovery and a counts-only failure. |

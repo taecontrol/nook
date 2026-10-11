@@ -20,7 +20,8 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
-import { formatDate, nameOf, parentOf } from './paths';
+import { nameOf, parentOf } from './paths';
+import { formatDate } from './time';
 
 export type OutlineNode = {
   path: string;

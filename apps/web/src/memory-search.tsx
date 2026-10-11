@@ -24,7 +24,8 @@ import { Item, ItemContent, ItemTitle } from '@/components/ui/item';
 import { Kbd } from '@/components/ui/kbd';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
-import { absoluteTime, relativeTime } from './memory-format';
+
+import { formatDateTime, recentTime } from './time';
 import type { MemoryPageModel } from './use-memory-page';
 
 const inputId = 'memory-search-input';
@@ -239,9 +240,9 @@ function SearchRow({
               <span aria-hidden>·</span>
               <span
                 className="shrink-0 tabular-nums"
-                title={absoluteTime(result.createdAt)}
+                title={formatDateTime(result.createdAt)}
               >
-                {relativeTime(result.createdAt)}
+                {recentTime(result.createdAt)}
               </span>
               {result.match === 'meaning' && (
                 <Badge variant="outline" className="ml-auto shrink-0">

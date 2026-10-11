@@ -45,7 +45,7 @@ import { ApiError } from './api-client';
 import { MachineAccess } from './grant-summary';
 import { type MachineRevoke, useMachines } from './machines-api';
 import { approvedText, groupMachines, lastUsedParts } from './machines-model';
-import { formatDate } from './paths';
+import { formatDate } from './time';
 
 const icons = { stale: Hourglass, never: CircleDashed, recent: Activity };
 function Facts({ parts }: { parts: string[] }) {

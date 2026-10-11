@@ -34,20 +34,13 @@ import { Spinner } from '@/components/ui/spinner';
 import { Cmd, ConnectionFailure, Mark } from './authorize-parts';
 import type { GrantSelection } from './grant-selection';
 import { GrantSelector } from './grant-selector';
+import { timeAgo, timeUntil } from './time';
 
-function relativeTime(timestamp: string, future = false) {
-  const minutes = Math.max(
-    1,
-    Math.ceil(Math.abs(Date.parse(timestamp) - Date.now()) / 60_000),
-  );
-  const duration = `${minutes} minute${minutes === 1 ? '' : 's'}`;
-  return future ? `in ${duration}` : `${duration} ago`;
-}
 function RequestDetails({ request }: { request: AuthorizationRequest }) {
   const rows = [
     ['Client', request.client],
-    ['Requested', relativeTime(request.requestedAt)],
-    ['Expires', relativeTime(request.expiresAt, true)],
+    ['Requested', timeAgo(request.requestedAt)],
+    ['Expires', timeUntil(request.expiresAt)],
   ];
   return (
     <dl className="flex flex-col gap-2 text-sm">

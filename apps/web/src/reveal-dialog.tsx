@@ -17,7 +17,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 import { ApiError, runApi } from './api-client';
-import { formatDate } from './paths';
+import { formatDate } from './time';
 import type { Secret } from './vault-model';
 
 type State =

@@ -42,7 +42,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
-import { formatDate } from './paths';
+import { formatDate } from './time';
 import { DESCRIPTION_MAX, type Secret } from './vault-model';
 import type { Draft, SheetState } from './vault-state';
 

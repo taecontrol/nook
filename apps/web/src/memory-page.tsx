@@ -14,9 +14,10 @@ import {
 import { Item, ItemContent, ItemTitle } from '@/components/ui/item';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError } from './api-client';
-import { absoluteTime, principalName, relativeTime } from './memory-format';
+import { principalName } from './memory-format';
 import { MemoryMarkdown } from './memory-markdown';
 import { ColumnSummary, SearchBody, SearchField } from './memory-search';
+import { formatDateTime, recentTime } from './time';
 import { type MemoryPageModel, useMemoryPage } from './use-memory-page';
 import { BucketTree, BucketTreeSkeleton } from './vault-tree';
 import './memory.css';
@@ -115,9 +116,9 @@ function MemoryRow({
               <span aria-hidden>·</span>
               <span
                 className="shrink-0 tabular-nums"
-                title={absoluteTime(memory.createdAt)}
+                title={formatDateTime(memory.createdAt)}
               >
-                {relativeTime(memory.createdAt)}
+                {recentTime(memory.createdAt)}
               </span>
               <span aria-hidden>·</span>
               <span className="min-w-0 truncate">{principalName(memory)}</span>
@@ -288,7 +289,7 @@ function Provenance({ memory }: { memory: Memory }) {
         <dt className="text-muted-foreground">Stored</dt>
         <dd>
           <time dateTime={at} className="mt-0.5 block font-medium">
-            {absoluteTime(at)}
+            {formatDateTime(at)}
           </time>
         </dd>
       </div>
