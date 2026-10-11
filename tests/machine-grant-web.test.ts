@@ -113,10 +113,9 @@ it('E25/E26: choosing a parent replaces descendants, labels coverage and read-on
     ).toBe(1);
     expect(
       await page
-        .getByText(
-          'To change access later, revoke this machine and log in again.',
-          { exact: true },
-        )
+        .getByText('To change access later, edit it in Machines.', {
+          exact: true,
+        })
         .count(),
     ).toBe(1);
     await page.getByRole('button', { name: 'Approve', exact: true }).click();
