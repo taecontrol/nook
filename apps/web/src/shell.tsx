@@ -16,15 +16,8 @@ import {
 } from '@/components/ui/sidebar';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { AppSidebar } from './app-sidebar';
+import { destinations } from './destinations';
 import { identityOptions, type Session } from './identity';
-
-const titles: Record<string, string> = {
-  '/buckets': 'Buckets',
-  '/machines': 'Machines',
-  '/audit': 'Audit',
-  '/vault': 'Vault',
-  '/memory': 'Memory',
-};
 
 export function Shell() {
   const identity = useQuery(identityOptions);
@@ -32,7 +25,9 @@ export function Shell() {
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   });
-  const title = titles[pathname];
+  const title = destinations.find(
+    (destination) => destination.to === pathname,
+  )?.title;
   return (
     <TooltipProvider>
       <SidebarProvider>

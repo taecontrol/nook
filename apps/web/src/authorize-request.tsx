@@ -2,6 +2,7 @@ import {
   type AuthorizationRequest,
   formatUserCode,
   machineNameError,
+  machineNameMaxLength,
 } from '@nook/contract';
 import { CircleCheck, Terminal } from 'lucide-react';
 import { type RefObject, useEffect, useRef, useState } from 'react';
@@ -73,7 +74,7 @@ function MachineNameField({
         id="machine-name"
         ref={input}
         value={name}
-        maxLength={64}
+        maxLength={machineNameMaxLength}
         onChange={(event) => onName(event.target.value)}
         disabled={busy}
         aria-invalid={Boolean(error)}

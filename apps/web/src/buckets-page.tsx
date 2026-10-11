@@ -36,6 +36,7 @@ import {
   OutlineSkeleton,
   type OutlineState,
 } from './outline';
+import { Path, PathList } from './path-text';
 import { type CreatePlan, planCreate, validatePath } from './paths';
 import { useConfirmTarget } from './use-confirm-target';
 
@@ -48,16 +49,7 @@ type Feedback =
   | { kind: 'loading' };
 
 function quote(path: string) {
-  return <span className="font-mono text-foreground">{path}</span>;
-}
-
-function list(paths: readonly string[]): ReactNode {
-  return paths.map((path, index) => (
-    <span key={path}>
-      {index > 0 && (index === paths.length - 1 ? ' and ' : ', ')}
-      {quote(path)}
-    </span>
-  ));
+  return <Path className="text-foreground">{path}</Path>;
 }
 
 function createdStatus(result: CreatedBucket) {
@@ -67,7 +59,8 @@ function createdStatus(result: CreatedBucket) {
     <>Created {quote(result.path)}.</>
   ) : (
     <>
-      Created {quote(result.path)} with {list(result.createdAncestors)}.
+      Created {quote(result.path)} with{' '}
+      <PathList paths={result.createdAncestors} className="text-foreground" />.
     </>
   );
 }

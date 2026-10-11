@@ -55,10 +55,11 @@ export function normalizeUserCode(value: string) {
 export function formatUserCode(value: string) {
   return value.length > 4 ? `${value.slice(0, 4)}-${value.slice(4)}` : value;
 }
+export const machineNameMaxLength = 64;
 export function machineNameError(name: string) {
   if (!name.trim()) return 'Enter a name for this machine.';
-  if (name.trim().length > 64)
-    return 'Use at most 64 characters for the machine name.';
+  if (name.trim().length > machineNameMaxLength)
+    return `Use at most ${machineNameMaxLength} characters for the machine name.`;
 }
 export class InvalidMachineName extends Schema.Error<InvalidMachineName>(
   'nook/InvalidMachineName',
@@ -147,7 +148,9 @@ export const MachineApi = HttpApi.make('machine').add(
     .add(
       HttpApiEndpoint.post('authorize', '/api/machine/authorizations', {
         payload: Schema.Struct({
-          suggestedName: Schema.String.check(Schema.isMaxLength(64)),
+          suggestedName: Schema.String.check(
+            Schema.isMaxLength(machineNameMaxLength),
+          ),
           client: Schema.String.check(Schema.isMaxLength(128)),
         }),
         success: Schema.Struct({

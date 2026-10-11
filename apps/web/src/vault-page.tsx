@@ -1,4 +1,4 @@
-import { RESERVED_BUCKET, secretPath } from '@nook/contract';
+import { secretPath } from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import { cn } from 'cn';
 import {
@@ -51,32 +51,19 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { describeFailure } from './api-client';
 import { LoadFailure } from './failure';
+import { Path, PathList } from './path-text';
 import { formatDate } from './time';
 import { useLastValue } from './use-confirm-target';
 import { useVaultPage } from './use-vault-page';
 import { WriteFeedback } from './vault-feedback';
 import { ancestorsOf, plural, type Secret, secretsIn } from './vault-model';
-import { reachText, SecretSheet } from './vault-sheet';
+import { agentsIn, reachText, SecretSheet } from './vault-sheet';
 import { BucketTree, BucketTreeSkeleton } from './vault-tree';
 
 const RevealDialog = lazy(() => import('./reveal-dialog'));
 
 const sectionLabel =
   'text-xs font-medium tracking-wider text-muted-foreground uppercase';
-
-function Path({ children }: { children: string }) {
-  return <span className="font-mono wrap-anywhere">{children}</span>;
-}
-
-/** "work and me", each path in mono. */
-function Paths({ paths }: { paths: readonly string[] }) {
-  return paths.map((path, index) => (
-    <span key={path}>
-      {index > 0 && (index === paths.length - 1 ? ' and ' : ', ')}
-      <Path>{path}</Path>
-    </span>
-  ));
-}
 
 /* ---------- secret rows ---------- */
 
@@ -284,12 +271,12 @@ function Inherited({
           {total === 0 ? (
             <>
               Agents working in <Path>{bucket}</Path> would also find secrets
-              stored in <Paths paths={ancestors} />. There are none yet.
+              stored in <PathList paths={ancestors} />. There are none yet.
             </>
           ) : (
             <>
               Agents working in <Path>{bucket}</Path> also find these, from{' '}
-              <Paths paths={groups.map((group) => group.bucket)} />. Open a
+              <PathList paths={groups.map((group) => group.bucket)} />. Open a
               bucket to change its secrets.
             </>
           )}
@@ -454,12 +441,7 @@ function DeleteConfirmation({
 }) {
   const shown = useLastValue(secret);
   if (!shown) return null;
-  const where =
-    shown.bucket === RESERVED_BUCKET
-      ? 'Agents working in any bucket'
-      : parents.has(shown.bucket)
-        ? `Agents working in ${shown.bucket} or a bucket inside it`
-        : `Agents working in ${shown.bucket}`;
+  const where = agentsIn(shown.bucket, parents.has(shown.bucket));
   return (
     <AlertDialog
       open={secret !== null}

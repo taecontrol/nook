@@ -1,4 +1,9 @@
-import { type Bucket, RESERVED_BUCKET } from '@nook/contract';
+import {
+  type Bucket,
+  bucketLimits,
+  bucketPathMessages,
+  RESERVED_BUCKET,
+} from '@nook/contract';
 import { cn } from 'cn';
 import { ChevronRight, Dot, MoreHorizontal, Plus, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
@@ -115,6 +120,8 @@ function RowMenu({
   busy: boolean;
 }) {
   const blocker = deleteBlocker(node);
+  // Depth counts from 0, so the deepest accepted level has no children.
+  const atDeepest = node.depth >= bucketLimits.levels - 1;
   const toField = useRef(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   return (
@@ -150,7 +157,7 @@ function RowMenu({
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem
-          disabled={busy || node.depth >= 5}
+          disabled={busy || atDeepest}
           onSelect={() => {
             toField.current = true;
             actions.createInside(node.path);
@@ -159,9 +166,9 @@ function RowMenu({
           <Plus />
           Create inside
         </DropdownMenuItem>
-        {node.depth >= 5 && (
+        {atDeepest && (
           <p className="px-2 pb-1.5 text-xs text-muted-foreground">
-            A bucket path can have at most 6 levels.
+            {bucketPathMessages.depth}
           </p>
         )}
         <DropdownMenuSeparator />

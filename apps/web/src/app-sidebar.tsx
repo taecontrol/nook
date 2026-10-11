@@ -1,13 +1,5 @@
 import { Link, useRouterState } from '@tanstack/react-router';
-import {
-  Box,
-  Brain,
-  History,
-  KeyRound,
-  ListTree,
-  MonitorSmartphone,
-  UserRound,
-} from 'lucide-react';
+import { Box, UserRound } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import {
@@ -23,6 +15,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from '@/components/ui/sidebar';
+import { destinationGroups, destinations } from './destinations';
 import type { Session } from './identity';
 import { OwnerMenu } from './owner-menu';
 
@@ -56,60 +49,27 @@ export function AppSidebar({ session }: { session: Session }) {
         </Link>
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Platform</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={pathname === '/buckets'}>
-                  <Link to="/buckets" onClick={close}>
-                    <ListTree />
-                    <span>Buckets</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={pathname === '/machines'}>
-                  <Link to="/machines" onClick={close}>
-                    <MonitorSmartphone />
-                    <span>Machines</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={pathname === '/audit'}>
-                  <Link to="/audit" search={{}} onClick={close}>
-                    <History />
-                    <span>Audit</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>Tools</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={pathname === '/memory'}>
-                  <Link to="/memory" search={{}} onClick={close}>
-                    <Brain />
-                    <span>Memory</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={pathname === '/vault'}>
-                  <Link to="/vault" search={{}} onClick={close}>
-                    <KeyRound />
-                    <span>Vault</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {destinationGroups.map((group) => (
+          <SidebarGroup key={group}>
+            <SidebarGroupLabel>{group}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {destinations
+                  .filter((destination) => destination.group === group)
+                  .map(({ to, title, icon: Icon }) => (
+                    <SidebarMenuItem key={to}>
+                      <SidebarMenuButton asChild isActive={pathname === to}>
+                        <Link to={to} search={{}} onClick={close}>
+                          <Icon />
+                          <span>{title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
       <Separator />
       <SidebarFooter className="p-3">
