@@ -9,6 +9,7 @@ import { useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from './api-client';
 import { useBucketList } from './buckets-api';
+import { useDesktop } from './hooks/use-desktop';
 import { type SecretWrite, unconfirmed, useVault } from './vault-api';
 import { feedbackFor } from './vault-feedback';
 import { countByBucket, type Secret } from './vault-model';
@@ -20,18 +21,6 @@ import {
   type VaultUi,
 } from './vault-state';
 
-function useWide() {
-  const [wide, setWide] = useState(
-    () => matchMedia('(min-width: 1024px)').matches,
-  );
-  useEffect(() => {
-    const media = matchMedia('(min-width: 1024px)');
-    const update = () => setWide(media.matches);
-    media.addEventListener('change', update);
-    return () => media.removeEventListener('change', update);
-  }, []);
-  return wide;
-}
 function blankDraft(bucket: string): Draft {
   return { mode: 'create', bucket, name: '', description: '', value: '' };
 }
@@ -123,7 +112,7 @@ export function useVaultPage() {
   const [dismissed, setDismissed] = useState<number>();
   const patch = (next: Partial<VaultUi>) =>
     setUi((current) => ({ ...current, ...next }));
-  const wide = useWide();
+  const wide = useDesktop();
   const deleteTrigger = useRef<HTMLButtonElement | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const buckets = useMemo(
