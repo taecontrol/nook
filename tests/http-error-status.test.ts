@@ -85,23 +85,8 @@ it('passes through exactly the annotated 400 domain errors', () => {
   );
 });
 
-const webStatuses = {
-  ...contractStatuses,
-  InvalidMachineName: 503,
-  NoMatchingRequest: 503,
-  AlreadyHandled: 503,
-  Expired: 503,
-  PendingLimit: 503,
-  pending: 503,
-  denied: 503,
-  expired: 503,
-  invalid: 503,
-  InvalidBucketGrant: 503,
-  GrantBucketNotFound: 503,
-  InvalidRun: 503,
-  SecretsForbidden: 503,
-  UnexpectedFailure: 503,
-};
+// The owner API client can only decode errors the contract declares.
+const webStatuses = { ...contractStatuses, UnexpectedFailure: 503 };
 const publicTags = new Set([
   'InvalidSecret',
   'SecretExists',
