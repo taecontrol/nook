@@ -312,7 +312,7 @@ Issue #11 uses the production Worker bundle, migrated D1, and its genuine schedu
 | E7–E10 | The same matrix: exact validation messages, hostile FTS text, empty and capped results, sanitized real D1 failure, both meaning failures, and revoked tokens before AI/index calls. |
 | E11–E16 | `memory-search-sync.test.ts`: immediate keyword visibility, controlled delayed vectors, failed post-write repair, previous-schema backfill, 50-row Cron budget, model changes, stale/orphan filtering, guarded late writes, and duplicate/concurrent remembers. Every migrated fixture is found by keyword and meaning. |
 | E17–E19 | `memory-search-web.test.ts`: exact 250 ms debounce and immediate Enter, URL reload/Back/bucket/scope retention, keyboard movement, reader preservation, highlights/badges, twenty-result cap, genuine loading/error/retry, incomplete/empty/fresh states, and stable column positions at both widths. Phone content flows vertically; desktop column sizes and each fixed header stay unchanged. |
-| E20 | The idle browser case observes the real HTTP boundary and requires zero search, embedding and vector requests. Existing Memory load-time tests and `verify:load-time` retain the 1000 ms cold-open and 100 ms intent-navigation budgets. |
+| E20 | The idle browser case observes the real HTTP boundary and requires zero search, embedding and vector requests. `load-time.test.ts` and `verify:load-time` retain the 1000 ms cold-open and 100 ms intent-navigation budgets; `memory-load-time.test.ts` proves the production measurement conditions. |
 | E21 | `memory-search-captures.test.ts`: eleven states × two sizes × two themes, 44 genuine-product PNGs. |
 | E22 | `tests/journeys/owner.e2e.ts`: deterministic strict-cache search and opening of the Spanish ancestor memory. |
 | E23 | `memory-search-deploy.test.ts`: the workflow's actual shell against a temporary command fixture, missing index/metadata combinations, idempotent reruns, delayed metadata readiness and timeout without deployment. |
@@ -325,6 +325,9 @@ matches, all-tag filtering on keyword hits, duplicate-tag rejection before AI,
 the owner-only bucket scope, equal-score date/id ranking, compatibility-width
 keyword normalization, the sixteen-term limit, malformed AI responses without
 a vector query and malformed Vectorize responses with keyword fallback.
+Owner HTTP also preserves all three query-validation messages before any AI
+or vector call. The shared contract error registry includes
+`InvalidMemorySearch` with its annotated 400 status.
 Synchronization cases require the native external-content FTS integrity check
 to pass after deleting a canonical row. They hold a real embedding
 request to require creation and keyword search before indexing completes;
