@@ -1,12 +1,47 @@
 import { NodeServices } from '@effect/platform-node';
 import { Effect } from 'effect';
-import { Argument, Command, Flag } from 'effect/cli';
+import { Argument, CliError, Command, Flag } from 'effect/cli';
 import cliPackage from '../package.json' with { type: 'json' };
 import { CliFailure } from './errors.ts';
 import { run } from './run.ts';
+import { runUsage } from './run-arguments.ts';
 import { login, logout, mcpHeader, whoami } from './session.ts';
 import { vaultCheck, vaultList } from './vault.ts';
 import { vaultCreate } from './vault-create.ts';
+import { createUsage } from './vault-create-arguments.ts';
+
+type Usage = string | { readonly [command: string]: Usage };
+const usage: Usage = {
+  run: runUsage,
+  vault: {
+    check: 'nook vault check',
+    list: 'nook vault list <bucket>',
+    create: createUsage,
+  },
+  login: 'nook login <url>',
+  whoami: 'nook whoami',
+  logout: 'nook logout',
+  'mcp-header': 'nook mcp-header',
+  version: 'nook version',
+};
+function usageLines(node: Usage): string[] {
+  return typeof node === 'string'
+    ? [node]
+    : Object.values(node).flatMap(usageLines);
+}
+// Prints the usage of the command that failed, or of every command below it.
+function usageOf(commandPath: readonly string[]) {
+  let node = usage;
+  for (const name of commandPath.slice(1))
+    if (typeof node !== 'string' && Object.hasOwn(node, name))
+      node = node[name];
+  return `Usage: ${usageLines(node).join(' | ')}`;
+}
+function failedPath(error: unknown) {
+  return CliError.isCliError(error) && error._tag === 'ShowHelp'
+    ? error.commandPath
+    : [];
+}
 
 function missingVaultBucket(args: readonly string[]) {
   return args[0] === 'vault' && args[1] === 'list' && args.length === 2;
@@ -39,7 +74,7 @@ export async function execute(
   }
   if (args[0] === 'run') return run(args.slice(1), write);
   if (missingVaultBucket(args)) {
-    write('Usage: nook vault list <bucket>');
+    write(usageOf(['nook', 'vault', 'list']));
     return 1;
   }
   const command = Command.make('nook').pipe(
@@ -95,9 +130,7 @@ export async function execute(
         writeError(
           error instanceof CliFailure
             ? error.message
-            : args[0] === 'vault'
-              ? 'Usage: nook vault list <bucket>'
-              : 'Usage: nook login <url> | nook whoami | nook logout | nook mcp-header | nook version',
+            : usageOf(failedPath(error)),
         );
         return Effect.succeed(1);
       }),
