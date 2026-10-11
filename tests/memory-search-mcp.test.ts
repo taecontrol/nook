@@ -371,6 +371,16 @@ describe('Memory search owner HTTP', () => {
       .run();
     app.services.clear();
     app.services.failEmbedding = false;
+    app.services.failIndex = false;
+    app.services.ignoreFilter = false;
+    await app.setBindings(
+      {
+        LOCAL_OWNER: 'synthetic-owner',
+        LOCAL_ORIGIN: app.origin,
+        EMBEDDING_MODEL: '@cf/baai/bge-m3',
+      },
+      { outboundService: (request) => app.services.fetch(request) },
+    );
   });
   afterAll(() => app?.close());
   it('E4/E17: Only this bucket excludes ancestors from both search sources', async () => {
