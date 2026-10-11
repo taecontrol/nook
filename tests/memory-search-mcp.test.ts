@@ -14,6 +14,7 @@ import {
   memoryId,
   seedMemories,
   seedMemoryMachine,
+  typicalMemories,
 } from './support/memory.ts';
 import {
   httpSearch,
@@ -417,4 +418,61 @@ describe('Memory search owner HTTP', () => {
     ]);
     expect(found.results.every((hit) => hit.match === 'both')).toBe(true);
   });
+  it('ranking: equal fused scores and dates put the greater id first', async () => {
+    const createdAt = '2026-10-10T12:00:00.000Z';
+    await indexMemories(app, [
+      memoryFixture(40, { content: searchMemories[5].content, createdAt }),
+      memoryFixture(41, { content: typicalMemories[1].content, createdAt }),
+    ]);
+    const found = await httpSearch(app, 'deploy');
+    expect(found.results.every((hit) => hit.match === 'both')).toBe(true);
+    expect(found.results.map((hit) => hit.id)).toEqual([
+      memoryId(41),
+      memoryId(40),
+    ]);
+  });
+  it.each(['empty', 'extra', 'dimensions', 'infinite'] as const)(
+    'E9: a malformed %s embedding response returns keywords without querying vectors',
+    async (kind) => {
+      await seedMemories(app, searchMemories);
+      const values = app.services.run('@cf/baai/bge-m3', {
+        text: ['pnpm verify'],
+        truncate_inputs: true,
+      }).data[0];
+      app.services.resetCalls();
+      let body: string;
+      if (kind === 'empty') body = JSON.stringify({ data: [] });
+      else if (kind === 'extra')
+        body = JSON.stringify({ data: [values, values] });
+      else if (kind === 'dimensions')
+        body = JSON.stringify({ data: [values.slice(0, 1023)] });
+      // A valid JSON numeric literal can overflow when parsed by the Worker.
+      else body = `{"data":[[1e400,${values.slice(1).join(',')}]]}`;
+      await app.setBindings(
+        {
+          LOCAL_OWNER: 'synthetic-owner',
+          LOCAL_ORIGIN: app.origin,
+          EMBEDDING_MODEL: '@cf/baai/bge-m3',
+        },
+        {
+          outboundService: async (request) => {
+            const normal = await app.services.fetch(request);
+            return new URL(request.url).pathname === '/run'
+              ? new Response(body, {
+                  headers: { 'Content-Type': 'application/json' },
+                })
+              : normal;
+          },
+        },
+      );
+      const found = await httpSearch(app, 'pnpm verify');
+      expect(found.meaning).toBe('unavailable');
+      expect(found.results[0]).toMatchObject({
+        id: memoryId(23),
+        match: 'keyword',
+      });
+      expect(app.services.embeddingCalls).toHaveLength(1);
+      expect(app.services.queries).toEqual([]);
+    },
+  );
 });

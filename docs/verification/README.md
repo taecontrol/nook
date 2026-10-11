@@ -322,7 +322,11 @@ Issue #11 uses the production Worker bundle, migrated D1, and its genuine schedu
 
 The MCP and owner HTTP cases also distinguish tag-free prefix and accent
 matches, all-tag filtering on keyword hits, duplicate-tag rejection before AI,
-the owner-only bucket scope and equal-score ranking. `memory-search-snippet.test.ts`
+the owner-only bucket scope, equal-score date/id ranking and malformed AI
+responses without a vector query. Synchronization cases hold a real embedding
+request to require creation and keyword search before indexing completes;
+they also inspect workerd's scheduled outcome after a failed upsert.
+`memory-search-snippet.test.ts`
 requires clipped long-word highlights and Unicode boundaries that preserve
 supplementary characters. `memory-refresh-web.test.ts` uses genuine tab
 visibility changes and a fixed browser date to require fresh search results

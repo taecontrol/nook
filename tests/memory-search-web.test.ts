@@ -56,6 +56,11 @@ it('E17: debounce and Enter put q in the URL; reload, selection, Back, scope and
         .evaluate((node) => node === document.activeElement),
     ).toBe(true);
     await page.keyboard.press('ArrowUp');
+    expect(
+      await rows(page)
+        .first()
+        .evaluate((node) => node === document.activeElement),
+    ).toBe(true);
     await page.locator(`[data-search-result="${memoryId(20)}"]`).focus();
     await page.keyboard.press('Enter');
     await page

@@ -87,6 +87,62 @@ it('E12: post-write embedding failure preserves creation and keyword search; Cro
     expect.objectContaining({ id, match: 'meaning' }),
   );
 });
+it('E11: creation and keyword search finish while post-write embedding is still pending', async () => {
+  const arrived = deferred();
+  const gate = deferred();
+  await app.setBindings(
+    {
+      LOCAL_OWNER: 'synthetic-owner',
+      LOCAL_ORIGIN: app.origin,
+      EMBEDDING_MODEL: '@cf/baai/bge-m3',
+    },
+    {
+      outboundService: async (request) => {
+        if (new URL(request.url).pathname === '/run') {
+          const args = (await request.clone().json()) as [
+            string,
+            { text: string[] },
+          ];
+          if (args[1].text[0] === spanishRelease) {
+            arrived.resolve();
+            await gate.promise;
+          }
+        }
+        return app.services.fetch(request);
+      },
+    },
+  );
+  let response: Awaited<ReturnType<typeof remembered>> | undefined;
+  const pending = remembered(spanishRelease).then((result) => {
+    response = result;
+    return result;
+  });
+  try {
+    await arrived.promise;
+    await expect.poll(() => response?.structuredContent?.created).toBe(true);
+    const id = response?.structuredContent?.id as string;
+    expect((await httpSearch(app, 'publicar')).results).toContainEqual(
+      expect.objectContaining({ id, match: 'keyword' }),
+    );
+    expect((await marker(id)).embedding_marker).toBeNull();
+    expect(app.services.upserts).toEqual([]);
+  } finally {
+    gate.resolve();
+    await pending;
+  }
+});
+it('E12/E14: a failed scheduled upsert has a successful workerd outcome and leaves every marker pending', async () => {
+  await seedMemories(app, searchMemories);
+  app.services.failIndex = true;
+  const outcome = await (await app.mf.getWorker()).scheduled({
+    cron: '*/5 * * * *',
+    scheduledTime: new Date(),
+  });
+  expect(outcome.outcome).toBe('ok');
+  expect(app.services.upserts).toHaveLength(1);
+  for (const row of searchMemories)
+    expect((await marker(row.id)).embedding_marker).toBeNull();
+});
 it('E13: migration rebuilds populated current versions and Cron backfills at most fifty with the specified call budgets', async () => {
   const files = await migrationFiles('migrations');
   expect(files).toContain('0010_memory_search.sql');
