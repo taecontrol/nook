@@ -291,54 +291,67 @@ it('E12: changed-elsewhere adopts the server baseline while retaining the draft 
   }
 });
 
-it('E12: a selected bucket deleted elsewhere refreshes the tree and disables Save until another choice', async () => {
-  const visit = await accessPage(browser);
-  try {
-    const sheet = await editAccess(visit.page, visit.machines[0]);
-    await sheet
-      .getByRole('checkbox', { name: 'work/beta', exact: true })
-      .check();
-    await (await visit.app.mf.getD1Database('DB'))
-      .prepare("DELETE FROM buckets WHERE path='work/beta'")
-      .run();
-    await sheet
-      .getByRole('button', { name: 'Save access', exact: true })
-      .click();
-    await expect
-      .poll(() => sheet.getByRole('alert').innerText())
-      .toContain('Some selected buckets no longer exist. Choose again.');
-    await sheet
-      .getByRole('checkbox', { name: 'work/beta', exact: true })
-      .waitFor({ state: 'hidden' });
-    expect(
+it.each(sizes)(
+  'E12: at $width px a selected bucket deleted elsewhere refreshes the tree, shows the complete guidance, and disables Save until another choice',
+  async (viewport) => {
+    const visit = await accessPage(browser, { viewport });
+    try {
+      const sheet = await editAccess(visit.page, visit.machines[0]);
       await sheet
-        .getByRole('checkbox', { name: 'work/acme', exact: true })
-        .isChecked(),
-    ).toBe(true);
-    expect(
+        .getByRole('checkbox', { name: 'work/beta', exact: true })
+        .check();
+      await (await visit.app.mf.getD1Database('DB'))
+        .prepare("DELETE FROM buckets WHERE path='work/beta'")
+        .run();
       await sheet
         .getByRole('button', { name: 'Save access', exact: true })
-        .isEnabled(),
-    ).toBe(false);
-    expect(
-      await machineRow(visit.page, visit.machines[0].id).innerText(),
-    ).not.toContain('work/acme, work/beta');
-    await sheet
-      .getByRole('checkbox', { name: 'work/taecontrol', exact: true })
-      .check();
-    expect(
+        .click();
+      await expect
+        .poll(() => sheet.getByRole('alert').innerText())
+        .toContain('Some selected buckets no longer exist. Choose again.');
+      expect(
+        await sheet.locator('[data-slot="alert-title"]').evaluate((title) => {
+          const content = document.createRange();
+          content.selectNodeContents(title);
+          const box = title.getBoundingClientRect();
+          return [...content.getClientRects()].every(
+            (line) => line.bottom <= box.bottom + 1,
+          );
+        }),
+      ).toBe(true);
+      await sheet
+        .getByRole('checkbox', { name: 'work/beta', exact: true })
+        .waitFor({ state: 'hidden' });
+      expect(
+        await sheet
+          .getByRole('checkbox', { name: 'work/acme', exact: true })
+          .isChecked(),
+      ).toBe(true);
+      expect(
+        await sheet
+          .getByRole('button', { name: 'Save access', exact: true })
+          .isEnabled(),
+      ).toBe(false);
+      expect(
+        await machineRow(visit.page, visit.machines[0].id).innerText(),
+      ).not.toContain('work/acme, work/beta');
+      await sheet
+        .getByRole('checkbox', { name: 'work/taecontrol', exact: true })
+        .check();
+      expect(
+        await sheet
+          .getByRole('button', { name: 'Save access', exact: true })
+          .isEnabled(),
+      ).toBe(true);
       await sheet
         .getByRole('button', { name: 'Save access', exact: true })
-        .isEnabled(),
-    ).toBe(true);
-    await sheet
-      .getByRole('button', { name: 'Save access', exact: true })
-      .click();
-    await sheet.waitFor({ state: 'hidden' });
-  } finally {
-    await visit.close();
-  }
-});
+        .click();
+      await sheet.waitFor({ state: 'hidden' });
+    } finally {
+      await visit.close();
+    }
+  },
+);
 
 it('E12: a revoked machine disappears, leaves only an explanation and Close, and gives the actual reconnect command', async () => {
   const visit = await accessPage(browser);
