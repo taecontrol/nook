@@ -680,6 +680,82 @@ it.each([
   },
 );
 
+it.each(sizes)(
+  'E14/E17: at $width px many long approved roots keep the checked tree and fixed Save footer reachable',
+  async (viewport) => {
+    const roots = Array.from({ length: 24 }, (_, index) =>
+      [
+        `scope${String(index).padStart(2, '0')}${'a'.repeat(25)}`,
+        ...Array.from(
+          { length: 5 },
+          (_, level) =>
+            `level${level}${String.fromCharCode(98 + level).repeat(26)}`,
+        ),
+      ].join('/'),
+    );
+    const visit = await accessPage(browser, {
+      viewport,
+      configure: async (_page, app) => {
+        for (const path of roots)
+          expect(
+            (await jsonRequest(app, '/api/buckets', { path })).status,
+          ).toBe(200);
+        const target = (await listMachines(app)).find(
+          (machine) =>
+            machine.name === 'framework-13' &&
+            machine.grant !== 'all' &&
+            machine.grant.length === 1 &&
+            machine.grant[0] === 'work/acme',
+        );
+        if (!target) throw new Error('The approved machine must be present.');
+        expect(
+          (await saveAccess(app, target.id, roots, target.grant)).status,
+        ).toBe(200);
+      },
+    });
+    try {
+      const machine = visit.machines[0];
+      const sheet = await editAccess(visit.page, machine);
+      const checked = sheet.getByRole('checkbox', {
+        name: roots[0],
+        exact: true,
+      });
+      const save = sheet.getByRole('button', {
+        name: 'Save access',
+        exact: true,
+      });
+      expect(await checked.isChecked()).toBe(true);
+      const before = await save.boundingBox();
+      if (!before) throw new Error('Save access must have visible bounds.');
+      expect(before.y).toBeGreaterThanOrEqual(0);
+      expect(before.y + before.height).toBeLessThanOrEqual(viewport.height);
+      await checked.scrollIntoViewIfNeeded();
+      const box = await checked.boundingBox();
+      if (!box) throw new Error('The checked root must have visible bounds.');
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height).toBeLessThanOrEqual(before.y);
+      expect((await save.boundingBox())?.y).toBe(before.y);
+      await checked.uncheck();
+      expect(await save.isEnabled()).toBe(true);
+      const after = await save.boundingBox();
+      if (!after) throw new Error('Save access must remain visible.');
+      expect(after.y + after.height).toBeLessThanOrEqual(viewport.height);
+      const saved = visit.page.waitForResponse(
+        (response) => response.request().method() === 'PUT',
+      );
+      await save.click();
+      expect((await saved).status()).toBe(200);
+      await sheet.waitFor({ state: 'hidden' });
+      expect(
+        (await listMachines(visit.app)).find((entry) => entry.id === machine.id)
+          ?.grant,
+      ).toEqual(roots.slice(1));
+    } finally {
+      await visit.close();
+    }
+  },
+);
+
 it('E15: approval, approved result, and deployment guidance direct later access edits to Machines', async () => {
   const visit = await accessPage(browser);
   try {

@@ -224,7 +224,7 @@ function AccessHeader({
             {machine.name}
           </p>
           {!revoked && (
-            <p className="wrap-anywhere">
+            <p className="max-h-32 overflow-y-auto wrap-anywhere">
               Now: <GrantRoots grant={baseline} />
             </p>
           )}
