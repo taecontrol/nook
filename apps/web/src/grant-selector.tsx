@@ -87,9 +87,13 @@ function GrantBranch({
 function BucketChecklist({
   selection,
   busy,
+  contained,
+  recovery,
 }: {
   selection: GrantSelection;
   busy: boolean;
+  contained: boolean;
+  recovery: string;
 }) {
   const { buckets } = selection;
   if (buckets.isPending)
@@ -116,7 +120,7 @@ function BucketChecklist({
           <AlertDescription>
             <p>
               Check your connection and try again. You can still choose All
-              buckets or deny this request.
+              buckets or {recovery}.
             </p>
             <Button
               type="button"
@@ -134,7 +138,10 @@ function BucketChecklist({
   return (
     <fieldset
       aria-label="Bucket access"
-      className="max-h-80 overflow-y-auto overscroll-contain p-1"
+      className={cn(
+        'p-1',
+        contained && 'max-h-80 overflow-y-auto overscroll-contain',
+      )}
     >
       <ul>
         {buildBucketTree(buckets.data, []).map((node) => (
@@ -152,9 +159,13 @@ function BucketChecklist({
 export function GrantSelector({
   selection,
   busy,
+  contained = true,
+  editing = false,
 }: {
   selection: GrantSelection;
   busy: boolean;
+  contained?: boolean;
+  editing?: boolean;
 }) {
   return (
     <section
@@ -189,7 +200,12 @@ export function GrantSelector({
             </span>
           </Label>
         </div>
-        <BucketChecklist selection={selection} busy={busy} />
+        <BucketChecklist
+          selection={selection}
+          busy={busy}
+          contained={contained}
+          recovery={editing ? 'close this editor' : 'deny this request'}
+        />
       </div>
       {selection.error && (
         <FieldError role="alert">{selection.error}</FieldError>
@@ -205,7 +221,9 @@ export function GrantSelector({
         </p>
       )}
       <p className="text-xs leading-5 text-muted-foreground">
-        To change access later, revoke this machine and log in again.
+        {editing
+          ? "Saving replaces this machine's access. It applies on the machine's next request to Nook; it stays logged in with the same token."
+          : 'To change access later, edit it in Machines.'}
       </p>
     </section>
   );

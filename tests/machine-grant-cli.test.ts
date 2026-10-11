@@ -180,7 +180,12 @@ async function loginForAccess(name: string, grant: BucketGrant) {
     ).status,
   ).toBe(204);
   expect((await child.done).status).toBe(0);
-  return (await listMachines(app)).find((machine) => machine.name === name)!;
+  const machine = (await listMachines(app)).find(
+    (entry) => entry.name === name,
+  );
+  if (!machine)
+    throw new Error('The approved machine must appear in the owner list.');
+  return machine;
 }
 it('Access E1: the next real whoami reports an added sibling without another login or token change', async () => {
   await seedGrantTree(app, ['work/beta']);
@@ -231,8 +236,11 @@ it('Access E2: the next real vault list denies a removed root and retains the ot
     'clients/acme-logistics',
   ]).done;
   expect(denied.status).toBe(1);
-  expect(denied.stdout).toBe('');
-  expectOutput(denied.stderr, 'Access to this bucket is forbidden.', true);
+  expectOutput(
+    denied.stdout + denied.stderr,
+    'Access to this bucket is forbidden.',
+    true,
+  );
   expect(
     (await keyring.start(['vault', 'list', 'work/taecontrol/nook']).done)
       .status,

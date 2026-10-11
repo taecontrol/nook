@@ -1,4 +1,5 @@
 import type { Machine } from '@nook/contract';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
   CircleAlert,
@@ -7,7 +8,7 @@ import {
   Hourglass,
   MonitorSmartphone,
 } from 'lucide-react';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Alert, AlertTitle } from '@/components/ui/alert';
 import {
   AlertDialog,
@@ -40,6 +41,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { ApiError, describeFailure } from './api-client';
+import { preloadBuckets } from './buckets-api';
 import { DismissibleAlert, LoadFailure } from './failure';
 import { MachineAccess } from './grant-summary';
 import { type MachineRevoke, useMachines } from './machines-api';
@@ -48,6 +50,10 @@ import { formatDate } from './time';
 import { useConfirmTarget } from './use-confirm-target';
 
 const icons = { stale: Hourglass, never: CircleDashed, recent: Activity };
+const loadAccessSheet = () => import('./machine-access-sheet');
+const AccessSheet = lazy(() =>
+  loadAccessSheet().then((module) => ({ default: module.AccessSheet })),
+);
 function Facts({ parts }: { parts: string[] }) {
   return parts.map((part, index) => (
     <Fragment key={part}>
@@ -123,12 +129,21 @@ function MachineGroups({
   now,
   busy,
   onRevoke,
+  onEdit,
+  saved,
 }: {
   machines: readonly Machine[];
   now: number;
   busy: boolean;
   onRevoke: (machine: Machine, trigger: HTMLButtonElement) => void;
+  onEdit: (machine: Machine, trigger: HTMLButtonElement) => void;
+  saved?: string;
 }) {
+  const queries = useQueryClient();
+  const preload = () => {
+    preloadBuckets(queries);
+    void loadAccessSheet().catch(() => {});
+  };
   return (
     <div className="flex flex-col gap-10">
       {groupMachines(machines, now).map((group) => {
@@ -155,8 +170,14 @@ function MachineGroups({
                       <Icon />
                     </ItemMedia>
                     <ItemContent className="min-w-0">
-                      <ItemTitle className="w-full wrap-anywhere">
+                      <ItemTitle className="w-full flex-wrap wrap-anywhere">
                         {machine.name}
+                        {saved === machine.id && (
+                          <Badge variant="secondary">
+                            <CircleCheck />
+                            Access saved
+                          </Badge>
+                        )}
                       </ItemTitle>
                       <ItemDescription>
                         <Facts parts={lastUsedParts(machine, now)} />
@@ -166,7 +187,20 @@ function MachineGroups({
                         <MachineAccess grant={machine.grant} />
                       </ItemDescription>
                     </ItemContent>
-                    <ItemActions className="self-start sm:self-center">
+                    <ItemActions className="flex-col items-stretch self-start sm:flex-row sm:self-center">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={busy}
+                        aria-label={`Edit access of ${machine.name}`}
+                        onPointerEnter={preload}
+                        onFocus={preload}
+                        onClick={(event) =>
+                          onEdit(machine, event.currentTarget)
+                        }
+                      >
+                        Edit access
+                      </Button>
                       <Button
                         variant="outline"
                         size="sm"
@@ -318,10 +352,14 @@ function MachineList({
   state,
   now,
   onRevoke,
+  onEdit,
+  saved,
 }: {
   state: ReturnType<typeof useMachines>;
   now: number;
   onRevoke: (machine: Machine, trigger: HTMLButtonElement) => void;
+  onEdit: (machine: Machine, trigger: HTMLButtonElement) => void;
+  saved?: string;
 }) {
   const { machines, busy } = state;
   if (machines.isPending) return <MachinesSkeleton />;
@@ -351,9 +389,48 @@ function MachineList({
           now={now}
           busy={busy}
           onRevoke={onRevoke}
+          onEdit={onEdit}
+          saved={saved}
         />
       )}
     </>
+  );
+}
+type SavedAccess = { machine: Machine; id: number };
+function SavedAnnouncement({ saved }: { saved: SavedAccess | null }) {
+  return (
+    <div aria-live="polite" className="sr-only">
+      {saved && (
+        <p key={saved.id}>
+          Saved access for {saved.machine.name}. It applies on the machine's
+          next request to Nook.
+        </p>
+      )}
+    </div>
+  );
+}
+function RevokedElsewhere({
+  machine,
+  onDismiss,
+}: {
+  machine: Machine | null;
+  onDismiss: () => void;
+}) {
+  if (!machine) return null;
+  return (
+    <DismissibleAlert
+      icon={<CircleAlert />}
+      title={<>{machine.name} was revoked elsewhere</>}
+      onDismiss={onDismiss}
+    >
+      <p>
+        The machine is no longer approved. To reconnect it, run this on it and
+        approve it again:
+      </p>
+      <div className="mt-1">
+        <LoginCommand />
+      </div>
+    </DismissibleAlert>
   );
 }
 export function MachinesPage() {
@@ -363,6 +440,10 @@ export function MachinesPage() {
   const [, tick] = useState(0);
   const heading = useRef<HTMLHeadingElement | null>(null);
   const revocation = useConfirmTarget<Machine>(() => heading.current);
+  const editing = useConfirmTarget<Machine>(() => heading.current);
+  const [session, setSession] = useState(0);
+  const [saved, setSaved] = useState<SavedAccess | null>(null);
+  const [gone, setGone] = useState<Machine | null>(null);
   // Relative times and the 30-day boundary also advance on an idle open page.
   useEffect(() => {
     const timer = setInterval(() => tick((value) => value + 1), 60_000);
@@ -391,7 +472,9 @@ export function MachinesPage() {
       ) : (
         <div className="h-4" />
       )}
-      <div aria-live="polite" className="empty:hidden mb-6">
+      <SavedAnnouncement saved={saved} />
+      <div aria-live="polite" className="empty:hidden mb-6 flex flex-col gap-2">
+        <RevokedElsewhere machine={gone} onDismiss={() => setGone(null)} />
         {write && write.id !== dismissed && (
           <RevokeFeedback
             write={write}
@@ -400,7 +483,35 @@ export function MachinesPage() {
           />
         )}
       </div>
-      <MachineList state={state} now={now} onRevoke={confirm} />
+      <MachineList
+        state={state}
+        now={now}
+        onRevoke={confirm}
+        saved={saved?.machine.id}
+        onEdit={(machine, button) => {
+          if (busy) return;
+          setSession((value) => value + 1);
+          setSaved(null);
+          setGone(null);
+          editing.open(machine, button);
+        }}
+      />
+      {editing.shown && (
+        <Suspense fallback={null}>
+          <AccessSheet
+            machine={editing.shown}
+            open={editing.target !== null}
+            session={session}
+            onClose={editing.close}
+            onCloseAutoFocus={editing.restoreFocus}
+            onRevoked={setGone}
+            onSaved={(machine) => {
+              setSaved({ id: session, machine });
+              editing.close();
+            }}
+          />
+        </Suspense>
+      )}
       {/* Unmounted on close: a confirmation reopened while the previous one
           exits must not sit beneath it. */}
       {revocation.target && (

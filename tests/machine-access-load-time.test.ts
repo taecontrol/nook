@@ -28,7 +28,7 @@ it('E17: the production editor timing measures its rendered checked tree on the 
       page,
       app.origin,
       '',
-      'machineAccessNavigation' as 'machinesNavigation',
+      'machineAccessNavigation',
     );
     expect(Number.isFinite(measured)).toBe(true);
     expect(measured).toBeGreaterThanOrEqual(0);

@@ -271,7 +271,7 @@ export function ResultStep({
             <p>
               <GrantDetails grant={grant} />
             </p>
-            <p>To change access later, revoke this machine and log in again.</p>
+            <p>To change access later, edit it in Machines.</p>
           </div>
         </CardContent>
       )}

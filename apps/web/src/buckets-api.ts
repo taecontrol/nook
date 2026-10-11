@@ -115,7 +115,8 @@ export async function refreshBucketList(queryClient: QueryClient) {
 }
 
 export function useBucketList() {
-  return useQuery(gate.queryOptions(bucketsOptions, gate.useBusy()));
+  const queries = useQueryClient();
+  return useQuery(gate.queryOptions(bucketsOptions, gate.useBusy(), queries));
 }
 
 export function useBuckets() {

@@ -51,7 +51,11 @@ it.each(sizes)(
       await row.waitFor();
       await row.scrollIntoViewIfNeeded();
       const above = await page
-        .getByRole('heading', { name: 'Never used', exact: true })
+        .getByRole('heading', {
+          name: 'Never used',
+          exact: true,
+          includeHidden: true,
+        })
         .boundingBox();
       const position = await row.boundingBox();
       const sheet = await editAccess(page, machine);
@@ -89,7 +93,11 @@ it.each(sizes)(
       expect(
         (
           await page
-            .getByRole('heading', { name: 'Never used', exact: true })
+            .getByRole('heading', {
+              name: 'Never used',
+              exact: true,
+              includeHidden: true,
+            })
             .boundingBox()
         )?.y,
       ).toBe(above?.y);
@@ -107,7 +115,11 @@ it.each(sizes)(
       expect(
         (
           await page
-            .getByRole('heading', { name: 'Never used', exact: true })
+            .getByRole('heading', {
+              name: 'Never used',
+              exact: true,
+              includeHidden: true,
+            })
             .boundingBox()
         )?.y,
       ).toBe(above?.y);
@@ -353,6 +365,7 @@ it('E12: a revoked machine disappears, leaves only an explanation and Close, and
     ).toBe(0);
     expect(await machineRow(visit.page, machine.id).count()).toBe(0);
     await close.click();
+    await sheet.waitFor({ state: 'hidden' });
     expect(await visit.page.getByRole('alert').innerText()).toContain(
       `nook login ${visit.app.origin}`,
     );

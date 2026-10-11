@@ -39,10 +39,12 @@ export function createWriteGate(
         staleTime?: unknown;
         refetchOnWindowFocus?: unknown;
       },
-    >(options: Options, busy: boolean) {
+    >(options: Options, busy: boolean, queries: QueryClient) {
       return {
         ...options,
-        ...(disableWhileBusy ? { enabled: !busy } : {}),
+        // Query checks this before focus/remount reads, including the interval
+        // before React renders a newly pending mutation.
+        ...(disableWhileBusy ? { enabled: () => !isWriting(queries) } : {}),
         staleTime: busy ? Infinity : options.staleTime,
         refetchOnWindowFocus: busy
           ? (false as const)

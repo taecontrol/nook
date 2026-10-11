@@ -121,6 +121,35 @@ The load-time stage adds five phone-network samples for code acceptance to the r
 
 `pnpm test tests/machine-grant-captures.test.ts` records the 12 accepted Inline tree scenarios at 1440×900 and 390×844 in light and dark. The `machine-grant-*` viewport and full-page PNGs live in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare them with reference A in `.work/prototypes/machine-grant/candidates/inline-tree/shots/`, accounting for DECISION.md's production corrections. E23 remains the owner's post-deployment capture for both real clients, documented in [deployment.md](../deployment.md#e23-owner-capture-after-deployment-pending).
 
+## Editing machine access
+
+The owner saves an approved machine's grant through `PUT /api/machines/:id/grant`
+with `{ grant, previous }`. One conditional UPDATE and its classification read
+share a D1 batch. A stale writer receives `MachineAccessChanged` and the current
+grant; an identical retry succeeds. No migration, token replacement, login, or
+audit entry is needed. Authentication reads the updated grant on the next request.
+
+| Examples | Evidence |
+| --- | --- |
+| E1 | `machine-access-worker.test.ts` preserves identity, credentials, dates, and duplicate-name approvals; `machine-grant-cli.test.ts` proves the next real `whoami`; `machine-grant-mcp.test.ts` proves newly granted writes in both protocols. |
+| E2 | The same CLI and MCP suites deny a removed root while retaining the other root. |
+| E3–E10 | `machine-access-worker.test.ts` covers normalization, validation at the batch boundary, lost-response retries, stale writers, revocation, owner/Origin/subtree boundaries, and credential-free failures and logs. |
+| E11–E15 | `machine-access-web.test.ts` covers optimistic rows and stable positions, keyboard focus, every save failure and recovery, disabled/empty drafts, deleted roots, loading retry, and approval/deployment guidance. |
+| E16 | `machine-access-captures.test.ts` captures all eight accepted Side sheet scenarios at 1280×900 and 390×844, including pending writes, outcomes, retries, long names, and stacked phone actions. |
+| E17 | The Worker suite enforces one batch; the browser suite proves lazy intent preloading and write-gated refresh; `machine-access-load-time.test.ts` proves the real phone measurement. `load-time.test.ts` and `pnpm verify:load-time` enforce five-sample medians for cold Machines (1000 ms), intent navigation (100 ms), and the preloaded checked editor tree (100 ms). |
+
+The `machine-access-*` PNGs live in `.local/verification/screenshots/` and CI's
+`web-shell-I` artifacts. Compare them with
+`.work/prototypes/machine-access/selected/screenshots/`; scenario controls and
+the prototype's save stub do not enter production. Every write and rejection
+comes from the built Worker and genuine D1, under the existing synthetic owner
+and temporary Chromium profile.
+
+The bucket list and editor chunk load only on Edit access intent. Access saves
+and revokes share the Machines write gate. Sheet adds an explicit `instant`
+opening-motion variant for the 100 ms editor budget; its default slide remains
+unchanged. Sheet now enters authored coverage rather than the generated inventory.
+
 ## Vault storage and discovery
 
 The Vault acceptance suites exercise the built Worker, migrated D1, genuine Access assertions, both observed MCP protocols, real CLI processes, and Chromium. Each runtime receives a random synthetic 32-byte `VAULT_KEY`; no owner credential is read. The private Linux and macOS keyring fixtures remain the CLI boundary, and `vault-cli.test.ts` runs in both platform jobs.
