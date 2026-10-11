@@ -547,6 +547,88 @@ it.each(sizes)(
   },
 );
 
+it('E13/E14: deleting the last stored root during editing leaves no checked roots and keeps Save disabled', async () => {
+  const visit = await accessPage(browser, {
+    configure: async (_page, app) => {
+      expect(
+        (
+          await jsonRequest(app, '/api/buckets', {
+            path: 'work/old-experiment',
+          })
+        ).status,
+      ).toBe(200);
+      const target = (await listMachines(app)).find(
+        (machine) =>
+          machine.name === 'framework-13' &&
+          machine.grant !== 'all' &&
+          machine.grant[0] === 'work/acme',
+      );
+      if (!target) throw new Error('The synthetic machine must exist');
+      expect(
+        (
+          await saveAccess(
+            app,
+            target.id,
+            ['work/old-experiment'],
+            target.grant,
+          )
+        ).status,
+      ).toBe(200);
+    },
+  });
+  try {
+    const sheet = await editAccess(visit.page, visit.machines[0]);
+    const old = sheet.getByRole('checkbox', {
+      name: 'work/old-experiment',
+      exact: true,
+    });
+    expect(await old.isChecked()).toBe(true);
+    expect(
+      (
+        await jsonRequest(
+          visit.app,
+          '/api/buckets/work%2Fold-experiment',
+          undefined,
+          {},
+          'DELETE',
+        )
+      ).status,
+    ).toBe(204);
+    const refreshed = visit.page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' &&
+        new URL(response.url()).pathname === '/api/buckets',
+    );
+    await visit.page.evaluate(() =>
+      window.dispatchEvent(new Event('visibilitychange')),
+    );
+    expect((await refreshed).status()).toBe(200);
+    await old.waitFor({ state: 'hidden' });
+    expect(
+      await sheet
+        .getByRole('checkbox')
+        .evaluateAll((nodes) =>
+          nodes.some((node) => node.getAttribute('aria-checked') === 'true'),
+        ),
+    ).toBe(false);
+    expect(
+      await sheet
+        .getByRole('button', { name: 'Save access', exact: true })
+        .isEnabled(),
+    ).toBe(false);
+    expect(
+      await sheet.locator('[data-slot="sheet-footer"]').innerText(),
+    ).toContain(
+      'Choose at least one bucket. To remove all access, revoke the machine.',
+    );
+    expect(
+      visit.requests.filter((request) => request.method === 'PUT'),
+    ).toHaveLength(0);
+  } finally {
+    await visit.close();
+  }
+});
+
 it('E14: saving an existing grant with a deleted root drops it without another edit and never offers it again', async () => {
   const visit = await accessPage(browser);
   try {
