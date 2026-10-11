@@ -3,6 +3,7 @@ import { D1Client } from '@effect/sql-d1';
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import {
   Bucket,
+  type BucketGrant,
   BucketPath,
   CreatedBucket,
   Memory,
@@ -13,7 +14,6 @@ import {
   Secret,
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
-import type { BucketGrant } from './authorization.ts';
 import { bucketOperations } from './buckets.ts';
 import { memoryStore } from './memory.ts';
 import { machineVault } from './vault.ts';

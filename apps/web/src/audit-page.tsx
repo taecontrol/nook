@@ -41,9 +41,9 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { type AuditFilters, auditOptions } from './audit-api';
-import { useBuckets } from './buckets-api';
-import { useMachines } from './machines-api';
-import { useVault } from './vault-api';
+import { useBucketList } from './buckets-api';
+import { useMachineList } from './machines-api';
+import { useSecretList } from './vault-api';
 
 const allBuckets = '*';
 
@@ -512,9 +512,9 @@ function NoEntries({ filtered }: { filtered: boolean }) {
 export function AuditPage() {
   const filters = useSearch({ from: '/owner/audit' });
   const query = useAuditEntries(filters);
-  const { machines } = useMachines();
-  const { secrets } = useVault();
-  const { buckets } = useBuckets();
+  const machines = useMachineList();
+  const secrets = useSecretList();
+  const buckets = useBucketList();
   const [, tick] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => tick((n) => n + 1), 60_000);

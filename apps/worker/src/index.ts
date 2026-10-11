@@ -1,12 +1,16 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import { D1Client } from '@effect/sql-d1';
-import { Api, secretLimits } from '@nook/contract';
+import {
+  Api,
+  type BucketGrant,
+  badRequestTags,
+  secretLimits,
+} from '@nook/contract';
 import { Effect, Layer } from 'effect';
 import { HttpRouter, HttpServer, HttpServerRequest } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
 import { auditStore } from './audit.ts';
 import { type AuthBindings, authenticate } from './auth.ts';
-import type { BucketGrant } from './authorization.ts';
 import { bucketOperations } from './buckets.ts';
 import {
   authorizationHandler,
@@ -204,24 +208,7 @@ async function sanitized(response: Promise<Response>, creation = false) {
       .clone()
       .json()
       .catch(() => undefined)) as { _tag?: string } | undefined;
-    if (
-      ![
-        'pending',
-        'denied',
-        'expired',
-        'invalid',
-        'InvalidMachineName',
-        'InvalidBucketGrant',
-        'GrantBucketNotFound',
-        'InvalidSecret',
-        'InvalidRun',
-        'InvalidAuditFilter',
-        'InvalidMemory',
-        'InvalidMemoryCursor',
-        'InvalidBucketPath',
-        'ReservedBucket',
-      ].includes(body?._tag ?? '')
-    )
+    if (!badRequestTags.has(body?._tag ?? ''))
       return creation
         ? invalidCreation()
         : Response.json({ _tag: 'BadRequest' }, { status: 400 });

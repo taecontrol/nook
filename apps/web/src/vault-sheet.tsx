@@ -1,4 +1,10 @@
-import { validateSecretDescription } from '@nook/contract';
+import {
+  RESERVED_BUCKET,
+  secretPath,
+  validateSecretDescription,
+  validateSecretName,
+  validateSecretValue,
+} from '@nook/contract';
 import { useRef } from 'react';
 import {
   AlertDialog,
@@ -36,14 +42,8 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
-import { formatDate, RESERVED } from './paths';
-import {
-  DESCRIPTION_MAX,
-  type Secret,
-  secretPath,
-  validateName,
-  validateValue,
-} from './vault-model';
+import { formatDate } from './paths';
+import { DESCRIPTION_MAX, type Secret } from './vault-model';
 import type { Draft, SheetState } from './vault-state';
 
 /** Keeps password managers and autofill away from secret fields. */
@@ -65,17 +65,18 @@ function Path({ children }: { children: string }) {
 }
 
 export function reachText(bucket: string, hasChildren: boolean, what = 'it') {
-  if (bucket === RESERVED) return `Agents working in any bucket find ${what}.`;
+  if (bucket === RESERVED_BUCKET)
+    return `Agents working in any bucket find ${what}.`;
   return hasChildren
     ? `Agents working in ${bucket} or a bucket inside it find ${what}.`
     : `Agents working in ${bucket} find ${what}.`;
 }
 
-export function sheetProblems(sheet: SheetState) {
+function sheetProblems(sheet: SheetState) {
   const { draft, submitted } = sheet;
   const nameProblem =
     draft.mode === 'create' && (submitted || draft.name !== '')
-      ? validateName(draft.name)
+      ? validateSecretName(draft.name)
       : null;
   const duplicate =
     sheet.duplicate === secretPath(draft)
@@ -84,7 +85,7 @@ export function sheetProblems(sheet: SheetState) {
   return {
     name: nameProblem ?? duplicate,
     duplicate: !nameProblem && duplicate !== null,
-    value: submitted ? validateValue(draft.value) : null,
+    value: submitted ? validateSecretValue(draft.value) : null,
   };
 }
 

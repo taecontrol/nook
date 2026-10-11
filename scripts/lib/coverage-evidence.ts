@@ -135,14 +135,24 @@ function requiredSeams(baseline: Baseline) {
     required.push('cli');
   return required;
 }
+// CI splits Linux coverage into this many shards; macOS adds one more source.
+export const linuxShards = 4;
+export const coverageShards = [
+  ...Array.from({ length: linuxShards }, (_, i) => `${i + 1}/${linuxShards}`),
+  'macos',
+];
+const shardsMessage = `Expected all ${linuxShards} Linux coverage shards and macOS`;
 export function validateCoverage(
   manifest: Manifest,
   artifacts: Record<string, string>,
   source: SourceIdentity,
 ) {
   validateArtifacts(manifest, artifacts, source);
-  if (manifest.shards !== undefined && manifest.shards !== 4)
-    throw new Error('Expected all three Linux coverage shards and macOS');
+  if (
+    manifest.shards !== undefined &&
+    manifest.shards !== coverageShards.length
+  )
+    throw new Error(shardsMessage);
   const baseline = JSON.parse(artifacts['baseline.json']) as Baseline;
   for (const [file, entry] of Object.entries(baseline)) {
     if (entry.hash !== source.files[file])
@@ -169,14 +179,14 @@ export function validateCoverage(
 }
 
 export function validateShards(manifests: Manifest[], source: SourceIdentity) {
-  if (manifests.length !== 4)
-    throw new Error('Expected all three Linux coverage shards and macOS');
+  if (manifests.length !== coverageShards.length)
+    throw new Error(shardsMessage);
   const shards = manifests
     .map((manifest) => {
       validateSource(manifest, source);
       return manifest.shard;
     })
     .sort();
-  if (!same(shards, ['1/3', '2/3', '3/3', 'macos']))
+  if (!same(shards, [...coverageShards].sort()))
     throw new Error('Missing, repeated or incompatible coverage shard');
 }

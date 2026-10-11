@@ -1,30 +1,19 @@
-import { type Memory, readLineage } from '@nook/contract';
+import { type Memory, RESERVED_BUCKET, readLineage } from '@nook/contract';
 import {
   useInfiniteQuery,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useBucketList } from './buckets-api';
+import { useDesktop } from './hooks/use-desktop';
 import {
   memoriesOptions,
   memoryCountsOptions,
   memoryOptions,
 } from './memory-api';
 
-function useDesktop() {
-  const [desktop, setDesktop] = useState(
-    () => matchMedia('(min-width: 1024px)').matches,
-  );
-  useEffect(() => {
-    const media = matchMedia('(min-width: 1024px)');
-    const changed = () => setDesktop(media.matches);
-    media.addEventListener('change', changed);
-    return () => media.removeEventListener('change', changed);
-  }, []);
-  return desktop;
-}
 function countSummary(
   rows: readonly { bucket: string; count: number }[] | undefined,
   visible: readonly string[],
@@ -66,7 +55,7 @@ export function useMemoryPage() {
   const navigate = useNavigate({ from: '/memory' });
   const queries = useQueryClient();
   const desktop = useDesktop();
-  const bucket = search.bucket ?? 'me';
+  const bucket = search.bucket ?? RESERVED_BUCKET;
   const scope = search.scope ?? 'inherited';
   const buckets = useBucketList();
   const countsQuery = useQuery(memoryCountsOptions);

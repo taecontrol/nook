@@ -1,4 +1,4 @@
-import type { MemoryScope } from '@nook/contract';
+import { bucketLineage, type MemoryScope } from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import { cn } from 'cn';
 import { ChevronRight, Dot } from 'lucide-react';
@@ -11,7 +11,6 @@ import {
 } from '@/components/ui/collapsible';
 import { Skeleton } from '@/components/ui/skeleton';
 import { buildOutline, Guides, type OutlineNode } from './outline';
-import { lineage } from './paths';
 
 type TreeState = {
   to: '/vault' | '/memory';
@@ -169,7 +168,7 @@ export function BucketTree({
   const visible = useMemo(() => {
     if (!selected) return collapsed;
     const next = new Set(collapsed);
-    for (const prefix of lineage(selected)) next.delete(prefix);
+    for (const prefix of bucketLineage(selected)) next.delete(prefix);
     return next;
   }, [collapsed, selected]);
   const state: TreeState = {

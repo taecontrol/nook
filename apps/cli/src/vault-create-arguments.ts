@@ -6,7 +6,7 @@ import {
 } from '@nook/contract';
 import { CliFailure } from './errors.ts';
 
-export const createUsage =
+const createUsage =
   'Usage: nook vault create <bucket>/<NAME> --purpose "…" [--description "…"]';
 function createOptions(flags: readonly string[]) {
   if (flags.length % 2) throw new CliFailure(createUsage);
