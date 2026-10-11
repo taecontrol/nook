@@ -41,7 +41,7 @@ calls.push(args); writeFileSync(${JSON.stringify(calls)}, JSON.stringify(calls))
 const command = args.slice(2, 4).join(' ');
 if (command === 'd1 list') console.log(JSON.stringify([{ name: 'nook' }]));
 else if (command === 'vectorize list') console.log(JSON.stringify(state.index ? [{ name: 'nook-memories' }] : []));
-else if (command === 'vectorize list-metadata-index') console.log(JSON.stringify(state.metadata ? [{ propertyName: 'bucket', indexType: 'string' }] : []));
+else if (command === 'vectorize list-metadata-index') console.log(JSON.stringify(state.metadata ? [{ propertyName: 'bucket', indexType: 'String' }] : []));
 else if (command === 'vectorize create') { if (state.index) process.exit(1); state.index = true; }
 else if (command === 'vectorize create-metadata-index') { if (!state.index || state.metadata) process.exit(1); state.metadata = true; }
 else if (args[2] === 'deploy' && (!state.index || !state.metadata)) process.exit(1);
@@ -154,7 +154,7 @@ else if (command === 'vectorize list') console.log(JSON.stringify([{ name: 'nook
 else if (command === 'vectorize create-metadata-index') { if (state.enqueued) process.exit(1); state.enqueued = true; }
 else if (command === 'vectorize list-metadata-index') {
   if (state.enqueued && state.remaining-- <= 0) state.metadata = true;
-  console.log(JSON.stringify(state.metadata ? [{ propertyName: 'bucket', indexType: 'string' }] : []));
+  console.log(JSON.stringify(state.metadata ? [{ propertyName: 'bucket', indexType: 'String' }] : []));
 } else if (args[2] === 'deploy' && !state.metadata) process.exit(1);
 writeFileSync(${JSON.stringify(state)}, JSON.stringify(state));
 `,
