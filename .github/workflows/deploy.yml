@@ -79,7 +79,19 @@ jobs:
             pnpm exec wrangler vectorize create "$index" --dimensions 1024 --metric cosine
           fi
           metadata=$(pnpm exec wrangler vectorize list-metadata-index "$index" --json)
-          if ! printf '%s' "$metadata" | node --input-type=module -e 'let input=""; for await (const part of process.stdin) input+=part; process.exit(JSON.parse(input).some(index => index.propertyName === "bucket" && index.indexType === "string") ? 0 : 1)'; then
+          metadata_ready() {
+            printf '%s' "$1" | node --input-type=module -e 'let input=""; for await (const part of process.stdin) input+=part; process.exit(JSON.parse(input).some(index => index.propertyName === "bucket" && index.indexType === "string") ? 0 : 1)'
+          }
+          if ! metadata_ready "$metadata"; then
             pnpm exec wrangler vectorize create-metadata-index "$index" --property-name bucket --type string
+            for attempt in {1..20}; do
+              metadata=$(pnpm exec wrangler vectorize list-metadata-index "$index" --json)
+              if metadata_ready "$metadata"; then break; fi
+              if [ "$attempt" -eq 20 ]; then
+                echo 'Metadata index did not become ready.' >&2
+                exit 1
+              fi
+              sleep 3
+            done
           fi
           pnpm exec wrangler deploy --domain "$NOOK_HOSTNAME"
