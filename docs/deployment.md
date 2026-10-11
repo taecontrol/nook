@@ -144,6 +144,12 @@ Record E13 and E14 outcomes on the pull request without tokens, cookies, asserti
 
 Search combines exact words with meaning across the selected bucket, its ancestors, and `me`, within the caller's grant. Exact words are available when `remember` succeeds. Embeddings are written afterwards; Vectorize can take about a minute to expose them. The five-minute Cron Trigger repairs up to 50 pending or outdated memories per run, including memories stored before search was installed. Changing `EMBEDDING_MODEL` in configuration schedules re-embedding; the index still requires 1,024-dimensional vectors.
 
+Vectorize [creates metadata indexes asynchronously](https://developers.cloudflare.com/vectorize/get-started/intro/).
+Deployment waits for the string `bucket` index to appear in
+`list-metadata-index`, with up to 20 checks three seconds apart. If it never
+becomes ready, deployment stops before the Worker can write vectors without
+indexed bucket metadata. A rerun uses the existing ready index.
+
 The [Vectorize Free allowance](https://developers.cloudflare.com/vectorize/platform/pricing/) is five million stored dimensions per account. At 1,024 dimensions per memory, that is 4,882 memories, approximately 4,900, less other indexes' usage. Beyond that capacity, upserts fail and pending memories remain searchable by exact words. Meaning service failures produce an explicit incomplete-results notice. Nook does not enforce a separate quota.
 
 ### Search E24: owner acceptance after merge (pending)

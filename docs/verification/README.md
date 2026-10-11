@@ -16,6 +16,17 @@ Run `pnpm verify` from the repository root with the pinned Node and pnpm version
 
 `pnpm test` builds the production target before running Vitest. A narrow run such as `pnpm test tests/worker.test.ts` uses the same HTTP target. After `pnpm test`, `pnpm test:journey` runs the journey against that target, with the same allowlisted environment and host-resource tripwire; strict cache replay and zero retries stay mandatory. `pnpm test:coverage` prepares its own separately instrumented build and needs no prior build. The complete test, coverage, verification, and load-time commands also keep their build, E2E, and browser subprocesses inside the isolation lifecycle.
 
+On Linux desktops where the user systemd manager adopts orphaned processes,
+run the unchanged gate inside a private PID namespace. The teardown fixtures
+expect an adopted child to have parent PID 1; the user manager otherwise adopts
+it under its host PID. This invocation preserves the current UID and adds
+process isolation without changing any check:
+
+```sh
+unshare --user --map-current-user --pid --fork --mount-proc \
+  --kill-child --forward-signals pnpm verify
+```
+
 All local identities, signing keys, and issuer responses are synthetic. Linux CLI tests require Node 26.10, `bubblewrap` (`bwrap`), `dbus-run-session`, `dbus-send`, `gnome-keyring-daemon`, and `secret-tool`. CI installs `bubblewrap`, `gnome-keyring`, `libsecret-tools`, and `dbus` in the test jobs. Each CLI fixture creates private HOME/XDG directories, including XDG_DATA_HOME for the encrypted keyring files, and a private bus with no service activation directories, asserts that its address differs from the inherited bus, and unlocks a real isolated keyring before launching the CLI. The daemon runs with `--foreground` alongside `--unlock --components=secrets`: the fixture waits for stdout EOF after initialization, then requires a real store/lookup/clear probe. The background launcher exits before initialization, so its exit is insufficient. Daemon streams are discarded. PATH shims record opener URLs and secret-tool argv, then delegate to the real binaries; the bus-identity shim delegates to the real dbus-send; values travel only over stdin. Missing-service tests deliberately omit the daemon. Fixtures reject bus overrides before every child, clean failed setup, stop the owned daemon and children before removing HOME, and kill any remaining private process group; shutdown has a bounded force-kill fallback. A concurrent fixture regression proves that inherited XDG data remains untouched. The runtime reads asset routing and compatibility settings from `wrangler.jsonc`, binds only to `127.0.0.1`, and takes explicit test bindings. Test port leases stay above Fetch's blocked-port range and outside Linux's ephemeral range. No test reads production credentials or contacts a Cloudflare account. Coverage endpoints and counters exist only in the test build.
 
 The macOS CLI acceptance runs only on a disposable GitHub-hosted `macos-latest` runner, with `pnpm test:coverage --macos-cli`. Only that workflow job sets the allowlisted `NOOK_TEST_MACOS_KEYCHAIN_BOOTSTRAP=github-hosted` opt-in. Without it, fixture setup fails with a message pointing to [#40](https://github.com/taecontrol/nook/issues/40); `CI=true` alone never enables creation. Local creation is forbidden on the owner's Mac. Each fixture creates and resolves a fresh temporary HOME, rejects the real owner HOME, and requires an empty user search list and an absent login keychain before creating `Library/Keychains/login.keychain-db` with an absolute path. Immediately after creation, both login and default keychain must resolve inside HOME before any item command or CLI child. No test changes the search list or default, locks, unlocks, deletes, or moves a keychain. Missing and locked states are reproduced with failing/stalling PATH shims. Every child requires the fixture file to exist and the shims to be first on PATH; `open` never delegates to the real opener. Commands and process groups stop before HOME is removed.
@@ -300,14 +311,23 @@ Issue #11 uses the production Worker bundle, migrated D1, and its genuine schedu
 | E4–E6 | The same MCP matrix: D1 lineage and grant enforcement, including a vector index that ignores its filter, missing/forbidden buckets, and all required tags. |
 | E7–E10 | The same matrix: exact validation messages, hostile FTS text, empty and capped results, sanitized real D1 failure, both meaning failures, and revoked tokens before AI/index calls. |
 | E11–E16 | `memory-search-sync.test.ts`: immediate keyword visibility, controlled delayed vectors, failed post-write repair, previous-schema backfill, 50-row Cron budget, model changes, stale/orphan filtering, guarded late writes, and duplicate/concurrent remembers. Every migrated fixture is found by keyword and meaning. |
-| E17–E19 | `memory-search-web.test.ts`: debounce/Enter, URL reload/Back/bucket/scope retention, keyboard movement, reader preservation, highlights/badges, twenty-result cap, genuine loading/error/retry, incomplete/empty/fresh states, and stable column positions at both widths. Phone content flows vertically; desktop column sizes and each fixed header stay unchanged. |
-| E20 | The idle browser case requires zero embedding/vector requests. Existing Memory load-time tests and `verify:load-time` retain the 1000 ms cold-open and 100 ms intent-navigation budgets. |
+| E17–E19 | `memory-search-web.test.ts`: exact 250 ms debounce and immediate Enter, URL reload/Back/bucket/scope retention, keyboard movement, reader preservation, highlights/badges, twenty-result cap, genuine loading/error/retry, incomplete/empty/fresh states, and stable column positions at both widths. Phone content flows vertically; desktop column sizes and each fixed header stay unchanged. |
+| E20 | The idle browser case observes the real HTTP boundary and requires zero search, embedding and vector requests. Existing Memory load-time tests and `verify:load-time` retain the 1000 ms cold-open and 100 ms intent-navigation budgets. |
 | E21 | `memory-search-captures.test.ts`: eleven states × two sizes × two themes, 44 genuine-product PNGs. |
 | E22 | `tests/journeys/owner.e2e.ts`: deterministic strict-cache search and opening of the Spanish ancestor memory. |
-| E23 | `memory-search-deploy.test.ts`: the workflow's actual shell against a temporary command fixture, missing index/metadata combinations, idempotent reruns and ordering before deployment. |
+| E23 | `memory-search-deploy.test.ts`: the workflow's actual shell against a temporary command fixture, missing index/metadata combinations, idempotent reruns, delayed metadata readiness and timeout without deployment. |
 | E24 | Pending owner production acceptance in [deployment.md](../deployment.md#search-e24-owner-acceptance-after-merge-pending). |
 
 `tests/fixtures/bge-m3.json.gz` records exact-text embeddings from the authorized bge-m3 experiment. `scripts/record-search-fixtures.ts` is an explicit, separate recording tool and never runs in verification. The strict embedder rejects unrecorded input; `memory-search-stand-ins.test.ts` also proves the observed Vectorize metadata-index timing, replacement/insert behavior, delayed visibility and request limits. D1 round trips and AI/index calls are counted without recording SQL or bindings. Dense 16 KiB content, large bilingual content and six-level paths with valid 32-character segments are included.
+
+The MCP and owner HTTP cases also distinguish tag-free prefix and accent
+matches, all-tag filtering on keyword hits, duplicate-tag rejection before AI,
+the owner-only bucket scope and equal-score ranking. `memory-search-snippet.test.ts`
+requires clipped long-word highlights and Unicode boundaries that preserve
+supplementary characters. `memory-refresh-web.test.ts` uses genuine tab
+visibility changes and a fixed browser date to require fresh search results
+when returning before the cached query expires. The existing counts-unavailable
+reader assertion continues to require the loaded-count wording.
 
 `pnpm dev` attaches these local services to Miniflare, using recorded vectors when available and deterministic non-semantic vectors for other text. The journey server passes `--strict-embeddings`. Neither local mode contacts Cloudflare; the decorator and stand-ins stay outside the deployed Worker bundle.
 
