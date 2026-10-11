@@ -137,7 +137,7 @@ audit entry is needed. Authentication reads the updated grant on the next reques
 | E11–E15 | `machine-access-web.test.ts` covers optimistic rows and stable positions, keyboard focus, every save failure and recovery, disabled/empty drafts, deleted roots, loading retry, and approval/deployment guidance. |
 | E11–E12 cache races | `machine-access-cache.test.ts` holds genuine reads and writes to prove machine-action exclusivity, cancellation of stale reads, and immediate application of the successful machine response before recovery can conceal a cache defect. |
 | E16 | `machine-access-captures.test.ts` captures all eight accepted Side sheet scenarios at 1280×900 and 390×844, including pending writes, outcomes, retries, long names, and stacked phone actions. |
-| E17 | The Worker suite enforces one batch; the browser suite proves lazy intent preloading and write-gated refresh; `machine-access-load-time.test.ts` proves the real phone measurement. `load-time.test.ts` and `pnpm verify:load-time` enforce five-sample medians for cold Machines (1000 ms), intent navigation (100 ms), and the preloaded checked editor tree (100 ms). |
+| E17 | The Worker suite enforces one batch; the browser suite proves lazy intent preloading and write-gated refresh; `machine-access-load-time.test.ts` independently observes native frames and visibility to prove that timing waits for a rendered, checked tree and fresh intent-preload quiet. `load-time.test.ts` and `pnpm verify:load-time` enforce five-sample medians for cold Machines (1000 ms), intent navigation (100 ms), and the preloaded checked editor tree (100 ms). |
 
 The `machine-access-*` PNGs live in `.local/verification/screenshots/` and CI's
 `web-shell-<shard>` artifacts. Compare them with
