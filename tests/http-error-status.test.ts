@@ -8,6 +8,7 @@ const contractStatuses = {
   Unauthorized: 401,
   Forbidden: 403,
   ServiceUnavailable: 503,
+  NotFound: 404,
   InvalidBucketPath: 400,
   ReservedBucket: 400,
   BucketHasChildren: 409,
@@ -24,6 +25,7 @@ const contractStatuses = {
   InvalidMemoryCursor: 400,
   InvalidMemorySearch: 400,
   InvalidMachineName: 400,
+  MachineAccessChanged: 409,
   NoMatchingRequest: 404,
   AlreadyHandled: 409,
   Expired: 410,
@@ -48,6 +50,7 @@ function annotatedStatuses() {
       HttpApiError.Unauthorized,
       HttpApiError.Forbidden,
       HttpApiError.ServiceUnavailable,
+      HttpApiError.NotFound,
     ].flatMap((schema) => {
       if (!Schema.isSchema(schema)) return [];
       const status = resolveStatus(schema.ast);

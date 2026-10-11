@@ -46,6 +46,7 @@ it('derives the owner gate and the machine token check from the contract', () =>
     'PUT /api/secrets/:path',
     'DELETE /api/secrets/:path',
     'GET /api/machines',
+    'PUT /api/machines/:id/grant',
     'DELETE /api/machines/:id',
   ]);
   expect(listed(tokenRoutes)).toEqual([

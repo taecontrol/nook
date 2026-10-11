@@ -7,6 +7,7 @@ import {
   GrantBucketNotFound,
   InvalidBucketGrant,
   InvalidMachineName,
+  MachineAccessChanged,
   machineNameError,
   NoMatchingRequest,
   normalizeGrant,
@@ -47,6 +48,59 @@ const MachineRow = Schema.Struct({
   created_at: Schema.Number,
   last_used_at: Schema.NullOr(Schema.Number),
 });
+const AccessRow = Schema.Struct({
+  ...MachineRow.fields,
+  selected_exist: Schema.Number,
+});
+function machine(row: typeof MachineRow.Type) {
+  return {
+    id: row.id,
+    name: row.machine_name,
+    grant: row.grant_json,
+    approvedAt: new Date(row.created_at).toISOString(),
+    lastUsedAt:
+      row.last_used_at === null
+        ? null
+        : new Date(row.last_used_at).toISOString(),
+  };
+}
+function decodeGrant(value: unknown) {
+  return Schema.decodeUnknownEffect(BucketGrant)(value).pipe(
+    Effect.mapError(
+      () =>
+        new InvalidBucketGrant({
+          message: 'Choose at least one existing bucket, or All buckets.',
+        }),
+    ),
+  );
+}
+function savedGrant(
+  updated: readonly unknown[],
+  remaining: readonly unknown[],
+) {
+  return Effect.gen(function* () {
+    if (updated.length) {
+      const row = yield* Schema.decodeUnknownEffect(MachineRow)(
+        updated[0],
+      ).pipe(unavailable);
+      return machine(row);
+    }
+    if (!remaining.length)
+      return yield* Effect.fail(new HttpApiError.NotFound());
+    const current = yield* Schema.decodeUnknownEffect(AccessRow)(
+      remaining[0],
+    ).pipe(unavailable);
+    if (!current.selected_exist)
+      return yield* Effect.fail(
+        new GrantBucketNotFound({
+          message: 'Some selected buckets no longer exist. Choose again.',
+        }),
+      );
+    return yield* Effect.fail(
+      new MachineAccessChanged({ current: current.grant_json }),
+    );
+  });
+}
 export function randomCode() {
   return btoa(
     String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))),
@@ -210,14 +264,7 @@ export const machineOperations = Effect.gen(function* () {
       const message = machineNameError(name);
       return message
         ? Effect.fail(new InvalidMachineName({ message }))
-        : Schema.decodeUnknownEffect(BucketGrant)(grant).pipe(
-            Effect.mapError(
-              () =>
-                new InvalidBucketGrant({
-                  message:
-                    'Choose at least one existing bucket, or All buckets.',
-                }),
-            ),
+        : decodeGrant(grant).pipe(
             Effect.flatMap((grant) =>
               handle(code, 'approved', name.trim(), grant),
             ),
@@ -257,17 +304,31 @@ export const machineOperations = Effect.gen(function* () {
         yield* requireAll(grant);
         const rows = yield* listRows().pipe(unavailable);
         return {
-          machines: rows.map((row) => ({
-            id: row.id,
-            name: row.machine_name,
-            grant: row.grant_json,
-            approvedAt: new Date(row.created_at).toISOString(),
-            lastUsedAt:
-              row.last_used_at === null
-                ? null
-                : new Date(row.last_used_at).toISOString(),
-          })),
+          machines: rows.map(machine),
         };
+      }),
+    saveGrant: (
+      caller: BucketGrant,
+      id: string,
+      grant: unknown,
+      previous: unknown,
+    ) =>
+      Effect.gen(function* () {
+        yield* requireAll(caller);
+        const next = yield* decodeGrant(grant);
+        const prior = yield* decodeGrant(previous);
+        const nextJson = JSON.stringify(normalizeGrant(next));
+        const priorJson = JSON.stringify(normalizeGrant(prior));
+        const selectedJson = JSON.stringify(next);
+        // The version predicate, bucket existence, and failure classification
+        // share one atomic boundary, including retries after a committed save.
+        const [updated, remaining] = yield* sql
+          .batch([
+            sql`UPDATE machine_tokens SET grant_json=${nextJson} WHERE id=${id} AND (grant_json=${priorJson} OR grant_json=${nextJson}) AND (${selectedJson}='"all"' OR NOT EXISTS (SELECT 1 FROM json_each(${selectedJson}) root WHERE NOT EXISTS (SELECT 1 FROM buckets WHERE path=root.value))) RETURNING id, machine_name, grant_json, created_at, last_used_at`,
+            sql`SELECT id, machine_name, grant_json, created_at, last_used_at, (${selectedJson}='"all"' OR NOT EXISTS (SELECT 1 FROM json_each(${selectedJson}) root WHERE NOT EXISTS (SELECT 1 FROM buckets WHERE path=root.value))) AS selected_exist FROM machine_tokens WHERE id=${id}`,
+          ])
+          .pipe(unavailable);
+        return yield* savedGrant(updated, remaining);
       }),
     revoke: (grant: BucketGrant, id: string) =>
       Effect.gen(function* () {

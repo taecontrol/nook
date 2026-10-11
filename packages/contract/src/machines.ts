@@ -39,6 +39,12 @@ export const Machine = Schema.Struct({
   grant: BucketGrant,
 });
 export type Machine = typeof Machine.Type;
+export class MachineAccessChanged extends Schema.Error<MachineAccessChanged>(
+  'nook/MachineAccessChanged',
+)(
+  { _tag: Schema.tag('MachineAccessChanged'), current: BucketGrant },
+  { httpApiStatus: 409 },
+) {}
 export const AuthorizationRequest = Schema.Struct({
   suggestedName: Schema.String,
   client: Schema.String,
