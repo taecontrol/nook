@@ -9,6 +9,7 @@ import {
   applyMigrations,
   checkMigrationHistory,
   migrationFiles,
+  normalizedSchema,
   normalizeSchema,
   verifyMigrations,
 } from '../scripts/lib/migrations.ts';
@@ -78,6 +79,7 @@ it('E22/E23: Wrangler applies only the numbered migrations and preserves the loc
       { name: '0007_secret_creations.sql' },
       { name: '0008_secret_reveals.sql' },
       { name: '0009_memories.sql' },
+      { name: '0010_memory_search.sql' },
     ]);
     expect(first[1].results).toEqual([
       { path: 'me', created_at: expect.any(String) },
@@ -281,19 +283,30 @@ it.each([
 
       const drifting = snapshot.replace('cannot be', 'cannot  be');
       const independent = await mf.getD1Database('Snapshot');
-      // The normalized snapshot sorts by type, so tables must precede indexes
-      // when independently replaying it rather than comparing its schema.
-      const statements = unstable_splitSqlQuery(drifting).toSorted(
-        (left, right) =>
-          Number(/^CREATE TABLE\b/i.test(right)) -
-          Number(/^CREATE TABLE\b/i.test(left)),
-      );
+      // FTS5 creates its four shadow tables. Retain their definitions in the
+      // full schema assertion, but do not create them a second time in replay.
+      // Ordinary tables must also precede indexes in the sorted snapshot.
+      const statements = unstable_splitSqlQuery(drifting)
+        .filter(
+          (sql) =>
+            !/^CREATE TABLE 'memories_fts_(config|data|docsize|idx)'/i.test(
+              sql,
+            ),
+        )
+        .toSorted(
+          (left, right) =>
+            Number(/^CREATE TABLE\b/i.test(right)) -
+            Number(/^CREATE TABLE\b/i.test(left)),
+        );
       await independent.batch([
         ...statements.map((sql) => independent.prepare(sql)),
         independent
           .prepare('INSERT INTO buckets VALUES (?, ?)')
           .bind('me', '2026-10-04T00:00:00.000Z'),
       ]);
+      expect(normalizeSchema(await normalizedSchema(independent))).toBe(
+        normalizeSchema(drifting),
+      );
       await expect(
         independent.prepare("DELETE FROM buckets WHERE path='me'").run(),
       ).rejects.toThrow('The me bucket cannot  be deleted.');
