@@ -46,7 +46,13 @@ let daemon: ChildProcessWithoutNullStreams | undefined;
 if (process.env.NOOK_TEST_SERVICE !== 'absent') {
   daemon = spawn(
     '/usr/bin/gnome-keyring-daemon',
-    ['--unlock', '--components=secrets', '--foreground'],
+    [
+      '--unlock',
+      '--components=secrets',
+      '--foreground',
+      // A fixture with a deep HOME names a short socket directory.
+      ...(process.argv[2] ? [`--control-directory=${process.argv[2]}`] : []),
+    ],
     { env: childEnvironment(), stdio: ['pipe', 'pipe', 'pipe'] },
   );
   const startingDaemon = daemon;

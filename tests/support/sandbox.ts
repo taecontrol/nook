@@ -10,6 +10,7 @@ export function launchSandbox(
   executable: string,
   args: string[],
   bubblewrap = 'bwrap',
+  runtime?: string,
 ) {
   const owner = userInfo();
   const node = dirname(dirname(realpathSync(process.execPath)));
@@ -57,6 +58,7 @@ export function launchSandbox(
     '--bind',
     home,
     home,
+    ...(runtime ? ['--bind', runtime, runtime] : []),
     ...(env.COVERAGE_RUN ? ['--bind', evidenceRoot, evidenceRoot] : []),
   ];
   const environment = Object.entries(env).flatMap(([name, value]) =>

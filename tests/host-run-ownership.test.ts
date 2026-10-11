@@ -6,13 +6,14 @@ import {
   mkdtemp,
   readdir,
   readFile,
+  readlink,
   rm,
   symlink,
   writeFile,
 } from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import os, { userInfo } from 'node:os';
-import { relative, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { startHostIsolation } from '../scripts/lib/host-isolation.ts';
 import {
@@ -470,6 +471,49 @@ it.runIf(process.platform === 'linux')(
   },
 );
 
+it.runIf(process.platform === 'linux')(
+  'a HOME too deep for a socket path links its private bus to a short directory',
+  async () => {
+    const parent = await mkdtemp('/tmp/nook-deeper-');
+    const root = resolve(
+      parent,
+      'x'.repeat(100 - Buffer.byteLength(parent) - 1),
+    );
+    let created: PrivateKeyring | undefined;
+    try {
+      await mkdir(root);
+      expect(
+        Buffer.byteLength(resolve(root, 'nook-cli-XXXXXX/bus')),
+      ).toBeGreaterThan(99);
+      created = await privateKeyring('present', { tempRoot: root });
+      const address = /^unix:path=([^,]+),/.exec(created.bus)?.[1] ?? '';
+      const socket = decodeURIComponent(address);
+      expect(Buffer.byteLength(socket)).toBeLessThanOrEqual(99);
+      expect(await readlink(resolve(created.home, 'bus'))).toBe(socket);
+      expect(existsSync(resolve(dirname(socket), 'control'))).toBe(true);
+      const elsewhere = created.bus.replace(
+        address,
+        encodeURIComponent('/tmp/nook-bus-elsewhere/bus'),
+      );
+      expect(() => testEnvironment(created?.home, {}, elsewhere)).toThrow(
+        'A private session bus is required.',
+      );
+      expect(
+        await created.store('https://deep.example', 'synthetic-deep-value'),
+      ).toBe(0);
+      expect(await created.lookup('https://deep.example')).toBe(
+        'synthetic-deep-value',
+      );
+      await created.close();
+      expect(await readdir(root)).toEqual([]);
+      expect(existsSync(dirname(socket))).toBe(false);
+    } finally {
+      await created?.close();
+      await rm(parent, { recursive: true, force: true });
+    }
+  },
+);
+
 async function foreignFixture() {
   const previous = process.env.NOOK_TEST_RUN;
   process.env.NOOK_TEST_RUN = crypto.randomUUID();
@@ -479,6 +523,23 @@ async function foreignFixture() {
     if (previous === undefined) delete process.env.NOOK_TEST_RUN;
     else process.env.NOOK_TEST_RUN = previous;
   }
+}
+
+async function parentOf(pid: number) {
+  const stat = await readFile(`/proc/${pid}/stat`, 'utf8');
+  return Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
+}
+
+// The kernel gives an orphan to its nearest subreaper ancestor, such as
+// `systemd --user` in a desktop session, or else to the namespace's PID 1.
+// Either way, its new parent lies outside the run's process tree.
+async function ancestorsOf(pid: number) {
+  const ancestors: number[] = [];
+  for (let parent = await parentOf(pid); parent > 0; ) {
+    ancestors.push(parent);
+    parent = parent === 1 ? 0 : await parentOf(parent);
+  }
+  return ancestors;
 }
 
 async function adoptedFixture(home: string) {
@@ -505,13 +566,14 @@ child.unref();`,
   const [status] = await once(launcher, 'close');
   expect(status).toBe(0);
   const pid = Number(await readFile(marker, 'utf8'));
+  const reapers = await ancestorsOf(process.pid);
   let observed: HostProcess | undefined;
   await expect
     .poll(async () => {
       observed = await readHostProcess(pid);
       return observed?.parent;
     })
-    .toBe(1);
+    .toSatisfy((parent) => reapers.includes(parent as number));
   if (!observed) throw new Error('Synthetic adopted fixture is missing.');
   expect(observed.run).toBe('');
   expect(observed.home).toBe(home);
