@@ -10,6 +10,7 @@ import { expectToolError, type ToolResult } from './support/mcp.ts';
 import {
   manyMemories,
   memoryClient,
+  memoryCounts,
   memoryFixture,
   memoryId,
   seedMemories,
@@ -62,35 +63,58 @@ describe.each(['owner', 'machine'] as const)(
       afterAll(() => app?.close());
       const search = (query: string, extra: Record<string, unknown> = {}) =>
         client.call('search', { bucket: 'work/acme', query, ...extra });
-      it('E1: cross-language meaning finds the Spanish release in the top three and returns only compact fields', async () => {
-        await indexMemories(app, searchMemories);
-        const result = results(await search('how do we deploy'));
-        expect(result.results.slice(0, 3)).toContainEqual(
-          expect.objectContaining({
-            id: memoryId(20),
-            title: 'Proceso de release',
-            bucket: 'work',
-            match: 'meaning',
-          }),
-        );
-        for (const hit of result.results)
-          expect(Object.keys(hit).sort()).toEqual([
-            'bucket',
-            'id',
-            'match',
-            'snippet',
-            'tags',
-            'title',
-          ]);
-        expect(result.meaning).toBe('available');
-        expect(app.services.embeddingCalls).toHaveLength(1);
-        expect(app.services.queries).toHaveLength(1);
-        // Machine authentication and last use take their own existing D1 trip.
-        expect(app.services.d1Trips).toBeLessThanOrEqual(
-          endpoint === 'machine' ? 3 : 2,
-        );
-        expect(app.services.missing.size).toBe(0);
-      });
+      it.each([
+        {
+          corpus: 'seven search memories',
+          seeds: searchMemories,
+          size: 7,
+          top: 3,
+        },
+        {
+          corpus: 'combined 104-memory corpus',
+          seeds: [...searchMemories, ...typicalMemories, ...manyMemories],
+          size: 104,
+          top: 10,
+        },
+      ])(
+        'E1: $corpus finds the Spanish release by meaning in the top $top and returns only compact fields',
+        async ({ seeds, size, top }) => {
+          await seedMemories(app, seeds);
+          expect((await memoryCounts(app)).memories).toBe(size);
+          for (let offset = 0; offset < seeds.length; offset += 50)
+            await app.scheduled();
+          expect(app.services.upserts.flat()).toHaveLength(size);
+          app.services.advance();
+          app.services.resetCalls();
+          const result = results(await search('how do we deploy'));
+          expect(result.results.slice(0, top)).toContainEqual(
+            expect.objectContaining({
+              id: memoryId(20),
+              title: 'Proceso de release',
+              bucket: 'work',
+              match: 'meaning',
+            }),
+          );
+          expect(result.results.length).toBeLessThanOrEqual(10);
+          for (const hit of result.results)
+            expect(Object.keys(hit).sort()).toEqual([
+              'bucket',
+              'id',
+              'match',
+              'snippet',
+              'tags',
+              'title',
+            ]);
+          expect(result.meaning).toBe('available');
+          expect(app.services.embeddingCalls).toHaveLength(1);
+          expect(app.services.queries).toHaveLength(1);
+          // Machine authentication and last use take their own existing D1 trip.
+          expect(app.services.d1Trips).toBeLessThanOrEqual(
+            endpoint === 'machine' ? 3 : 2,
+          );
+          expect(app.services.missing.size).toBe(0);
+        },
+      );
       it('E2/E3: exact verification ranks first; diacritics, case and prefixes match through real FTS5', async () => {
         await indexMemories(app, searchMemories);
         const exact = results(await search('pnpm verify'));
