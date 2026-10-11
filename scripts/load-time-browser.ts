@@ -141,7 +141,15 @@ async function approvalNavigation(page: Page, origin: string, code: string) {
       ).duration,
   );
 }
-async function settleNetworkAfter<T>(page: Page, action: () => Promise<T>) {
+// Measurement scripts wait this long for intent preloading to go quiet.
+const intentPreloadTimeout = 15_000;
+export type MeasureOptions = { preloadTimeout?: number };
+
+async function settleNetworkAfter<T>(
+  page: Page,
+  timeout: number,
+  action: () => Promise<T>,
+) {
   const active = new Set<Request>();
   let quietTimer: ReturnType<typeof setTimeout> | undefined;
   let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
@@ -169,7 +177,7 @@ async function settleNetworkAfter<T>(page: Page, action: () => Promise<T>) {
           reject(
             new Error('Intent preload did not reach 500 ms of network quiet.'),
           ),
-        15_000,
+        timeout,
       );
       restartQuietWindow();
     });
@@ -186,8 +194,9 @@ async function navigate(
   page: Page,
   origin: string,
   kind: 'buckets' | 'machines' | 'vault' | 'audit' | 'memory',
+  preloadTimeout: number,
 ) {
-  const link = await settleNetworkAfter(page, async () => {
+  const link = await settleNetworkAfter(page, preloadTimeout, async () => {
     await page.goto(origin);
     await page.getByRole('heading', { name: "You're signed in" }).waitFor();
     const link = page
@@ -250,6 +259,7 @@ export async function measureScreen(
   origin: string,
   code: string,
   kind: Exclude<keyof Measurements, 'gzipBytes'>,
+  { preloadTimeout = intentPreloadTimeout }: MeasureOptions = {},
 ) {
   const destinations = {
     navigation: 'buckets',
@@ -262,6 +272,6 @@ export async function measureScreen(
   if (kind === 'approvalNavigation')
     return approvalNavigation(page, origin, code);
   return destination
-    ? navigate(page, origin, destination)
+    ? navigate(page, origin, destination, preloadTimeout)
     : cold(page, origin, kind as ColdScreen);
 }
