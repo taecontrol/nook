@@ -1,4 +1,4 @@
-import { Api } from '@nook/contract';
+import { Api, errorStatus } from '@nook/contract';
 import { Effect, Schema } from 'effect';
 import { FetchHttpClient, HttpClientError } from 'effect/http';
 import { HttpApiClient } from 'effect/http-api';
@@ -14,27 +14,12 @@ export class ApiError extends Error {
     super(message ?? `Request failed with ${status}`);
   }
 }
-const statusByTag: Record<string, number> = {
-  Unauthorized: 401,
-  Forbidden: 403,
-  ServiceUnavailable: 503,
-  InvalidBucketPath: 400,
-  InvalidMemory: 400,
-  InvalidMemoryCursor: 400,
-  MemoryNotFound: 404,
-  BucketHasMemories: 409,
-  InvalidAuditFilter: 400,
-  ReservedBucket: 400,
-  BucketNotFound: 404,
-  BucketHasChildren: 409,
-  BucketHasSecrets: 409,
-  InvalidSecret: 400,
-  SecretExists: 409,
-  SecretChanged: 409,
-  SecretNotFound: 404,
-  VaultNotConfigured: 503,
-  SecretKeyUnavailable: 503,
-};
+// Errors the owner API declares carry their contract status; anything else is unavailable.
+function statusOf(tag: string) {
+  return Object.hasOwn(errorStatus, tag)
+    ? errorStatus[tag as keyof typeof errorStatus]
+    : 503;
+}
 const client = HttpApiClient.make(Api);
 export function runApi<A, E>(
   operation: (api: Effect.Success<typeof client>) => Effect.Effect<A, E>,
@@ -46,7 +31,7 @@ export function runApi<A, E>(
       Effect.mapError(
         (error) =>
           new ApiError(
-            statusByTag[(error as { _tag: string })._tag] ?? 503,
+            statusOf((error as { _tag: string })._tag),
             // Failed delivery or decoding and storage errors can follow commit.
             HttpClientError.isHttpClientError(error) ||
               Schema.isSchemaError(error) ||

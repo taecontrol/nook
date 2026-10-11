@@ -1,8 +1,11 @@
 import { D1Client } from '@effect/sql-d1';
 import {
+  type BucketGrant,
   BucketNotFound,
   type CreateMachineSecret,
   type CreateSecret,
+  canRead,
+  canWrite,
   InvalidBucketPath,
   InvalidRun,
   InvalidSecret,
@@ -26,7 +29,7 @@ import { Effect, Redacted, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
 import { SqlSchema } from 'effect/sql';
 import { type AuditMachine, auditStore } from './audit.ts';
-import { type BucketGrant, canRead, canWrite } from './authorization.ts';
+import { unavailable } from './http-errors.ts';
 import { open, parseKeyring, seal } from './vault-keyring.ts';
 
 const Row = Schema.Struct({
@@ -43,9 +46,6 @@ const Envelope = Schema.Struct({
   ciphertext: Schema.String,
 });
 type CreateState = Partial<Row> & { has_bucket: number };
-const unavailable = Effect.mapError(
-  () => new HttpApiError.ServiceUnavailable(),
-);
 function metadata(row: Row): OwnerSecret {
   return {
     bucket: row.bucket,

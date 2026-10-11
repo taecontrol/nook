@@ -1,5 +1,7 @@
 import { Schema } from 'effect';
 
+export const RESERVED_BUCKET = 'me';
+
 export const bucketPathMessages = {
   empty: 'Enter a bucket path.',
   characters:
@@ -41,7 +43,7 @@ export function bucketLineage(path: string): string[] {
 }
 export function readLineage(bucket: string) {
   const paths = bucketLineage(bucket).reverse();
-  return paths.includes('me') ? paths : [...paths, 'me'];
+  return paths.includes(RESERVED_BUCKET) ? paths : [...paths, RESERVED_BUCKET];
 }
 export class InvalidBucketPath extends Schema.Error<InvalidBucketPath>(
   'nook/InvalidBucketPath',

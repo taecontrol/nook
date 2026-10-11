@@ -20,6 +20,7 @@ import {
 import { Effect, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
 import { SqlSchema } from 'effect/sql';
+import { unavailable } from './http-errors.ts';
 
 const RequestRow = Schema.Struct({
   device_hash: Schema.String,
@@ -46,9 +47,6 @@ const MachineRow = Schema.Struct({
   created_at: Schema.Number,
   last_used_at: Schema.NullOr(Schema.Number),
 });
-const unavailable = Effect.mapError(
-  () => new HttpApiError.ServiceUnavailable(),
-);
 export function randomCode() {
   return btoa(
     String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))),

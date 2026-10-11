@@ -237,11 +237,17 @@ it.each([
           await page
             .getByRole('combobox', { name: 'Bucket', exact: true })
             .click();
-          expect(
-            await page
-              .getByRole('option', { name: bucketPath, exact: true })
-              .count(),
-          ).toBe(operation === 'create' ? 1 : 0);
+          // Count only after the listbox renders; the read may land mid-open.
+          await page
+            .getByRole('option', { name: 'All buckets', exact: true })
+            .waitFor();
+          await expect
+            .poll(() =>
+              page
+                .getByRole('option', { name: bucketPath, exact: true })
+                .count(),
+            )
+            .toBe(operation === 'create' ? 1 : 0);
         } else {
           const row = auditEntries(page).first();
           await row.getByRole('button', { name: /Show details/ }).click();

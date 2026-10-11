@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { buildProduct } from './build.ts';
+import { coverageShards, linuxShards } from './lib/coverage-evidence.ts';
 import { startHostIsolation } from './lib/host-isolation.ts';
 import { digest, files, sourceIdentity } from './lib/identity.ts';
 import { evidenceRoot, prepare } from './lib/instrument.ts';
@@ -12,8 +13,13 @@ import { buildTest } from './test-build.ts';
 const shard = process.argv
   .find((arg) => arg.startsWith('--shard='))
   ?.slice('--shard='.length);
-if (shard !== undefined && !/^[1-3]\/3$/.test(shard))
-  throw new Error('Expected --shard=I/3 with I between one and three.');
+if (
+  shard !== undefined &&
+  (shard === 'macos' || !coverageShards.includes(shard))
+)
+  throw new Error(
+    `Expected --shard=I/${linuxShards} with I between 1 and ${linuxShards}.`,
+  );
 const macos = process.argv.includes('--macos-cli');
 if (macos && (process.platform !== 'darwin' || shard !== undefined))
   throw new Error('--macos-cli requires macOS without a Linux shard.');

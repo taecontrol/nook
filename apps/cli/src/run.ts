@@ -1,25 +1,26 @@
 import { NodeServices } from '@effect/platform-node';
 import { Effect, Redacted } from 'effect';
-import { CliFailure, invalidToken, type ServerFailure } from './errors.ts';
+import { CliFailure, networkError, type RequestFailure } from './errors.ts';
 import { currentDirectory, projectSecrets } from './project-secrets.ts';
 import { parseRun } from './run-arguments.ts';
 import { CommandFailure, resolveCommand, runCommand } from './run-command.ts';
 import { session } from './session.ts';
 
-function runFailure(error: ServerFailure, url: string) {
-  if (error.tag === 'Unauthorized') return invalidToken(url);
-  if (error.tag === 'SecretsForbidden')
+function runFailure(error: RequestFailure) {
+  if (error.server.tag === 'SecretsForbidden')
     return new CliFailure(
-      error.paths.map((path) => `Access to ${path} is forbidden.`).join(' '),
+      error.server.paths
+        .map((path) => `Access to ${path} is forbidden.`)
+        .join(' '),
     );
   if (
     ['SecretNotFound', 'SecretKeyUnavailable', 'VaultNotConfigured'].includes(
-      error.tag,
+      error.server.tag,
     ) &&
-    error.message
+    error.publicMessage
   )
-    return new CliFailure(error.message);
-  return new CliFailure(`Could not reach ${url}. Try again.`);
+    return new CliFailure(error.publicMessage);
+  return error;
 }
 export function run(args: string[], write: (message: string) => void) {
   return Effect.runPromise(
@@ -31,13 +32,13 @@ export function run(args: string[], write: (message: string) => void) {
         catch: (error) => error as CliFailure,
       });
       const file = yield* resolveCommand(parsed.command[0]);
-      const { url, token, request } = yield* session;
-      const delivered = yield* request((api) =>
+      const { url, request } = yield* session;
+      const delivered = yield* request((api, headers) =>
         api.machine.values({
-          headers: { authorization: `Bearer ${token}` },
+          headers,
           payload: parsed.input,
         }),
-      ).pipe(Effect.mapError((error) => runFailure(error, url)));
+      ).pipe(Effect.mapError(runFailure));
       const values = new Map(
         delivered.values.map(({ path, value }) => [path, value]),
       );
@@ -47,10 +48,7 @@ export function run(args: string[], write: (message: string) => void) {
       );
       for (const { name, path } of parsed.mappings) {
         const value = values.get(path);
-        if (!value)
-          return yield* Effect.fail(
-            new CliFailure(`Could not reach ${url}. Try again.`),
-          );
+        if (!value) return yield* Effect.fail(networkError(url));
         env[name] = Redacted.value(value);
       }
       return yield* runCommand(file, parsed.command, env);

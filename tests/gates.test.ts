@@ -139,13 +139,13 @@ it('E19: accepts complete coverage and fails closed on each missing execution se
   }
 });
 
-it('#33 E21: merged coverage requires four platform sources, including macOS', () => {
+it('#33 E21: merged coverage requires five platform sources, including macOS', () => {
   const input = evidence();
   expect(() =>
-    validateCoverage({ ...input.manifest, shards: 4 }, input.artifacts, source),
+    validateCoverage({ ...input.manifest, shards: 5 }, input.artifacts, source),
   ).not.toThrow();
   expect(() =>
-    validateCoverage({ ...input.manifest, shards: 3 }, input.artifacts, source),
+    validateCoverage({ ...input.manifest, shards: 4 }, input.artifacts, source),
   ).toThrow(/shards/);
 });
 
@@ -206,16 +206,16 @@ it('E19: empty files and zero counters cannot stand in for an execution seam', (
   }
 });
 
-it('E19/#33 E21: requires all three Linux shards and macOS, with distinct indexes and the same source', () => {
-  const manifests = [1, 2, 3, 'macos'].map((index) => ({
+it('E19/#33 E21: requires all four Linux shards and macOS, with distinct indexes and the same source', () => {
+  const manifests = [1, 2, 3, 4, 'macos'].map((index) => ({
     ...evidence().manifest,
-    shard: index === 'macos' ? 'macos' : `${index}/3`,
+    shard: index === 'macos' ? 'macos' : `${index}/4`,
   }));
   expect(() => validateShards(manifests, source)).not.toThrow();
   expect(() => validateShards(manifests.slice(0, 2), source)).toThrow(/shard/i);
   expect(() =>
     validateShards(
-      [manifests[0], manifests[0], manifests[2], manifests[3]],
+      [manifests[0], manifests[0], manifests[2], manifests[3], manifests[4]],
       source,
     ),
   ).toThrow(/shard/i);
@@ -223,7 +223,7 @@ it('E19/#33 E21: requires all three Linux shards and macOS, with distinct indexe
     validateShards(
       manifests.map((manifest) => ({
         ...manifest,
-        shard: manifest.shard.replace('/3', '/2'),
+        shard: manifest.shard.replace('/4', '/2'),
       })),
       source,
     ),
@@ -234,7 +234,8 @@ it('E19/#33 E21: requires all three Linux shards and macOS, with distinct indexe
         manifests[0],
         manifests[1],
         manifests[2],
-        { ...manifests[3], source: { ...source, digest: hash('different') } },
+        manifests[3],
+        { ...manifests[4], source: { ...source, digest: hash('different') } },
       ],
       source,
     ),

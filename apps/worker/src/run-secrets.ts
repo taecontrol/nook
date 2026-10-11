@@ -1,5 +1,6 @@
 import { D1Client } from '@effect/sql-d1';
 import {
+  canRead,
   InvalidRun,
   type RunSecrets,
   SecretKeyUnavailable,
@@ -9,9 +10,8 @@ import {
   validateRunSecrets,
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
-import { HttpApiError } from 'effect/http-api';
 import { type AuditMachine, auditStore } from './audit.ts';
-import { canRead } from './authorization.ts';
+import { unavailable } from './http-errors.ts';
 import { open, parseKeyring } from './vault-keyring.ts';
 
 const Envelope = Schema.Struct({
@@ -45,7 +45,7 @@ export function runSecrets(
           return sql`SELECT key_id, iv, ciphertext FROM secrets WHERE bucket=${bucket} AND name=${name}`;
         }),
       )
-      .pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable()));
+      .pipe(unavailable);
     const values = yield* decrypt(paths, rows, binding);
     yield* audit.record(machine, input, paths, 'delivered');
     return { values };
@@ -69,7 +69,7 @@ function decrypt(
       Effect.gen(function* () {
         const envelope = yield* Schema.decodeUnknownEffect(Envelope)(
           rows[index][0],
-        ).pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable()));
+        ).pipe(unavailable);
         const value = yield* open(ring, path, envelope).pipe(
           Effect.mapError(
             () =>

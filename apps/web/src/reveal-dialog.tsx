@@ -1,3 +1,4 @@
+import { secretPath } from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import { Redacted } from 'effect';
 import { Check, Copy, History, ServerCrash } from 'lucide-react';
@@ -17,7 +18,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 import { ApiError, runApi } from './api-client';
 import { formatDate } from './paths';
-import { type Secret, secretPath } from './vault-model';
+import type { Secret } from './vault-model';
 
 type State =
   | { status: 'pending' }

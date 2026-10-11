@@ -1,23 +1,24 @@
 import { D1Client } from '@effect/sql-d1';
 import {
+  type BucketGrant,
   BucketHasChildren,
   BucketHasMemories,
   BucketHasSecrets,
   BucketNotFound,
   bucketLineage,
+  canRead,
+  canWrite,
   InvalidBucketPath,
+  RESERVED_BUCKET,
   ReservedBucket,
   validateBucketPath,
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
 import { SqlSchema } from 'effect/sql';
-import { type BucketGrant, canRead, canWrite } from './authorization.ts';
+import { unavailable } from './http-errors.ts';
 
 const Row = Schema.Struct({ path: Schema.String, created_at: Schema.String });
-const unavailable = Effect.mapError(
-  () => new HttpApiError.ServiceUnavailable(),
-);
 function writable(grant: BucketGrant, path: string) {
   const message = validateBucketPath(path);
   if (message) return Effect.fail(new InvalidBucketPath({ message }));
@@ -67,7 +68,7 @@ export const bucketOperations = Effect.gen(function* () {
     delete: (grant: BucketGrant, path: string) =>
       Effect.gen(function* () {
         yield* writable(grant, path);
-        if (path === 'me')
+        if (path === RESERVED_BUCKET)
           return yield* Effect.fail(
             new ReservedBucket({ message: 'The me bucket cannot be deleted.' }),
           );

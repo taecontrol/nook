@@ -1,3 +1,4 @@
+import { type Bucket, RESERVED_BUCKET } from '@nook/contract';
 import { cn } from 'cn';
 import { ChevronRight, Dot, MoreHorizontal, Plus, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
@@ -19,7 +20,7 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
-import { type Bucket, formatDate, nameOf, parentOf, RESERVED } from './paths';
+import { formatDate, nameOf, parentOf } from './paths';
 
 export type OutlineNode = {
   path: string;
@@ -95,7 +96,7 @@ export function Guides({ depth }: { depth: number }) {
 }
 
 function deleteBlocker(node: OutlineNode) {
-  if (node.path === RESERVED)
+  if (node.path === RESERVED_BUCKET)
     return 'me is reserved: it always exists and every machine can read it.';
   if (node.children.length > 0) return 'Delete its child buckets first.';
   return null;
@@ -213,7 +214,9 @@ function RowBadges({ node, matched }: { node: OutlineNode; matched: boolean }) {
   return (
     <>
       {' '}
-      {node.path === RESERVED && <Badge variant="secondary">reserved</Badge>}
+      {node.path === RESERVED_BUCKET && (
+        <Badge variant="secondary">reserved</Badge>
+      )}
       {node.ghost && <Badge variant="outline">new</Badge>}
       {matched && <Badge variant="outline">exists</Badge>}
     </>

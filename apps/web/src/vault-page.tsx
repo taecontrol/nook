@@ -1,3 +1,4 @@
+import { RESERVED_BUCKET, secretPath } from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import { cn } from 'cn';
 import {
@@ -51,16 +52,10 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { ApiError } from './api-client';
-import { formatDate, RESERVED } from './paths';
+import { formatDate } from './paths';
 import { useVaultPage } from './use-vault-page';
 import { WriteFeedback } from './vault-feedback';
-import {
-  ancestorsOf,
-  plural,
-  type Secret,
-  secretPath,
-  secretsIn,
-} from './vault-model';
+import { ancestorsOf, plural, type Secret, secretsIn } from './vault-model';
 import { reachText, SecretSheet } from './vault-sheet';
 
 import { BucketTree, BucketTreeSkeleton } from './vault-tree';
@@ -495,7 +490,7 @@ function DeleteConfirmation({
   const shown = secret ?? last.current;
   if (!shown) return null;
   const where =
-    shown.bucket === RESERVED
+    shown.bucket === RESERVED_BUCKET
       ? 'Agents working in any bucket'
       : parents.has(shown.bucket)
         ? `Agents working in ${shown.bucket} or a bucket inside it`

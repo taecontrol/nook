@@ -1,18 +1,18 @@
-import { validateSecretDescription } from '@nook/contract';
+import {
+  RESERVED_BUCKET,
+  secretPath,
+  validateSecretDescription,
+  validateSecretName,
+  validateSecretValue,
+} from '@nook/contract';
 import { useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from './api-client';
 import { useBucketList } from './buckets-api';
-import { RESERVED } from './paths';
+import { useDesktop } from './hooks/use-desktop';
 import { type SecretWrite, unconfirmed, useVault } from './vault-api';
 import { feedbackFor } from './vault-feedback';
-import {
-  countByBucket,
-  type Secret,
-  secretPath,
-  validateName,
-  validateValue,
-} from './vault-model';
+import { countByBucket, type Secret } from './vault-model';
 import {
   type Draft,
   idleUi,
@@ -21,18 +21,6 @@ import {
   type VaultUi,
 } from './vault-state';
 
-function useWide() {
-  const [wide, setWide] = useState(
-    () => matchMedia('(min-width: 1024px)').matches,
-  );
-  useEffect(() => {
-    const media = matchMedia('(min-width: 1024px)');
-    const update = () => setWide(media.matches);
-    media.addEventListener('change', update);
-    return () => media.removeEventListener('change', update);
-  }, []);
-  return wide;
-}
 function blankDraft(bucket: string): Draft {
   return { mode: 'create', bucket, name: '', description: '', value: '' };
 }
@@ -64,9 +52,9 @@ function fromDraft(draft: Draft): SecretWrite {
 }
 function invalidDraft(draft: Draft) {
   return (
-    (draft.mode === 'create' && validateName(draft.name)) ||
+    (draft.mode === 'create' && validateSecretName(draft.name)) ||
     validateSecretDescription(draft.description) ||
-    validateValue(draft.value)
+    validateSecretValue(draft.value)
   );
 }
 function knownDuplicate(draft: Draft, list: readonly Secret[]) {
@@ -124,7 +112,7 @@ export function useVaultPage() {
   const [dismissed, setDismissed] = useState<number>();
   const patch = (next: Partial<VaultUi>) =>
     setUi((current) => ({ ...current, ...next }));
-  const wide = useWide();
+  const wide = useDesktop();
   const deleteTrigger = useRef<HTMLButtonElement | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const buckets = useMemo(
@@ -132,7 +120,7 @@ export function useVaultPage() {
     [bucketsQuery.data],
   );
   const list = secrets.data;
-  const selected = search.bucket ?? RESERVED;
+  const selected = search.bucket ?? RESERVED_BUCKET;
   const drilled = search.bucket !== undefined;
   const parents = useMemo(
     () =>
@@ -183,7 +171,7 @@ export function useVaultPage() {
     patch({
       sheet: openSheet(
         blankDraft(
-          bucket ?? (buckets.includes(selected) ? selected : RESERVED),
+          bucket ?? (buckets.includes(selected) ? selected : RESERVED_BUCKET),
         ),
       ),
     });

@@ -2,9 +2,15 @@ import { hostname } from 'node:os';
 import { limitedAccessText, readOnlyText } from '@nook/contract';
 import { Effect } from 'effect';
 import cliPackage from '../package.json' with { type: 'json' };
-import { machineApi } from './api.ts';
+import { type MachineClient, machineApi } from './api.ts';
 import { installationOrigin, readConfig, writeConfig } from './config.ts';
-import { CliFailure, invalidToken } from './errors.ts';
+import {
+  CliFailure,
+  invalidToken,
+  NotLoggedIn,
+  networkError,
+  RequestFailure,
+} from './errors.ts';
 import {
   checkKeyring,
   clearToken,
@@ -18,12 +24,31 @@ import { lockSession } from './session-lock.ts';
 type Write = (message: string) => void;
 type Approved = { token: string; machine: string };
 function notLoggedIn(url?: string) {
-  return new CliFailure(
+  return new NotLoggedIn(
     `Not logged in. Run: nook login ${url ?? '<your Nook URL>'}`,
   );
 }
-function networkError(url: string) {
-  return new CliFailure(`Could not reach ${url}. Try again.`);
+function authenticatedRequest(url: string, token: string) {
+  const request = machineApi(url);
+  const headers = { authorization: `Bearer ${token}` };
+  return function authenticated<A, E>(
+    operation: (
+      api: MachineClient,
+      headers: { authorization: string },
+    ) => Effect.Effect<A, E>,
+  ) {
+    return request((api) => operation(api, headers)).pipe(
+      Effect.mapError((error) => {
+        const unauthorized = error.tag === 'Unauthorized';
+        const failure = unauthorized ? invalidToken(url) : networkError(url);
+        return new RequestFailure(
+          failure.message,
+          error,
+          unauthorized ? undefined : error.message,
+        );
+      }),
+    );
+  };
 }
 export const session = Effect.gen(function* () {
   yield* checkKeyring;
@@ -31,7 +56,7 @@ export const session = Effect.gen(function* () {
   if (!url) return yield* Effect.fail(notLoggedIn());
   const token = yield* readToken(url);
   if (!token) return yield* Effect.fail(notLoggedIn(url));
-  return { url, token, request: machineApi(url) };
+  return { url, request: authenticatedRequest(url, token) };
 });
 function waitForApproval(url: string, deviceCode: string, interval: number) {
   const request = machineApi(url);
@@ -64,11 +89,12 @@ function waitForApproval(url: string, deviceCode: string, interval: number) {
   });
 }
 function revokeIssued(url: string, token: string) {
-  return machineApi(url)((api) =>
-    api.machine.logout({ headers: { authorization: `Bearer ${token}` } }),
-  ).pipe(
+  return authenticatedRequest(
+    url,
+    token,
+  )((api, headers) => api.machine.logout({ headers })).pipe(
     Effect.catch((error) =>
-      error.tag === 'Unauthorized' ? Effect.void : Effect.fail(error),
+      error.server.tag === 'Unauthorized' ? Effect.void : Effect.fail(error),
     ),
   );
 }
@@ -164,13 +190,9 @@ export function login(input: string, write: Write) {
 }
 export function whoami(write: Write) {
   return Effect.gen(function* () {
-    const { url, token, request } = yield* session;
-    const identity = yield* request((api) =>
-      api.machine.whoami({ headers: { authorization: `Bearer ${token}` } }),
-    ).pipe(
-      Effect.mapError((error) =>
-        error.tag === 'Unauthorized' ? invalidToken(url) : networkError(url),
-      ),
+    const { url, request } = yield* session;
+    const identity = yield* request((api, headers) =>
+      api.machine.whoami({ headers }),
     );
     const access =
       identity.grant === 'all'
@@ -195,12 +217,10 @@ export function logout(write: Write) {
   return Effect.scoped(
     Effect.gen(function* () {
       yield* lockSession;
-      const { url, token, request } = yield* session;
-      yield* request((api) =>
-        api.machine.logout({ headers: { authorization: `Bearer ${token}` } }),
-      ).pipe(
+      const { url, request } = yield* session;
+      yield* request((api, headers) => api.machine.logout({ headers })).pipe(
         Effect.catch((error) =>
-          error.tag === 'Unauthorized'
+          error.server.tag === 'Unauthorized'
             ? Effect.void
             : Effect.fail(
                 new CliFailure(

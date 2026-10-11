@@ -27,6 +27,7 @@ import {
 import { Effect, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
 import { sha256 } from './digest.ts';
+import { unavailable } from './http-errors.ts';
 import {
   type EmbeddingMemory,
   type MemoryIndex,
@@ -41,9 +42,6 @@ import {
 
 const uuid =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const unavailable = Effect.mapError(
-  () => new HttpApiError.ServiceUnavailable(),
-);
 const notFound = () => new MemoryNotFound({ message: 'Memory not found.' });
 const bucketMissing = () =>
   new BucketNotFound({ message: 'Bucket not found.' });

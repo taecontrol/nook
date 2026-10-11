@@ -2,6 +2,7 @@ import { D1Client } from '@effect/sql-d1';
 import {
   type AuditEntry,
   type AuditFilters,
+  type BucketGrant,
   InvalidAuditFilter,
   type RunSecrets,
   splitSecretPath,
@@ -10,7 +11,7 @@ import {
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
-import type { BucketGrant } from './authorization.ts';
+import { unavailable } from './http-errors.ts';
 
 export type AuditMachine = { id: string; machine: string; grant: BucketGrant };
 const Facts = Schema.Struct({
@@ -51,9 +52,6 @@ const Row = Schema.Union([
   })),
 ]);
 type Row = typeof Row.Type;
-const unavailable = Effect.mapError(
-  () => new HttpApiError.ServiceUnavailable(),
-);
 function entry(row: Row): AuditEntry {
   const facts = {
     id: row.id,

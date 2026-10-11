@@ -1,6 +1,11 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { validateArtifacts, validateShards } from './lib/coverage-evidence.ts';
+import {
+  coverageShards,
+  linuxShards,
+  validateArtifacts,
+  validateShards,
+} from './lib/coverage-evidence.ts';
 import { readEvidence } from './lib/evidence-io.ts';
 import { digest, sourceIdentity } from './lib/identity.ts';
 import { evidenceRoot } from './lib/instrument.ts';
@@ -33,6 +38,10 @@ for (const [name, data] of Object.entries(artifacts)) {
 }
 await writeFile(
   resolve(evidenceRoot, 'manifest.json'),
-  JSON.stringify({ schema: 1, source, shards: 4, outputs }, null, 2),
+  JSON.stringify(
+    { schema: 1, source, shards: coverageShards.length, outputs },
+    null,
+    2,
+  ),
 );
-console.log('Merged all three Linux coverage shards and macOS.');
+console.log(`Merged all ${linuxShards} Linux coverage shards and macOS.`);

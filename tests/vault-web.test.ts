@@ -115,6 +115,28 @@ it('E19: phone drill-in supports All buckets and browser Back', async () => {
     await visit.close();
   }
 });
+it('the Vault bucket selection follows both sides of the desktop breakpoint', async () => {
+  const visit = await vaultPage(browser, {
+    start: '/vault',
+    viewport: { width: 1023, height: 900 },
+  });
+  const { page } = visit;
+  try {
+    const bucket = page
+      .getByRole('list', { name: 'Buckets', exact: true })
+      .locator('[data-path="me"]')
+      .getByRole('link');
+    await bucket.waitFor();
+    expect(await bucket.getAttribute('aria-current')).toBeNull();
+    await page.setViewportSize({ width: 1024, height: 900 });
+    await expect.poll(() => bucket.getAttribute('aria-current')).toBe('page');
+    await page.setViewportSize({ width: 1023, height: 900 });
+    await expect.poll(() => bucket.getAttribute('aria-current')).toBeNull();
+    expect(new URL(page.url()).searchParams.has('bucket')).toBe(false);
+  } finally {
+    await visit.close();
+  }
+});
 it.each([false, true])(
   'E19: create is optimistic and settled values disappear from DOM, Query cache and mutation state (submit burst: %s)',
   async (submitBurst) => {

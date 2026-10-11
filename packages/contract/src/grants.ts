@@ -1,5 +1,5 @@
 import { Schema } from 'effect';
-import { BucketPath, bucketLineage } from './buckets.ts';
+import { BucketPath, bucketLineage, RESERVED_BUCKET } from './buckets.ts';
 
 export const BucketGrant = Schema.Union([
   Schema.Literal('all'),
@@ -13,7 +13,7 @@ function inside(path: string, root: string) {
 export function canRead(grant: BucketGrant, path: string): boolean {
   return (
     grant === 'all' ||
-    path === 'me' ||
+    path === RESERVED_BUCKET ||
     grant.some((root) => inside(path, root) || inside(root, path))
   );
 }
@@ -30,7 +30,7 @@ export function normalizeGrant(grant: BucketGrant): BucketGrant {
 export function readOnlyBuckets(grant: BucketGrant): string[] {
   if (grant === 'all') return [];
   const readable = new Set([
-    'me',
+    RESERVED_BUCKET,
     ...grant.flatMap((path) => bucketLineage(path).slice(0, -1)),
   ]);
   return [...readable].filter((path) => !canWrite(grant, path)).sort();

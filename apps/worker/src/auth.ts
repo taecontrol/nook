@@ -1,10 +1,10 @@
+import type { BucketGrant } from '@nook/contract';
 import {
   createRemoteJWKSet,
   customFetch,
   type JWTVerifyGetKey,
   jwtVerify,
 } from 'jose';
-import type { BucketGrant } from './authorization.ts';
 
 export type AuthBindings = {
   ACCESS_ISSUER?: string;

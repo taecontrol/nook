@@ -1,9 +1,6 @@
-import { bucketLineage, validateBucketPath } from '@nook/contract';
-export type Bucket = { path: string; createdAt: string };
+import { type Bucket, bucketLineage, validateBucketPath } from '@nook/contract';
 
-export const RESERVED = 'me';
-
-export type PathProblem =
+type PathProblem =
   | { kind: 'uppercase'; message: string; suggestion: string }
   | { kind: 'other'; message: string };
 export function validatePath(path: string): PathProblem | null {
@@ -13,9 +10,6 @@ export function validatePath(path: string): PathProblem | null {
     return { kind: 'uppercase', message, suggestion: path.toLowerCase() };
   return { kind: 'other', message };
 }
-
-/** Every prefix of a path, from the top level down to the path itself. */
-export const lineage = bucketLineage;
 
 export function parentOf(path: string): string | null {
   const index = path.lastIndexOf('/');
@@ -35,17 +29,13 @@ export type CreatePlan = {
 };
 
 export function planCreate(path: string, existing: Set<string>): CreatePlan {
-  const prefixes = lineage(path);
+  const prefixes = bucketLineage(path);
   const missing = prefixes.filter((prefix) => !existing.has(prefix));
   const landsIn =
     [...prefixes]
       .reverse()
       .find((prefix) => existing.has(prefix) && prefix !== path) ?? null;
   return { path, missing, landsIn };
-}
-
-export function hasChildren(path: string, buckets: Bucket[]): boolean {
-  return buckets.some((bucket) => bucket.path.startsWith(`${path}/`));
 }
 
 export function sortBuckets(buckets: Bucket[]): Bucket[] {

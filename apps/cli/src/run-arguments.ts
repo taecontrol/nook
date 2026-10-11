@@ -7,7 +7,8 @@ import {
   requireMappingLimit,
   type SecretMapping,
 } from './project-secrets.ts';
-export const runUsage =
+
+const runUsage =
   'Usage: nook run --secret ENV=bucket/NAME --purpose "…" -- <command>';
 function mapping(value: string): SecretMapping {
   const separator = value.indexOf('=');

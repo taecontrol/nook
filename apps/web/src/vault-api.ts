@@ -3,7 +3,6 @@ import {
   type QueryClient,
   queryOptions,
   useMutation,
-  useMutationState,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
@@ -12,8 +11,9 @@ import { useRef } from 'react';
 import { ApiError, runApi } from './api-client';
 import { preloadBuckets } from './buckets-api';
 import type { WriteOp } from './vault-state';
+import { createWriteGate, observedWrites } from './write-gate';
 
-export const secretsOptions = queryOptions({
+const secretsOptions = queryOptions({
   queryKey: ['vault', 'secrets'],
   queryFn: async ({ signal }) => [
     ...(await runApi((api) => api.vault.list(), signal)).secrets,
@@ -26,6 +26,8 @@ export const secretsOptions = queryOptions({
   structuralSharing: false,
 });
 const writeKey = ['vault', 'write'] as const;
+// Vault keeps its observer enabled so successful-list revisions can reconcile writes.
+const gate = createWriteGate(writeKey, { disableWhileBusy: false });
 export type SecretWrite = {
   op: WriteOp;
   secret: OwnerSecret;
@@ -171,40 +173,27 @@ function optimistic(
   }
   return visible;
 }
-function isWriting(queries: QueryClient) {
-  return queries.isMutating({ mutationKey: writeKey }) > 0;
-}
 export function preloadVault(queries: QueryClient) {
   preloadBuckets(queries);
-  if (!isWriting(queries)) void queries.prefetchQuery(secretsOptions);
+  gate.preload(queries, secretsOptions);
 }
-export function useVault() {
+function useSecretState() {
   const queries = useQueryClient();
-  // Values live only in this closure, which settlement clears. Mutation state is metadata only.
-  const values = useRef(new Map<string, Redacted.Redacted<string>>());
-  const raw = useMutationState<ObservedWrite>({
-    filters: { mutationKey: writeKey },
-    select: (mutation) => ({
-      id: mutation.mutationId,
-      input: mutation.state.variables as SecretWrite,
-      status: mutation.state.status,
-      error: mutation.state.error,
-      result: mutation.state.data as WriteResult | undefined,
-      revision:
-        (mutation.state.context as { revision?: number } | undefined)
-          ?.revision ?? 0,
-    }),
-  });
-  const busy = raw.some((write) => write.status === 'pending');
-  const query = useQuery({
-    ...secretsOptions,
-    staleTime: busy ? Infinity : secretsOptions.staleTime,
-    refetchOnWindowFocus: busy ? false : secretsOptions.refetchOnWindowFocus,
-  });
+  const { writes: raw, busy } = gate.useWrites<ObservedWrite>((mutation) => ({
+    id: mutation.mutationId,
+    input: mutation.state.variables as SecretWrite,
+    status: mutation.state.status,
+    error: mutation.state.error,
+    result: mutation.state.data as WriteResult | undefined,
+    revision:
+      (mutation.state.context as { revision?: number } | undefined)?.revision ??
+      0,
+  }));
+  const query = useQuery(gate.queryOptions(secretsOptions, busy));
   const revision =
     queries.getQueryState(secretsOptions.queryKey)?.dataUpdateCount ?? 0;
-  const writes = raw.map((write) =>
-    resolved(write, revision, query.data ?? []),
+  const observed = observedWrites(
+    raw.map((write) => resolved(write, revision, query.data ?? [])),
   );
   const secrets = {
     ...query,
@@ -213,6 +202,16 @@ export function useVault() {
         ? undefined
         : optimistic(query.data, raw, revision),
   };
+  return { ...observed, secrets };
+}
+export function useSecretList() {
+  return useSecretState().secrets;
+}
+export function useVault() {
+  const queries = useQueryClient();
+  const { secrets, writes, busy, write: latest } = useSecretState();
+  // Values live only in this closure, which settlement clears. Mutation state is metadata only.
+  const values = useRef(new Map<string, Redacted.Redacted<string>>());
   const write = useMutation({
     mutationKey: writeKey,
     // Unconfirmed submissions remain metadata-only until a list reconciles them.
@@ -235,7 +234,7 @@ export function useVault() {
   return {
     secrets,
     busy,
-    write: writes.at(-1),
+    write: latest,
     saving: new Set(
       writes
         .filter((entry) => entry.status === 'pending')
@@ -250,11 +249,10 @@ export function useVault() {
       input: SecretWrite,
       value: string,
       onError: (error: Error) => void,
-    ) => {
-      if (isWriting(queries)) return false;
-      values.current.set(input.writeId, Redacted.make(value));
-      write.mutate(input, { onError });
-      return true;
-    },
+    ) =>
+      gate.start(queries, () => {
+        values.current.set(input.writeId, Redacted.make(value));
+        write.mutate(input, { onError });
+      }),
   };
 }
