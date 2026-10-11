@@ -322,8 +322,11 @@ Issue #11 uses the production Worker bundle, migrated D1, and its genuine schedu
 
 The MCP and owner HTTP cases also distinguish tag-free prefix and accent
 matches, all-tag filtering on keyword hits, duplicate-tag rejection before AI,
-the owner-only bucket scope, equal-score date/id ranking and malformed AI
-responses without a vector query. Synchronization cases hold a real embedding
+the owner-only bucket scope, equal-score date/id ranking, compatibility-width
+keyword normalization, the sixteen-term limit, malformed AI responses without
+a vector query and malformed Vectorize responses with keyword fallback.
+Synchronization cases require the native external-content FTS integrity check
+to pass after deleting a canonical row. They hold a real embedding
 request to require creation and keyword search before indexing completes;
 they also inspect workerd's scheduled outcome after a failed upsert.
 `memory-search-snippet.test.ts`

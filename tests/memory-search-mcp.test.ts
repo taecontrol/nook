@@ -431,6 +431,26 @@ describe('Memory search owner HTTP', () => {
       memoryId(40),
     ]);
   });
+  it('keyword normalization: compatibility-width words find ordinary text', async () => {
+    await seedMemories(app, searchMemories);
+    app.services.failEmbedding = true;
+    const found = await httpSearch(app, 'ｐｎｐｍ ｖｅｒｉｆｙ');
+    expect(found.results[0]).toMatchObject({
+      id: memoryId(23),
+      match: 'keyword',
+    });
+  });
+  it('keyword limits: an absent seventeenth term does not suppress a match for the first sixteen', async () => {
+    const content =
+      'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen';
+    await seedMemories(app, [memoryFixture(486, { content, tags: [] })]);
+    app.services.failEmbedding = true;
+    const found = await httpSearch(app, `${content} seventeenth`);
+    expect(found.meaning).toBe('unavailable');
+    expect(found.results).toContainEqual(
+      expect.objectContaining({ id: memoryId(486), match: 'keyword' }),
+    );
+  });
   it.each(['empty', 'extra', 'dimensions', 'infinite'] as const)(
     'E9: a malformed %s embedding response returns keywords without querying vectors',
     async (kind) => {
@@ -475,4 +495,34 @@ describe('Memory search owner HTTP', () => {
       expect(app.services.queries).toEqual([]);
     },
   );
+  it('E9: a malformed Vectorize response reports unavailable meaning and preserves keywords', async () => {
+    await seedMemories(app, searchMemories);
+    await app.setBindings(
+      {
+        LOCAL_OWNER: 'synthetic-owner',
+        LOCAL_ORIGIN: app.origin,
+        EMBEDDING_MODEL: '@cf/baai/bge-m3',
+      },
+      {
+        outboundService: async (request) => {
+          const normal = await app.services.fetch(request);
+          return new URL(request.url).pathname === '/query'
+            ? Response.json({
+                matches: [
+                  { id: 23, metadata: { contentHash: 'f'.repeat(64) } },
+                ],
+              })
+            : normal;
+        },
+      },
+    );
+    const found = await httpSearch(app, 'pnpm verify');
+    expect(found.meaning).toBe('unavailable');
+    expect(found.results[0]).toMatchObject({
+      id: memoryId(23),
+      match: 'keyword',
+    });
+    expect(app.services.embeddingCalls).toHaveLength(1);
+    expect(app.services.queries).toHaveLength(1);
+  });
 });
