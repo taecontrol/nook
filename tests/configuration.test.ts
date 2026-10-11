@@ -316,3 +316,69 @@ it('E20 setup: only the commit main points to deploys, so a slower older Verify 
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+it('E23: D1 is bound by name with migrations and no installation ID', async () => {
+  const config = JSON.parse(await readFile('wrangler.jsonc', 'utf8'));
+  expect(config.d1_databases).toEqual([
+    {
+      binding: 'DB',
+      database_name: 'nook',
+      migrations_dir: 'migrations',
+      migrations_pattern: 'migrations/[0-9][0-9][0-9][0-9]_+([a-z0-9_]).sql',
+    },
+  ]);
+});
+
+it('E24: deployment builds, creates the missing database, migrates, then deploys', async () => {
+  const deploy = await workflow('deploy');
+  const commands = deploy.jobs.deploy.steps
+    .filter((step: { run?: string }) => step.run)
+    .map((step: { run: string }) => step.run)
+    .join('\n');
+  const build = commands.indexOf('pnpm build');
+  const create = commands.indexOf('wrangler d1 create nook');
+  const migrate = commands.indexOf('wrangler d1 migrations apply DB --remote');
+  const publish = commands.indexOf('wrangler deploy');
+  expect(build).toBeGreaterThanOrEqual(0);
+  expect(create).toBeGreaterThan(build);
+  expect(migrate).toBeGreaterThan(create);
+  expect(publish).toBeGreaterThan(migrate);
+});
+
+it('E26: CLI enters complexity and coverage scope, and CI installs a real Secret Service', async () => {
+  const config = JSON.parse(await readFile('coverage.config.json', 'utf8'));
+  expect(config.roots).toContain('apps/cli/src');
+  expect(config.complexityRoots).toContain('apps/cli/src');
+  const commands = (await workflow('verify')).jobs.tests.steps
+    .map((step: { run?: string }) => step.run ?? '')
+    .join('\n');
+  for (const dependency of ['gnome-keyring', 'libsecret-tools', 'dbus'])
+    expect(commands).toContain(dependency);
+});
+
+it('E12: every CI test shard installs bubblewrap and loads only the versioned executable profile before coverage', async () => {
+  const ci = await workflow('verify');
+  const commands: string[] = ci.jobs.tests.steps.map(
+    (step: { run?: string }) => step.run ?? '',
+  );
+  const install = commands.findIndex((command) =>
+    /apt-get install.*\bbubblewrap\b/.test(command),
+  );
+  const profile = commands.indexOf(
+    'sudo apparmor_parser -r .github/apparmor/nook-bwrap',
+  );
+  const coverage = commands.findIndex((command) =>
+    command.startsWith('pnpm test:coverage'),
+  );
+  expect(install).toBeGreaterThanOrEqual(0);
+  expect(profile).toBeGreaterThan(install);
+  expect(coverage).toBeGreaterThan(profile);
+  expect(ci.jobs.tests.strategy.matrix.shard).toEqual([1, 2, 3]);
+  expect(commands.join('\n')).not.toMatch(
+    /sysctl.*apparmor_restrict_unprivileged_userns/,
+  );
+  const policy = await readFile('.github/apparmor/nook-bwrap', 'utf8');
+  expect(policy.replace(/\s+/g, ' ').trim()).toBe(
+    'abi <abi/4.0>, include <tunables/global> profile nook-bwrap /usr/bin/bwrap flags=(unconfined) { userns, }',
+  );
+});
