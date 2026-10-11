@@ -383,6 +383,29 @@ describe('Memory search owner HTTP', () => {
     );
   });
   afterAll(() => app?.close());
+  it.each([
+    ['an empty query', '', 'Enter a search query.'],
+    ['whitespace', ' \t\n', 'Enter a search query.'],
+    [
+      'over 512 characters',
+      'a'.repeat(513),
+      'A search query can be at most 512 characters.',
+    ],
+  ])(
+    'E7: owner HTTP preserves validation for %s before AI/index calls',
+    async (_label, query, message) => {
+      const response = await fetch(
+        `${app.origin}/api/memories/search?${new URLSearchParams({ bucket: 'work/acme', q: query })}`,
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        _tag: 'InvalidMemorySearch',
+        message,
+      });
+      expect(app.services.embeddingCalls).toEqual([]);
+      expect(app.services.queries).toEqual([]);
+    },
+  );
   it('E4/E17: Only this bucket excludes ancestors from both search sources', async () => {
     await indexMemories(
       app,
