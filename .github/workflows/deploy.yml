@@ -80,7 +80,7 @@ jobs:
           fi
           metadata=$(pnpm exec wrangler vectorize list-metadata-index "$index" --json)
           metadata_ready() {
-            printf '%s' "$1" | node --input-type=module -e 'let input=""; for await (const part of process.stdin) input+=part; process.exit(JSON.parse(input).some(index => index.propertyName === "bucket" && index.indexType === "string") ? 0 : 1)'
+            printf '%s' "$1" | node --input-type=module -e 'let input=""; for await (const part of process.stdin) input+=part; process.exit(JSON.parse(input).some(index => index.propertyName === "bucket" && index.indexType?.toLowerCase() === "string") ? 0 : 1)'
           }
           if ! metadata_ready "$metadata"; then
             pnpm exec wrangler vectorize create-metadata-index "$index" --property-name bucket --type string
