@@ -30,6 +30,51 @@ const sizes = [
 ];
 
 it.each(sizes)(
+  'E11: at $width px Close and Escape discard unsaved edits and return focus to Edit access',
+  async (viewport) => {
+    const visit = await accessPage(browser, { viewport });
+    const machine = visit.machines[0];
+    const trigger = machineRow(visit.page, machine.id).getByRole('button', {
+      name: /Edit access/,
+    });
+    try {
+      for (const dismissal of ['Close', 'Escape']) {
+        const sheet = await editAccess(visit.page, machine);
+        expect(
+          await sheet
+            .getByRole('checkbox', { name: 'work/beta', exact: true })
+            .isChecked(),
+        ).toBe(false);
+        await sheet
+          .getByRole('checkbox', { name: 'work/beta', exact: true })
+          .check();
+        if (dismissal === 'Close')
+          await sheet
+            .getByRole('button', { name: 'Close', exact: true })
+            .click();
+        else await visit.page.keyboard.press('Escape');
+        await sheet.waitFor({ state: 'hidden' });
+        await expect
+          .poll(() =>
+            trigger.evaluate((button) => button === document.activeElement),
+          )
+          .toBe(true);
+        expect(
+          (await listMachines(visit.app)).find(
+            (entry) => entry.id === machine.id,
+          )?.grant,
+        ).toEqual(['work/acme']);
+        expect(
+          visit.requests.filter((request) => request.method === 'PUT'),
+        ).toHaveLength(0);
+      }
+    } finally {
+      await visit.close();
+    }
+  },
+);
+
+it.each(sizes)(
   'E11: at $width px an added sibling appears optimistically, preserves row position, and returns focus on success',
   async (viewport) => {
     const gate = deferred();
@@ -82,6 +127,10 @@ it.each(sizes)(
         .getByRole('button', { name: 'Save access', exact: true })
         .click();
       await entered.promise;
+      await page.keyboard.press('Escape');
+      expect(await sheet.getAttribute('data-state')).toBe('open');
+      await sheet.getByRole('button', { name: 'Close', exact: true }).click();
+      expect(await sheet.getAttribute('data-state')).toBe('open');
       await expect
         .poll(() => row.innerText())
         .toContain('work/acme, work/beta');
