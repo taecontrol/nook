@@ -2,16 +2,15 @@ import type { CreatedBucket } from '@nook/contract';
 import {
   type QueryClient,
   queryOptions,
-  useIsMutating,
   useMutation,
-  useMutationState,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
 import { runApi as run } from './api-client';
 import { lineage, sortBuckets } from './paths';
+import { createWriteGate } from './write-gate';
 
-export const bucketsOptions = queryOptions({
+const bucketsOptions = queryOptions({
   queryKey: ['buckets'],
   queryFn: async ({ signal }) => {
     const body = await run((api) => api.buckets.list(), signal);
@@ -23,6 +22,7 @@ export const bucketsOptions = queryOptions({
 });
 
 const writeKey = ['buckets', 'write'] as const;
+const gate = createWriteGate(writeKey, { disableWhileBusy: true });
 type BucketWrite = {
   id: number;
   operation: 'create' | 'delete';
@@ -32,9 +32,6 @@ type BucketWrite = {
   result?: CreatedBucket;
   added: string[];
 };
-function isWriting(queryClient: QueryClient) {
-  return queryClient.isMutating({ mutationKey: writeKey }) > 0;
-}
 async function refreshBuckets(queryClient: QueryClient) {
   const filters = { queryKey: bucketsOptions.queryKey };
   await queryClient.invalidateQueries({ ...filters, refetchType: 'none' });
@@ -105,57 +102,46 @@ function useDeleteBucket() {
 }
 
 export function preloadBuckets(queryClient: QueryClient) {
-  if (!isWriting(queryClient)) void queryClient.prefetchQuery(bucketsOptions);
+  gate.preload(queryClient, bucketsOptions);
 }
 
 export async function refreshBucketList(queryClient: QueryClient) {
   // Pending writes own the cached outline until their recovery read.
-  if (isWriting(queryClient))
+  if (gate.isWriting(queryClient))
     return queryClient.getQueryData(bucketsOptions.queryKey) ?? [];
   return queryClient.fetchQuery({ ...bucketsOptions, staleTime: 0 });
 }
 
 export function useBucketList() {
-  const busy = useIsMutating({ mutationKey: writeKey }) > 0;
-  return useQuery({
-    ...bucketsOptions,
-    enabled: !busy,
-    staleTime: busy ? Infinity : bucketsOptions.staleTime,
-    refetchOnWindowFocus: busy ? false : bucketsOptions.refetchOnWindowFocus,
-  });
+  return useQuery(gate.queryOptions(bucketsOptions, gate.useBusy()));
 }
 
 export function useBuckets() {
   const queryClient = useQueryClient();
   // The native mutation cache retains the operation across route unmounts.
-  const writes = useMutationState<BucketWrite>({
-    filters: { mutationKey: writeKey },
-    select: (mutation) => ({
-      id: mutation.mutationId,
-      operation: mutation.options.mutationKey?.[2] as BucketWrite['operation'],
-      path: mutation.state.variables as string,
-      status: mutation.state.status,
-      error: mutation.state.error,
-      result: mutation.state.data as CreatedBucket | undefined,
-      added:
-        (mutation.state.context as { added?: string[] } | undefined)?.added ??
-        [],
-    }),
-  });
-  const busy = writes.some((write) => write.status === 'pending');
+  const { writes, busy, write } = gate.useWrites<BucketWrite>((mutation) => ({
+    id: mutation.mutationId,
+    operation: mutation.options.mutationKey?.[2] as BucketWrite['operation'],
+    path: mutation.state.variables as string,
+    status: mutation.state.status,
+    error: mutation.state.error,
+    result: mutation.state.data as CreatedBucket | undefined,
+    added:
+      (mutation.state.context as { added?: string[] } | undefined)?.added ?? [],
+  }));
   const create = useCreateBucket();
   const remove = useDeleteBucket();
   const start = (operation: BucketWrite['operation'], path: string) => {
-    if (isWriting(queryClient)) return false;
-    (operation === 'create' ? create : remove).mutate(path);
-    return true;
+    return gate.start(queryClient, () =>
+      (operation === 'create' ? create : remove).mutate(path),
+    );
   };
   return {
     buckets: useBucketList(),
     create: (path: string) => start('create', path),
     remove: (path: string) => start('delete', path),
     busy,
-    write: writes.at(-1),
+    write,
     pending: new Set(
       writes
         .filter((write) => write.status === 'pending')

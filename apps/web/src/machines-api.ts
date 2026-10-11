@@ -3,13 +3,13 @@ import {
   type QueryClient,
   queryOptions,
   useMutation,
-  useMutationState,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
 import { runApi } from './api-client';
+import { createWriteGate } from './write-gate';
 
-export const machinesOptions = queryOptions({
+const machinesOptions = queryOptions({
   queryKey: ['machines'],
   queryFn: async ({ signal }) => [
     ...(await runApi((api) => api.machines.list(), signal)).machines,
@@ -19,42 +19,41 @@ export const machinesOptions = queryOptions({
   refetchOnWindowFocus: 'always',
 });
 const revokeKey = ['machines', 'revoke'] as const;
+const gate = createWriteGate(revokeKey, { disableWhileBusy: true });
 export type MachineRevoke = {
   id: number;
   machine: Machine;
   status: 'idle' | 'pending' | 'success' | 'error';
   error: Error | null;
 };
-function isRevoking(queries: QueryClient) {
-  return queries.isMutating({ mutationKey: revokeKey }) > 0;
-}
 export function preloadMachines(queries: QueryClient) {
-  if (!isRevoking(queries)) void queries.prefetchQuery(machinesOptions);
+  gate.preload(queries, machinesOptions);
 }
-export function useMachines() {
-  const queries = useQueryClient();
-  const writes = useMutationState<MachineRevoke>({
-    filters: { mutationKey: revokeKey },
-    select: (mutation) => ({
-      id: mutation.mutationId,
-      machine: mutation.state.variables as Machine,
-      status: mutation.state.status,
-      error: mutation.state.error,
-    }),
-  });
-  const busy = writes.some((write) => write.status === 'pending');
+function useMachineState() {
+  const observed = gate.useWrites<MachineRevoke>((mutation) => ({
+    id: mutation.mutationId,
+    machine: mutation.state.variables as Machine,
+    status: mutation.state.status,
+    error: mutation.state.error,
+  }));
+  const { writes, busy } = observed;
   const pendingIds = new Set(
     writes
       .filter((write) => write.status === 'pending')
       .map((write) => write.machine.id),
   );
   const machines = useQuery({
-    ...machinesOptions,
-    enabled: !busy,
-    staleTime: busy ? Infinity : machinesOptions.staleTime,
-    refetchOnWindowFocus: busy ? false : machinesOptions.refetchOnWindowFocus,
+    ...gate.queryOptions(machinesOptions, busy),
     select: (data) => data.filter((machine) => !pendingIds.has(machine.id)),
   });
+  return { ...observed, machines };
+}
+export function useMachineList() {
+  return useMachineState().machines;
+}
+export function useMachines() {
+  const queries = useQueryClient();
+  const { machines, busy, write } = useMachineState();
   const revoke = useMutation({
     mutationKey: revokeKey,
     mutationFn: (machine: Machine) =>
@@ -79,11 +78,8 @@ export function useMachines() {
   return {
     machines,
     busy,
-    write: writes.at(-1),
-    revoke: (machine: Machine) => {
-      if (isRevoking(queries)) return false;
-      revoke.mutate(machine);
-      return true;
-    },
+    write,
+    revoke: (machine: Machine) =>
+      gate.start(queries, () => revoke.mutate(machine)),
   };
 }
