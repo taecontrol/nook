@@ -12,17 +12,16 @@ const { version } = JSON.parse(
 ) as { version: string };
 
 it('E6: nook version prints the package version as JSON and --version names the same version', async () => {
-  expect(version).toBe('0.1.0');
   const keyring = await privateKeyring();
   try {
     expect(await keyring.start(['version']).done).toMatchObject({
       status: 0,
-      stdout: '{"version":"0.1.0"}\n',
+      stdout: `{"version":"${version}"}\n`,
       stderr: '',
     });
     expect(await keyring.start(['--version']).done).toMatchObject({
       status: 0,
-      stdout: 'nook v0.1.0\n',
+      stdout: `nook v${version}\n`,
     });
   } finally {
     await keyring.close();
