@@ -14,13 +14,13 @@ import {
 import { Item, ItemContent, ItemTitle } from '@/components/ui/item';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError, describeFailure } from './api-client';
+import { BucketTree, BucketTreeSkeleton } from './bucket-tree';
 import { LoadFailure } from './failure';
 import { principalName } from './memory-format';
 import { MemoryMarkdown } from './memory-markdown';
 import { ColumnSummary, SearchBody, SearchField } from './memory-search';
 import { formatDateTime, recentTime } from './time';
 import { type MemoryPageModel, useMemoryPage } from './use-memory-page';
-import { BucketTree, BucketTreeSkeleton } from './vault-tree';
 import './memory.css';
 
 function BucketNav({ model }: { model: MemoryPageModel }) {

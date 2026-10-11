@@ -8,6 +8,7 @@ import {
 import { useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from './api-client';
+import { parentBuckets } from './bucket-tree';
 import { useBucketList } from './buckets-api';
 import { useDesktop } from './hooks/use-desktop';
 import { useReturnFocus } from './use-confirm-target';
@@ -123,15 +124,7 @@ export function useVaultPage() {
   const list = secrets.data;
   const selected = search.bucket ?? RESERVED_BUCKET;
   const drilled = search.bucket !== undefined;
-  const parents = useMemo(
-    () =>
-      new Set(
-        buckets.filter((path) =>
-          buckets.some((other) => other.startsWith(`${path}/`)),
-        ),
-      ),
-    [buckets],
-  );
+  const parents = useMemo(() => parentBuckets(buckets), [buckets]);
   const counts = useMemo(() => (list ? countByBucket(list) : null), [list]);
   const feedback =
     vault.write?.id === dismissed ? null : feedbackFor(vault.write);

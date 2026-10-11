@@ -50,6 +50,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { describeFailure } from './api-client';
+import { BucketTree, BucketTreeSkeleton } from './bucket-tree';
 import { LoadFailure } from './failure';
 import { Path, PathList } from './path-text';
 import { formatDate } from './time';
@@ -58,7 +59,6 @@ import { useVaultPage } from './use-vault-page';
 import { WriteFeedback } from './vault-feedback';
 import { ancestorsOf, plural, type Secret, secretsIn } from './vault-model';
 import { agentsIn, reachText, SecretSheet } from './vault-sheet';
-import { BucketTree, BucketTreeSkeleton } from './vault-tree';
 
 const RevealDialog = lazy(() => import('./reveal-dialog'));
 

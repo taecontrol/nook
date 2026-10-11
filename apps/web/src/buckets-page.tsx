@@ -1,4 +1,4 @@
-import { bucketLineage, type CreatedBucket } from '@nook/contract';
+import type { CreatedBucket } from '@nook/contract';
 import { CircleAlert, CircleCheck, CornerDownLeft, Plus } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -27,10 +27,10 @@ import {
 } from '@/components/ui/input-group';
 import { Kbd } from '@/components/ui/kbd';
 import { ApiError, describeFailure } from './api-client';
+import { buildBucketTree, parentBuckets, useCollapsed } from './bucket-tree';
 import { useBuckets } from './buckets-api';
 import { DismissibleAlert, LoadFailure } from './failure';
 import {
-  buildOutline,
   Outline,
   type OutlineActions,
   OutlineSkeleton,
@@ -201,7 +201,6 @@ function useBucketsPage() {
   const [focused, setFocused] = useState(false);
   const [status, setStatus] = useState<ReactNode>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [highlighted, setHighlighted] = useState<{
     path: string;
     at: number;
@@ -228,18 +227,10 @@ function useBucketsPage() {
   const { plan, ghosts, existingMatch, previewPath } = previewState(feedback);
 
   // Preview and reveal open the branches on the way to the path.
-  const visibleCollapsed = useMemo(() => {
-    const reveal = [previewPath, highlighted?.path].filter(
-      (path): path is string => !!path,
-    );
-    if (reveal.length === 0) return collapsed;
-    const next = new Set(collapsed);
-    for (const path of reveal)
-      for (const prefix of bucketLineage(path)) next.delete(prefix);
-    return next;
-  }, [collapsed, previewPath, highlighted]);
+  const collapse = useCollapsed([previewPath, highlighted?.path]);
+  const { setCollapsed } = collapse;
 
-  const nodes = useMemo(() => buildOutline(all, ghosts), [all, ghosts]);
+  const nodes = useMemo(() => buildBucketTree(all, ghosts), [all, ghosts]);
 
   useEffect(() => {
     if (!highlighted) return;
@@ -298,7 +289,7 @@ function useBucketsPage() {
         setHighlighted({ path: write.path, at: Date.now() });
       }
     } else if (write.result) setStatus(createdStatus(write.result));
-  }, [write]);
+  }, [write, setCollapsed]);
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -332,13 +323,7 @@ function useBucketsPage() {
   };
 
   const actions: OutlineActions = {
-    toggle: (path, open) =>
-      setCollapsed((current) => {
-        const next = new Set(current);
-        if (open) next.delete(path);
-        else next.add(path);
-        return next;
-      }),
+    toggle: collapse.toggle,
     createInside: (path) => {
       setValue(`${path}/`);
       setSubmitted(false);
@@ -352,16 +337,14 @@ function useBucketsPage() {
   };
 
   const outlineState: OutlineState = {
-    collapsed: visibleCollapsed,
+    collapsed: collapse.visible,
     highlighted: highlighted?.path ?? null,
     existingMatch,
     pending,
     busy,
   };
 
-  const branches = all.filter((bucket) =>
-    all.some((other) => other.path.startsWith(`${bucket.path}/`)),
-  );
+  const branches = [...parentBuckets(all.map((bucket) => bucket.path))];
   const problem = feedback.kind === 'problem';
 
   return {
@@ -375,7 +358,6 @@ function useBucketsPage() {
     failure,
     setFailure,
     setStatus,
-    collapsed,
     setCollapsed,
     deletion,
     loaded,
@@ -582,9 +564,7 @@ function BucketOutline({ state }: { state: PageState }) {
             <Button
               variant="ghost"
               size="xs"
-              onClick={() =>
-                setCollapsed(new Set(branches.map((bucket) => bucket.path)))
-              }
+              onClick={() => setCollapsed(new Set(branches))}
             >
               Collapse all
             </Button>
