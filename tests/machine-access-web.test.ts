@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
-import { createAuthorization } from './support/authorizations.ts';
+import { createAuthorization, jsonRequest } from './support/authorizations.ts';
 import {
   accessPage,
   editAccess,
@@ -395,6 +395,18 @@ it.each(sizes)(
       await (await visit.app.mf.getD1Database('DB'))
         .prepare("DELETE FROM buckets WHERE path='work/beta'")
         .run();
+      const refreshed = visit.page.waitForResponse(
+        (response) =>
+          response.request().method() === 'GET' &&
+          new URL(response.url()).pathname === '/api/buckets',
+      );
+      await visit.page.evaluate(() =>
+        window.dispatchEvent(new Event('visibilitychange')),
+      );
+      expect((await refreshed).status()).toBe(200);
+      await sheet
+        .getByRole('checkbox', { name: 'work/beta', exact: true })
+        .waitFor({ state: 'hidden' });
       await sheet
         .getByRole('button', { name: 'Save access', exact: true })
         .click();
@@ -580,6 +592,93 @@ it('E14: saving an existing grant with a deleted root drops it without another e
     await visit.close();
   }
 });
+
+it.each([
+  { draft: 'unchanged', addSibling: false, expected: ['work/acme'] },
+  {
+    draft: 'expanded',
+    addSibling: true,
+    expected: ['work/acme', 'work/beta'],
+  },
+])(
+  'E14: a stored root deleted during editing is omitted from the first save while retaining the $draft draft',
+  async ({ addSibling, expected }) => {
+    const visit = await accessPage(browser, {
+      configure: async (_page, app) => {
+        expect(
+          (
+            await jsonRequest(app, '/api/buckets', {
+              path: 'work/old-experiment',
+            })
+          ).status,
+        ).toBe(200);
+      },
+    });
+    const machine = visit.machines[5];
+    try {
+      const sheet = await editAccess(visit.page, machine);
+      const old = sheet.getByRole('checkbox', {
+        name: 'work/old-experiment',
+        exact: true,
+      });
+      expect(await old.isChecked()).toBe(true);
+      if (addSibling)
+        await sheet
+          .getByRole('checkbox', { name: 'work/beta', exact: true })
+          .check();
+      expect(
+        (
+          await fetch(
+            `${visit.app.origin}/api/buckets/${encodeURIComponent('work/old-experiment')}`,
+            { method: 'DELETE' },
+          )
+        ).status,
+      ).toBe(204);
+      const refreshed = visit.page.waitForResponse(
+        (response) =>
+          response.request().method() === 'GET' &&
+          new URL(response.url()).pathname === '/api/buckets',
+      );
+      await visit.page.evaluate(() =>
+        window.dispatchEvent(new Event('visibilitychange')),
+      );
+      expect((await refreshed).status()).toBe(200);
+      await old.waitFor({ state: 'hidden' });
+      await expect
+        .poll(() => sheet.getByRole('alert').innerText())
+        .toContain('It gives no access now, and saving removes it.');
+      expect(
+        await sheet.locator('[data-slot="sheet-footer"]').innerText(),
+      ).toMatch(/Removes\s+work\/old-experiment\s+No longer exists/);
+      await expect
+        .poll(() =>
+          sheet
+            .getByRole('button', { name: 'Save access', exact: true })
+            .isEnabled(),
+        )
+        .toBe(true);
+      const saved = visit.page.waitForResponse(
+        (response) => response.request().method() === 'PUT',
+      );
+      await sheet
+        .getByRole('button', { name: 'Save access', exact: true })
+        .click();
+      const response = await saved;
+      expect(response.status()).toBe(200);
+      expect(response.request().postDataJSON()).toEqual({
+        grant: expected,
+        previous: ['work/acme', 'work/old-experiment'],
+      });
+      await sheet.waitFor({ state: 'hidden' });
+      expect(
+        (await listMachines(visit.app)).find((entry) => entry.id === machine.id)
+          ?.grant,
+      ).toEqual(expected);
+    } finally {
+      await visit.close();
+    }
+  },
+);
 
 it('E15: approval, approved result, and deployment guidance direct later access edits to Machines', async () => {
   const visit = await accessPage(browser);

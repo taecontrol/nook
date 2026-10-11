@@ -233,6 +233,15 @@ function AccessHeader({
     </SheetHeader>
   );
 }
+function withoutDeletedStoredRoots(
+  selection: GrantSelection,
+  missing: readonly string[],
+): GrantSelection {
+  const roots = selection.roots.filter((path) => !missing.includes(path));
+  // Only missing baseline roots are discarded. A newly chosen root still
+  // reaches server validation if it disappears before saving.
+  return { ...selection, roots, grant: selection.all ? 'all' : roots };
+}
 function blocked(
   selection: GrantSelection,
   changes: AccessChange[],
@@ -316,11 +325,12 @@ function AccessEditor({
 }: EditorProps) {
   const [baseline, setBaseline] = useState(machine.grant);
   const [outcome, setOutcome] = useState<Outcome>({ kind: 'none' });
-  const selection = useGrantSelection(existingGrant(machine.grant, existing));
+  const choices = useGrantSelection(existingGrant(machine.grant, existing));
   const save = useSaveAccess();
   const body = useRef<HTMLDivElement>(null);
   const form = useRef<HTMLFormElement>(null);
   const missing = missingRoots(baseline, existing);
+  const selection = withoutDeletedStoredRoots(choices, missing);
   const changes = accessChanges(baseline, selection.grant, missing);
   const disabled = blocked(selection, changes, outcome);
   const revoked = outcome.kind === 'revoked';
