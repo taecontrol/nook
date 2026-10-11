@@ -156,7 +156,7 @@ it('E22/E28: Retry recovers failed counts and the feed with an existing URL sele
     await (await visit.app.mf.getD1Database('DB'))
       .prepare('ALTER TABLE unavailable_memories RENAME TO memories')
       .run();
-    await page.getByRole('button', { name: 'Retry', exact: true }).click();
+    await page.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect.poll(() => memoryRows(page).count()).toBe(25);
     await page
       .getByText('90 memories · newest first', { exact: true })

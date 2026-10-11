@@ -6,10 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { FieldError } from '@/components/ui/field';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { type BucketNode, buildBucketTree, Guides } from './bucket-tree';
 import type { GrantSelection } from './grant-selection';
-import { buildOutline, type OutlineNode } from './outline';
 
 function rowAccess(selection: GrantSelection, path: string) {
   if (selection.all) return 'Included';
@@ -23,7 +22,7 @@ function GrantBranch({
   selection,
   busy,
 }: {
-  node: OutlineNode;
+  node: BucketNode;
   selection: GrantSelection;
   busy: boolean;
 }) {
@@ -38,17 +37,7 @@ function GrantBranch({
           write && 'bg-accent/50',
         )}
       >
-        {['one', 'two', 'three', 'four', 'five']
-          .slice(0, node.depth)
-          .map((level) => (
-            <div
-              key={level}
-              className="flex w-3 shrink-0 justify-center sm:w-4"
-              aria-hidden
-            >
-              <Separator orientation="vertical" />
-            </div>
-          ))}
+        <Guides depth={node.depth} className="w-3 sm:w-4" />
         <div className="flex min-w-0 flex-1 items-start gap-2 py-2">
           <Checkbox
             id={id}
@@ -148,7 +137,7 @@ function BucketChecklist({
       className="max-h-80 overflow-y-auto overscroll-contain p-1"
     >
       <ul>
-        {buildOutline(buckets.data, []).map((node) => (
+        {buildBucketTree(buckets.data, []).map((node) => (
           <GrantBranch
             key={node.path}
             node={node}

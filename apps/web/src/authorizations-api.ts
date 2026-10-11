@@ -1,32 +1,9 @@
-import { type AuthorizationRequest, AuthorizationsApi } from '@nook/contract';
+import type { AuthorizationRequest } from '@nook/contract';
 import { useQueryClient } from '@tanstack/react-query';
-import { Effect } from 'effect';
-import { FetchHttpClient } from 'effect/http';
-import { HttpApiClient } from 'effect/http-api';
 import { useEffect, useState } from 'react';
+import { ApiError, runAuthorizationsApi as run } from './api-client';
 import { useGrantSelection } from './grant-selection';
 
-class ApprovalError extends Error {
-  constructor(readonly tag: string) {
-    super('The authorization request could not be completed.');
-  }
-}
-const client = HttpApiClient.make(AuthorizationsApi);
-function run<A, E>(
-  operation: (api: Effect.Success<typeof client>) => Effect.Effect<A, E>,
-  signal?: AbortSignal,
-) {
-  return Effect.runPromise(
-    Effect.flatMap(client, operation).pipe(
-      Effect.provide(FetchHttpClient.layer),
-      Effect.mapError(
-        (error) =>
-          new ApprovalError((error as { _tag?: string })._tag ?? 'Unavailable'),
-      ),
-    ),
-    { signal },
-  );
-}
 export type AuthorizationPhase =
   | 'code'
   | 'checking'
@@ -38,7 +15,7 @@ export type AuthorizationPhase =
   | 'expired'
   | 'used';
 function terminalPhase(error: unknown) {
-  if (!(error instanceof ApprovalError)) return undefined;
+  if (!(error instanceof ApiError)) return undefined;
   if (error.tag === 'Expired') return 'expired';
   if (error.tag === 'AlreadyHandled') return 'used';
 }
@@ -49,7 +26,7 @@ function approvalFailure(
   const terminal = terminalPhase(error);
   if (terminal) return { phase: terminal, failure: undefined };
   const missing =
-    error instanceof ApprovalError && error.tag === 'NoMatchingRequest';
+    error instanceof ApiError && error.tag === 'NoMatchingRequest';
   return {
     phase: missing ? 'code' : fallback,
     failure: missing ? 'unknown' : 'network',
@@ -104,10 +81,7 @@ export function useAuthorizationFlow() {
       setPhase(action === 'approve' ? 'approved' : 'denied');
     } catch (error) {
       queries.removeQueries({ queryKey: ['authorization', code] });
-      if (
-        error instanceof ApprovalError &&
-        error.tag === 'GrantBucketNotFound'
-      ) {
+      if (error instanceof ApiError && error.tag === 'GrantBucketNotFound') {
         setPhase('request');
         await access.missing();
         return;

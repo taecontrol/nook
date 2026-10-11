@@ -74,15 +74,28 @@ it('E18: real CLI denial, missing bucket and usage each emit one line and exit o
     expectOutput(result.stdout + result.stderr, message, true);
   }
 });
-it('Vault parser failures end with command-specific usage', async () => {
-  const result = await keyring.start(['vault', 'unknown']).done;
-  expect(result.status).toBe(1);
-  expectOutput(
-    (result.stdout + result.stderr).trimEnd().split('\n').at(-1) ?? '',
-    'Usage: nook vault list <bucket>',
-    true,
-  );
-});
+const vaultUsage =
+  'nook vault check | nook vault list <bucket> | nook vault create <bucket>/<NAME> --purpose "…" [--description "…"]';
+it.each([
+  [['vault', 'check', 'extra'], 'Usage: nook vault check'],
+  [['vault', 'list', 'work/acme', 'extra'], 'Usage: nook vault list <bucket>'],
+  [['vault', 'unknown'], `Usage: ${vaultUsage}`],
+  [
+    ['unknown'],
+    `Usage: nook run --secret ENV=bucket/NAME --purpose "…" -- <command> | ${vaultUsage} | nook login <url> | nook whoami | nook logout | nook mcp-header | nook version`,
+  ],
+])(
+  'Parser failure %j ends with the usage of the command that failed',
+  async (args, usage) => {
+    const result = await keyring.start(args).done;
+    expect(result.status).toBe(1);
+    expectOutput(
+      (result.stdout + result.stderr).trimEnd().split('\n').at(-1) ?? '',
+      usage,
+      true,
+    );
+  },
+);
 it('Vault list uses the existing unavailable-server guidance for a genuine storage failure', async () => {
   await login();
   await (await app.mf.getD1Database('DB'))

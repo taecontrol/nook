@@ -21,6 +21,7 @@ import { machineOperations } from './machines.ts';
 import { mcpHandler } from './mcp.ts';
 import { memoryStore } from './memory.ts';
 import { memoryIndex, type SearchBindings } from './memory-index.ts';
+import { matches, ownerRoutes, revealRoute, tokenRoutes } from './routes.ts';
 import { ownerVault } from './vault.ts';
 
 export function handlerForPrincipal(
@@ -160,35 +161,8 @@ function foreignOrigin(request: Request, url: URL) {
     origin !== url.origin
   );
 }
-function isRevealPath(path: string) {
-  return path.startsWith('/api/secrets/') && path.endsWith('/reveal');
-}
-function isMemoryRead(path: string, method: string) {
-  return path.startsWith('/api/memories/') && method === 'GET';
-}
-function isSecretOperation(path: string, method: string) {
-  return (
-    path.startsWith('/api/secrets/') &&
-    (['PUT', 'DELETE'].includes(method) ||
-      (method === 'POST' && isRevealPath(path)))
-  );
-}
 function knownRoute(path: string, method: string) {
-  return (
-    [
-      '/api/whoami',
-      '/api/buckets',
-      '/api/machines',
-      '/api/secrets',
-      '/api/audit',
-      '/api/memories',
-      '/mcp',
-    ].includes(path) ||
-    isMemoryRead(path, method) ||
-    isSecretOperation(path, method) ||
-    ((path.startsWith('/api/buckets/') || path.startsWith('/api/machines/')) &&
-      method === 'DELETE')
-  );
+  return path === '/mcp' || matches(ownerRoutes, method, path);
 }
 let machineRoutes:
   | {
@@ -255,14 +229,6 @@ async function machineApiResponse(
     creation,
   );
 }
-function protectedMachineRoute(path: string, method: string) {
-  return (
-    path === '/api/machine/whoami' ||
-    (path === '/api/machine/secrets/values' && method === 'POST') ||
-    (path === '/api/machine/secrets' && ['GET', 'POST'].includes(method)) ||
-    (path === '/api/machine/token' && method === 'DELETE')
-  );
-}
 async function machineRequest(
   request: Request,
   url: URL,
@@ -280,7 +246,7 @@ async function machineRequest(
     });
   }
   if (
-    protectedMachineRoute(url.pathname, request.method) &&
+    matches(tokenRoutes, request.method, url.pathname) &&
     !request.headers.has('Authorization')
   )
     return Response.json({ _tag: 'Unauthorized' }, { status: 401 });
@@ -321,7 +287,7 @@ export default {
         env,
       )(request, ctx),
     );
-    if (isRevealPath(url.pathname))
+    if (matches([revealRoute], request.method, url.pathname))
       response.headers.set('Cache-Control', 'no-store');
     return response;
   },

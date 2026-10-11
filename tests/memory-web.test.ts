@@ -251,7 +251,7 @@ it('E25: detail shows reported client, authenticated principal, optional directo
       typicalMemories[0].createdAt,
     );
     expect(await detail.locator('time').innerText()).toMatch(
-      /Oct 9, 2026.*UTC/,
+      /^Oct 9, 2026, \d{1,2}:\d{2}\s[AP]M$/,
     );
     await memoryRows(page).nth(2).click();
     await detail.getByText('Owner', { exact: true }).waitFor();
@@ -388,7 +388,7 @@ it('E28: a real failed list shows Retry and recovers after D1 is restored', asyn
     await (await visit.app.mf.getD1Database('DB'))
       .prepare('ALTER TABLE unavailable_versions RENAME TO memory_versions')
       .run();
-    await page.getByRole('button', { name: 'Retry', exact: true }).click();
+    await page.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect.poll(() => memoryRows(page).count()).toBe(7);
   } finally {
     await visit.close();

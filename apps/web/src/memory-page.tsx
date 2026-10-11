@@ -1,7 +1,7 @@
 import { type Memory, type MemoryListItem, memoryTitle } from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import { cn } from 'cn';
-import { ArrowLeft, BookOpen, ChevronRight, ServerCrash } from 'lucide-react';
+import { ArrowLeft, BookOpen, ChevronRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -13,12 +13,14 @@ import {
 } from '@/components/ui/empty';
 import { Item, ItemContent, ItemTitle } from '@/components/ui/item';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ApiError } from './api-client';
-import { absoluteTime, principalName, relativeTime } from './memory-format';
+import { ApiError, describeFailure } from './api-client';
+import { BucketTree, BucketTreeSkeleton } from './bucket-tree';
+import { LoadFailure } from './failure';
+import { principalName } from './memory-format';
 import { MemoryMarkdown } from './memory-markdown';
 import { ColumnSummary, SearchBody, SearchField } from './memory-search';
+import { formatDateTime, recentTime } from './time';
 import { type MemoryPageModel, useMemoryPage } from './use-memory-page';
-import { BucketTree, BucketTreeSkeleton } from './vault-tree';
 import './memory.css';
 
 function BucketNav({ model }: { model: MemoryPageModel }) {
@@ -95,8 +97,6 @@ function MemoryRow({
           data-inherited={inherited ? 'true' : undefined}
           title={memory.title}
           aria-current={selected ? 'true' : undefined}
-          onMouseEnter={() => model.prefetch(memory.id)}
-          onFocus={() => model.prefetch(memory.id)}
         >
           <ItemContent className="min-w-0">
             <ItemTitle className="block min-w-0 max-w-full">
@@ -115,9 +115,9 @@ function MemoryRow({
               <span aria-hidden>·</span>
               <span
                 className="shrink-0 tabular-nums"
-                title={absoluteTime(memory.createdAt)}
+                title={formatDateTime(memory.createdAt)}
               >
-                {relativeTime(memory.createdAt)}
+                {recentTime(memory.createdAt)}
               </span>
               <span aria-hidden>·</span>
               <span className="min-w-0 truncate">{principalName(memory)}</span>
@@ -170,25 +170,18 @@ function ListBody({ model }: { model: MemoryPageModel }) {
   if (model.list.isPending) return <ListSkeleton />;
   if (model.list.isError)
     return (
-      <div className="px-5 py-12 text-center">
-        <ServerCrash className="mx-auto mb-3 size-6 text-muted-foreground" />
-        <h3 className="font-medium">Could not load memories</h3>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Try loading this bucket again.
-        </p>
-        <div className="mt-4">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              void model.list.refetch();
-              if (model.countsQuery.isError) void model.countsQuery.refetch();
-              if (model.detail.isError) void model.detail.refetch();
-            }}
-          >
-            Retry
-          </Button>
-        </div>
+      <div className="p-3">
+        <LoadFailure
+          title="Could not load memories"
+          description={describeFailure(model.list.error, 'read memories')}
+          cached={false}
+          retrying={model.list.isFetching}
+          onRetry={() => {
+            void model.list.refetch();
+            if (model.countsQuery.isError) void model.countsQuery.refetch();
+            if (model.detail.isError) void model.detail.refetch();
+          }}
+        />
       </div>
     );
   if (!model.records.length) return <EmptyList model={model} />;
@@ -288,7 +281,7 @@ function Provenance({ memory }: { memory: Memory }) {
         <dt className="text-muted-foreground">Stored</dt>
         <dd>
           <time dateTime={at} className="mt-0.5 block font-medium">
-            {absoluteTime(at)}
+            {formatDateTime(at)}
           </time>
         </dd>
       </div>
@@ -327,15 +320,15 @@ function ReadingState({ model }: { model: MemoryPageModel }) {
     )
   )
     return (
-      <div className="px-8 py-12">
-        <p>Could not load memory</p>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void model.detail.refetch()}
-        >
-          Retry memory
-        </Button>
+      <div className="min-w-0 flex-1 px-8 py-12">
+        <LoadFailure
+          title="Could not load memory"
+          description={describeFailure(model.detail.error, 'read memories')}
+          cached={false}
+          retrying={model.detail.isFetching}
+          onRetry={() => void model.detail.refetch()}
+          retryLabel="Retry memory"
+        />
       </div>
     );
   return (

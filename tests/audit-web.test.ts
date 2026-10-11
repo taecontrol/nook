@@ -52,24 +52,27 @@ it('E17/E18/E28: chronological ledger, named facts, details and historical links
       ),
     ).toEqual(visit.entries.map((entry) => entry.id));
     const first = auditEntries(page).first();
-    expect(await first.innerText()).toContain('Just now');
+    expect(await first.innerText()).toContain('just now');
     expect(await first.innerText()).toContain('GH_TOKEN');
     expect(await first.innerText()).toContain('work/acme');
     expect(await first.innerText()).toContain('Delivered');
     expect(await first.innerText()).toContain('open the release PR');
     expect(await first.innerText()).toContain('work-laptop');
     expect(await first.innerText()).toContain('gh');
-    expect(await auditEntries(page).nth(1).innerText()).toContain('5m ago');
-    expect(await auditEntries(page).nth(21).innerText()).toContain('3h ago');
+    expect(await auditEntries(page).nth(1).innerText()).toContain(
+      '5 minutes ago',
+    );
+    expect(await auditEntries(page).nth(21).innerText()).toContain(
+      '3 hours ago',
+    );
     expect(
       await auditEntries(page).nth(22).locator('time').first().innerText(),
-    ).toBe('Oct 7');
+    ).toBe('Oct 7, 2026');
     await first.getByRole('button', { name: /Show details/ }).click();
     const text = await first.innerText();
     for (const fact of [
       acmePath,
       'Recorded',
-      'GMT-3',
       'Working directory',
       '/synthetic/work/acme',
       'Executable',
@@ -77,6 +80,8 @@ it('E17/E18/E28: chronological ledger, named facts, details and historical links
       visit.entries[0].runId,
     ])
       expect(text).toContain(fact);
+    // 12:00 UTC in the browser's Buenos Aires time zone.
+    expect(text).toMatch(/Oct 8, 2026, 9:00\sAM/);
     await first.getByRole('link', { name: 'Activity for this secret' }).click();
     expect(new URL(page.url()).searchParams.get('secret')).toBe(acmePath);
     expectNoValue(await page.content(), visit.values);
@@ -308,9 +313,14 @@ it('E22: genuine D1 load failure retries, and older-page failure keeps loaded en
   });
   try {
     const { page } = visit;
-    await page
+    const failure = page
       .getByText('Couldn’t load audit entries', { exact: true })
-      .waitFor();
+      .locator('..');
+    await failure.waitFor();
+    expect(await failure.innerText()).toContain(
+      'Nook is unavailable right now. Try again in a moment.',
+    );
+    expect(await failure.innerText()).not.toContain('Request failed');
     expect(componentHeld).toBe(true);
     expect(
       visit.requests.filter((request) => request.startsWith('/api/audit'))
@@ -329,9 +339,13 @@ it('E22: genuine D1 load failure retries, and older-page failure keeps loaded en
     await page
       .getByRole('button', { name: 'Load older entries', exact: true })
       .click();
-    await page
-      .getByText('Couldn’t load more entries', { exact: true })
-      .waitFor();
+    const more = page.getByRole('alert').filter({
+      hasText: 'Couldn’t load more entries',
+    });
+    await more.waitFor();
+    expect(await more.innerText()).toContain(
+      'Showing the last loaded activity. Nook is unavailable right now. Try again in a moment.',
+    );
     expect(await auditEntries(page).count()).toBe(before);
     await db
       .prepare('ALTER TABLE unavailable_audit_entries RENAME TO audit_entries')
@@ -343,6 +357,31 @@ it('E22: genuine D1 load failure retries, and older-page failure keeps loaded en
         .getByText('Couldn’t load more entries', { exact: true })
         .count(),
     ).toBe(0);
+  } finally {
+    await visit.close();
+  }
+});
+it('E22: an expired owner session on Audit asks the owner to sign in again', async () => {
+  const visit = await visitAudit(browser, {
+    configure: async (page) => {
+      await page.route('**/api/audit*', (route) =>
+        route.fulfill({
+          status: 401,
+          contentType: 'application/json',
+          body: JSON.stringify({ _tag: 'Unauthorized' }),
+        }),
+      );
+    },
+  });
+  try {
+    const failure = visit.page
+      .getByText('Couldn’t load audit entries', { exact: true })
+      .locator('..');
+    await failure.waitFor();
+    expect(await failure.innerText()).toContain(
+      'Your owner session expired. Sign in again, then try again.',
+    );
+    expect(await failure.innerText()).not.toContain('Request failed');
   } finally {
     await visit.close();
   }
@@ -644,9 +683,11 @@ it('E17: date labels retain the year and advance after a minute on an idle page'
     expect(
       await auditEntries(page).last().locator('time').first().innerText(),
     ).toBe('Oct 7, 2025');
-    expect(await auditEntries(page).first().innerText()).toContain('Just now');
+    expect(await auditEntries(page).first().innerText()).toContain('just now');
     await page.clock.runFor(60_000);
-    expect(await auditEntries(page).first().innerText()).toContain('1m ago');
+    expect(await auditEntries(page).first().innerText()).toContain(
+      '1 minute ago',
+    );
   } finally {
     await visit.close();
   }

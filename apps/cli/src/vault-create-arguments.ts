@@ -4,28 +4,21 @@ import {
   validateSecretDescription,
   validateSecretPath,
 } from '@nook/contract';
+import { type Grammar, parseArguments } from './arguments.ts';
 import { CliFailure } from './errors.ts';
 
-const createUsage =
-  'Usage: nook vault create <bucket>/<NAME> --purpose "…" [--description "…"]';
-function createOptions(flags: readonly string[]) {
-  if (flags.length % 2) throw new CliFailure(createUsage);
-  const options = new Map<string, string>();
-  for (let index = 0; index < flags.length; index += 2) {
-    const flag = flags[index];
-    if (!['--purpose', '--description'].includes(flag) || options.has(flag))
-      throw new CliFailure(createUsage);
-    options.set(flag, flags[index + 1]);
-  }
-  return options;
-}
+export const createGrammar: Grammar = {
+  usage: 'nook vault create <bucket>/<NAME> --purpose "…" [--description "…"]',
+  positional: ['path'],
+  flags: { purpose: 'required', description: 'optional' },
+};
 export function parseCreate(args: readonly string[]) {
-  const [path, ...flags] = args;
-  if (!path) throw new CliFailure(createUsage);
-  const options = createOptions(flags);
-  const purpose = options.get('--purpose');
-  if (purpose === undefined) throw new CliFailure('A purpose is required.');
-  const description = options.get('--description') ?? '';
+  const {
+    positional: [path],
+    flags,
+  } = parseArguments(createGrammar, args);
+  const [purpose] = flags.get('purpose') ?? [];
+  const [description = ''] = flags.get('description') ?? [];
   const message =
     validateSecretPath(path) ??
     validatePurpose(purpose) ??

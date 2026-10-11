@@ -354,7 +354,9 @@ it.each([
         .getByRole('link')
         .click();
       await loadFailure.waitFor({ state: 'visible' });
-      expect(await loadFailure.innerText()).toContain('(503)');
+      expect(await loadFailure.innerText()).toContain(
+        'Nook is unavailable right now. Try again in a moment.',
+      );
       expect(await secretRow(page, 'work/acme/STRIPE_KEY').count()).toBe(1);
       expect(
         await page

@@ -1,14 +1,13 @@
-import { type Bucket, RESERVED_BUCKET } from '@nook/contract';
+import {
+  bucketLimits,
+  bucketPathMessages,
+  RESERVED_BUCKET,
+} from '@nook/contract';
 import { cn } from 'cn';
-import { ChevronRight, Dot, MoreHorizontal, Plus, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Plus, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,54 +16,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
-import { formatDate, nameOf, parentOf } from './paths';
-
-export type OutlineNode = {
-  path: string;
-  name: string;
-  depth: number;
-  createdAt: string | null;
-  ghost: boolean;
-  children: OutlineNode[];
-};
-
-/** Nests buckets (and preview ghosts) by path, siblings sorted by name. */
-export function buildOutline(
-  buckets: Bucket[],
-  ghosts: string[],
-): OutlineNode[] {
-  const nodes = new Map<string, OutlineNode>();
-  const entries = [
-    ...buckets.map((bucket) => ({
-      path: bucket.path,
-      createdAt: bucket.createdAt,
-      ghost: false,
-    })),
-    ...ghosts.map((path) => ({ path, createdAt: null, ghost: true })),
-  ].sort((a, b) => a.path.split('/').length - b.path.split('/').length);
-  const roots: OutlineNode[] = [];
-  for (const entry of entries) {
-    if (nodes.has(entry.path)) continue;
-    const node: OutlineNode = {
-      ...entry,
-      name: nameOf(entry.path),
-      depth: entry.path.split('/').length - 1,
-      children: [],
-    };
-    nodes.set(entry.path, node);
-    const parent = parentOf(entry.path);
-    (parent ? (nodes.get(parent)?.children ?? roots) : roots).push(node);
-  }
-  const sort = (list: OutlineNode[]) => {
-    list.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    for (const node of list) sort(node.children);
-  };
-  sort(roots);
-  return roots;
-}
+import {
+  BranchToggle,
+  type BucketNode,
+  Guides,
+  TreeBranches,
+} from './bucket-tree';
+import { formatDate } from './time';
 
 export type OutlineState = {
   collapsed: Set<string>;
@@ -81,21 +41,7 @@ export type OutlineActions = {
   requestDelete: (path: string, trigger: HTMLButtonElement | null) => void;
 };
 
-export function Guides({ depth }: { depth: number }) {
-  return ['root', 'one', 'two', 'three', 'four']
-    .slice(0, depth)
-    .map((level) => (
-      <div
-        key={level}
-        className="flex w-5 shrink-0 justify-center sm:w-6"
-        aria-hidden
-      >
-        <Separator orientation="vertical" />
-      </div>
-    ));
-}
-
-function deleteBlocker(node: OutlineNode) {
+function deleteBlocker(node: BucketNode) {
   if (node.path === RESERVED_BUCKET)
     return 'me is reserved: it always exists and every machine can read it.';
   if (node.children.length > 0) return 'Delete its child buckets first.';
@@ -108,12 +54,14 @@ function RowMenu({
   onOpenChange,
   busy,
 }: {
-  node: OutlineNode;
+  node: BucketNode;
   actions: OutlineActions;
   onOpenChange: (open: boolean) => void;
   busy: boolean;
 }) {
   const blocker = deleteBlocker(node);
+  // Depth counts from 0, so the deepest accepted level has no children.
+  const atDeepest = node.depth >= bucketLimits.levels - 1;
   const toField = useRef(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   return (
@@ -149,7 +97,7 @@ function RowMenu({
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem
-          disabled={busy || node.depth >= 5}
+          disabled={busy || atDeepest}
           onSelect={() => {
             toField.current = true;
             actions.createInside(node.path);
@@ -158,9 +106,9 @@ function RowMenu({
           <Plus />
           Create inside
         </DropdownMenuItem>
-        {node.depth >= 5 && (
+        {atDeepest && (
           <p className="px-2 pb-1.5 text-xs text-muted-foreground">
-            A bucket path can have at most 6 levels.
+            {bucketPathMessages.depth}
           </p>
         )}
         <DropdownMenuSeparator />
@@ -180,37 +128,24 @@ function RowMenu({
   );
 }
 
-function rowColor(node: OutlineNode, emphasized: boolean, menuOpen: boolean) {
+function rowColor(node: BucketNode, emphasized: boolean, menuOpen: boolean) {
   if (node.ghost) return 'rounded-none bg-muted text-muted-foreground';
   if (emphasized) return 'bg-accent ring-1 ring-ring/40';
   return menuOpen ? 'bg-accent' : 'hover:bg-accent/60';
 }
-function RowToggle({ node, open }: { node: OutlineNode; open: boolean }) {
+function RowToggle({ node, open }: { node: BucketNode; open: boolean }) {
   return (
     <>
       {' '}
       {node.ghost ? (
         <Plus className="size-3.5" aria-hidden />
-      ) : node.children.length > 0 ? (
-        <CollapsibleTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="size-5"
-            aria-label={`${open ? 'Collapse' : 'Expand'} ${node.path}`}
-          >
-            <ChevronRight
-              className={cn('transition-transform', open && 'rotate-90')}
-            />
-          </Button>
-        </CollapsibleTrigger>
       ) : (
-        <Dot className="size-4 text-muted-foreground" aria-hidden />
+        <BranchToggle node={node} open={open} />
       )}
     </>
   );
 }
-function RowBadges({ node, matched }: { node: OutlineNode; matched: boolean }) {
+function RowBadges({ node, matched }: { node: BucketNode; matched: boolean }) {
   return (
     <>
       {' '}
@@ -222,7 +157,7 @@ function RowBadges({ node, matched }: { node: OutlineNode; matched: boolean }) {
     </>
   );
 }
-function RowDate({ node, pending }: { node: OutlineNode; pending: boolean }) {
+function RowDate({ node, pending }: { node: BucketNode; pending: boolean }) {
   return (
     <>
       {' '}
@@ -240,7 +175,7 @@ function Row({
   state,
   actions,
 }: {
-  node: OutlineNode;
+  node: BucketNode;
   open: boolean;
   state: OutlineState;
   actions: OutlineActions;
@@ -291,56 +226,25 @@ function Row({
   );
 }
 
-function Branch({
-  node,
-  state,
-  actions,
-}: {
-  node: OutlineNode;
-  state: OutlineState;
-  actions: OutlineActions;
-}) {
-  const open = !state.collapsed.has(node.path);
-  return (
-    <li data-bucket={node.path}>
-      <Collapsible
-        open={open}
-        onOpenChange={(value) => actions.toggle(node.path, value)}
-      >
-        <Row node={node} open={open} state={state} actions={actions} />
-        {node.children.length > 0 && (
-          <CollapsibleContent asChild>
-            <ul>
-              {node.children.map((child) => (
-                <Branch
-                  key={child.path}
-                  node={child}
-                  state={state}
-                  actions={actions}
-                />
-              ))}
-            </ul>
-          </CollapsibleContent>
-        )}
-      </Collapsible>
-    </li>
-  );
-}
-
 export function Outline({
   nodes,
   state,
   actions,
 }: {
-  nodes: OutlineNode[];
+  nodes: BucketNode[];
   state: OutlineState;
   actions: OutlineActions;
 }) {
   return (
     <ul aria-label="All buckets">
-      {nodes.map((node) => (
-        <Branch key={node.path} node={node} state={state} actions={actions} />
-      ))}
+      <TreeBranches
+        nodes={nodes}
+        collapsed={state.collapsed}
+        onToggle={actions.toggle}
+        row={(node, open) => (
+          <Row node={node} open={open} state={state} actions={actions} />
+        )}
+      />
     </ul>
   );
 }

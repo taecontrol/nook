@@ -3,7 +3,8 @@ import { dirname } from 'node:path';
 import { Effect, Fiber } from 'effect';
 import { ChildProcessSpawner } from 'effect/process';
 import { TestClock } from 'effect/testing';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { hostFor } from '../apps/cli/src/host.ts';
 import {
   checkKeyring,
   clearToken,
@@ -21,10 +22,8 @@ import {
 import { runtime, type TestRuntime } from './support/runtime.ts';
 
 // Coordination is independently proven by real CLI processes in E13/E14.
-vi.mock('../apps/cli/src/session-lock.ts', async () => {
-  const { Effect } = await import('effect');
-  return { lockSession: Effect.void };
-});
+const host = hostFor('darwin');
+const unlocked = host && { ...host, lockSession: Effect.void };
 
 describe.runIf(process.platform === 'darwin')(
   'macOS keychain deadline at the CLI module seam',
@@ -51,12 +50,14 @@ describe.runIf(process.platform === 'darwin')(
         const stalled = ChildProcessSpawner.make(() => Effect.never);
         let failure = '';
         let settled = false;
+        if (!unlocked) throw new Error('The macOS host is unavailable.');
+        const write = (message: string) => output.push(message);
         const operation =
           command === 'login'
-            ? login(app.origin, (message) => output.push(message))
+            ? login(unlocked, app.origin, write)
             : command === 'whoami'
-              ? whoami((message) => output.push(message))
-              : logout((message) => output.push(message));
+              ? whoami(unlocked, write)
+              : logout(unlocked, write);
         await Effect.runPromise(
           Effect.gen(function* () {
             const fiber = yield* Effect.scoped(operation).pipe(

@@ -9,11 +9,9 @@ import {
   Eye,
   History,
   SearchX,
-  ServerCrash,
   ShieldX,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -40,35 +38,16 @@ import {
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
+import { describeFailure } from './api-client';
 import { type AuditFilters, auditOptions } from './audit-api';
 import { useBucketList } from './buckets-api';
+import { LoadFailure } from './failure';
 import { useMachineList } from './machines-api';
+import { formatDateTime, recentTime } from './time';
 import { useSecretList } from './vault-api';
 
 const allBuckets = '*';
 
-function recentTime(at: string) {
-  const minutes = Math.max(
-    0,
-    Math.floor((Date.now() - Date.parse(at)) / 60_000),
-  );
-  if (minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  if (minutes < 1440) return `${Math.floor(minutes / 60)}h ago`;
-  return new Date(at).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    ...(new Date(at).getFullYear() !== new Date().getFullYear()
-      ? { year: 'numeric' as const }
-      : {}),
-  });
-}
-function exactTime(at: string) {
-  return new Date(at).toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'long',
-  });
-}
 function inBucket(path: string, bucket?: string) {
   return !bucket || path.startsWith(`${bucket}/`);
 }
@@ -286,8 +265,8 @@ function Entry({
     >
       <Collapsible open={open} onOpenChange={setOpen}>
         <Item size="sm" className="flex-nowrap items-start lg:items-center">
-          <div className="hidden w-20 shrink-0 text-xs tabular-nums text-muted-foreground lg:block">
-            <time dateTime={entry.at} title={exactTime(entry.at)}>
+          <div className="hidden w-28 shrink-0 text-xs tabular-nums text-muted-foreground lg:block">
+            <time dateTime={entry.at} title={formatDateTime(entry.at)}>
               {recentTime(entry.at)}
             </time>
           </div>
@@ -397,7 +376,7 @@ function EntryDetails({
           )}
         </Fact>
         <Fact label="Recorded">
-          <time dateTime={entry.at}>{exactTime(entry.at)}</time>
+          <time dateTime={entry.at}>{formatDateTime(entry.at)}</time>
         </Fact>
         {entry.outcome === 'revealed' ? (
           <>
@@ -558,50 +537,28 @@ function AuditLoadFailure({
   query: ReturnType<typeof useAuditEntries>;
 }) {
   if (!query.isError) return null;
-  const retry = (
-    <Button
-      variant="outline"
-      size="sm"
-      disabled={query.isFetching}
-      onClick={() =>
+  const cached = query.data !== undefined;
+  const problem = describeFailure(query.error, 'view audit entries');
+  return (
+    <LoadFailure
+      title={
+        !cached
+          ? 'Couldn’t load audit entries'
+          : query.isFetchNextPageError
+            ? 'Couldn’t load more entries'
+            : 'Couldn’t refresh audit entries'
+      }
+      description={
+        cached ? `Showing the last loaded activity. ${problem}` : problem
+      }
+      cached={cached}
+      retrying={query.isFetching}
+      onRetry={() =>
         void (query.isFetchNextPageError
           ? query.fetchNextPage()
           : query.refetch())
       }
-    >
-      Try again
-    </Button>
-  );
-  if (query.data)
-    return (
-      <Alert variant="destructive" className="mb-4">
-        <ServerCrash />
-        <AlertTitle>
-          {query.isFetchNextPageError
-            ? 'Couldn’t load more entries'
-            : 'Couldn’t refresh audit entries'}
-        </AlertTitle>
-        <AlertDescription>
-          Showing the last loaded activity. {query.error.message}
-          {retry}
-        </AlertDescription>
-      </Alert>
-    );
-  return (
-    <div className="rounded-lg border border-dashed">
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <ServerCrash />
-          </EmptyMedia>
-          <EmptyTitle>Couldn’t load audit entries</EmptyTitle>
-          <EmptyDescription>
-            {query.error.message} Try again in a moment.
-          </EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>{retry}</EmptyContent>
-      </Empty>
-    </div>
+    />
   );
 }
 function AuditResults({
@@ -633,7 +590,7 @@ function AuditResults({
             <span>Newest first</span>
           </div>
           <div className="hidden items-center gap-2.5 border-b px-4 py-2 text-xs text-muted-foreground lg:flex">
-            <span className="w-20 shrink-0">When</span>
+            <span className="w-28 shrink-0">When</span>
             <span className="w-24 shrink-0">Outcome</span>
             <div className="flex flex-1 gap-4">
               <span className="flex-1">Secret / bucket</span>

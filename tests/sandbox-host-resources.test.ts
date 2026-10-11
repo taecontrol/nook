@@ -165,7 +165,13 @@ it('E3: owner HOME has only mount parents and run and tmp contain only their all
     expect(report.run).toEqual(['user']);
     expect(report.users).toEqual([String(input.owner.uid)]);
     expect(report.user).toEqual([]);
-    expect(report.tmp).toEqual([fixture.home.slice('/tmp/'.length)]);
+    // Only the parents of mounts bound beneath /tmp appear there, including a
+    // repository checked out under /tmp.
+    const parents = input.binds
+      .filter((path) => path.startsWith('/tmp/'))
+      .map((path) => path.slice('/tmp/'.length).split('/')[0]);
+    expect(parents).toContain(fixture.home.slice('/tmp/'.length));
+    expect(report.tmp.toSorted()).toEqual([...new Set(parents)].sort());
     expect(report.absent).toEqual([true, true, true, true, true]);
   } finally {
     await fixture.close();

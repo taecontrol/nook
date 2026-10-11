@@ -1,6 +1,7 @@
 import { hostname } from 'node:os';
 import { limitedAccessText, readOnlyText } from '@nook/contract';
 import { Effect } from 'effect';
+import { ChildProcess, ChildProcessSpawner } from 'effect/process';
 import cliPackage from '../package.json' with { type: 'json' };
 import { type MachineClient, machineApi } from './api.ts';
 import { installationOrigin, readConfig, writeConfig } from './config.ts';
@@ -11,15 +12,7 @@ import {
   networkError,
   RequestFailure,
 } from './errors.ts';
-import {
-  checkKeyring,
-  clearToken,
-  openBrowser,
-  readMachineName,
-  readToken,
-  storeToken,
-} from './keyring.ts';
-import { lockSession } from './session-lock.ts';
+import type { Host } from './host.ts';
 
 type Write = (message: string) => void;
 type Approved = { token: string; machine: string };
@@ -50,14 +43,28 @@ function authenticatedRequest(url: string, token: string) {
     );
   };
 }
-export const session = Effect.gen(function* () {
-  yield* checkKeyring;
-  const url = yield* readConfig;
-  if (!url) return yield* Effect.fail(notLoggedIn());
-  const token = yield* readToken(url);
-  if (!token) return yield* Effect.fail(notLoggedIn(url));
-  return { url, request: authenticatedRequest(url, token) };
-});
+export function session({ keyring }: Host) {
+  return Effect.gen(function* () {
+    yield* keyring.checkKeyring;
+    const url = yield* readConfig;
+    if (!url) return yield* Effect.fail(notLoggedIn());
+    const token = yield* keyring.readToken(url);
+    if (!token) return yield* Effect.fail(notLoggedIn(url));
+    return { url, request: authenticatedRequest(url, token) };
+  });
+}
+function openBrowser({ browser }: Host, url: string) {
+  return Effect.gen(function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    yield* spawner.exitCode(
+      ChildProcess.make(browser, [url], {
+        stdin: 'ignore',
+        stdout: 'ignore',
+        stderr: 'ignore',
+      }),
+    );
+  }).pipe(Effect.timeout('3 seconds'), Effect.ignore);
+}
 function waitForApproval(url: string, deviceCode: string, interval: number) {
   const request = machineApi(url);
   const poll = request((api) =>
@@ -98,24 +105,23 @@ function revokeIssued(url: string, token: string) {
     ),
   );
 }
-function persistApproved(url: string, approved: Approved) {
+function persistApproved({ keyring }: Host, url: string, approved: Approved) {
   return Effect.gen(function* () {
-    yield* storeToken(url, approved.machine, approved.token);
+    yield* keyring.storeToken(url, approved.machine, approved.token);
     yield* writeConfig(url);
   }).pipe(
     Effect.catch((error) =>
       revokeIssued(url, approved.token).pipe(
         Effect.matchEffect({
           onSuccess: () =>
-            clearToken(url).pipe(
-              Effect.ignore,
-              Effect.andThen(Effect.fail(error)),
-            ),
+            keyring
+              .clearToken(url)
+              .pipe(Effect.ignore, Effect.andThen(Effect.fail(error))),
           onFailure: () =>
             Effect.gen(function* () {
-              yield* storeToken(url, approved.machine, approved.token).pipe(
-                Effect.ignore,
-              );
+              yield* keyring
+                .storeToken(url, approved.machine, approved.token)
+                .pipe(Effect.ignore);
               yield* writeConfig(url).pipe(Effect.ignore);
               return yield* Effect.fail(
                 new CliFailure(
@@ -128,11 +134,15 @@ function persistApproved(url: string, approved: Approved) {
     ),
   );
 }
-function refuseExisting(url: string, restoreConfig: boolean) {
+function refuseExisting(
+  { keyring }: Host,
+  url: string,
+  restoreConfig: boolean,
+) {
   return Effect.gen(function* () {
-    const token = yield* readToken(url);
+    const token = yield* keyring.readToken(url);
     if (!token) return;
-    const machine = yield* readMachineName(url);
+    const machine = yield* keyring.readMachineName(url);
     if (restoreConfig) yield* writeConfig(url);
     return yield* Effect.fail(
       new CliFailure(
@@ -141,7 +151,7 @@ function refuseExisting(url: string, restoreConfig: boolean) {
     );
   });
 }
-export function login(input: string, write: Write) {
+export function login(host: Host, input: string, write: Write) {
   return Effect.scoped(
     Effect.gen(function* () {
       const url = yield* Effect.try({
@@ -151,16 +161,16 @@ export function login(input: string, write: Write) {
             'Use the HTTPS origin of your Nook installation, without a path, query, or credentials.',
           ),
       });
-      yield* lockSession;
-      yield* checkKeyring;
+      yield* host.lockSession;
+      yield* host.keyring.checkKeyring;
       const configured = yield* readConfig;
-      if (configured) yield* refuseExisting(configured, false);
-      if (configured !== url) yield* refuseExisting(url, true);
+      if (configured) yield* refuseExisting(host, configured, false);
+      if (configured !== url) yield* refuseExisting(host, url, true);
       const started = yield* machineApi(url)((api) =>
         api.machine.authorize({
           payload: {
             suggestedName: hostname().slice(0, 64),
-            client: `nook ${cliPackage.version} · ${process.platform}-${process.arch}`,
+            client: `nook ${cliPackage.version} · ${host.platform}-${process.arch}`,
           },
         }),
       ).pipe(
@@ -175,22 +185,22 @@ export function login(input: string, write: Write) {
       write(
         `Open ${url}/cli/authorize and enter this code:\n\n    ${started.userCode}\n\nWaiting for approval (expires in 10 minutes)...`,
       );
-      yield* openBrowser(`${url}/cli/authorize`).pipe(Effect.forkScoped);
+      yield* openBrowser(host, `${url}/cli/authorize`).pipe(Effect.forkScoped);
       const approved = yield* waitForApproval(
         url,
         started.deviceCode,
         started.interval,
       );
-      yield* persistApproved(url, approved);
+      yield* persistApproved(host, url, approved);
       write(
         `Logged in to ${url} as ${approved.machine}. Token stored in the system keyring.`,
       );
     }),
   );
 }
-export function whoami(write: Write) {
+export function whoami(host: Host, write: Write) {
   return Effect.gen(function* () {
-    const { url, request } = yield* session;
+    const { url, request } = yield* session(host);
     const identity = yield* request((api, headers) =>
       api.machine.whoami({ headers }),
     );
@@ -201,11 +211,11 @@ export function whoami(write: Write) {
     write(`${identity.machine} at ${url}\nAccess: ${access}`);
   });
 }
-export function mcpHeader(write: Write) {
+export function mcpHeader({ keyring }: Host, write: Write) {
   return Effect.gen(function* () {
     const url = yield* readConfig;
     if (!url) return yield* Effect.fail(notLoggedIn());
-    const token = yield* readToken(url).pipe(
+    const token = yield* keyring.readToken(url).pipe(
       Effect.timeout('5 seconds'),
       Effect.mapError(() => notLoggedIn(url)),
     );
@@ -213,11 +223,11 @@ export function mcpHeader(write: Write) {
     write(JSON.stringify({ Authorization: `Bearer ${token}` }));
   });
 }
-export function logout(write: Write) {
+export function logout(host: Host, write: Write) {
   return Effect.scoped(
     Effect.gen(function* () {
-      yield* lockSession;
-      const { url, request } = yield* session;
+      yield* host.lockSession;
+      const { url, request } = yield* session(host);
       yield* request((api, headers) => api.machine.logout({ headers })).pipe(
         Effect.catch((error) =>
           error.server.tag === 'Unauthorized'
@@ -229,7 +239,7 @@ export function logout(write: Write) {
               ),
         ),
       );
-      yield* clearToken(url);
+      yield* host.keyring.clearToken(url);
       write(
         `Logged out of ${url}. The token was revoked and removed from the keyring.`,
       );

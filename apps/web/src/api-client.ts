@@ -1,10 +1,12 @@
-import { Api, errorStatus } from '@nook/contract';
+import { Api, AuthorizationsApi, errorStatus } from '@nook/contract';
 import { Effect, Schema } from 'effect';
-import { FetchHttpClient, HttpClientError } from 'effect/http';
+import { FetchHttpClient, type HttpClient, HttpClientError } from 'effect/http';
 import { HttpApiClient } from 'effect/http-api';
 
 export class ApiError extends Error {
   ambiguous = false;
+  /** The message is one the contract lets the owner read. */
+  readonly hasPublicMessage: boolean;
   constructor(
     readonly status: number,
     readonly outcomeUnknown = false,
@@ -12,37 +14,76 @@ export class ApiError extends Error {
     message?: string,
   ) {
     super(message ?? `Request failed with ${status}`);
+    this.hasPublicMessage = message !== undefined;
   }
 }
-// Errors the owner API declares carry their contract status; anything else is unavailable.
-function statusOf(tag: string) {
-  return Object.hasOwn(errorStatus, tag)
-    ? errorStatus[tag as keyof typeof errorStatus]
-    : 503;
+// Errors the contract declares carry their status; Cloudflare Access answers
+// 401 and 403 before the Worker does; anything else is unavailable.
+function statusOf(error: unknown, tag: string) {
+  if (Object.hasOwn(errorStatus, tag))
+    return errorStatus[tag as keyof typeof errorStatus];
+  if (HttpClientError.isHttpClientError(error)) {
+    const status = error.response?.status;
+    if (status === 401 || status === 403) return status;
+  }
+  return 503;
 }
-const client = HttpApiClient.make(Api);
-export function runApi<A, E>(
-  operation: (api: Effect.Success<typeof client>) => Effect.Effect<A, E>,
-  signal?: AbortSignal,
+function apiRunner<Client>(
+  client: Effect.Effect<Client, never, HttpClient.HttpClient>,
 ) {
-  return Effect.runPromise(
-    Effect.flatMap(client, operation).pipe(
-      Effect.provide(FetchHttpClient.layer),
-      Effect.mapError(
-        (error) =>
-          new ApiError(
-            statusOf((error as { _tag: string })._tag),
+  return <A, E>(
+    operation: (api: Client) => Effect.Effect<A, E>,
+    signal?: AbortSignal,
+  ) =>
+    Effect.runPromise(
+      Effect.flatMap(client, operation).pipe(
+        Effect.provide(FetchHttpClient.layer),
+        Effect.mapError((failure) => {
+          const error = failure as { _tag?: string };
+          const tag = error._tag ?? 'ServiceUnavailable';
+          return new ApiError(
+            statusOf(error, tag),
             // Failed delivery or decoding and storage errors can follow commit.
             HttpClientError.isHttpClientError(error) ||
               Schema.isSchemaError(error) ||
-              (error as { _tag: string })._tag === 'ServiceUnavailable',
-            (error as { _tag?: string })._tag ?? 'ServiceUnavailable',
+              tag === 'ServiceUnavailable',
+            tag,
             publicMessage(error),
-          ),
+          );
+        }),
       ),
-    ),
-    { signal },
+      { signal },
+    );
+}
+export const runApi = apiRunner(HttpApiClient.make(Api));
+export const runAuthorizationsApi = apiRunner(
+  HttpApiClient.make(AuthorizationsApi),
+);
+/**
+ * What the owner reads when a request fails. `action` completes "Only this
+ * installation's owner can …". `outcome` follows every reason; without it,
+ * an unavailable Nook asks the owner to try again in a moment.
+ */
+export function describeFailure(
+  error: unknown,
+  action: string,
+  outcome?: string,
+) {
+  const status = error instanceof ApiError ? error.status : 503;
+  if (status === 401)
+    return joined(
+      'Your owner session expired. Sign in again, then try again.',
+      outcome,
+    );
+  if (status === 403)
+    return joined(`Only this installation’s owner can ${action}.`, outcome);
+  return joined(
+    'Nook is unavailable right now.',
+    outcome ?? 'Try again in a moment.',
   );
+}
+function joined(reason: string, outcome: string | undefined) {
+  return outcome ? `${reason} ${outcome}` : reason;
 }
 function publicMessage(error: unknown) {
   const typed = error as { _tag?: string; message?: string };

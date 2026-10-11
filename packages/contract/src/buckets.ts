@@ -2,14 +2,15 @@ import { Schema } from 'effect';
 
 export const RESERVED_BUCKET = 'me';
 
+export const bucketLimits = { levels: 6, segmentLength: 32 } as const;
 export const bucketPathMessages = {
   empty: 'Enter a bucket path.',
   characters:
     'Use lowercase letters, digits, and single hyphens in each segment.',
   separators:
     'Separate segments with a single /, with none at the start or end.',
-  segmentLength: 'Each segment can have at most 32 characters.',
-  depth: 'A bucket path can have at most 6 levels.',
+  segmentLength: `Each segment can have at most ${bucketLimits.segmentLength} characters.`,
+  depth: `A bucket path can have at most ${bucketLimits.levels} levels.`,
 };
 export function validateBucketPath(path: string): string | undefined {
   if (path === '') return bucketPathMessages.empty;
@@ -18,9 +19,9 @@ export function validateBucketPath(path: string): string | undefined {
   const segments = path.split('/');
   if (segments.some((segment) => !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(segment)))
     return bucketPathMessages.characters;
-  if (segments.some((segment) => segment.length > 32))
+  if (segments.some((segment) => segment.length > bucketLimits.segmentLength))
     return bucketPathMessages.segmentLength;
-  if (segments.length > 6) return bucketPathMessages.depth;
+  if (segments.length > bucketLimits.levels) return bucketPathMessages.depth;
 }
 export const BucketPath = Schema.String.check(
   Schema.makeFilter(validateBucketPath),

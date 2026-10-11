@@ -114,13 +114,11 @@ it.each([
     vi.doMock('node:fs/promises', () => ({ mkdir: create, open }));
     vi.doMock('node:os', () => ({ homedir: () => home }));
     try {
-      const { lockSession } = await darwinModule(
-        () => import('../apps/cli/src/session-lock.ts'),
-      );
+      const { macosLock } = await import('../apps/cli/src/session-lock.ts');
       const error = await Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
-            yield* lockSession;
+            yield* macosLock;
           }),
         ).pipe(
           Effect.provideService(

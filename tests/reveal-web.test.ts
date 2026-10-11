@@ -276,6 +276,31 @@ it.each([
     }
   },
 );
+it('intent on secret actions preloads the reveal dialog code and never its value', async () => {
+  const visit = await revealPage(browser);
+  try {
+    const { page } = visit;
+    const actions = secretRow(page, revealPath).getByRole('button', {
+      name: `Actions for ${revealPath}`,
+      exact: true,
+    });
+    await actions.waitFor();
+    const chunk = page.waitForRequest((request) =>
+      /\/assets\/reveal-dialog-[^/]+\.js$/.test(
+        new URL(request.url()).pathname,
+      ),
+    );
+    await actions.hover();
+    await chunk;
+    expect(revealRequests(visit.requests)).toEqual([]);
+    const dialog = await openReveal(page);
+    await expect.poll(() => valueField(page).inputValue()).toBe(revealValue);
+    expect(await dialog.isVisible()).toBe(true);
+    expect(revealRequests(visit.requests)).toHaveLength(1);
+  } finally {
+    await visit.close();
+  }
+});
 it('E3: Copy writes exact bytes and shows Copied/live feedback for three seconds; rejection gives destructive manual-copy guidance', async () => {
   const value = '  synthetic clipboard\n秘密🔐  \n';
   const visit = await revealPage(browser, { value });

@@ -11,7 +11,7 @@ export function validateSecretName(name: string): string | undefined {
   if (!/^[A-Z_][A-Z0-9_]*$/.test(name))
     return 'Use uppercase letters, digits, and underscores, starting with a letter or underscore.';
   if (name.length > secretLimits.name)
-    return 'A name can have at most 64 characters.';
+    return `A name can have at most ${secretLimits.name} characters.`;
 }
 export function validateSecretDescription(
   description: string,
@@ -19,14 +19,14 @@ export function validateSecretDescription(
   if (/[\r\n\u2028\u2029]/u.test(description))
     return 'Use one line for the description.';
   if (Array.from(description).length > secretLimits.description)
-    return 'A description can have at most 200 characters.';
+    return `A description can have at most ${secretLimits.description} characters.`;
 }
 export function validateSecretValue(value: string): string | undefined {
   if (value === '') return 'Enter a value.';
   if (value.includes('\0')) return 'A value cannot contain NUL.';
   if (/[\uD800-\uDFFF]/u.test(value)) return 'Use valid Unicode for the value.';
   if (new TextEncoder().encode(value).length > secretLimits.valueBytes)
-    return 'A value can be at most 64 KiB.';
+    return `A value can be at most ${secretLimits.valueBytes / 1024} KiB.`;
 }
 export function secretPath(secret: { bucket: string; name: string }) {
   return `${secret.bucket}/${secret.name}`;

@@ -8,8 +8,10 @@ import {
 import { useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from './api-client';
+import { parentBuckets } from './bucket-tree';
 import { useBucketList } from './buckets-api';
 import { useDesktop } from './hooks/use-desktop';
+import { useReturnFocus } from './use-confirm-target';
 import { type SecretWrite, unconfirmed, useVault } from './vault-api';
 import { feedbackFor } from './vault-feedback';
 import { countByBucket, type Secret } from './vault-model';
@@ -113,8 +115,8 @@ export function useVaultPage() {
   const patch = (next: Partial<VaultUi>) =>
     setUi((current) => ({ ...current, ...next }));
   const wide = useDesktop();
-  const deleteTrigger = useRef<HTMLButtonElement | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  const deleteFocus = useReturnFocus(() => heading.current);
   const buckets = useMemo(
     () => bucketsQuery.data?.map((bucket) => bucket.path) ?? [],
     [bucketsQuery.data],
@@ -122,15 +124,7 @@ export function useVaultPage() {
   const list = secrets.data;
   const selected = search.bucket ?? RESERVED_BUCKET;
   const drilled = search.bucket !== undefined;
-  const parents = useMemo(
-    () =>
-      new Set(
-        buckets.filter((path) =>
-          buckets.some((other) => other.startsWith(`${path}/`)),
-        ),
-      ),
-    [buckets],
-  );
+  const parents = useMemo(() => parentBuckets(buckets), [buckets]);
   const counts = useMemo(() => (list ? countByBucket(list) : null), [list]);
   const feedback =
     vault.write?.id === dismissed ? null : feedbackFor(vault.write);
@@ -179,7 +173,7 @@ export function useVaultPage() {
     patch({ sheet: openSheet(replacement(secret)) });
   const requestDelete = (secret: Secret, trigger: HTMLButtonElement | null) => {
     if (busy) return;
-    deleteTrigger.current = trigger;
+    deleteFocus.capture(trigger);
     patch({ deleting: secret });
   };
   const confirmDelete = () => {
@@ -251,7 +245,7 @@ export function useVaultPage() {
     counts,
     highlighted,
     heading,
-    deleteTrigger,
+    restoreDeleteFocus: deleteFocus.restore,
     openCreate,
     openReplace,
     requestDelete,

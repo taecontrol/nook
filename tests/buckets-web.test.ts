@@ -205,7 +205,11 @@ it.each([200, 503])(
           .toContain("Couldn't confirm creation of work/acme");
         expect(await field.inputValue()).toBe('work/acme');
         expect(await row(page, 'work/acme').innerText()).toContain('new');
-        expect(await page.getByRole('alert').innerText()).toContain('(503)');
+        const alert = await page.getByRole('alert').innerText();
+        expect(alert).toContain(
+          "Nook couldn't confirm whether the bucket was created.",
+        );
+        expect(alert).not.toContain('503');
       }
       await expect
         .poll(
@@ -309,8 +313,13 @@ it.each([204, 503, 409])(
               ? 'Delete its child buckets first.'
               : "Couldn't confirm deletion of work/taecontrol/nook",
           );
-        if (status === 503)
-          expect(await page.getByRole('alert').innerText()).toContain('(503)');
+        if (status === 503) {
+          const alert = await page.getByRole('alert').innerText();
+          expect(alert).toContain(
+            "Nook couldn't confirm whether the bucket was deleted.",
+          );
+          expect(alert).not.toContain('503');
+        }
       }
       await expect
         .poll(
@@ -949,6 +958,45 @@ it('Cancel returns keyboard focus to the bucket row action', async () => {
         actions.evaluate((button) => button === document.activeElement),
       )
       .toBe(true);
+  } finally {
+    await closeBrowserPage(page, context);
+  }
+});
+it('the delete dialog keeps the bucket path in its title while it closes', async () => {
+  const { page, context } = await bucketPage(browser, app.origin);
+  try {
+    await page
+      .getByRole('button', {
+        name: 'Actions for work/taecontrol/nook',
+        exact: true,
+      })
+      .click();
+    await page.getByRole('menuitem', { name: 'Delete bucket…' }).click();
+    await page.getByRole('alertdialog').waitFor();
+    await page.evaluate(() => {
+      const titles: string[] = [];
+      Object.assign(window, { titles });
+      const record = () => {
+        const title = document.querySelector(
+          '[data-slot="alert-dialog-title"]',
+        );
+        if (title) titles.push(title.textContent ?? '');
+      };
+      record();
+      new MutationObserver(record).observe(document.body, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributes: true,
+      });
+    });
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect.poll(() => page.getByRole('alertdialog').count()).toBe(0);
+    expect(
+      await page.evaluate(() => [
+        ...new Set((window as unknown as { titles: string[] }).titles),
+      ]),
+    ).toEqual(['Delete work/taecontrol/nook?']);
   } finally {
     await closeBrowserPage(page, context);
   }

@@ -1,3 +1,4 @@
+import { readlinkSync } from 'node:fs';
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import { isAbsolute, resolve, sep } from 'node:path';
@@ -109,11 +110,22 @@ export function testEnvironment(
   env.DBUS_SESSION_BUS_ADDRESS = unavailableSessionBus(home);
   if (privateBus !== undefined) {
     const path = /^unix:path=([^,]+),guid=[0-9a-f]+$/.exec(privateBus)?.[1];
-    if (!path || decodeURIComponent(path) !== resolve(home, 'bus'))
+    if (!path || !designatedBus(home, decodeURIComponent(path)))
       throw new Error('A private session bus is required.');
     env.DBUS_SESSION_BUS_ADDRESS = privateBus;
   }
   return env;
+}
+
+// A HOME too deep for a D-Bus socket path links its bus to a short directory.
+function designatedBus(home: string, path: string) {
+  const bus = resolve(home, 'bus');
+  if (path === bus) return true;
+  try {
+    return readlinkSync(bus) === path;
+  } catch {
+    return false;
+  }
 }
 
 export function unavailableSessionBus(home: string) {

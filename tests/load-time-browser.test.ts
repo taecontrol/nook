@@ -157,7 +157,9 @@ it('#21: an unfinished preload times out before clicking', async () => {
       await route.continue().catch(() => {});
     });
     await expect(
-      measureScreen(page, app.origin, '', 'navigation'),
+      measureScreen(page, app.origin, '', 'navigation', {
+        preloadTimeout: 1_000,
+      }),
     ).rejects.toThrow('Intent preload did not reach 500 ms of network quiet.');
     expect(new URL(page.url()).pathname).toBe('/');
     expect(

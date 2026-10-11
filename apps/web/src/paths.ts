@@ -43,14 +43,3 @@ export function sortBuckets(buckets: Bucket[]): Bucket[] {
     a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
   );
 }
-
-const dateFormat = new Intl.DateTimeFormat('en-US', {
-  month: 'short',
-  day: 'numeric',
-  year: 'numeric',
-  timeZone: 'UTC',
-});
-
-export function formatDate(iso: string): string {
-  return dateFormat.format(new Date(iso));
-}

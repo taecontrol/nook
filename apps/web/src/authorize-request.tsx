@@ -2,6 +2,7 @@ import {
   type AuthorizationRequest,
   formatUserCode,
   machineNameError,
+  machineNameMaxLength,
 } from '@nook/contract';
 import { CircleCheck, Terminal } from 'lucide-react';
 import { type RefObject, useEffect, useRef, useState } from 'react';
@@ -34,20 +35,13 @@ import { Spinner } from '@/components/ui/spinner';
 import { Cmd, ConnectionFailure, Mark } from './authorize-parts';
 import type { GrantSelection } from './grant-selection';
 import { GrantSelector } from './grant-selector';
+import { timeAgo, timeUntil } from './time';
 
-function relativeTime(timestamp: string, future = false) {
-  const minutes = Math.max(
-    1,
-    Math.ceil(Math.abs(Date.parse(timestamp) - Date.now()) / 60_000),
-  );
-  const duration = `${minutes} minute${minutes === 1 ? '' : 's'}`;
-  return future ? `in ${duration}` : `${duration} ago`;
-}
 function RequestDetails({ request }: { request: AuthorizationRequest }) {
   const rows = [
     ['Client', request.client],
-    ['Requested', relativeTime(request.requestedAt)],
-    ['Expires', relativeTime(request.expiresAt, true)],
+    ['Requested', timeAgo(request.requestedAt)],
+    ['Expires', timeUntil(request.expiresAt)],
   ];
   return (
     <dl className="flex flex-col gap-2 text-sm">
@@ -80,7 +74,7 @@ function MachineNameField({
         id="machine-name"
         ref={input}
         value={name}
-        maxLength={64}
+        maxLength={machineNameMaxLength}
         onChange={(event) => onName(event.target.value)}
         disabled={busy}
         aria-invalid={Boolean(error)}

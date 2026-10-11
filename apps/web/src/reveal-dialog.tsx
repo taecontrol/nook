@@ -17,7 +17,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 import { ApiError, runApi } from './api-client';
-import { formatDate } from './paths';
+import { noAutofill } from './no-autofill';
+import { formatDate } from './time';
 import type { Secret } from './vault-model';
 
 type State =
@@ -115,14 +116,7 @@ function RevealBody({ state, onRetry }: { state: State; onRetry: () => void }) {
       value={value}
       rows={value.includes('\n') ? 12 : 3}
       className="max-h-80 min-h-20 resize-none break-all whitespace-pre-wrap"
-      autoComplete="off"
-      autoCorrect="off"
-      autoCapitalize="off"
-      spellCheck={false}
-      data-1p-ignore
-      data-lpignore="true"
-      data-bwignore
-      data-form-type="other"
+      {...noAutofill}
       onFocus={(event) => event.currentTarget.select()}
     />
   );

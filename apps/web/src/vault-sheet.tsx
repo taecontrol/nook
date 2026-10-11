@@ -1,5 +1,6 @@
 import {
   RESERVED_BUCKET,
+  secretLimits,
   secretPath,
   validateSecretDescription,
   validateSecretName,
@@ -42,34 +43,26 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
-import { formatDate } from './paths';
+import { noAutofill } from './no-autofill';
+import { Path as SharedPath } from './path-text';
+import { formatDate } from './time';
 import { DESCRIPTION_MAX, type Secret } from './vault-model';
 import type { Draft, SheetState } from './vault-state';
 
-/** Keeps password managers and autofill away from secret fields. */
-const noAutofill = {
-  autoComplete: 'off',
-  autoCorrect: 'off',
-  autoCapitalize: 'off',
-  spellCheck: false,
-  'data-1p-ignore': true,
-  'data-lpignore': 'true',
-  'data-bwignore': true,
-  'data-form-type': 'other',
-} as const;
-
 function Path({ children }: { children: string }) {
-  return (
-    <span className="font-mono text-foreground wrap-anywhere">{children}</span>
-  );
+  return <SharedPath className="text-foreground">{children}</SharedPath>;
+}
+
+/** The agents that find what is stored in `bucket`. */
+export function agentsIn(bucket: string, hasChildren: boolean) {
+  if (bucket === RESERVED_BUCKET) return 'Agents working in any bucket';
+  return hasChildren
+    ? `Agents working in ${bucket} or a bucket inside it`
+    : `Agents working in ${bucket}`;
 }
 
 export function reachText(bucket: string, hasChildren: boolean, what = 'it') {
-  if (bucket === RESERVED_BUCKET)
-    return `Agents working in any bucket find ${what}.`;
-  return hasChildren
-    ? `Agents working in ${bucket} or a bucket inside it find ${what}.`
-    : `Agents working in ${bucket} find ${what}.`;
+  return `${agentsIn(bucket, hasChildren)} find ${what}.`;
 }
 
 function sheetProblems(sheet: SheetState) {
@@ -213,7 +206,7 @@ function ValueField({
           <FieldDescription>
             {replacing
               ? 'Overwrites the current value. '
-              : 'Up to 64 KiB, several lines are fine. '}
+              : `Up to ${secretLimits.valueBytes / 1024} KiB, several lines are fine. `}
             Once saved, it is encrypted; reveal it from the list when you need
             it.
           </FieldDescription>

@@ -5,6 +5,7 @@ import {
   readdir,
   readFile,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
@@ -16,6 +17,14 @@ import { testEnvironment } from '../../scripts/lib/test-environment.ts';
 import { type CommandResult, privateMacKeychain } from './macos-keychain.ts';
 import { testBuild } from './runtime.ts';
 import { launchSandbox } from './sandbox.ts';
+
+// libdbus limits a socket path to 99 bytes, and sockaddr_un to 107.
+function socketsFit(home: string) {
+  return (
+    Buffer.byteLength(resolve(home, 'bus')) <= 99 &&
+    Buffer.byteLength(resolve(home, 'runtime/keyring/control')) <= 107
+  );
+}
 
 export async function privateKeyring(
   service: 'present' | 'absent' = 'present',
@@ -44,7 +53,12 @@ export async function privateKeyring(
   if (!homes || !isAbsolute(homes))
     throw new Error('Linux CLI fixtures require an isolated HOME registry.');
   const home = await mkdtemp(resolve(options.tempRoot ?? '/tmp', 'nook-cli-'));
+  let runtime: string | undefined;
   let sandbox: ReturnType<typeof launchSandbox> | undefined;
+  const remove = async () => {
+    await rm(home, { recursive: true, force: true });
+    if (runtime) await rm(runtime, { recursive: true, force: true });
+  };
   try {
     await registerLinuxFixtureHome(homes, run, home);
     const shim = resolve(home, 'bin');
@@ -69,10 +83,17 @@ export async function privateKeyring(
       NOOK_TEST_SERVICE: service,
       NODE_OPTIONS: options.nodeOptions,
     });
+    let socket = resolve(home, 'bus');
+    if (!socketsFit(home)) {
+      // A deep HOME keeps its bus and keyring sockets in a short directory.
+      runtime = await mkdtemp('/tmp/nook-sockets-');
+      await symlink(resolve(runtime, 'bus'), socket);
+      socket = resolve(runtime, 'bus');
+    }
     const busConfig = resolve(home, 'bus.conf');
     await writeFile(
       busConfig,
-      `<busconfig><type>session</type><listen>unix:path=${encodeURIComponent(resolve(home, 'bus'))}</listen><auth>EXTERNAL</auth><policy context="default"><allow send_destination="*"/><allow receive_sender="*"/><allow own="*"/></policy></busconfig>`,
+      `<busconfig><type>session</type><listen>unix:path=${encodeURIComponent(socket)}</listen><auth>EXTERNAL</auth><policy context="default"><allow send_destination="*"/><allow receive_sender="*"/><allow own="*"/></policy></busconfig>`,
     );
     sandbox = launchSandbox(
       home,
@@ -83,8 +104,10 @@ export async function privateKeyring(
         '--',
         process.execPath,
         resolve('tests/support/keyring-host.ts'),
+        ...(runtime ? [runtime] : []),
       ],
       options.sandboxExecutable,
+      runtime,
     );
     const started = sandbox;
     const host = started.child;
@@ -92,7 +115,7 @@ export async function privateKeyring(
       try {
         await started.close();
       } finally {
-        await rm(home, { recursive: true, force: true });
+        await remove();
       }
     }
     let id = 0;
@@ -261,7 +284,7 @@ export async function privateKeyring(
     };
   } catch (error) {
     await sandbox?.close();
-    await rm(home, { recursive: true, force: true });
+    await remove();
     throw error;
   }
 }
