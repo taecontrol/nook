@@ -50,3 +50,42 @@ it('E30: an agent write appears after real tab refocus without reloading', async
     await app.close();
   }
 });
+
+it('E11/E30: a fresh active search includes an agent write after real tab refocus', async () => {
+  const app = await memoryRuntime();
+  const visible = await visibilityBrowser();
+  const { page, context } = visible;
+  let requests = 0;
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/memories/search') requests++;
+  });
+  try {
+    // Keep the query fresh deterministically; native visibility is still real.
+    await page.clock.setFixedTime(new Date('2026-10-10T20:00:00Z'));
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await seedMemories(app);
+    await page.goto(`${app.origin}/memory?bucket=work/acme&q=publicar`);
+    await page.locator('[data-search-result]').first().waitFor();
+    expect(requests).toBe(1);
+    const other = await context.newPage();
+    await other.bringToFront();
+    await expect
+      .poll(() => page.evaluate(() => document.visibilityState))
+      .toBe('hidden');
+    const result = await memoryClient(app, '2026-07-28').call('remember', {
+      bucket: 'work/acme',
+      content:
+        '# Fresh publication\n\nPara publicar una versión nueva, lanzar el flujo de publicación cuando la integración continua esté en verde.',
+    });
+    expect(result.isError).not.toBe(true);
+    const { id } = result.structuredContent as { id: string };
+    await page.bringToFront();
+    await expect.poll(() => requests).toBe(2);
+    await page.locator(`[data-search-result="${id}"]`).waitFor();
+    expect(new URL(page.url()).searchParams.get('q')).toBe('publicar');
+  } finally {
+    await observeBrowserPage(page);
+    await visible.close();
+    await app.close();
+  }
+});
