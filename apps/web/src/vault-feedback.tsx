@@ -1,8 +1,8 @@
-import { CircleAlert, CircleCheck, X } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { CircleAlert, CircleCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
-import { ApiError } from './api-client';
+import { ApiError, describeFailure } from './api-client';
+import { DismissibleAlert } from './failure';
 import { type ObservedWrite, unconfirmed } from './vault-api';
 import type { Feedback, WriteOp } from './vault-state';
 
@@ -47,14 +47,12 @@ function failureMessage(write: ObservedWrite) {
       : `${error.message} ${unchanged}`;
   if (error.tag === 'SecretNotFound')
     return `${secret.path} is no longer stored.`;
-  return `${definitiveMessage(error)} ${unchanged}`;
+  return definitiveMessage(error, unchanged);
 }
-function definitiveMessage(error: ApiError) {
-  if (error.status === 401)
-    return 'Your owner session expired. Sign in again, then try again.';
-  if (error.status === 403)
-    return 'Only this installation’s owner can change secrets.';
-  return error.message;
+function definitiveMessage(error: ApiError, unchanged: string) {
+  return error.hasPublicMessage
+    ? `${error.message} ${unchanged}`
+    : describeFailure(error, 'change secrets', unchanged);
 }
 function successFeedback(write: ObservedWrite): Feedback {
   const { op, secret } = write.input;
@@ -99,39 +97,26 @@ export function WriteFeedback({
 }) {
   const error = feedback.kind === 'failed' || feedback.kind === 'unconfirmed';
   return (
-    <Alert variant={error ? 'destructive' : 'default'}>
-      {feedback.kind === 'saving' ? (
-        <Spinner />
-      ) : error ? (
-        <CircleAlert />
-      ) : (
-        <CircleCheck />
-      )}
-      <AlertTitle className="mr-6">{heading(feedback)}</AlertTitle>
-      <AlertDescription>
-        <p className="wrap-anywhere">{feedback.message}</p>
-        {error && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="mt-1"
-            onClick={onRetry}
-          >
-            Try again
-          </Button>
-        )}
-      </AlertDescription>
-      {feedback.kind !== 'saving' && (
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="absolute top-2.5 right-2.5"
-          aria-label="Dismiss"
-          onClick={onDismiss}
-        >
-          <X />
+    <DismissibleAlert
+      destructive={error}
+      icon={
+        feedback.kind === 'saving' ? (
+          <Spinner />
+        ) : error ? (
+          <CircleAlert />
+        ) : (
+          <CircleCheck />
+        )
+      }
+      title={heading(feedback)}
+      onDismiss={feedback.kind === 'saving' ? undefined : onDismiss}
+    >
+      <p className="wrap-anywhere">{feedback.message}</p>
+      {error && (
+        <Button variant="outline" size="sm" className="mt-1" onClick={onRetry}>
+          Try again
         </Button>
       )}
-    </Alert>
+    </DismissibleAlert>
   );
 }

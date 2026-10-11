@@ -313,9 +313,14 @@ it('E22: genuine D1 load failure retries, and older-page failure keeps loaded en
   });
   try {
     const { page } = visit;
-    await page
+    const failure = page
       .getByText('Couldn’t load audit entries', { exact: true })
-      .waitFor();
+      .locator('..');
+    await failure.waitFor();
+    expect(await failure.innerText()).toContain(
+      'Nook is unavailable right now. Try again in a moment.',
+    );
+    expect(await failure.innerText()).not.toContain('Request failed');
     expect(componentHeld).toBe(true);
     expect(
       visit.requests.filter((request) => request.startsWith('/api/audit'))
@@ -334,9 +339,13 @@ it('E22: genuine D1 load failure retries, and older-page failure keeps loaded en
     await page
       .getByRole('button', { name: 'Load older entries', exact: true })
       .click();
-    await page
-      .getByText('Couldn’t load more entries', { exact: true })
-      .waitFor();
+    const more = page.getByRole('alert').filter({
+      hasText: 'Couldn’t load more entries',
+    });
+    await more.waitFor();
+    expect(await more.innerText()).toContain(
+      'Showing the last loaded activity. Nook is unavailable right now. Try again in a moment.',
+    );
     expect(await auditEntries(page).count()).toBe(before);
     await db
       .prepare('ALTER TABLE unavailable_audit_entries RENAME TO audit_entries')
@@ -348,6 +357,31 @@ it('E22: genuine D1 load failure retries, and older-page failure keeps loaded en
         .getByText('Couldn’t load more entries', { exact: true })
         .count(),
     ).toBe(0);
+  } finally {
+    await visit.close();
+  }
+});
+it('E22: an expired owner session on Audit asks the owner to sign in again', async () => {
+  const visit = await visitAudit(browser, {
+    configure: async (page) => {
+      await page.route('**/api/audit*', (route) =>
+        route.fulfill({
+          status: 401,
+          contentType: 'application/json',
+          body: JSON.stringify({ _tag: 'Unauthorized' }),
+        }),
+      );
+    },
+  });
+  try {
+    const failure = visit.page
+      .getByText('Couldn’t load audit entries', { exact: true })
+      .locator('..');
+    await failure.waitFor();
+    expect(await failure.innerText()).toContain(
+      'Your owner session expired. Sign in again, then try again.',
+    );
+    expect(await failure.innerText()).not.toContain('Request failed');
   } finally {
     await visit.close();
   }

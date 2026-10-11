@@ -1,14 +1,6 @@
 import { bucketLineage, type CreatedBucket } from '@nook/contract';
-import {
-  CircleAlert,
-  CircleCheck,
-  CornerDownLeft,
-  Plus,
-  ServerCrash,
-  X,
-} from 'lucide-react';
+import { CircleAlert, CircleCheck, CornerDownLeft, Plus } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,14 +14,6 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from '@/components/ui/empty';
-import {
   Field,
   FieldDescription,
   FieldError,
@@ -42,8 +26,9 @@ import {
   InputGroupInput,
 } from '@/components/ui/input-group';
 import { Kbd } from '@/components/ui/kbd';
-import { ApiError } from './api-client';
+import { ApiError, describeFailure } from './api-client';
 import { useBuckets } from './buckets-api';
+import { DismissibleAlert, LoadFailure } from './failure';
 import {
   buildOutline,
   Outline,
@@ -52,6 +37,7 @@ import {
   type OutlineState,
 } from './outline';
 import { type CreatePlan, planCreate, validatePath } from './paths';
+import { useConfirmTarget } from './use-confirm-target';
 
 type Failure = { title: string; description: string };
 type Feedback =
@@ -60,10 +46,6 @@ type Feedback =
   | { kind: 'continue'; parent: string }
   | { kind: 'plan'; plan: CreatePlan }
   | { kind: 'loading' };
-
-function statusText(error: unknown) {
-  return error instanceof ApiError ? ` (${error.status})` : '';
-}
 
 function quote(path: string) {
   return <span className="font-mono text-foreground">{path}</span>;
@@ -100,8 +82,12 @@ function writeFailure(
         ? `Couldn't confirm creation of ${write.path}`
         : `Couldn't create ${write.path}`,
       description: unknown
-        ? `Nook couldn't confirm whether the bucket was created${statusText(write.error)}. The path is back in the field; press Enter to try again.`
-        : `Nook couldn't complete this request${statusText(write.error)}. The path is back in the field; press Enter to try again.`,
+        ? "Nook couldn't confirm whether the bucket was created. The path is back in the field; press Enter to try again."
+        : describeFailure(
+            write.error,
+            'change buckets',
+            'The path is back in the field; press Enter to try again.',
+          ),
     };
   return {
     title: unknown
@@ -114,7 +100,7 @@ function writeFailure(
 function deleteFailure(error: Error | null) {
   if (error instanceof ApiError) {
     if (error.outcomeUnknown)
-      return `Nook couldn't confirm whether the bucket was deleted${statusText(error)}. Check the outline before trying again.`;
+      return "Nook couldn't confirm whether the bucket was deleted. Check the outline before trying again.";
     if (['BucketHasSecrets', 'BucketHasMemories'].includes(error.tag ?? ''))
       return error.message;
     if (error.tag === 'BucketNotFound')
@@ -122,7 +108,11 @@ function deleteFailure(error: Error | null) {
     if (error.status === 409)
       return 'Nook reports that it has child buckets, so the tree changed since you loaded it. Delete its child buckets first. Check the outline before trying again.';
   }
-  return `Nook couldn't complete this request${statusText(error)}. Check the outline before trying again.`;
+  return describeFailure(
+    error,
+    'change buckets',
+    'Check the outline before trying again.',
+  );
 }
 
 function PlanPreview({ plan }: { plan: CreatePlan }) {
@@ -223,8 +213,9 @@ function useBucketsPage() {
     path: string;
     at: number;
   } | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  const deleteTrigger = useRef<HTMLButtonElement | null>(null);
+  const deletion = useConfirmTarget<string>(() =>
+    document.querySelector<HTMLButtonElement>('[aria-label="Actions for me"]'),
+  );
   const handledWrite = useRef(
     write?.status === 'success' ? write.id : undefined,
   );
@@ -340,9 +331,9 @@ function useBucketsPage() {
   };
 
   const confirmDelete = () => {
-    const path = deleteTarget;
+    const path = deletion.target;
     if (!path || !remove(path)) return;
-    setDeleteTarget(null);
+    deletion.close();
     setFailure(null);
     setStatus(<>Deleted {quote(path)}.</>);
   };
@@ -363,8 +354,7 @@ function useBucketsPage() {
     focusField: () => inputRef.current?.focus(),
     requestDelete: (path, trigger) => {
       if (busy) return;
-      deleteTrigger.current = trigger;
-      setDeleteTarget(path);
+      deletion.open(path, trigger);
     },
   };
 
@@ -394,8 +384,7 @@ function useBucketsPage() {
     setStatus,
     collapsed,
     setCollapsed,
-    deleteTarget,
-    setDeleteTarget,
+    deletion,
     loaded,
     all,
     feedback,
@@ -409,15 +398,6 @@ function useBucketsPage() {
     problem,
     buckets,
     busy,
-    restoreDeleteFocus: (event: Event) => {
-      event.preventDefault();
-      const trigger = deleteTrigger.current;
-      if (trigger?.isConnected) trigger.focus();
-      else
-        document
-          .querySelector<HTMLButtonElement>('[aria-label="Actions for me"]')
-          ?.focus();
-    },
   };
 }
 
@@ -548,20 +528,16 @@ function BucketComposer({ state }: { state: PageState }) {
         </Field>
       </form>
       {failure && (
-        <Alert variant="destructive" className="mt-3">
-          <CircleAlert />
-          <AlertTitle className="wrap-anywhere">{failure.title}</AlertTitle>
-          <AlertDescription>{failure.description}</AlertDescription>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="absolute top-2.5 right-2.5"
-            aria-label="Dismiss"
-            onClick={() => setFailure(null)}
+        <div className="mt-3">
+          <DismissibleAlert
+            destructive
+            icon={<CircleAlert />}
+            title={failure.title}
+            onDismiss={() => setFailure(null)}
           >
-            <X />
-          </Button>
-        </Alert>
+            {failure.description}
+          </DismissibleAlert>
+        </div>
       )}
     </div>
   );
@@ -569,43 +545,19 @@ function BucketComposer({ state }: { state: PageState }) {
 
 function BucketLoadFailure({ state }: { state: PageState }) {
   const { buckets, loaded, busy } = state;
-  const retry = (
-    <Button
-      variant="outline"
-      size="sm"
-      disabled={buckets.isFetching || busy}
-      onClick={() => buckets.refetch()}
-    >
-      Try again
-    </Button>
-  );
-  if (loaded)
-    return (
-      <Alert variant="destructive" className="my-3">
-        <ServerCrash />
-        <AlertTitle>Couldn't refresh buckets</AlertTitle>
-        <AlertDescription>
-          Showing the last loaded outline. Nook is unavailable right now
-          {statusText(buckets.error)}.{retry}
-        </AlertDescription>
-      </Alert>
-    );
+  const problem = describeFailure(buckets.error, 'view buckets');
   return (
-    <div className="rounded-lg border border-dashed">
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <ServerCrash />
-          </EmptyMedia>
-          <EmptyTitle>Couldn't load buckets</EmptyTitle>
-          <EmptyDescription>
-            Nook is unavailable right now{statusText(buckets.error)}. Try again
-            in a moment.
-          </EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>{retry}</EmptyContent>
-      </Empty>
-    </div>
+    <LoadFailure
+      title={loaded ? "Couldn't refresh buckets" : "Couldn't load buckets"}
+      description={
+        loaded ? `Showing the last loaded outline. ${problem}` : problem
+      }
+      cached={loaded}
+      retrying={buckets.isFetching}
+      disabled={busy}
+      onRetry={() => buckets.refetch()}
+      className={loaded ? 'my-3' : undefined}
+    />
   );
 }
 
@@ -669,17 +621,16 @@ function BucketOutline({ state }: { state: PageState }) {
 }
 
 function DeleteConfirmation({ state }: { state: PageState }) {
-  const { deleteTarget, setDeleteTarget, confirmDelete, restoreDeleteFocus } =
-    state;
+  const { deletion, confirmDelete } = state;
   return (
     <AlertDialog
-      open={deleteTarget !== null}
-      onOpenChange={(open) => !open && setDeleteTarget(null)}
+      open={deletion.target !== null}
+      onOpenChange={(open) => !open && deletion.close()}
     >
-      <AlertDialogContent onCloseAutoFocus={restoreDeleteFocus}>
+      <AlertDialogContent onCloseAutoFocus={deletion.restoreFocus}>
         <AlertDialogHeader>
           <AlertDialogTitle className="wrap-anywhere">
-            Delete {deleteTarget}?
+            Delete {deletion.shown}?
           </AlertDialogTitle>
           <AlertDialogDescription>
             The bucket is empty and will be removed. You can create it again

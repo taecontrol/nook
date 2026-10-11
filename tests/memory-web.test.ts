@@ -388,7 +388,7 @@ it('E28: a real failed list shows Retry and recovers after D1 is restored', asyn
     await (await visit.app.mf.getD1Database('DB'))
       .prepare('ALTER TABLE unavailable_versions RENAME TO memory_versions')
       .run();
-    await page.getByRole('button', { name: 'Retry', exact: true }).click();
+    await page.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect.poll(() => memoryRows(page).count()).toBe(7);
   } finally {
     await visit.close();

@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from './api-client';
 import { useBucketList } from './buckets-api';
 import { useDesktop } from './hooks/use-desktop';
+import { useReturnFocus } from './use-confirm-target';
 import { type SecretWrite, unconfirmed, useVault } from './vault-api';
 import { feedbackFor } from './vault-feedback';
 import { countByBucket, type Secret } from './vault-model';
@@ -113,8 +114,8 @@ export function useVaultPage() {
   const patch = (next: Partial<VaultUi>) =>
     setUi((current) => ({ ...current, ...next }));
   const wide = useDesktop();
-  const deleteTrigger = useRef<HTMLButtonElement | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  const deleteFocus = useReturnFocus(() => heading.current);
   const buckets = useMemo(
     () => bucketsQuery.data?.map((bucket) => bucket.path) ?? [],
     [bucketsQuery.data],
@@ -179,7 +180,7 @@ export function useVaultPage() {
     patch({ sheet: openSheet(replacement(secret)) });
   const requestDelete = (secret: Secret, trigger: HTMLButtonElement | null) => {
     if (busy) return;
-    deleteTrigger.current = trigger;
+    deleteFocus.capture(trigger);
     patch({ deleting: secret });
   };
   const confirmDelete = () => {
@@ -251,7 +252,7 @@ export function useVaultPage() {
     counts,
     highlighted,
     heading,
-    deleteTrigger,
+    restoreDeleteFocus: deleteFocus.restore,
     openCreate,
     openReplace,
     requestDelete,

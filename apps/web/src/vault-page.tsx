@@ -9,11 +9,9 @@ import {
   Plus,
   Replace,
   SearchX,
-  ServerCrash,
   Trash2,
 } from 'lucide-react';
 import { lazy, Suspense, useRef } from 'react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -51,13 +49,14 @@ import {
 } from '@/components/ui/item';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
-import { ApiError } from './api-client';
+import { describeFailure } from './api-client';
+import { LoadFailure } from './failure';
 import { formatDate } from './time';
+import { useLastValue } from './use-confirm-target';
 import { useVaultPage } from './use-vault-page';
 import { WriteFeedback } from './vault-feedback';
 import { ancestorsOf, plural, type Secret, secretsIn } from './vault-model';
 import { reachText, SecretSheet } from './vault-sheet';
-
 import { BucketTree, BucketTreeSkeleton } from './vault-tree';
 
 const RevealDialog = lazy(() => import('./reveal-dialog'));
@@ -330,60 +329,28 @@ function Inherited({
 
 /* ---------- empty and failure states ---------- */
 
-function LoadFailure({
-  status,
-  retrying,
-  onRetry,
+function SecretsLoadFailure({
+  page,
   compact,
-  cached = false,
-  busy = false,
 }: {
-  status: number;
-  retrying: boolean;
-  onRetry: () => void;
-  compact?: boolean;
-  cached?: boolean;
-  busy?: boolean;
+  page: Page;
+  compact: boolean;
 }) {
-  const retry = (
-    <Button
-      variant="outline"
-      size="sm"
-      disabled={retrying || busy}
-      onClick={onRetry}
-    >
-      {retrying && <Spinner />}Try again
-    </Button>
-  );
-  if (compact)
-    return (
-      <Alert variant="destructive" className="mb-4">
-        <ServerCrash />
-        <AlertTitle>Couldn’t load secrets</AlertTitle>
-        <AlertDescription>
-          Nook is unavailable right now ({status}).{' '}
-          {cached
-            ? 'Secret metadata could not be refreshed. Previously loaded data is still shown.'
-            : 'Bucket counts are missing until it loads.'}
-          {retry}
-        </AlertDescription>
-      </Alert>
-    );
+  const { secrets } = page;
+  const cached = page.list !== undefined;
+  const problem = describeFailure(secrets.error, 'manage secrets');
+  const note = cached
+    ? 'Secret metadata could not be refreshed. Previously loaded data is still shown.'
+    : 'Bucket counts are missing until it loads.';
   return (
-    <div className="rounded-lg border border-dashed">
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <ServerCrash />
-          </EmptyMedia>
-          <EmptyTitle>Couldn’t load secrets</EmptyTitle>
-          <EmptyDescription>
-            Nook is unavailable right now ({status}). Try again in a moment.
-          </EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>{retry}</EmptyContent>
-      </Empty>
-    </div>
+    <LoadFailure
+      title="Couldn’t load secrets"
+      description={compact ? `${note} ${problem}` : problem}
+      cached={compact}
+      retrying={secrets.isFetching}
+      disabled={page.busy}
+      onRetry={() => secrets.refetch()}
+    />
   );
 }
 
@@ -485,9 +452,7 @@ function DeleteConfirmation({
   onConfirm: () => void;
   onClose: (event: Event) => void;
 }) {
-  const last = useRef<Secret | null>(null);
-  if (secret) last.current = secret;
-  const shown = secret ?? last.current;
+  const shown = useLastValue(secret);
   if (!shown) return null;
   const where =
     shown.bucket === RESERVED_BUCKET
@@ -579,16 +544,8 @@ function StoredSecrets({
 function BucketSecrets({ page }: { page: Page }) {
   const { list, secrets } = page;
   if (secrets.isPending) return <SecretsSkeleton />;
-  const status = secrets.error instanceof ApiError ? secrets.error.status : 503;
   const failure = (
-    <LoadFailure
-      compact={list !== undefined}
-      cached={list !== undefined}
-      busy={page.busy}
-      status={status}
-      retrying={secrets.isFetching}
-      onRetry={() => secrets.refetch()}
-    />
+    <SecretsLoadFailure page={page} compact={list !== undefined} />
   );
   if (!list) return failure;
   return (
@@ -625,16 +582,7 @@ function MobileListStatus({ page }: { page: Page }) {
   if (secrets.isError)
     return (
       <div className="lg:hidden">
-        <LoadFailure
-          compact
-          cached={page.list !== undefined}
-          busy={page.busy}
-          status={
-            secrets.error instanceof ApiError ? secrets.error.status : 503
-          }
-          retrying={secrets.isFetching}
-          onRetry={() => secrets.refetch()}
-        />
+        <SecretsLoadFailure page={page} compact />
       </div>
     );
   if (page.list?.length === 0)
@@ -791,12 +739,7 @@ function VaultDialogs({ page }: { page: Page }) {
         parents={page.parents}
         onCancel={() => patch({ deleting: null })}
         onConfirm={page.confirmDelete}
-        onClose={(event) => {
-          event.preventDefault();
-          const trigger = page.deleteTrigger.current;
-          if (trigger?.isConnected) trigger.focus();
-          else page.heading.current?.focus();
-        }}
+        onClose={page.restoreDeleteFocus}
       />
       {page.revealing && (
         <Suspense fallback={null}>

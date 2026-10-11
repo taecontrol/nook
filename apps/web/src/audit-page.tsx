@@ -9,11 +9,9 @@ import {
   Eye,
   History,
   SearchX,
-  ServerCrash,
   ShieldX,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -40,8 +38,10 @@ import {
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
+import { describeFailure } from './api-client';
 import { type AuditFilters, auditOptions } from './audit-api';
 import { useBucketList } from './buckets-api';
+import { LoadFailure } from './failure';
 import { useMachineList } from './machines-api';
 import { formatDateTime, recentTime } from './time';
 import { useSecretList } from './vault-api';
@@ -537,50 +537,28 @@ function AuditLoadFailure({
   query: ReturnType<typeof useAuditEntries>;
 }) {
   if (!query.isError) return null;
-  const retry = (
-    <Button
-      variant="outline"
-      size="sm"
-      disabled={query.isFetching}
-      onClick={() =>
+  const cached = query.data !== undefined;
+  const problem = describeFailure(query.error, 'view audit entries');
+  return (
+    <LoadFailure
+      title={
+        !cached
+          ? 'Couldn’t load audit entries'
+          : query.isFetchNextPageError
+            ? 'Couldn’t load more entries'
+            : 'Couldn’t refresh audit entries'
+      }
+      description={
+        cached ? `Showing the last loaded activity. ${problem}` : problem
+      }
+      cached={cached}
+      retrying={query.isFetching}
+      onRetry={() =>
         void (query.isFetchNextPageError
           ? query.fetchNextPage()
           : query.refetch())
       }
-    >
-      Try again
-    </Button>
-  );
-  if (query.data)
-    return (
-      <Alert variant="destructive" className="mb-4">
-        <ServerCrash />
-        <AlertTitle>
-          {query.isFetchNextPageError
-            ? 'Couldn’t load more entries'
-            : 'Couldn’t refresh audit entries'}
-        </AlertTitle>
-        <AlertDescription>
-          Showing the last loaded activity. {query.error.message}
-          {retry}
-        </AlertDescription>
-      </Alert>
-    );
-  return (
-    <div className="rounded-lg border border-dashed">
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <ServerCrash />
-          </EmptyMedia>
-          <EmptyTitle>Couldn’t load audit entries</EmptyTitle>
-          <EmptyDescription>
-            {query.error.message} Try again in a moment.
-          </EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>{retry}</EmptyContent>
-      </Empty>
-    </div>
+    />
   );
 }
 function AuditResults({

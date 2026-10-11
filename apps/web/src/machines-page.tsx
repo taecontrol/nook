@@ -6,11 +6,9 @@ import {
   CircleDashed,
   Hourglass,
   MonitorSmartphone,
-  ServerCrash,
-  X,
 } from 'lucide-react';
 import { Fragment, useEffect, useRef, useState } from 'react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Alert, AlertTitle } from '@/components/ui/alert';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,11 +39,13 @@ import {
 } from '@/components/ui/item';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
-import { ApiError } from './api-client';
+import { ApiError, describeFailure } from './api-client';
+import { DismissibleAlert, LoadFailure } from './failure';
 import { MachineAccess } from './grant-summary';
 import { type MachineRevoke, useMachines } from './machines-api';
 import { approvedText, groupMachines, lastUsedParts } from './machines-model';
 import { formatDate } from './time';
+import { useConfirmTarget } from './use-confirm-target';
 
 const icons = { stale: Hourglass, never: CircleDashed, recent: Activity };
 function Facts({ parts }: { parts: string[] }) {
@@ -65,13 +65,6 @@ function LoginCommand() {
       nook login {window.location.origin}
     </code>
   );
-}
-function loadProblem(error: Error | null) {
-  if (error instanceof ApiError && error.status === 401)
-    return 'Your owner session expired. Sign in again, then try again.';
-  if (error instanceof ApiError && error.status === 403)
-    return "Only this installation's owner can manage machines.";
-  return 'Nook is unavailable right now (503).';
 }
 function MachinesSkeleton() {
   return (
@@ -121,50 +114,6 @@ function NoMachines() {
         <EmptyContent>
           <LoginCommand />
         </EmptyContent>
-      </Empty>
-    </div>
-  );
-}
-function LoadFailure({
-  error,
-  retrying,
-  onRetry,
-  cached,
-}: {
-  error: Error | null;
-  retrying: boolean;
-  onRetry: () => void;
-  cached: boolean;
-}) {
-  const retry = (
-    <Button variant="outline" size="sm" disabled={retrying} onClick={onRetry}>
-      {retrying && <Spinner />}Try again
-    </Button>
-  );
-  if (cached)
-    return (
-      <Alert variant="destructive" className="mb-6">
-        <ServerCrash />
-        <AlertTitle>Couldn't refresh machines</AlertTitle>
-        <AlertDescription>
-          Showing the last loaded machines. {loadProblem(error)}
-          {retry}
-        </AlertDescription>
-      </Alert>
-    );
-  return (
-    <div className="rounded-lg border border-dashed">
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <ServerCrash />
-          </EmptyMedia>
-          <EmptyTitle>Couldn't load machines</EmptyTitle>
-          <EmptyDescription>
-            {loadProblem(error)} Try again in a moment.
-          </EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>{retry}</EmptyContent>
       </Empty>
     </div>
   );
@@ -247,9 +196,13 @@ function revokeHeading(write: MachineRevoke) {
   return "Couldn't revoke ";
 }
 function revokeProblem(error: Error | null) {
-  if (error instanceof ApiError && error.outcomeUnknown)
-    return `${loadProblem(error)} The machine may already be revoked. Try again to confirm it is revoked.`;
-  return `${loadProblem(error)} Check the machine list before trying again.`;
+  return describeFailure(
+    error,
+    'manage machines',
+    error instanceof ApiError && error.outcomeUnknown
+      ? 'The machine may already be revoked. Try again to confirm it is revoked.'
+      : 'Check the machine list before trying again.',
+  );
 }
 function RevokeFeedback({
   write,
@@ -272,48 +225,42 @@ function RevokeFeedback({
     );
   const failed = write.status === 'error';
   return (
-    <Alert variant={failed ? 'destructive' : 'default'}>
-      {failed ? <CircleAlert /> : <CircleCheck />}
-      <AlertTitle className="mr-6">
-        {revokeHeading(write)}
-        <span className="wrap-anywhere">{machine.name}</span>
-      </AlertTitle>
-      <AlertDescription>
-        {failed ? (
-          <>
-            <p>{revokeProblem(write.error)}</p>
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-1"
-              onClick={(event) => onRetry(machine, event.currentTarget)}
-            >
-              Try again
-            </Button>
-          </>
-        ) : (
-          <>
-            <p>
-              The token approved {formatDate(machine.approvedAt)} is deleted.
-              That machine's next request to Nook will fail. To reconnect it,
-              run this on it and approve it again:
-            </p>
-            <div className="mt-1">
-              <LoginCommand />
-            </div>
-          </>
-        )}
-      </AlertDescription>
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        className="absolute top-2.5 right-2.5"
-        aria-label="Dismiss"
-        onClick={onDismiss}
-      >
-        <X />
-      </Button>
-    </Alert>
+    <DismissibleAlert
+      destructive={failed}
+      icon={failed ? <CircleAlert /> : <CircleCheck />}
+      title={
+        <>
+          {revokeHeading(write)}
+          {machine.name}
+        </>
+      }
+      onDismiss={onDismiss}
+    >
+      {failed ? (
+        <>
+          <p>{revokeProblem(write.error)}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-1"
+            onClick={(event) => onRetry(machine, event.currentTarget)}
+          >
+            Try again
+          </Button>
+        </>
+      ) : (
+        <>
+          <p>
+            The token approved {formatDate(machine.approvedAt)} is deleted. That
+            machine's next request to Nook will fail. To reconnect it, run this
+            on it and approve it again:
+          </p>
+          <div className="mt-1">
+            <LoginCommand />
+          </div>
+        </>
+      )}
+    </DismissibleAlert>
   );
 }
 function RevokeConfirmation({
@@ -378,12 +325,18 @@ function MachineList({
 }) {
   const { machines, busy } = state;
   if (machines.isPending) return <MachinesSkeleton />;
+  const cached = machines.data !== undefined;
+  const problem = describeFailure(machines.error, 'manage machines');
   const failure = (
     <LoadFailure
-      error={machines.error}
+      title={cached ? "Couldn't refresh machines" : "Couldn't load machines"}
+      description={
+        cached ? `Showing the last loaded machines. ${problem}` : problem
+      }
+      cached={cached}
       retrying={machines.isFetching}
       onRetry={() => machines.refetch()}
-      cached={machines.data !== undefined}
+      className={cached ? 'mb-6' : undefined}
     />
   );
   if (machines.data === undefined) return failure;
@@ -406,11 +359,10 @@ function MachineList({
 export function MachinesPage() {
   const state = useMachines();
   const { machines, write, busy, revoke } = state;
-  const [target, setTarget] = useState<Machine | null>(null);
   const [dismissed, setDismissed] = useState<number>();
   const [, tick] = useState(0);
-  const trigger = useRef<HTMLButtonElement | null>(null);
   const heading = useRef<HTMLHeadingElement | null>(null);
+  const revocation = useConfirmTarget<Machine>(() => heading.current);
   // Relative times and the 30-day boundary also advance on an idle open page.
   useEffect(() => {
     const timer = setInterval(() => tick((value) => value + 1), 60_000);
@@ -420,8 +372,7 @@ export function MachinesPage() {
   const list = machines.data;
   const confirm = (machine: Machine, button: HTMLButtonElement) => {
     if (busy) return;
-    trigger.current = button;
-    setTarget(machine);
+    revocation.open(machine, button);
   };
   return (
     <div className="w-full max-w-4xl px-4 pb-24 sm:px-6 md:px-12">
@@ -450,19 +401,18 @@ export function MachinesPage() {
         )}
       </div>
       <MachineList state={state} now={now} onRevoke={confirm} />
-      {target && (
+      {/* Unmounted on close: a confirmation reopened while the previous one
+          exits must not sit beneath it. */}
+      {revocation.target && (
         <RevokeConfirmation
-          machine={target}
+          machine={revocation.target}
           now={now}
-          onCancel={() => setTarget(null)}
+          onCancel={revocation.close}
           onConfirm={() => {
-            if (target && revoke(target)) setTarget(null);
+            const target = revocation.target;
+            if (target && revoke(target)) revocation.close();
           }}
-          onClose={(event) => {
-            event.preventDefault();
-            if (trigger.current?.isConnected) trigger.current.focus();
-            else heading.current?.focus();
-          }}
+          onClose={revocation.restoreFocus}
         />
       )}
     </div>
