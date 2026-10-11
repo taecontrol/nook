@@ -66,7 +66,7 @@ Istanbul instruments original sources before Node execution, CLI child-process b
 
 CRAP rejects a missing baseline or seam, empty or unexecuted seam observations, stale source, unknown modules, incompatible counter maps or shapes, and altered artifacts. Coverage is the fraction of the function's own statements executed, excluding nested functions. A statement-free function uses its function counter. Classic complexity counts decisions independently for each function. The score is `complexity² × (1 − coverage)³ + complexity`.
 
-CI runs the five static commands, three `pnpm test:coverage --shard=I/3` jobs, a macOS CLI coverage job, and a final job. Each platform job uploads its manifest and artifacts; the final job requires the distinct indexes `1/3`, `2/3`, `3/3`, and `macos`, identical source identities and baselines, and intact artifact hashes before CRAP, build, and the load-time check. The timing stage runs alone after test jobs finish. It needs no Cloudflare secrets.
+CI runs the five static commands, four `pnpm test:coverage --shard=I/4` jobs, a macOS CLI coverage job, and a final job. Each platform job uploads its manifest and artifacts; the final job requires the distinct indexes `1/4`, `2/4`, `3/4`, `4/4`, and `macos`, identical source identities and baselines, and intact artifact hashes before CRAP, build, and the load-time check. The timing stage runs alone after test jobs finish. It needs no Cloudflare secrets.
 
 ## Browser evidence and budget
 

@@ -44,7 +44,7 @@ it('E5: committed Worker and deploy settings contain no installation identifiers
   expect(config.preview_urls).toBe(false);
 });
 
-it('E17/#33 E21: PR CI requires static checks, three Linux shards, macOS CLI and the final coverage/build/budget gate without Cloudflare credentials', async () => {
+it('E17/#33 E21: PR CI requires static checks, four Linux shards, macOS CLI and the final coverage/build/budget gate without Cloudflare credentials', async () => {
   const ci = await workflow('verify');
   expect(ci.on).toHaveProperty('pull_request');
   expect(
@@ -58,12 +58,12 @@ it('E17/#33 E21: PR CI requires static checks, three Linux shards, macOS CLI and
     'pnpm verify:complexity',
     'pnpm verify:migrations',
   ]);
-  expect(ci.jobs.tests.strategy.matrix.shard).toEqual([1, 2, 3]);
+  expect(ci.jobs.tests.strategy.matrix.shard).toEqual([1, 2, 3, 4]);
   expect(
     ci.jobs.tests.steps.some(
       (step: { run?: string }) =>
         step.run ===
-        `pnpm test:coverage --shard=${expression('matrix.shard')}/3`,
+        `pnpm test:coverage --shard=${expression('matrix.shard')}/4`,
     ),
   ).toBe(true);
   const final = ci.jobs.verify;
@@ -373,7 +373,7 @@ it('E12: every CI test shard installs bubblewrap and loads only the versioned ex
   expect(install).toBeGreaterThanOrEqual(0);
   expect(profile).toBeGreaterThan(install);
   expect(coverage).toBeGreaterThan(profile);
-  expect(ci.jobs.tests.strategy.matrix.shard).toEqual([1, 2, 3]);
+  expect(ci.jobs.tests.strategy.matrix.shard).toEqual([1, 2, 3, 4]);
   expect(commands.join('\n')).not.toMatch(
     /sysctl.*apparmor_restrict_unprivileged_userns/,
   );
