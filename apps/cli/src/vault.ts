@@ -4,7 +4,8 @@ import {
   validateBucketPath,
 } from '@nook/contract';
 import { Effect } from 'effect';
-import { CliFailure, type RequestFailure } from './errors.ts';
+import { CliFailure, type RequestFailure, tryCli } from './errors.ts';
+import type { Host } from './host.ts';
 import {
   currentDirectory,
   projectSecrets,
@@ -19,11 +20,15 @@ function listFailure(error: RequestFailure) {
     return new CliFailure('Bucket not found.');
   return error;
 }
-export function vaultList(bucket: string, write: (message: string) => void) {
+export function vaultList(
+  host: Host,
+  bucket: string,
+  write: (message: string) => void,
+) {
   return Effect.gen(function* () {
     const message = validateBucketPath(bucket);
     if (message) return yield* Effect.fail(new CliFailure(message));
-    const { request } = yield* session;
+    const { request } = yield* session(host);
     const { secrets } = yield* request((api, headers) =>
       api.machine.secrets({
         headers,
@@ -57,7 +62,7 @@ function availability(
     }),
   );
 }
-export function vaultCheck(write: (message: string) => void) {
+export function vaultCheck(host: Host, write: (message: string) => void) {
   return Effect.gen(function* () {
     const directory = yield* currentDirectory;
     const project = yield* projectSecrets(directory);
@@ -65,10 +70,7 @@ export function vaultCheck(write: (message: string) => void) {
       return yield* Effect.fail(
         new CliFailure(`No nook.json in ${directory} or its parents.`),
       );
-    yield* Effect.try({
-      try: () => requireMappingLimit(project.mappings, project.file),
-      catch: (error) => error as CliFailure,
-    });
+    yield* tryCli(() => requireMappingLimit(project.mappings, project.file));
     const buckets = [
       ...new Set(
         project.mappings.map(({ path }) => splitSecretPath(path).bucket),
@@ -80,7 +82,7 @@ export function vaultCheck(write: (message: string) => void) {
       write(summary);
       return;
     }
-    const { request } = yield* session;
+    const { request } = yield* session(host);
     const listed = new Map(
       yield* Effect.forEach(buckets, (bucket) =>
         availability(

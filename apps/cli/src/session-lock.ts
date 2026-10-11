@@ -5,7 +5,8 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { Effect, Stream } from 'effect';
 import { ChildProcess, ChildProcessSpawner } from 'effect/process';
-import { CliFailure, keyringMessage } from './errors.ts';
+import { CliFailure } from './errors.ts';
+import { keyringMessage } from './keyring-secret-service.ts';
 
 const busIdentity = Effect.scoped(
   Effect.gen(function* () {
@@ -61,13 +62,13 @@ function acquireSocket(busId: string) {
 
 const acquire = busIdentity.pipe(Effect.flatMap(acquireSocket));
 
-const linuxLock = Effect.acquireRelease(acquire, (server) =>
+export const linuxLock = Effect.acquireRelease(acquire, (server) =>
   Effect.promise(
     () => new Promise<void>((resolve) => server.close(() => resolve())),
   ),
 );
 
-const macosLock = Effect.acquireRelease(
+export const macosLock = Effect.acquireRelease(
   Effect.tryPromise({
     try: async () => {
       const directory = resolve(homedir(), 'Library/Application Support/nook');
@@ -91,6 +92,3 @@ const macosLock = Effect.acquireRelease(
   }),
   (file) => Effect.promise(() => file.close()),
 );
-
-export const lockSession =
-  process.platform === 'darwin' ? macosLock : linuxLock;

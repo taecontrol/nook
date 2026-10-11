@@ -1,9 +1,12 @@
 import { Effect } from 'effect';
-import { CliFailure, keyringMessage } from './errors.ts';
+import { CliFailure } from './errors.ts';
 import { keyringCommand, requireKeyringSuccess } from './keyring-command.ts';
 
+export const keyringMessage =
+  'Nook keeps its token in the macOS login keychain and could not use it. Unlock your login keychain and try again.';
+const requireSuccess = requireKeyringSuccess(keyringMessage);
 function security(args: string[], input = '') {
-  return keyringCommand('security', args, '2 minutes', input);
+  return keyringCommand('security', args, '2 minutes', keyringMessage, input);
 }
 
 function quote(value: string) {
@@ -16,7 +19,7 @@ function store(service: string, account: string, label: string, value: string) {
   return security(
     ['-i'],
     `add-generic-password -s ${quote(service)} -a ${quote(account)} -l ${quote(label)} -w ${quote(value)}\n`,
-  ).pipe(Effect.flatMap(requireKeyringSuccess));
+  ).pipe(Effect.flatMap(requireSuccess));
 }
 
 function clear(service: string, account: string) {
@@ -28,7 +31,7 @@ function clear(service: string, account: string) {
     account,
   ]).pipe(
     Effect.flatMap((result) =>
-      result.status === 44 ? Effect.void : requireKeyringSuccess(result),
+      result.status === 44 ? Effect.void : requireSuccess(result),
     ),
   );
 }

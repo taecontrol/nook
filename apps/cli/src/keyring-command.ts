@@ -1,11 +1,12 @@
 import { Effect, Stream } from 'effect';
 import { ChildProcess, ChildProcessSpawner } from 'effect/process';
-import { CliFailure, keyringMessage } from './errors.ts';
+import { CliFailure } from './errors.ts';
 
 export function keyringCommand(
   tool: string,
   args: string[],
   timeout: '10 seconds' | '2 minutes',
+  message: string,
   input = '',
 ) {
   return Effect.scoped(
@@ -34,12 +35,11 @@ export function keyringCommand(
     }),
   ).pipe(
     Effect.timeout(timeout),
-    Effect.mapError(() => new CliFailure(keyringMessage)),
+    Effect.mapError(() => new CliFailure(message)),
   );
 }
 
-export function requireKeyringSuccess(result: { status: number }) {
-  return result.status === 0
-    ? Effect.void
-    : Effect.fail(new CliFailure(keyringMessage));
+export function requireKeyringSuccess(message: string) {
+  return (result: { status: number }) =>
+    result.status === 0 ? Effect.void : Effect.fail(new CliFailure(message));
 }

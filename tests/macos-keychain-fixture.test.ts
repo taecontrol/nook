@@ -17,7 +17,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Effect, type Scope } from 'effect';
 import { expect, it, vi } from 'vitest';
-import { lockSession } from '../apps/cli/src/session-lock.ts';
+import { macosLock } from '../apps/cli/src/session-lock.ts';
 import type { HostProcess } from '../scripts/lib/host-processes.ts';
 import { observeKeychains } from '../scripts/lib/macos-keychains.ts';
 import {
@@ -625,7 +625,7 @@ it.runIf(process.platform === 'darwin').each(['success', 'failure'])(
     const retained: FileHandle[] = [];
     vi.stubEnv('HOME', fixture.home);
     const acquire = (
-      lockSession as Effect.Effect<FileHandle, unknown, Scope.Scope>
+      macosLock as Effect.Effect<FileHandle, unknown, Scope.Scope>
     ).pipe(Effect.tap((handle) => Effect.sync(() => retained.push(handle))));
     try {
       const first = Effect.scoped(

@@ -1,22 +1,24 @@
 import { NodeServices } from '@effect/platform-node';
 import { Effect } from 'effect';
-import { Argument, CliError, Command, Flag } from 'effect/cli';
+import { Argument, CliError, Command } from 'effect/cli';
 import cliPackage from '../package.json' with { type: 'json' };
+import { declaration } from './arguments.ts';
 import { CliFailure } from './errors.ts';
+import { hostFor } from './host.ts';
 import { run } from './run.ts';
-import { runUsage } from './run-arguments.ts';
+import { runGrammar } from './run-arguments.ts';
 import { login, logout, mcpHeader, whoami } from './session.ts';
 import { vaultCheck, vaultList } from './vault.ts';
 import { vaultCreate } from './vault-create.ts';
-import { createUsage } from './vault-create-arguments.ts';
+import { createGrammar } from './vault-create-arguments.ts';
 
 type Usage = string | { readonly [command: string]: Usage };
 const usage: Usage = {
-  run: runUsage,
+  run: runGrammar.usage,
   vault: {
     check: 'nook vault check',
     list: 'nook vault list <bucket>',
-    create: createUsage,
+    create: createGrammar.usage,
   },
   login: 'nook login <url>',
   whoami: 'nook whoami',
@@ -49,9 +51,6 @@ function missingVaultBucket(args: readonly string[]) {
 function creatingVault(args: readonly string[]) {
   return args[0] === 'vault' && args[1] === 'create' && args[2] !== '--help';
 }
-function supportedPlatform(platform: NodeJS.Platform) {
-  return platform === 'linux' || platform === 'darwin';
-}
 
 export async function execute(
   args: string[],
@@ -63,40 +62,36 @@ export async function execute(
   const write =
     options.write ??
     ((message: string) => process.stdout.write(`${message}\n`));
-  const platform = options.platform ?? process.platform;
+  const host = hostFor(options.platform ?? process.platform);
   const writeError =
     args[0] === 'mcp-header'
       ? (message: string) => process.stderr.write(`${message}\n`)
       : write;
-  if (!supportedPlatform(platform)) {
+  if (!host) {
     write('The Nook CLI supports Linux and macOS only.');
     return 1;
   }
-  if (args[0] === 'run') return run(args.slice(1), write);
+  if (args[0] === 'run') return run(host, args.slice(1), write);
   if (missingVaultBucket(args)) {
     write(usageOf(['nook', 'vault', 'list']));
     return 1;
   }
   const command = Command.make('nook').pipe(
     Command.withSubcommands([
-      Command.make('run').pipe(
+      Command.make('run', declaration(runGrammar)).pipe(
         Command.withDescription('Run a command with audited secrets.'),
       ),
       Command.make('vault').pipe(
         Command.withSubcommands([
-          Command.make('check', {}, () => vaultCheck(write)).pipe(
+          Command.make('check', {}, () => vaultCheck(host, write)).pipe(
             Command.withDescription('Check the secrets mapped in nook.json.'),
           ),
           Command.make(
             'list',
             { bucket: Argument.String('bucket') },
-            ({ bucket }) => vaultList(bucket, write),
+            ({ bucket }) => vaultList(host, bucket, write),
           ),
-          Command.make('create', {
-            path: Argument.String('path'),
-            purpose: Flag.String('purpose'),
-            description: Flag.optional(Flag.String('description')),
-          }).pipe(
+          Command.make('create', declaration(createGrammar)).pipe(
             Command.withDescription(
               'Store a new secret from stdin without overwriting.',
             ),
@@ -104,11 +99,11 @@ export async function execute(
         ]),
       ),
       Command.make('login', { url: Argument.String('url') }, ({ url }) =>
-        login(url, write),
+        login(host, url, write),
       ),
-      Command.make('whoami', {}, () => whoami(write)),
-      Command.make('logout', {}, () => logout(write)),
-      Command.make('mcp-header', {}, () => mcpHeader(write)),
+      Command.make('whoami', {}, () => whoami(host, write)),
+      Command.make('logout', {}, () => logout(host, write)),
+      Command.make('mcp-header', {}, () => mcpHeader(host, write)),
       Command.make('version', {}, () =>
         Effect.sync(() =>
           write(JSON.stringify({ version: cliPackage.version })),
@@ -118,7 +113,7 @@ export async function execute(
   );
   return Effect.runPromise(
     (creatingVault(args)
-      ? vaultCreate(args.slice(2), write)
+      ? vaultCreate(host, args.slice(2), write)
       : Command.runWith(command, {
           version: cliPackage.version,
           renderErrors: false,

@@ -1,9 +1,18 @@
 import { Effect } from 'effect';
-import { CliFailure, keyringMessage } from './errors.ts';
+import { CliFailure } from './errors.ts';
 import { keyringCommand, requireKeyringSuccess } from './keyring-command.ts';
 
+export const keyringMessage =
+  'Nook keeps its token in the Secret Service keyring and could not use it. Install secret-tool (libsecret), unlock your keyring, and try again.';
+const requireSuccess = requireKeyringSuccess(keyringMessage);
 function secretTool(args: string[], input = '') {
-  return keyringCommand('secret-tool', args, '10 seconds', input);
+  return keyringCommand(
+    'secret-tool',
+    args,
+    '10 seconds',
+    keyringMessage,
+    input,
+  );
 }
 export const checkKeyring = Effect.gen(function* () {
   const nonce = crypto.randomUUID();
@@ -18,7 +27,7 @@ export const checkKeyring = Effect.gen(function* () {
     ],
     'ready',
   );
-  yield* requireKeyringSuccess(stored);
+  yield* requireSuccess(stored);
   const cleared = yield* secretTool([
     'clear',
     'service',
@@ -26,7 +35,7 @@ export const checkKeyring = Effect.gen(function* () {
     'nonce',
     nonce,
   ]);
-  yield* requireKeyringSuccess(cleared);
+  yield* requireSuccess(cleared);
 });
 export function readToken(url: string) {
   return secretTool(['lookup', 'service', 'nook', 'url', url]).pipe(
@@ -67,10 +76,10 @@ export function storeToken(url: string, machine: string, token: string) {
       url,
     ],
     token,
-  ).pipe(Effect.flatMap(requireKeyringSuccess));
+  ).pipe(Effect.flatMap(requireSuccess));
 }
 export function clearToken(url: string) {
   return secretTool(['clear', 'service', 'nook', 'url', url]).pipe(
-    Effect.flatMap(requireKeyringSuccess),
+    Effect.flatMap(requireSuccess),
   );
 }

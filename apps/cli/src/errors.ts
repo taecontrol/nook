@@ -1,3 +1,5 @@
+import { Effect } from 'effect';
+
 export class CliFailure extends Error {}
 export class NotLoggedIn extends CliFailure {}
 export function networkError(url: string) {
@@ -8,10 +10,10 @@ export function invalidToken(url: string) {
     `This machine's token is no longer valid. Run: nook logout && nook login ${url}`,
   );
 }
-export const keyringMessage =
-  process.platform === 'darwin'
-    ? 'Nook keeps its token in the macOS login keychain and could not use it. Unlock your login keychain and try again.'
-    : 'Nook keeps its token in the Secret Service keyring and could not use it. Install secret-tool (libsecret), unlock your keyring, and try again.';
+// Lifts a synchronous check whose only failure is a thrown CliFailure.
+export function tryCli<A>(check: () => A) {
+  return Effect.try({ try: check, catch: (error) => error as CliFailure });
+}
 export class ServerFailure {
   constructor(
     readonly tag: string,

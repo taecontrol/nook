@@ -1,5 +1,6 @@
 import { basename } from 'node:path';
 import { validateRunSecrets, validateSecretPath } from '@nook/contract';
+import { type Grammar, parseArguments } from './arguments.ts';
 import { CliFailure } from './errors.ts';
 import {
   isEnvironmentName,
@@ -8,9 +9,12 @@ import {
   type SecretMapping,
 } from './project-secrets.ts';
 
-export const runUsage =
-  'nook run --secret ENV=bucket/NAME --purpose "…" -- <command>';
-const usageFailure = () => new CliFailure(`Usage: ${runUsage}`);
+export const runGrammar: Grammar = {
+  usage: 'nook run --secret ENV=bucket/NAME --purpose "…" -- <command>',
+  positional: [],
+  flags: { secret: 'repeated', purpose: 'required' },
+  rest: 'command',
+};
 function mapping(value: string): SecretMapping {
   const separator = value.indexOf('=');
   const name = value.slice(0, separator);
@@ -23,31 +27,16 @@ function mapping(value: string): SecretMapping {
   if (invalid) throw new CliFailure(invalid);
   return { name, path };
 }
-function options(args: string[]) {
-  let purpose: string | undefined;
-  const secrets: SecretMapping[] = [];
-  for (let index = 0; index < args.length; index += 2) {
-    const flag = args[index];
-    const value = args[index + 1];
-    if (value === undefined) throw usageFailure();
-    if (flag === '--secret') secrets.push(mapping(value));
-    else if (flag === '--purpose' && purpose === undefined) purpose = value;
-    else throw usageFailure();
-  }
-  return { purpose, secrets };
-}
 export function parseRun(
   args: string[],
   workingDirectory: string,
   project?: ProjectSecrets,
 ) {
-  const separator = args.indexOf('--');
-  if (separator < 0 || separator === args.length - 1) throw usageFailure();
-  const { purpose, secrets } = options(args.slice(0, separator));
-  if (purpose === undefined) throw new CliFailure('A purpose is required.');
+  const { flags, rest: command } = parseArguments(runGrammar, args);
+  const [purpose] = flags.get('purpose') ?? [];
+  const secrets = (flags.get('secret') ?? []).map(mapping);
   requireUniqueNames(secrets);
   const mappings = mergeMappings(project, secrets);
-  const command = args.slice(separator + 1);
   const input = {
     purpose,
     workingDirectory,
@@ -71,7 +60,7 @@ function mergeMappings(
     throw new CliFailure(
       project
         ? `No secrets are mapped in ${project.file}.`
-        : `Usage: ${runUsage}`,
+        : `Usage: ${runGrammar.usage}`,
     );
   requireMappingLimit(mappings, project?.file);
   return mappings;

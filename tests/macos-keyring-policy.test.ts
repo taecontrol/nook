@@ -6,9 +6,7 @@ import { readMachineName, readToken } from '../apps/cli/src/keyring-macos.ts';
 // Native keychain acceptance stays in macos-cli.test.ts. These transcripts cover
 // malformed/error responses that a healthy private keychain cannot produce.
 const failure =
-  process.platform === 'darwin'
-    ? 'Nook keeps its token in the macOS login keychain and could not use it. Unlock your login keychain and try again.'
-    : 'Nook keeps its token in the Secret Service keyring and could not use it. Install secret-tool (libsecret), unlock your keyring, and try again.';
+  'Nook keeps its token in the macOS login keychain and could not use it. Unlock your login keychain and try again.';
 const origin = 'https://synthetic.nook.test';
 
 async function securityResult<A>(
