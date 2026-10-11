@@ -4,7 +4,7 @@ import {
   validateBucketPath,
 } from '@nook/contract';
 import { Effect } from 'effect';
-import { CliFailure, invalidToken, type ServerFailure } from './errors.ts';
+import { CliFailure, type RequestFailure } from './errors.ts';
 import {
   currentDirectory,
   projectSecrets,
@@ -12,25 +12,24 @@ import {
 } from './project-secrets.ts';
 import { session } from './session.ts';
 
-function listFailure(error: ServerFailure, url: string) {
-  if (error.tag === 'Unauthorized') return invalidToken(url);
-  if (error.tag === 'Forbidden')
+function listFailure(error: RequestFailure) {
+  if (error.server.tag === 'Forbidden')
     return new CliFailure('Access to this bucket is forbidden.');
-  if (error.tag === 'BucketNotFound')
+  if (error.server.tag === 'BucketNotFound')
     return new CliFailure('Bucket not found.');
-  return new CliFailure(`Could not reach ${url}. Try again.`);
+  return error;
 }
 export function vaultList(bucket: string, write: (message: string) => void) {
   return Effect.gen(function* () {
     const message = validateBucketPath(bucket);
     if (message) return yield* Effect.fail(new CliFailure(message));
-    const { url, token, request } = yield* session;
-    const { secrets } = yield* request((api) =>
+    const { request } = yield* session;
+    const { secrets } = yield* request((api, headers) =>
       api.machine.secrets({
-        headers: { authorization: `Bearer ${token}` },
+        headers,
         query: { bucket },
       }),
-    ).pipe(Effect.mapError((error) => listFailure(error, url)));
+    ).pipe(Effect.mapError(listFailure));
     if (secrets.length === 0) {
       write(`No secrets visible from ${bucket}.`);
       return;
@@ -45,17 +44,16 @@ export function vaultList(bucket: string, write: (message: string) => void) {
 }
 type Availability = Set<string> | 'not found' | "outside this machine's grant";
 function availability(
-  operation: Effect.Effect<{ secrets: readonly Secret[] }, ServerFailure>,
-  url: string,
+  operation: Effect.Effect<{ secrets: readonly Secret[] }, RequestFailure>,
 ): Effect.Effect<Availability, CliFailure> {
   return operation.pipe(
     Effect.map(({ secrets }) => new Set(secrets.map(({ path }) => path))),
     Effect.catch((error) => {
-      if (error.tag === 'Forbidden')
+      if (error.server.tag === 'Forbidden')
         return Effect.succeed("outside this machine's grant" as const);
-      if (error.tag === 'BucketNotFound')
+      if (error.server.tag === 'BucketNotFound')
         return Effect.succeed('not found' as const);
-      return Effect.fail(listFailure(error, url));
+      return Effect.fail(error);
     }),
   );
 }
@@ -82,17 +80,16 @@ export function vaultCheck(write: (message: string) => void) {
       write(summary);
       return;
     }
-    const { url, token, request } = yield* session;
+    const { request } = yield* session;
     const listed = new Map(
       yield* Effect.forEach(buckets, (bucket) =>
         availability(
-          request((api) =>
+          request((api, headers) =>
             api.machine.secrets({
-              headers: { authorization: `Bearer ${token}` },
+              headers,
               query: { bucket },
             }),
           ),
-          url,
         ).pipe(Effect.map((found) => [bucket, found] as const)),
       ),
     );

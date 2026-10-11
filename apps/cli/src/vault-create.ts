@@ -1,26 +1,25 @@
 import { randomUUID } from 'node:crypto';
-import { realpath } from 'node:fs/promises';
 import {
   type CreateMachineSecret,
   validateWorkingDirectory,
 } from '@nook/contract';
 import { Effect } from 'effect';
 import { readConfig } from './config.ts';
-import { CliFailure, invalidToken, type ServerFailure } from './errors.ts';
+import { CliFailure, NotLoggedIn, type RequestFailure } from './errors.ts';
+import { currentDirectory } from './project-secrets.ts';
 import { readSecretInput } from './secret-input.ts';
 import { session } from './session.ts';
 import { parseCreate } from './vault-create-arguments.ts';
 
-function refused(error: ServerFailure, path: string, url: string) {
-  if (error.tag === 'Unauthorized') return invalidToken(url);
-  if (error.tag === 'Forbidden')
+function refused(error: RequestFailure, path: string) {
+  if (error.server.tag === 'Forbidden')
     return new CliFailure(`Access to ${path} is forbidden.`);
-  if (error.message) return new CliFailure(error.message);
-  return new CliFailure(`Could not reach ${url}. Try again.`);
+  if (error.publicMessage) return new CliFailure(error.publicMessage);
+  return error;
 }
 const createSession = session.pipe(
   Effect.catch((error) =>
-    error.message.startsWith('Not logged in.')
+    error instanceof NotLoggedIn
       ? readConfig.pipe(
           Effect.flatMap((url) =>
             Effect.fail(
@@ -35,19 +34,19 @@ const createSession = session.pipe(
 );
 function store(input: CreateMachineSecret, path: string) {
   return Effect.gen(function* () {
-    const { url, token, request } = yield* createSession;
+    const { request } = yield* createSession;
     let unconfirmed = false;
     for (let attempt = 0; attempt < 3; attempt++) {
-      const result = yield* request((api) =>
+      const result = yield* request((api, headers) =>
         api.machine.createSecret({
-          headers: { authorization: `Bearer ${token}` },
+          headers,
           payload: input,
         }),
       ).pipe(Effect.result);
       if (result._tag === 'Success') return;
-      if (!result.failure.retryable) {
+      if (!result.failure.server.retryable) {
         if (!unconfirmed)
-          return yield* Effect.fail(refused(result.failure, path, url));
+          return yield* Effect.fail(refused(result.failure, path));
         break;
       }
       unconfirmed = true;
@@ -66,10 +65,7 @@ export function vaultCreate(
       try: () => parseCreate(args),
       catch: (error) => error as CliFailure,
     });
-    const workingDirectory = yield* Effect.tryPromise({
-      try: () => realpath(process.cwd()),
-      catch: () => new CliFailure('Could not resolve the working directory.'),
-    });
+    const workingDirectory = yield* currentDirectory;
     const message = validateWorkingDirectory(workingDirectory);
     if (message) return yield* Effect.fail(new CliFailure(message));
     const value = yield* readSecretInput(parsed.path);

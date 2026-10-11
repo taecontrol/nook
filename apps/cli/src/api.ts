@@ -4,6 +4,8 @@ import { FetchHttpClient, HttpClientError } from 'effect/http';
 import { HttpApiClient } from 'effect/http-api';
 import { ServerFailure } from './errors.ts';
 
+export type MachineClient = HttpApiClient.ForApi<typeof MachineApi>;
+
 export function machineApi(url: string) {
   const client = HttpApiClient.make(MachineApi, { baseUrl: url });
   return function request<A, E>(
