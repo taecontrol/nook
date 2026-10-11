@@ -1,9 +1,19 @@
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
+import { ownerRuntime } from './support/authorizations.ts';
 import { issueGrant } from './support/grants.ts';
-import { accessPage, editAccess } from './support/machine-access.ts';
-import { deferred, listMachines, machineIdentity } from './support/machines.ts';
+import {
+  accessPage,
+  editAccess,
+  saveAccess,
+} from './support/machine-access.ts';
+import {
+  deferred,
+  listMachines,
+  machineIdentity,
+  revokeMachine,
+} from './support/machines.ts';
 import { machineRow } from './support/machines-browser.ts';
 
 let browser: Browser;
@@ -163,6 +173,167 @@ it('E11: a successful save applies real machine activity facts before the recove
   } finally {
     write.resolve();
     read.resolve();
+    await visit.close();
+  }
+});
+
+it.each([404, 409])(
+  'E12: a genuine %s reconciles the row and presents its alert before the recovery list',
+  async (status) => {
+    const visit = await accessPage(browser);
+    const read = deferred();
+    const recovery = deferred();
+    try {
+      const machine = visit.machines[0];
+      const sheet = await editAccess(visit.page, machine);
+      await sheet
+        .getByRole('checkbox', { name: 'work/beta', exact: true })
+        .check();
+      const elsewhere =
+        status === 404
+          ? await revokeMachine(visit.app, machine.id)
+          : await saveAccess(
+              visit.app,
+              machine.id,
+              ['work/acme', 'work/taecontrol'],
+              ['work/acme'],
+            );
+      expect(elsewhere.status).toBe(status === 404 ? 204 : 200);
+      await visit.page.route('**/api/machines', async (route) => {
+        recovery.resolve();
+        await read.promise;
+        await route.continue().catch(() => {});
+      });
+      const response = visit.page.waitForResponse((response) =>
+        response.url().endsWith('/grant'),
+      );
+      await sheet
+        .getByRole('button', { name: 'Save access', exact: true })
+        .click();
+      expect((await response).status()).toBe(status);
+      await recovery.promise;
+      const row = machineRow(visit.page, machine.id);
+      if (status === 404) await expect.poll(() => row.count()).toBe(0);
+      else
+        await expect
+          .poll(() => row.innerText())
+          .toContain('work/acme, work/taecontrol');
+      expect(
+        await machineRow(visit.page, visit.machines[2].id).innerText(),
+      ).toContain('Access: personal/finances');
+      const alert = sheet.getByRole('alert');
+      await expect
+        .poll(() => alert.innerText())
+        .toContain(status === 404 ? 'was revoked' : 'Access changed elsewhere');
+      await expect
+        .poll(() =>
+          alert.evaluate((element) => element === document.activeElement),
+        )
+        .toBe(true);
+      if (status === 409)
+        expect(
+          await sheet
+            .getByRole('checkbox', { name: 'work/beta', exact: true })
+            .isChecked(),
+        ).toBe(true);
+      else
+        expect(
+          await sheet
+            .getByRole('button', { name: 'Close', exact: true })
+            .count(),
+        ).toBe(2);
+    } finally {
+      read.resolve();
+      await visit.close();
+    }
+  },
+);
+
+it('E12: a failed retry keeps the last confirmed cache after an unconfirmed commit', async () => {
+  let attempts = 0;
+  const visit = await accessPage(browser, {
+    configure: async (page) => {
+      await page.route('**/api/machines/*/grant', async (route) => {
+        if (++attempts === 1) {
+          const response = await route.fetch();
+          expect(response.status()).toBe(200);
+          await route.abort('failed');
+        } else await route.continue();
+      });
+    },
+  });
+  const read = deferred();
+  const recovery = deferred();
+  try {
+    const machine = visit.machines[0];
+    const sheet = await editAccess(visit.page, machine);
+    await sheet
+      .getByRole('checkbox', { name: 'work/beta', exact: true })
+      .check();
+    await sheet
+      .getByRole('button', { name: 'Save access', exact: true })
+      .click();
+    await sheet
+      .getByRole('button', { name: 'Try again', exact: true })
+      .waitFor();
+    const row = machineRow(visit.page, machine.id);
+    await expect.poll(() => row.innerText()).toContain('work/acme, work/beta');
+    await (await visit.app.mf.getD1Database('DB'))
+      .prepare(
+        "CREATE TRIGGER retry_failure BEFORE UPDATE ON machine_tokens BEGIN SELECT RAISE(ABORT, 'Synthetic private failure'); END",
+      )
+      .run();
+    await visit.page.route('**/api/machines', async (route) => {
+      recovery.resolve();
+      await read.promise;
+      await route.continue().catch(() => {});
+    });
+    const response = visit.page.waitForResponse((response) =>
+      response.url().endsWith('/grant'),
+    );
+    await sheet.getByRole('button', { name: 'Try again', exact: true }).click();
+    expect((await response).status()).toBe(503);
+    await recovery.promise;
+    expect(await row.innerText()).toContain('work/acme, work/beta');
+  } finally {
+    read.resolve();
+    await visit.close();
+  }
+});
+
+it('E12: a definitive owner session failure asks for sign-in and retains the draft', async () => {
+  const visit = await accessPage(browser);
+  try {
+    const sheet = await editAccess(visit.page, visit.machines[0]);
+    await sheet
+      .getByRole('checkbox', { name: 'work/beta', exact: true })
+      .check();
+    await visit.app.setBindings({
+      LOCAL_OWNER: '',
+      LOCAL_ORIGIN: visit.app.origin,
+    });
+    const response = visit.page.waitForResponse((response) =>
+      response.url().endsWith('/grant'),
+    );
+    await sheet
+      .getByRole('button', { name: 'Save access', exact: true })
+      .click();
+    expect((await response).status()).toBe(401);
+    await expect
+      .poll(() => sheet.getByRole('alert').innerText())
+      .toContain('Sign in again');
+    expect(
+      await sheet
+        .getByRole('checkbox', { name: 'work/beta', exact: true })
+        .isChecked(),
+    ).toBe(true);
+    await ownerRuntime(visit.app);
+    expect(
+      (await listMachines(visit.app)).find(
+        (entry) => entry.id === visit.machines[0].id,
+      )?.grant,
+    ).toEqual(['work/acme']);
+  } finally {
     await visit.close();
   }
 });
