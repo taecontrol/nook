@@ -25,6 +25,7 @@ const screens = [
   ['auditNavigation', 'Intent navigation /audit', 100],
   ['memoryNavigation', 'Intent navigation /memory', 100],
   ['approvalNavigation', 'Loaded approval tree', 100],
+  ['machineAccessNavigation', 'Loaded machine access tree', 100],
 ] as const;
 type Screen = (typeof screens)[number][0];
 // Measurements requires every screen, so a new one fails type checking here.

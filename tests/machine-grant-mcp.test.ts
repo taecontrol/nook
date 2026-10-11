@@ -10,6 +10,7 @@ import {
   machineMcp,
   seedGrantTree,
 } from './support/grants.ts';
+import { saveAccess } from './support/machine-access.ts';
 import {
   expectPrivate,
   listMachines,
@@ -428,3 +429,79 @@ it('E18: responses and runtime logs exclude credentials even when genuine D1 fai
   expectPrivate(await response.text(), [token, hash]);
   expectPrivate(log.messages.join('\n'), [token, hash]);
 });
+
+it.each(['2026-07-28', '2025-06-18'] as const)(
+  'Access E1/E2: %s MCP adopts added and removed roots on the very next request with the same token',
+  async (version) => {
+    await seedGrantTree(app, ['work/beta']);
+    const { token } = await issueGrant(app, ['work/acme']);
+    const [machine] = await listMachines(app);
+    const driver = machineMcp(app, token, version);
+    expectToolError(
+      await driver.call('create_bucket', { path: 'work/beta/new' }),
+      forbidden,
+    );
+    expect(
+      (
+        await saveAccess(
+          app,
+          machine.id,
+          ['work/acme', 'work/beta'],
+          ['work/acme'],
+        )
+      ).status,
+    ).toBe(200);
+    expectToolSuccess(
+      await driver.call('create_bucket', { path: 'work/beta/new' }),
+      { path: 'work/beta/new', created: true, createdAncestors: [] },
+    );
+    expect(
+      (
+        await saveAccess(
+          app,
+          machine.id,
+          ['clients/acme-logistics', 'work/taecontrol/nook'],
+          ['work/acme', 'work/beta'],
+        )
+      ).status,
+    ).toBe(200);
+    expectToolSuccess(
+      await driver.call('list_secrets', { bucket: 'clients/acme-logistics' }),
+      { secrets: [] },
+    );
+    expect(
+      (
+        await saveAccess(
+          app,
+          machine.id,
+          ['work/taecontrol/nook'],
+          ['clients/acme-logistics', 'work/taecontrol/nook'],
+        )
+      ).status,
+    ).toBe(200);
+    const before = await bucketRows();
+    expectToolError(
+      await driver.call('list_secrets', { bucket: 'clients/acme-logistics' }),
+      forbidden,
+    );
+    expectToolError(
+      await driver.call('create_bucket', {
+        path: 'clients/acme-logistics/new',
+      }),
+      forbidden,
+    );
+    expectToolError(
+      await driver.call('delete_bucket', { path: 'clients/acme-logistics' }),
+      forbidden,
+    );
+    expect(await bucketRows()).toEqual(before);
+    expectToolSuccess(
+      await driver.call('list_secrets', { bucket: 'work/taecontrol/nook' }),
+      { secrets: [] },
+    );
+    expectToolSuccess(
+      await driver.call('create_bucket', { path: 'work/taecontrol/nook/new' }),
+      { path: 'work/taecontrol/nook/new', created: true, createdAncestors: [] },
+    );
+  },
+);
