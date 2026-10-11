@@ -9,6 +9,7 @@ const { runtime } = await startRuntime({
   port,
   directory: process.env.NOOK_BUILD ?? '.local/test-build',
   syntheticOwner: true,
+  strictEmbeddings: process.argv.includes('--strict-embeddings'),
   bindings: { VAULT_KEY: randomBytes(32).toString('base64') },
   coverage: Boolean(process.env.COVERAGE_RUN),
 });

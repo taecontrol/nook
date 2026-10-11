@@ -14,25 +14,13 @@ import {
 import { Item, ItemContent, ItemTitle } from '@/components/ui/item';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError } from './api-client';
+import { absoluteTime, principalName, relativeTime } from './memory-format';
 import { MemoryMarkdown } from './memory-markdown';
+import { ColumnSummary, SearchBody, SearchField } from './memory-search';
 import { type MemoryPageModel, useMemoryPage } from './use-memory-page';
 import { BucketTree, BucketTreeSkeleton } from './vault-tree';
 import './memory.css';
 
-function principalName(memory: Memory | MemoryListItem) {
-  return memory.provenance.principal.kind === 'owner'
-    ? 'Owner'
-    : memory.provenance.principal.name;
-}
-function relativeTime(value: string) {
-  const hours = Math.max(
-    1,
-    Math.floor((Date.now() - Date.parse(value)) / 3_600_000),
-  );
-  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
-}
-const absoluteTime = (value: string) =>
-  `${new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))} UTC`;
 function BucketNav({ model }: { model: MemoryPageModel }) {
   return (
     <nav aria-label="Memory buckets" data-memory-buckets className="px-3 pt-3">
@@ -60,6 +48,7 @@ function BucketNav({ model }: { model: MemoryPageModel }) {
             to="/memory"
             noun="memory"
             scope={model.scope}
+            query={model.q || undefined}
           />
         )}
       </div>
@@ -100,6 +89,7 @@ function MemoryRow({
             bucket: model.bucket,
             scope: model.scope,
             memory: memory.id,
+            q: model.q || undefined,
           }}
           data-memory-row={memory.id}
           data-inherited={inherited ? 'true' : undefined}
@@ -204,12 +194,6 @@ function ListBody({ model }: { model: MemoryPageModel }) {
   if (!model.records.length) return <EmptyList model={model} />;
   return (
     <>
-      <div className="border-b px-4 py-2 text-xs text-muted-foreground">
-        {model.total === null
-          ? `${model.records.length} memories loaded`
-          : `${model.total} memories`}{' '}
-        · newest first
-      </div>
       <ul>
         {model.records.map((memory) => (
           <MemoryRow key={memory.id} memory={memory} model={model} />
@@ -241,7 +225,10 @@ function MemoryList({ model }: { model: MemoryPageModel }) {
       )}
     >
       <div className="sticky top-0 z-10 border-b bg-background px-4 py-3">
-        <div className="font-mono text-sm font-semibold wrap-anywhere">
+        <div
+          title={model.bucket}
+          className="line-clamp-2 font-mono text-sm font-semibold wrap-anywhere"
+        >
           {model.bucket}
         </div>
         <p className="mt-0.5 text-xs text-muted-foreground">
@@ -249,7 +236,8 @@ function MemoryList({ model }: { model: MemoryPageModel }) {
             ? 'Memories here and from ancestors'
             : 'Memories stored in this bucket'}
         </p>
-        <fieldset className="mt-3 flex gap-1" aria-label="Memory scope">
+        <SearchField model={model} />
+        <fieldset className="mt-2 flex gap-1" aria-label="Memory scope">
           <Button
             variant={model.scope === 'bucket' ? 'secondary' : 'ghost'}
             size="xs"
@@ -268,7 +256,12 @@ function MemoryList({ model }: { model: MemoryPageModel }) {
           </Button>
         </fieldset>
       </div>
-      <ListBody model={model} />
+      <ColumnSummary model={model} />
+      {model.searching ? (
+        <SearchBody model={model} />
+      ) : (
+        <ListBody model={model} />
+      )}
     </section>
   );
 }
@@ -370,10 +363,14 @@ function MemoryBack({ model }: { model: MemoryPageModel }) {
       <Button asChild variant="ghost" size="sm">
         <Link
           to="/memory"
-          search={{ bucket: model.bucket, scope: model.scope }}
+          search={{
+            bucket: model.bucket,
+            scope: model.scope,
+            q: model.q || undefined,
+          }}
         >
           <ArrowLeft />
-          Memories
+          {model.q ? 'Results' : 'Memories'}
         </Link>
       </Button>
     </div>
@@ -424,6 +421,38 @@ function ReadingPane({ model }: { model: MemoryPageModel }) {
     </article>
   );
 }
+function PhoneBucketsLink({ model }: { model: MemoryPageModel }) {
+  return (
+    <div className={cn('mt-6 lg:hidden', model.detailOpen && 'hidden')}>
+      <Button asChild variant="ghost" size="sm">
+        <Link
+          to="/memory"
+          search={
+            model.browse
+              ? {
+                  bucket: model.bucket,
+                  scope: model.scope,
+                  q: model.q || undefined,
+                }
+              : { scope: model.scope, q: model.q || undefined }
+          }
+        >
+          {model.browse ? (
+            <>
+              <ArrowLeft />
+              {model.bucket}
+            </>
+          ) : (
+            <>
+              All buckets
+              <ChevronRight />
+            </>
+          )}
+        </Link>
+      </Button>
+    </div>
+  );
+}
 export function MemoryPage() {
   const model = useMemoryPage();
   return (
@@ -434,30 +463,7 @@ export function MemoryPage() {
           Read what agents stored in a bucket and the buckets above it.
         </p>
       </div>
-      <div className={cn('mt-6 lg:hidden', model.detailOpen && 'hidden')}>
-        <Button asChild variant="ghost" size="sm">
-          <Link
-            to="/memory"
-            search={
-              model.browse
-                ? { bucket: model.bucket, scope: model.scope }
-                : { scope: model.scope }
-            }
-          >
-            {model.browse ? (
-              <>
-                <ArrowLeft />
-                {model.bucket}
-              </>
-            ) : (
-              <>
-                All buckets
-                <ChevronRight />
-              </>
-            )}
-          </Link>
-        </Button>
-      </div>
+      <PhoneBucketsLink model={model} />
       <div
         data-memory-layout
         className="mt-4 overflow-hidden rounded-lg border lg:mt-7"

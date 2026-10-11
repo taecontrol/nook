@@ -53,6 +53,7 @@ it('E17: debounce and Enter put q in the URL; reload, selection, Back, scope and
         .evaluate((node) => node === document.activeElement),
     ).toBe(true);
     await page.keyboard.press('ArrowUp');
+    await page.locator(`[data-search-result="${memoryId(20)}"]`).focus();
     await page.keyboard.press('Enter');
     await page
       .getByRole('heading', { name: 'Proceso de release', exact: true })
@@ -187,9 +188,12 @@ it.each([
           .locator('[data-search-results]')
           .evaluate((node) => getComputedStyle(node).opacity),
       ).toBe('0.5');
-      expect(await page.locator('search [data-slot="spinner"]').count()).toBe(
-        1,
-      );
+      expect(
+        await page
+          .locator('search')
+          .getByRole('status', { name: 'Loading', exact: true })
+          .count(),
+      ).toBe(1);
       expect(await columnBoxes(page)).toEqual(idle);
       gate.resolve();
       await page.unroute('**/api/memories/search?*');
@@ -279,7 +283,7 @@ it('E17 phone: a result opens the reading pane and Results returns with q intact
     start: '/memory?bucket=work/acme&q=how%20do%20we%20deploy',
   });
   try {
-    await rows(visit.page).first().click();
+    await visit.page.locator(`[data-search-result="${memoryId(20)}"]`).click();
     await visit.page
       .getByRole('heading', { name: 'Proceso de release', exact: true })
       .waitFor();

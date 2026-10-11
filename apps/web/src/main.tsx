@@ -73,6 +73,9 @@ const router = createRouter({
           ...(search.scope === 'bucket' || search.scope === 'inherited'
             ? { scope: search.scope }
             : {}),
+          ...(typeof search.q === 'string' && search.q.trim()
+            ? { q: search.q }
+            : {}),
         }),
         loaderDeps: ({ search }) => search,
         loader: ({ context, deps }) => {

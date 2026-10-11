@@ -1,7 +1,9 @@
 import { resolve } from 'node:path';
+import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 import { unstable_readConfig } from 'wrangler';
 import { applyMigrations } from './lib/migrations.ts';
+import { embeddingRecordings, SearchStandIns } from './search-stand-ins.ts';
 
 export function runtimeOptions(options: {
   port: number;
@@ -9,6 +11,7 @@ export function runtimeOptions(options: {
   configPath?: string;
   bindings?: Record<string, string>;
   syntheticOwner?: boolean;
+  strictEmbeddings?: boolean;
   coverage?: boolean;
   outboundService?: (request: Request) => Promise<Response>;
 }) {
@@ -32,6 +35,7 @@ export function runtimeOptions(options: {
     scriptPath: resolve(options.directory, 'worker.js'),
     compatibilityDate: config.compatibility_date,
     compatibilityFlags: config.compatibility_flags,
+    cf: false as const,
     bindings,
     d1Databases: (config.d1_databases ?? []).map(
       (database: { binding: string }) => database.binding,
@@ -57,10 +61,46 @@ export function runtimeOptions(options: {
   };
 }
 
+async function localSettings(
+  settings: ReturnType<typeof runtimeOptions>,
+  strict: boolean,
+) {
+  const services = new SearchStandIns(await embeddingRecordings(), strict);
+  services.autoAdvance = true;
+  const bundle = await build({
+    stdin: {
+      contents: `import worker from ${JSON.stringify(settings.scriptPath)}; import { localSearchWorker } from ${JSON.stringify(resolve('scripts/local-search-worker.ts'))}; export default localSearchWorker(worker);`,
+      resolveDir: process.cwd(),
+    },
+    write: false,
+    bundle: true,
+    format: 'esm',
+    platform: 'neutral',
+    conditions: ['workerd', 'worker', 'browser'],
+    external: ['node:*', 'cloudflare:*'],
+    target: 'es2023',
+  });
+  const { scriptPath: _scriptPath, ...rest } = settings;
+  return {
+    ...rest,
+    script: bundle.outputFiles[0].text,
+    bindings: {
+      EMBEDDING_MODEL: '@cf/baai/bge-m3',
+      ...settings.bindings,
+    } as Record<string, string>,
+    serviceBindings: {
+      NOOK_LOCAL_SEARCH: (request: Request) => services.fetch(request),
+    },
+  };
+}
+
 export async function startRuntime(
   options: Parameters<typeof runtimeOptions>[0],
 ) {
-  const settings = runtimeOptions(options);
+  const configured = runtimeOptions(options);
+  const settings = options.syntheticOwner
+    ? await localSettings(configured, options.strictEmbeddings ?? false)
+    : configured;
   const runtime = new Miniflare(settings);
   try {
     await runtime.ready;

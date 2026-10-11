@@ -17,6 +17,7 @@ type TreeState = {
   to: '/vault' | '/memory';
   noun: 'secret' | 'memory';
   scope: MemoryScope;
+  query?: string;
   /** The bucket shown on the right; null on a phone's bucket list. */
   selected: string | null;
   counts: Map<string, number> | null;
@@ -51,7 +52,7 @@ function Count({ path, state }: { path: string; state: TreeState }) {
 
 function bucketSearch(state: TreeState, path: string) {
   return state.to === '/memory'
-    ? { bucket: path, scope: state.scope }
+    ? { bucket: path, scope: state.scope, q: state.query }
     : { bucket: path };
 }
 
@@ -147,6 +148,7 @@ export function BucketTree({
   to = '/vault',
   noun = 'secret',
   scope = 'inherited',
+  query,
 }: {
   buckets: readonly string[];
   selected: string | null;
@@ -155,6 +157,7 @@ export function BucketTree({
   to?: '/vault' | '/memory';
   noun?: 'secret' | 'memory';
   scope?: MemoryScope;
+  query?: string;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const nodes = useMemo(
@@ -176,6 +179,7 @@ export function BucketTree({
     to,
     noun,
     scope,
+    query,
     selected,
     counts,
     loading,

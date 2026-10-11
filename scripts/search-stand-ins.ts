@@ -70,10 +70,12 @@ export class SearchStandIns {
   indexes = new Set(['bucket']);
   private written = new Map<string, LocalVector & { indexed: Set<string> }>();
   private visible = new Map<string, LocalVector & { indexed: Set<string> }>();
-  constructor(
-    private recordings?: EmbeddingRecordings,
-    private strict = true,
-  ) {}
+  private recordings: EmbeddingRecordings | undefined;
+  private strict: boolean;
+  constructor(recordings?: EmbeddingRecordings, strict = true) {
+    this.recordings = recordings;
+    this.strict = strict;
+  }
   resetCalls() {
     this.embeddingCalls = [];
     this.queries = [];

@@ -259,7 +259,7 @@ Issue #10 runs against the migrated production Worker in workerd and real local 
 | E9 | `memory-mcp.test.ts`: denied, missing and malformed ids share the not-found result; ancestors remain readable. |
 | E10 | `memory-mcp.test.ts`: missing bucket creates no rows. |
 | E11 | `memory-mcp.test.ts`: exact UTF-8 byte limit, Unicode, NUL, tags and directory boundaries. |
-| E12 | `memory-mcp.test.ts`, `mcp-worker.test.ts`: tool descriptions, annotations and the four preserved tools plus get/remember. Existing transport, grant, CLI-header and Vault-reveal tests require that six-tool inventory. |
+| E12 | `memory-mcp.test.ts`, `mcp-worker.test.ts`: tool descriptions, annotations and the four preserved tools plus get/remember. Search delivery adds `search`; transport, grant, CLI-header and Vault-reveal tests now require the seven-tool inventory. |
 | E13 | `memory-mcp.test.ts`: revocation rejects writes and retains machine provenance. |
 | E14 | `memory-mcp.test.ts`, `memory-worker.test.ts`: real D1 and corrupt persisted ordering/encoding failures return fixed private errors. |
 | E15 | `memory-worker.test.ts`: HTTP/MCP deletion blockers, precedence and direct foreign-key enforcement. |
@@ -289,5 +289,28 @@ Paging cursors are versioned, checksummed Base64url JSON bound to the bucket, sc
 The 28 viewport PNGs and two full phone detail PNGs are `memory-*` files in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. The selected hybrid's three independent desktop columns, shared Vault bucket tree, phone push flow, scope toggle, and nonclickable image chip are the visual reference. Captures omit the prototype scenario selector. A plain first heading already shown in full by the detail title is omitted from the body; long, multiline and formatted headings are retained. Long row titles remain available through the link's title attribute.
 
 The load-time stage uses the unchanged 9 Mbps down, 3 Mbps up, 85 ms latency profile at 390×844, cache disabled, without CPU throttling. Cold `/memory?bucket=work/acme` must show real memory rows within 1000 ms. Home-to-Memory navigation after settled hover preloading must show the bucket tree within 100 ms. Both measurements use five animation-frame samples and fail independently when absent, malformed, or over budget.
+
+## Memory search
+
+Issue #11 uses the production Worker bundle, migrated D1, and its genuine scheduled handler under Miniflare. MCP tests cover both protocols and both owner and machine endpoints. Chromium uses the existing temporary-profile launcher and host-resource tripwire. `pnpm verify` needs no Cloudflare account or credential.
+
+| Example | Evidence |
+| --- | --- |
+| E1–E3 | `memory-search-mcp.test.ts`: recorded cross-language ranking, compact fields without content, exact words, accents, case and prefix matches. |
+| E4–E6 | The same MCP matrix: D1 lineage and grant enforcement, including a vector index that ignores its filter, missing/forbidden buckets, and all required tags. |
+| E7–E10 | The same matrix: exact validation messages, hostile FTS text, empty and capped results, sanitized real D1 failure, both meaning failures, and revoked tokens before AI/index calls. |
+| E11–E16 | `memory-search-sync.test.ts`: immediate keyword visibility, controlled delayed vectors, failed post-write repair, previous-schema backfill, 50-row Cron budget, model changes, stale/orphan filtering, guarded late writes, and duplicate/concurrent remembers. Every migrated fixture is found by keyword and meaning. |
+| E17–E19 | `memory-search-web.test.ts`: debounce/Enter, URL reload/Back/bucket/scope retention, keyboard movement, reader preservation, highlights/badges, twenty-result cap, genuine loading/error/retry, incomplete/empty/fresh states, and stable column positions at both widths. Phone content flows vertically; desktop column sizes and each fixed header stay unchanged. |
+| E20 | The idle browser case requires zero embedding/vector requests. Existing Memory load-time tests and `verify:load-time` retain the 1000 ms cold-open and 100 ms intent-navigation budgets. |
+| E21 | `memory-search-captures.test.ts`: eleven states × two sizes × two themes, 44 genuine-product PNGs. |
+| E22 | `tests/journeys/owner.e2e.ts`: deterministic strict-cache search and opening of the Spanish ancestor memory. |
+| E23 | `memory-search-deploy.test.ts`: the workflow's actual shell against a temporary command fixture, missing index/metadata combinations, idempotent reruns and ordering before deployment. |
+| E24 | Pending owner production acceptance in [deployment.md](../deployment.md#search-e24-owner-acceptance-after-merge-pending). |
+
+`tests/fixtures/bge-m3.json.gz` records exact-text embeddings from the authorized bge-m3 experiment. `scripts/record-search-fixtures.ts` is an explicit, separate recording tool and never runs in verification. The strict embedder rejects unrecorded input; `memory-search-stand-ins.test.ts` also proves the observed Vectorize metadata-index timing, replacement/insert behavior, delayed visibility and request limits. D1 round trips and AI/index calls are counted without recording SQL or bindings. Dense 16 KiB content, large bilingual content and six-level paths with valid 32-character segments are included.
+
+`pnpm dev` attaches these local services to Miniflare, using recorded vectors when available and deterministic non-semantic vectors for other text. The journey server passes `--strict-embeddings`. Neither local mode contacts Cloudflare; the decorator and stand-ins stay outside the deployed Worker bundle.
+
+The `memory-search-*.png` files live in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare them with the selected `inline` prototype: fixed list header/summary, three desktop columns, phone Results link, three-line snippets, highlighted exact words and quiet meaning badge. Captures use genuine ranks and counts rather than fabricated results. The degraded state uses `pnpm verify` for real keyword hits; the no-results state uses a not-yet-visible meaning index. Extremes use valid six-level, 32-character paths rather than the prototype's invalid 34-character segment. The scenario selector, request stubs and schema bypass do not enter production.
 
 `scripts/load-time-browser.ts` owns the browser measurement functions used by the production timing command and the measurement-condition tests. The latter run those same functions against the built product, proving the phone viewport, destination URL and visible first screen rather than accepting a finite duration from the wrong route.

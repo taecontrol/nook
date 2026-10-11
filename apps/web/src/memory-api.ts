@@ -49,10 +49,28 @@ export function memoryOptions(id: string) {
     staleTime: 30_000,
   });
 }
+export function memorySearchOptions(
+  bucket: string,
+  scope: MemoryScope,
+  q: string,
+) {
+  return queryOptions({
+    queryKey: ['memory-search', bucket, scope, q.trim()],
+    queryFn: ({ signal }) =>
+      runApi(
+        (api) => api.memories.search({ query: { bucket, scope, q: q.trim() } }),
+        signal,
+      ),
+    enabled: Boolean(q.trim()),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 export type MemorySearch = {
   bucket?: string;
   memory?: string;
   scope?: MemoryScope;
+  q?: string;
 };
 export function preloadMemory(queries: QueryClient, search: MemorySearch) {
   preloadBuckets(queries);
@@ -61,4 +79,12 @@ export function preloadMemory(queries: QueryClient, search: MemorySearch) {
     memoriesOptions(search.bucket ?? 'me', search.scope),
   );
   if (search.memory) void queries.prefetchQuery(memoryOptions(search.memory));
+  if (search.q?.trim())
+    void queries.prefetchQuery(
+      memorySearchOptions(
+        search.bucket ?? 'me',
+        search.scope ?? 'inherited',
+        search.q,
+      ),
+    );
 }

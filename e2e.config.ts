@@ -16,7 +16,14 @@ export default {
         url: 'http://127.0.0.1:0',
         command: {
           executable: 'pnpm',
-          args: ['exec', 'node', 'scripts/serve.ts', '--port', '{port}'],
+          args: [
+            'exec',
+            'node',
+            'scripts/serve.ts',
+            '--port',
+            '{port}',
+            '--strict-embeddings',
+          ],
           env: {
             NOOK_BUILD: process.env.NOOK_BUILD ?? '.local/test-build',
             COVERAGE_RUN: process.env.COVERAGE_RUN ?? '',
