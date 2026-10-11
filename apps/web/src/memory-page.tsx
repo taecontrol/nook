@@ -97,8 +97,6 @@ function MemoryRow({
           data-inherited={inherited ? 'true' : undefined}
           title={memory.title}
           aria-current={selected ? 'true' : undefined}
-          onMouseEnter={() => model.prefetch(memory.id)}
-          onFocus={() => model.prefetch(memory.id)}
         >
           <ItemContent className="min-w-0">
             <ItemTitle className="block min-w-0 max-w-full">

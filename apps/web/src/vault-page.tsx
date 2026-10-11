@@ -60,7 +60,9 @@ import { WriteFeedback } from './vault-feedback';
 import { ancestorsOf, plural, type Secret, secretsIn } from './vault-model';
 import { agentsIn, reachText, SecretSheet } from './vault-sheet';
 
-const RevealDialog = lazy(() => import('./reveal-dialog'));
+// Intent loads only the dialog's code; the value is fetched, and audited, on open.
+const loadRevealDialog = () => import('./reveal-dialog');
+const RevealDialog = lazy(loadRevealDialog);
 
 const sectionLabel =
   'text-xs font-medium tracking-wider text-muted-foreground uppercase';
@@ -89,6 +91,8 @@ function SecretMenu({
           variant="ghost"
           size="icon-sm"
           aria-label={`Actions for ${secretPath(secret)}`}
+          onPointerEnter={() => void loadRevealDialog()}
+          onFocus={() => void loadRevealDialog()}
         >
           <MoreHorizontal />
         </Button>

@@ -1,9 +1,5 @@
 import { type Memory, RESERVED_BUCKET, readLineage } from '@nook/contract';
-import {
-  useInfiniteQuery,
-  useQuery,
-  useQueryClient,
-} from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { useBucketList } from './buckets-api';
@@ -97,7 +93,6 @@ function useQueryDraft(q: string, navigate: (q: string | undefined) => void) {
 export function useMemoryPage() {
   const search = useSearch({ from: '/owner/memory' });
   const navigate = useNavigate({ from: '/memory' });
-  const queries = useQueryClient();
   const desktop = useDesktop();
   const bucket = search.bucket ?? RESERVED_BUCKET;
   const scope = search.scope ?? 'inherited';
@@ -170,7 +165,6 @@ export function useMemoryPage() {
         },
         replace: true,
       }),
-    prefetch: (id: string) => void queries.prefetchQuery(memoryOptions(id)),
   };
 }
 export type MemoryPageModel = ReturnType<typeof useMemoryPage>;

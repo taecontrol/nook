@@ -217,8 +217,6 @@ function SearchRow({
           data-search-result={result.id}
           aria-current={selected ? 'true' : undefined}
           title={result.title}
-          onMouseEnter={() => model.prefetch(result.id)}
-          onFocus={() => model.prefetch(result.id)}
           onKeyDown={(event) => resultKey(event, model)}
         >
           <ItemContent className="min-w-0">
