@@ -35,7 +35,7 @@ export function runtimeOptions(options: {
     scriptPath: resolve(options.directory, 'worker.js'),
     compatibilityDate: config.compatibility_date,
     compatibilityFlags: config.compatibility_flags,
-    cf: false as const,
+    cf: false as false | Record<string, unknown>,
     bindings,
     d1Databases: (config.d1_databases ?? []).map(
       (database: { binding: string }) => database.binding,

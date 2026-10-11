@@ -70,6 +70,10 @@ export async function searchRuntime() {
       async close() {
         try {
           await app.close();
+          expect(
+            services.missing.size,
+            'Unrecorded embeddings must fail acceptance',
+          ).toBe(0);
         } finally {
           await rm(directory, { recursive: true, force: true });
         }
