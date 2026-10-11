@@ -135,7 +135,10 @@ export function useSaveAccess() {
           : previous,
       );
     },
-    onSettled: () => refreshMachines(queries),
+    onSettled: () => {
+      // A confirmed response settles the editor even if recovery is delayed.
+      void refreshMachines(queries);
+    },
   });
   return {
     ...save,

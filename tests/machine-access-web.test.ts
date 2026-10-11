@@ -190,6 +190,49 @@ it.each(sizes)(
   },
 );
 
+it('E11: a confirmed save closes and returns focus while its recovery list is still pending', async () => {
+  const gate = deferred();
+  const entered = deferred();
+  const visit = await accessPage(browser);
+  const machine = visit.machines[0];
+  const row = machineRow(visit.page, machine.id);
+  try {
+    const sheet = await editAccess(visit.page, machine);
+    await visit.page.route('**/api/machines', async (route) => {
+      entered.resolve();
+      await gate.promise;
+      await route.continue().catch(() => {});
+    });
+    await sheet
+      .getByRole('checkbox', { name: 'work/beta', exact: true })
+      .check();
+    const response = visit.page.waitForResponse((response) =>
+      response.url().endsWith('/grant'),
+    );
+    await sheet
+      .getByRole('button', { name: 'Save access', exact: true })
+      .click();
+    expect((await response).status()).toBe(200);
+    await entered.promise;
+    expect(
+      (await listMachines(visit.app)).find((entry) => entry.id === machine.id)
+        ?.grant,
+    ).toEqual(['work/acme', 'work/beta']);
+    await sheet.waitFor({ state: 'hidden', timeout: 2_000 });
+    expect(await row.innerText()).toContain('Access saved');
+    await expect
+      .poll(() =>
+        row
+          .getByRole('button', { name: /Edit access/ })
+          .evaluate((button) => button === document.activeElement),
+      )
+      .toBe(true);
+  } finally {
+    gate.resolve();
+    await visit.close();
+  }
+});
+
 it('E12: an unconfirmed lost response retains the selection, reconciles the row, and safely retries the same request', async () => {
   let attempts = 0;
   const payloads: unknown[] = [];
