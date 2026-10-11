@@ -143,7 +143,7 @@ export async function privateMacKeychain(
     throw new Error('The macOS fixture requires macOS.');
   if (process.env.NOOK_TEST_MACOS_KEYCHAIN_BOOTSTRAP !== 'github-hosted')
     throw new Error(
-      'macOS CLI acceptance requires explicit disposable GitHub-hosted runner opt-in. Local Keychain creation is forbidden. See https://github.com/taecontrol/nook/issues/40.',
+      'macOS CLI acceptance requires explicit disposable GitHub-hosted runner opt-in. Local Keychain creation is forbidden. See https://github.com/taecontrol/nook/issues/22.',
     );
   const home = await realpath(
     await mkdtemp(resolve(options.tempRoot ?? '/tmp', 'nook-cli-')),
