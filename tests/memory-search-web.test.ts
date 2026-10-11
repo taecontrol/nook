@@ -323,6 +323,56 @@ it('E17: the debounce commits at 250 ms and Enter commits before the timer fires
     await visit.close();
   }
 });
+it('E17: result keys return focus and clear search; slash respects typing and modifiers', async () => {
+  const visit = await searchPage(browser, {
+    seeds: searchMemories,
+    start: '/memory?bucket=work/acme&q=how%20do%20we%20deploy',
+  });
+  try {
+    const { page } = visit;
+    await rows(page).first().waitFor();
+    await rows(page).first().focus();
+    await page.keyboard.press('ArrowUp');
+    expect(
+      await field(page).evaluate((node) => document.activeElement === node),
+    ).toBe(true);
+    await field(page).press('ArrowDown');
+    expect(
+      await rows(page)
+        .first()
+        .evaluate((node) => node === document.activeElement),
+    ).toBe(true);
+    await page.keyboard.press('Escape');
+    await memoryRows(page).first().waitFor();
+    expect(new URL(page.url()).searchParams.has('q')).toBe(false);
+    expect(
+      await field(page).evaluate((node) => document.activeElement === node),
+    ).toBe(true);
+    const scope = page.getByRole('button', {
+      name: 'Only this bucket',
+      exact: true,
+    });
+    await scope.focus();
+    for (const key of ['Control+/', 'Meta+/']) {
+      await page.keyboard.press(key);
+      expect(
+        await scope.evaluate((node) => document.activeElement === node),
+      ).toBe(true);
+    }
+    const time = new Date('2026-10-10T20:00:00Z');
+    await page.clock.install({ time });
+    await page.clock.pauseAt(new Date(time.getTime() + 1000));
+    await field(page).focus();
+    await field(page).press('/');
+    expect(await field(page).inputValue()).toBe('/');
+    await field(page).press('Escape');
+    expect(await field(page).inputValue()).toBe('');
+    expect(new URL(page.url()).searchParams.has('q')).toBe(false);
+    await page.clock.resume();
+  } finally {
+    await visit.close();
+  }
+});
 it('E17 phone: a result opens the reading pane and Results returns with q intact', async () => {
   const visit = await searchPage(browser, {
     seeds: searchMemories,
