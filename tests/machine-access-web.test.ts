@@ -802,6 +802,43 @@ it.each(sizes)(
         name: roots[0],
         exact: true,
       });
+      const now = sheet
+        .locator('[data-slot="sheet-header"] p')
+        .filter({ hasText: 'Now:' });
+      await now.hover();
+      await visit.page.mouse.wheel(0, 10_000);
+      await expect
+        .poll(() => now.evaluate((summary) => summary.scrollTop))
+        .toBeGreaterThan(0);
+      await expect
+        .poll(() =>
+          now.evaluate(
+            (summary, lastRoot) => {
+              const text = summary.querySelector('code')?.firstChild;
+              if (!text?.textContent || text.nodeType !== Node.TEXT_NODE)
+                return false;
+              const offset = text.textContent.lastIndexOf(lastRoot);
+              if (offset < 0) return false;
+              const range = document.createRange();
+              range.setStart(text, offset);
+              range.setEnd(text, offset + lastRoot.length);
+              const box = summary.getBoundingClientRect();
+              const lines = [...range.getClientRects()];
+              return (
+                lines.length > 0 &&
+                lines.every(
+                  (line) =>
+                    line.top >= box.top - 1 &&
+                    line.bottom <= box.bottom + 1 &&
+                    line.left >= box.left - 1 &&
+                    line.right <= box.right + 1,
+                )
+              );
+            },
+            roots[roots.length - 1],
+          ),
+        )
+        .toBe(true);
       const save = sheet.getByRole('button', {
         name: 'Save access',
         exact: true,
