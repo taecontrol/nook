@@ -91,9 +91,9 @@ it('every screen accepts its exact budget and prints its own median', () => {
 it.each(screens)(
   'an over-budget %s median fails for its own timing',
   (key, label, budget) => {
-    expect(() =>
-      assertLoadTimes({ ...atLimit, [key]: Array(5).fill(budget + 1) }),
-    ).toThrow(
+    // Two fast samples must not hide an over-budget median.
+    const over = [0, budget + 1, 0, budget + 1, budget + 1];
+    expect(() => assertLoadTimes({ ...atLimit, [key]: over })).toThrow(
       `${label} median ${(budget + 1).toFixed(1)} ms exceeds ${budget} ms.`,
     );
   },
