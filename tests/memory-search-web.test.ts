@@ -359,6 +359,11 @@ it('E17: result keys return focus and clear search; slash respects typing and mo
         await scope.evaluate((node) => document.activeElement === node),
       ).toBe(true);
     }
+    await page.keyboard.press('/');
+    expect(
+      await field(page).evaluate((node) => document.activeElement === node),
+    ).toBe(true);
+    expect(await field(page).inputValue()).toBe('');
     const time = new Date('2026-10-10T20:00:00Z');
     await page.clock.install({ time });
     await page.clock.pauseAt(new Date(time.getTime() + 1000));
