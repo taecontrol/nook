@@ -1,4 +1,8 @@
-import { type BucketGrant, normalizeGrant } from '@nook/contract';
+import {
+  type BucketGrant,
+  normalizeGrant,
+  RESERVED_BUCKET,
+} from '@nook/contract';
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { refreshBucketList, useBucketList } from './buckets-api';
@@ -6,7 +10,7 @@ import { refreshBucketList, useBucketList } from './buckets-api';
 export function useGrantSelection() {
   const queries = useQueryClient();
   const buckets = useBucketList();
-  const [roots, setRoots] = useState<readonly string[]>(['me']);
+  const [roots, setRoots] = useState<readonly string[]>([RESERVED_BUCKET]);
   const [all, setAll] = useState(false);
   const [error, setError] = useState<string>();
   const grant: BucketGrant = all ? 'all' : roots;
@@ -51,7 +55,7 @@ export function useGrantSelection() {
     },
     reset: () => {
       setAll(false);
-      change(['me']);
+      change([RESERVED_BUCKET]);
     },
     missing: async () => {
       setError('Some selected buckets no longer exist. Choose again.');

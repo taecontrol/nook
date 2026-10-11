@@ -1,18 +1,17 @@
-import { validateSecretDescription } from '@nook/contract';
+import {
+  RESERVED_BUCKET,
+  secretPath,
+  validateSecretDescription,
+  validateSecretName,
+  validateSecretValue,
+} from '@nook/contract';
 import { useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from './api-client';
 import { useBucketList } from './buckets-api';
-import { RESERVED } from './paths';
 import { type SecretWrite, unconfirmed, useVault } from './vault-api';
 import { feedbackFor } from './vault-feedback';
-import {
-  countByBucket,
-  type Secret,
-  secretPath,
-  validateName,
-  validateValue,
-} from './vault-model';
+import { countByBucket, type Secret } from './vault-model';
 import {
   type Draft,
   idleUi,
@@ -64,9 +63,9 @@ function fromDraft(draft: Draft): SecretWrite {
 }
 function invalidDraft(draft: Draft) {
   return (
-    (draft.mode === 'create' && validateName(draft.name)) ||
+    (draft.mode === 'create' && validateSecretName(draft.name)) ||
     validateSecretDescription(draft.description) ||
-    validateValue(draft.value)
+    validateSecretValue(draft.value)
   );
 }
 function knownDuplicate(draft: Draft, list: readonly Secret[]) {
@@ -132,7 +131,7 @@ export function useVaultPage() {
     [bucketsQuery.data],
   );
   const list = secrets.data;
-  const selected = search.bucket ?? RESERVED;
+  const selected = search.bucket ?? RESERVED_BUCKET;
   const drilled = search.bucket !== undefined;
   const parents = useMemo(
     () =>
@@ -183,7 +182,7 @@ export function useVaultPage() {
     patch({
       sheet: openSheet(
         blankDraft(
-          bucket ?? (buckets.includes(selected) ? selected : RESERVED),
+          bucket ?? (buckets.includes(selected) ? selected : RESERVED_BUCKET),
         ),
       ),
     });

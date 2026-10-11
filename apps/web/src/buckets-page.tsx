@@ -1,4 +1,4 @@
-import type { CreatedBucket } from '@nook/contract';
+import { bucketLineage, type CreatedBucket } from '@nook/contract';
 import {
   CircleAlert,
   CircleCheck,
@@ -51,7 +51,7 @@ import {
   OutlineSkeleton,
   type OutlineState,
 } from './outline';
-import { type CreatePlan, lineage, planCreate, validatePath } from './paths';
+import { type CreatePlan, planCreate, validatePath } from './paths';
 
 type Failure = { title: string; description: string };
 type Feedback =
@@ -251,7 +251,7 @@ function useBucketsPage() {
     if (reveal.length === 0) return collapsed;
     const next = new Set(collapsed);
     for (const path of reveal)
-      for (const prefix of lineage(path)) next.delete(prefix);
+      for (const prefix of bucketLineage(path)) next.delete(prefix);
     return next;
   }, [collapsed, previewPath, highlighted]);
 

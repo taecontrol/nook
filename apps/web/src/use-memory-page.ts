@@ -1,4 +1,4 @@
-import { type Memory, readLineage } from '@nook/contract';
+import { type Memory, RESERVED_BUCKET, readLineage } from '@nook/contract';
 import {
   useInfiniteQuery,
   useQuery,
@@ -66,7 +66,7 @@ export function useMemoryPage() {
   const navigate = useNavigate({ from: '/memory' });
   const queries = useQueryClient();
   const desktop = useDesktop();
-  const bucket = search.bucket ?? 'me';
+  const bucket = search.bucket ?? RESERVED_BUCKET;
   const scope = search.scope ?? 'inherited';
   const buckets = useBucketList();
   const countsQuery = useQuery(memoryCountsOptions);

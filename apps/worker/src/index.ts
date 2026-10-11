@@ -1,12 +1,16 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import { D1Client } from '@effect/sql-d1';
-import { Api, badRequestTags, secretLimits } from '@nook/contract';
+import {
+  Api,
+  type BucketGrant,
+  badRequestTags,
+  secretLimits,
+} from '@nook/contract';
 import { Effect, Layer } from 'effect';
 import { HttpRouter, HttpServer, HttpServerRequest } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
 import { auditStore } from './audit.ts';
 import { type AuthBindings, authenticate } from './auth.ts';
-import type { BucketGrant } from './authorization.ts';
 import { bucketOperations } from './buckets.ts';
 import {
   authorizationHandler,

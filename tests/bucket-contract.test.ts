@@ -1,7 +1,10 @@
 import { Schema } from 'effect';
 import { expect, it } from 'vitest';
-import { canRead, canWrite } from '../apps/worker/src/authorization.ts';
-import { BucketPath } from '../packages/contract/src/index.ts';
+import {
+  BucketPath,
+  canRead,
+  canWrite,
+} from '../packages/contract/src/index.ts';
 import { invalidPaths, validPaths } from './support/bucket-paths.ts';
 
 it.each(validPaths)('E1: the contract accepts %s', (path) => {

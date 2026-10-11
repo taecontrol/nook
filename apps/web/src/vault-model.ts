@@ -1,11 +1,6 @@
 import type { OwnerSecret } from '@nook/contract';
 import { secretLimits, secretLineage } from '@nook/contract';
 
-export {
-  secretPath,
-  validateSecretName as validateName,
-  validateSecretValue as validateValue,
-} from '@nook/contract';
 export type Secret = OwnerSecret;
 export const DESCRIPTION_MAX = secretLimits.description;
 export function ancestorsOf(bucket: string) {

@@ -1,4 +1,4 @@
-import type { MemoryScope } from '@nook/contract';
+import { type MemoryScope, RESERVED_BUCKET } from '@nook/contract';
 import {
   infiniteQueryOptions,
   type QueryClient,
@@ -58,7 +58,7 @@ export function preloadMemory(queries: QueryClient, search: MemorySearch) {
   preloadBuckets(queries);
   void queries.prefetchQuery(memoryCountsOptions);
   void queries.prefetchInfiniteQuery(
-    memoriesOptions(search.bucket ?? 'me', search.scope),
+    memoriesOptions(search.bucket ?? RESERVED_BUCKET, search.scope),
   );
   if (search.memory) void queries.prefetchQuery(memoryOptions(search.memory));
 }

@@ -1,4 +1,4 @@
-import type { CreatedBucket } from '@nook/contract';
+import { bucketLineage, type CreatedBucket } from '@nook/contract';
 import {
   type QueryClient,
   queryOptions,
@@ -7,7 +7,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import { runApi as run } from './api-client';
-import { lineage, sortBuckets } from './paths';
+import { sortBuckets } from './paths';
 import { createWriteGate } from './write-gate';
 
 const bucketsOptions = queryOptions({
@@ -51,7 +51,9 @@ function useCreateBucket() {
       await queryClient.cancelQueries({ queryKey: bucketsOptions.queryKey });
       const current = queryClient.getQueryData(bucketsOptions.queryKey) ?? [];
       const existing = new Set(current.map((bucket) => bucket.path));
-      const added = lineage(path).filter((prefix) => !existing.has(prefix));
+      const added = bucketLineage(path).filter(
+        (prefix) => !existing.has(prefix),
+      );
       const createdAt = new Date().toISOString();
       queryClient.setQueryData(bucketsOptions.queryKey, (buckets = []) =>
         sortBuckets([
