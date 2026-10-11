@@ -73,4 +73,13 @@ jobs:
             pnpm exec wrangler d1 create nook
           fi
           pnpm exec wrangler d1 migrations apply DB --remote
+          index=$(node --input-type=module -e 'import fs from "node:fs"; const config=JSON.parse(fs.readFileSync("wrangler.jsonc", "utf8")); console.log(config.vectorize.find(binding => binding.binding === "MEMORY_INDEX").index_name)')
+          indexes=$(pnpm exec wrangler vectorize list --json)
+          if ! printf '%s' "$indexes" | node --input-type=module -e 'let input=""; for await (const part of process.stdin) input+=part; process.exit(JSON.parse(input).some(index => index.name === process.argv[1]) ? 0 : 1)' "$index"; then
+            pnpm exec wrangler vectorize create "$index" --dimensions 1024 --metric cosine
+          fi
+          metadata=$(pnpm exec wrangler vectorize list-metadata-index "$index" --json)
+          if ! printf '%s' "$metadata" | node --input-type=module -e 'let input=""; for await (const part of process.stdin) input+=part; process.exit(JSON.parse(input).some(index => index.propertyName === "bucket" && index.indexType === "string") ? 0 : 1)'; then
+            pnpm exec wrangler vectorize create-metadata-index "$index" --property-name bucket --type string
+          fi
           pnpm exec wrangler deploy --domain "$NOOK_HOSTNAME"

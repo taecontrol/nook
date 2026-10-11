@@ -35,9 +35,9 @@ it('E23: deploy provisions both indexes only when missing and re-runs successful
       `#!/usr/bin/env node
 import { readFileSync, writeFileSync } from 'node:fs';
 const args = process.argv.slice(2);
-const state = JSON.parse(readFileSync(process.env.PROVISION_STATE, 'utf8'));
-const calls = JSON.parse(readFileSync(process.env.PROVISION_CALLS, 'utf8'));
-calls.push(args); writeFileSync(process.env.PROVISION_CALLS, JSON.stringify(calls));
+const state = JSON.parse(readFileSync(${JSON.stringify(state)}, 'utf8'));
+const calls = JSON.parse(readFileSync(${JSON.stringify(calls)}, 'utf8'));
+calls.push(args); writeFileSync(${JSON.stringify(calls)}, JSON.stringify(calls));
 const command = args.slice(2, 4).join(' ');
 if (command === 'd1 list') console.log(JSON.stringify([{ name: 'nook' }]));
 else if (command === 'vectorize list') console.log(JSON.stringify(state.index ? [{ name: 'nook-memories' }] : []));
@@ -45,7 +45,7 @@ else if (command === 'vectorize list-metadata-index') console.log(JSON.stringify
 else if (command === 'vectorize create') { if (state.index) process.exit(1); state.index = true; }
 else if (command === 'vectorize create-metadata-index') { if (!state.index || state.metadata) process.exit(1); state.metadata = true; }
 else if (args[2] === 'deploy' && (!state.index || !state.metadata)) process.exit(1);
-writeFileSync(process.env.PROVISION_STATE, JSON.stringify(state));
+writeFileSync(${JSON.stringify(state)}, JSON.stringify(state));
 `,
     );
     await chmod(resolve(directory, 'pnpm'), 0o755);
@@ -56,14 +56,12 @@ writeFileSync(process.env.PROVISION_STATE, JSON.stringify(state));
     ]) {
       await writeFile(state, JSON.stringify(initial));
       await writeFile(calls, '[]');
-      const result = spawnSync('bash', ['-e', '-c', step.run], {
+      // Only the test-owned shell receives these literal synthetic values;
+      // none of the owner's Cloudflare environment is inherited.
+      const shell = `export CLOUDFLARE_ACCOUNT_ID=synthetic-account NOOK_HOSTNAME=synthetic.nook.test CLOUDFLARE_API_TOKEN=synthetic-fixture\n${step.run}`;
+      const result = spawnSync('bash', ['-e', '-c', shell], {
         env: testEnvironment(resolve(directory, 'home'), {
           PATH: `${directory}${delimiter}${process.env.PATH}`,
-          CLOUDFLARE_ACCOUNT_ID: 'synthetic-account',
-          NOOK_HOSTNAME: 'synthetic.nook.test',
-          CLOUDFLARE_API_TOKEN: 'synthetic-fixture',
-          PROVISION_STATE: state,
-          PROVISION_CALLS: calls,
         }),
         encoding: 'utf8',
         timeout: 10_000,

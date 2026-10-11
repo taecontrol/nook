@@ -7,15 +7,18 @@ import {
   CreatedBucket,
   Memory,
   type MemoryClient,
+  MemorySearchResults,
   type Principal,
   Remember,
   Remembered,
+  SearchMemories,
   Secret,
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
 import type { BucketGrant } from './authorization.ts';
 import { bucketOperations } from './buckets.ts';
 import { memoryStore } from './memory.ts';
+import type { MemoryIndex } from './memory-index.ts';
 import { machineVault } from './vault.ts';
 
 function standard<S extends Schema.ConstraintDecoder<unknown>>(schema: S) {
@@ -38,7 +41,9 @@ type VaultStore = Effect.Success<ReturnType<typeof machineVault>>;
 type VaultError = Effect.Error<ReturnType<VaultStore['list']>>;
 type MemoryStore = Effect.Success<ReturnType<typeof memoryStore>>;
 type MemoryError = Effect.Error<
-  ReturnType<MemoryStore['remember'] | MemoryStore['get']>
+  ReturnType<
+    MemoryStore['remember'] | MemoryStore['get'] | MemoryStore['search']
+  >
 >;
 const unavailableMessage = 'Service unavailable. Try again later.';
 function errorResult(message: string) {
@@ -100,6 +105,10 @@ function clientFrom(envelope: unknown, userAgent: string | null): MemoryClient {
 export function mcpHandler(
   db: D1Database,
   caller: { grant: BucketGrant; principal: Principal },
+  options: {
+    index?: MemoryIndex;
+    waitUntil?: (promise: Promise<unknown>) => void;
+  } = {},
 ) {
   const { grant, principal } = caller;
   function execute<A extends Record<string, unknown>>(
@@ -142,7 +151,7 @@ export function mcpHandler(
       },
       (input, ctx) =>
         execute(
-          memoryStore(grant).pipe(
+          memoryStore(grant, options.index, options.waitUntil).pipe(
             Effect.flatMap((store) =>
               store.remember(
                 principal,
@@ -152,6 +161,47 @@ export function mcpHandler(
             ),
           ),
         ),
+    );
+    server.registerTool(
+      'search',
+      {
+        description:
+          'Find up to 10 memories by keyword or meaning in a bucket, its ancestors, and me, within your grant. Name the bucket explicitly; ask the owner when unsure. An optional tags filter requires every tag. Results contain a title and snippet; call get with an id for the full content. If meaning search is unavailable, keyword results may be incomplete.',
+        inputSchema: standard(SearchMemories),
+        outputSchema: standard(MemorySearchResults),
+        annotations: { readOnlyHint: true },
+      },
+      ({ bucket, query, tags }) =>
+        execute(
+          memoryStore(grant, options.index).pipe(
+            Effect.flatMap((store) =>
+              store.search(bucket, query, tags, 'inherited', 10),
+            ),
+            Effect.map(({ results, meaning }) => ({
+              results: results.map(
+                ({ id, bucket, title, tags, snippet, match }) => ({
+                  id,
+                  bucket,
+                  title,
+                  tags,
+                  snippet,
+                  match,
+                }),
+              ),
+              meaning,
+            })),
+          ),
+        ).then((result) => {
+          if (
+            'structuredContent' in result &&
+            result.structuredContent.meaning === 'unavailable'
+          )
+            result.content.push({
+              type: 'text',
+              text: 'Meaning search is unavailable; results may be incomplete.',
+            });
+          return result;
+        }),
     );
     server.registerTool(
       'get',

@@ -1,4 +1,4 @@
-import type { D1Database } from '@cloudflare/workers-types';
+import type { D1Database, ExecutionContext } from '@cloudflare/workers-types';
 import { D1Client } from '@effect/sql-d1';
 import { Api, secretLimits } from '@nook/contract';
 import { Effect, Layer } from 'effect';
@@ -16,6 +16,7 @@ import {
 import { machineOperations } from './machines.ts';
 import { mcpHandler } from './mcp.ts';
 import { memoryStore } from './memory.ts';
+import { memoryIndex, type SearchBindings } from './memory-index.ts';
 import { ownerVault } from './vault.ts';
 
 export function handlerForPrincipal(
@@ -23,14 +24,19 @@ export function handlerForPrincipal(
   db: D1Database,
   grant: BucketGrant = 'all',
   vaultKey = '',
+  searchBindings: SearchBindings = {},
 ) {
+  const index = memoryIndex(searchBindings);
   const session = HttpApiBuilder.group(Api, 'session', (handlers) =>
     handlers.handle('whoami', () => Effect.succeed({ email })),
   );
   const memories = HttpApiBuilder.group(Api, 'memories', (handlers) =>
     Effect.gen(function* () {
-      const store = yield* memoryStore(grant);
+      const store = yield* memoryStore(grant, index);
       return handlers
+        .handle('search', ({ query }) =>
+          store.search(query.bucket, query.q, [], query.scope),
+        )
         .handle('counts', () => store.counts())
         .handle('list', ({ query }) =>
           store.list(query.bucket, query.cursor, query.scope),
@@ -96,9 +102,13 @@ export function handlerForPrincipal(
     // The router checks decoded params: six 32-character segments plus the name.
     routerConfig: { maxParamLength: 6 * (32 + 1) + secretLimits.name },
   }).handler;
-  return (request: Request) =>
+  return (request: Request, ctx?: Pick<ExecutionContext, 'waitUntil'>) =>
     new URL(request.url).pathname === '/mcp'
-      ? mcpHandler(db, { grant, principal: { kind: 'owner' } }).fetch(request)
+      ? mcpHandler(
+          db,
+          { grant, principal: { kind: 'owner' } },
+          { index, waitUntil: ctx?.waitUntil.bind(ctx) },
+        ).fetch(request)
       : apiHandler(request);
 }
 let cached:
@@ -107,6 +117,7 @@ let cached:
       db: D1Database;
       grant: BucketGrant;
       vaultKey: string;
+      searchBindings: SearchBindings;
       handler: ReturnType<typeof handlerForPrincipal>;
     }
   | undefined;
@@ -115,19 +126,24 @@ function handlerFor(
   db: D1Database,
   grant: BucketGrant,
   vaultKey = '',
+  searchBindings: SearchBindings = {},
 ) {
   if (
     cached?.email !== email ||
     cached.db !== db ||
     cached.grant !== grant ||
-    cached.vaultKey !== vaultKey
+    cached.vaultKey !== vaultKey ||
+    cached.searchBindings.AI !== searchBindings.AI ||
+    cached.searchBindings.MEMORY_INDEX !== searchBindings.MEMORY_INDEX ||
+    cached.searchBindings.EMBEDDING_MODEL !== searchBindings.EMBEDDING_MODEL
   )
     cached = {
       email,
       db,
       grant,
       vaultKey,
-      handler: handlerForPrincipal(email, db, grant, vaultKey),
+      searchBindings,
+      handler: handlerForPrincipal(email, db, grant, vaultKey, searchBindings),
     };
   return cached.handler;
 }
@@ -218,6 +234,7 @@ async function sanitized(response: Promise<Response>, creation = false) {
         'InvalidAuditFilter',
         'InvalidMemory',
         'InvalidMemoryCursor',
+        'InvalidMemorySearch',
         'InvalidBucketPath',
         'ReservedBucket',
       ].includes(body?._tag ?? '')
@@ -265,11 +282,16 @@ async function machineRequest(
   url: URL,
   db: D1Database,
   vaultKey = '',
+  searchBindings: SearchBindings = {},
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
 ) {
   if (url.pathname === '/api/machine/mcp') {
     if (foreignOrigin(request, url))
       return Response.json({ _tag: 'Forbidden' }, { status: 403 });
-    return machineMcpHandler(db, request);
+    return machineMcpHandler(db, request, {
+      index: memoryIndex(searchBindings),
+      waitUntil: ctx?.waitUntil.bind(ctx),
+    });
   }
   if (
     protectedMachineRoute(url.pathname, request.method) &&
@@ -286,11 +308,12 @@ async function machineRequest(
 export default {
   async fetch(
     request: Request,
-    env: AuthBindings & { DB: D1Database; VAULT_KEY?: string },
+    env: AuthBindings & SearchBindings & { DB: D1Database; VAULT_KEY?: string },
+    ctx?: Pick<ExecutionContext, 'waitUntil'>,
   ): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api/machine/'))
-      return machineRequest(request, url, env.DB, env.VAULT_KEY);
+      return machineRequest(request, url, env.DB, env.VAULT_KEY, env, ctx);
     const identity = await authenticate(request, env);
     if ('status' in identity)
       return Response.json(
@@ -309,10 +332,21 @@ export default {
         env.DB,
         identity.grant,
         env.VAULT_KEY,
-      )(request),
+        env,
+      )(request, ctx),
     );
     if (isRevealPath(url.pathname))
       response.headers.set('Cache-Control', 'no-store');
     return response;
+  },
+  scheduled(_controller: unknown, env: SearchBindings & { DB: D1Database }) {
+    return Effect.runPromise(
+      memoryStore('all', memoryIndex(env)).pipe(
+        Effect.flatMap((store) => store.sync()),
+        Effect.provide(D1Client.layer({ db: env.DB })),
+        // Failed writes leave their markers pending for the next scheduled run.
+        Effect.catchCause(() => Effect.void),
+      ),
+    );
   },
 };

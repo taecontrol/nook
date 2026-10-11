@@ -47,8 +47,13 @@ CREATE TABLE memories (
   current_version INTEGER NOT NULL CHECK (current_version >= 1),
   content_hash TEXT NOT NULL CHECK (length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL , embedding_marker TEXT
 );
+CREATE VIRTUAL TABLE memories_fts USING fts5(content, tags, content='memory_current', content_rowid='seq', tokenize='unicode61 remove_diacritics 2');
+CREATE TABLE 'memories_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID;
+CREATE TABLE 'memories_fts_data'(id INTEGER PRIMARY KEY, block BLOB);
+CREATE TABLE 'memories_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB);
+CREATE TABLE 'memories_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID;
 CREATE TABLE memory_versions (
   memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
   version INTEGER NOT NULL CHECK (version >= 1),
@@ -79,3 +84,7 @@ CREATE TABLE secrets (
 ) WITHOUT ROWID;
 CREATE TRIGGER buckets_reserve_me BEFORE DELETE ON buckets WHEN OLD.path = 'me' BEGIN SELECT RAISE(ABORT, 'The me bucket cannot be deleted.'); END;
 CREATE TRIGGER machine_tokens_assign_id AFTER INSERT ON machine_tokens WHEN NEW.id IS NULL BEGIN UPDATE machine_tokens SET id = lower(hex(randomblob(16))) WHERE token_hash = NEW.token_hash; END;
+CREATE TRIGGER memories_fts_current_update AFTER UPDATE OF current_version ON memories BEGIN INSERT INTO memories_fts(memories_fts, rowid, content, tags) SELECT 'delete', OLD.seq, content, tags FROM memory_versions WHERE memory_id = OLD.id AND version = OLD.current_version; INSERT INTO memories_fts(rowid, content, tags) SELECT NEW.seq, content, tags FROM memory_versions WHERE memory_id = NEW.id AND version = NEW.current_version; END;
+CREATE TRIGGER memories_fts_delete BEFORE DELETE ON memories BEGIN INSERT INTO memories_fts(memories_fts, rowid, content, tags) SELECT 'delete', OLD.seq, content, tags FROM memory_versions WHERE memory_id = OLD.id AND version = OLD.current_version; END;
+CREATE TRIGGER memories_fts_version_insert AFTER INSERT ON memory_versions WHEN NEW.version = (SELECT current_version FROM memories WHERE id = NEW.memory_id) BEGIN INSERT INTO memories_fts(rowid, content, tags) SELECT seq, NEW.content, NEW.tags FROM memories WHERE id = NEW.memory_id; END;
+CREATE VIEW memory_current AS SELECT m.seq, v.content, v.tags FROM memories m JOIN memory_versions v ON v.memory_id = m.id AND v.version = m.current_version;

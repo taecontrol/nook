@@ -7,7 +7,9 @@ import {
   searchMemories,
   spanishRelease,
 } from './fixtures/search-corpus.ts';
+import { deferred } from './support/machines.ts';
 import {
+  manyMemories,
   memoryClient,
   memoryFixture,
   memoryId,
@@ -43,6 +45,12 @@ it('E11/E16: keyword is immediate, vectors stay hidden until visible, and an ide
   const result = await remembered(spanishRelease);
   expect(result.structuredContent).toMatchObject({ created: true });
   const id = result.structuredContent?.id as string;
+  await expect
+    .poll(async () => (await marker(id))?.embedding_marker)
+    .toBe(`@cf/baai/bge-m3:${hash(spanishRelease)}`);
+  expect(app.services.embeddingCalls).toHaveLength(1);
+  expect(app.services.upserts).toHaveLength(1);
+  expect(app.services.d1Trips).toBe(2);
   expect(
     (await httpSearch(app, 'publicar')).results.map((m) => m.id),
   ).toContain(id);
@@ -96,17 +104,16 @@ it('E13: migration rebuilds populated current versions and Cron backfills at mos
   await db
     .prepare("DELETE FROM d1_migrations WHERE name='0010_memory_search.sql'")
     .run();
-  const seeds = Array.from({ length: 61 }, (_, i) =>
-    memoryFixture(500 + i, {
-      content: searchMemories[i % searchMemories.length].content,
-      bucket: i < 7 ? 'me' : 'work/acme',
-    }),
-  );
   // The exact-content guard is preserved; use the existing unique volume fixtures.
-  const { manyMemories } = await import('./fixtures/memories.ts');
-  await seedMemories(app, manyMemories.slice(0, seeds.length));
+  await seedMemories(app, manyMemories.slice(0, 61));
   await applyMigrations(db);
   expect((await httpSearch(app, 'deployment')).results).toHaveLength(20);
+  app.services.failEmbedding = true;
+  for (let i = 0; i < 61; i++)
+    expect((await httpSearch(app, `note ${i}`)).results).toContainEqual(
+      expect.objectContaining({ id: manyMemories[i].id, match: 'keyword' }),
+    );
+  app.services.failEmbedding = false;
   app.services.resetCalls();
   await app.scheduled();
   expect(app.services.embeddingCalls).toHaveLength(2);
@@ -147,6 +154,13 @@ it('E13: migration rebuilds populated current versions and Cron backfills at mos
   expect(
     (await httpSearch(app, 'how do we deploy')).results.length,
   ).toBeGreaterThan(0);
+  for (const memory of manyMemories.slice(0, 61))
+    expect((await httpSearch(app, memory.content)).results).toContainEqual(
+      expect.objectContaining({
+        id: memory.id,
+        match: expect.stringMatching(/^(meaning|both)$/),
+      }),
+    );
 });
 it('E14: model changes mark all memories outdated; failures keep keyword and the next scheduled run replaces every vector', async () => {
   await indexMemories(app, searchMemories);
@@ -230,4 +244,80 @@ it('real target: 16 KiB token-dense and large bilingual memories embed with trun
     (await httpSearch(app, 'how do we deploy')).results.map((r) => r.id).sort(),
   ).toEqual([memoryId(60), memoryId(61)]);
   expect(app.services.missing.size).toBe(0);
+});
+
+it('the embedding marker cannot mark a newer version current after a late old-content write', async () => {
+  await seedMemories(app, [searchMemories[0]]);
+  const arrived = deferred();
+  const gate = deferred();
+  await app.setBindings(
+    {
+      LOCAL_OWNER: 'synthetic-owner',
+      LOCAL_ORIGIN: app.origin,
+      EMBEDDING_MODEL: '@cf/baai/bge-m3',
+    },
+    {
+      outboundService: async (request) => {
+        if (new URL(request.url).pathname === '/run') {
+          arrived.resolve();
+          await gate.promise;
+        }
+        return app.services.fetch(request);
+      },
+    },
+  );
+  const pending = app.scheduled();
+  try {
+    await arrived.promise;
+    const db = await app.mf.getD1Database('DB');
+    const content = searchMemories[3].content;
+    await db.batch([
+      db
+        .prepare(
+          'INSERT INTO memory_versions SELECT memory_id, 2, ?, tags, client_name, client_version, principal, machine_id, machine_name, working_directory, created_at FROM memory_versions WHERE memory_id=? AND version=1',
+        )
+        .bind(content, memoryId(20)),
+      db
+        .prepare(
+          'UPDATE memories SET current_version=2, content_hash=? WHERE id=?',
+        )
+        .bind(hash(content), memoryId(20)),
+    ]);
+    gate.resolve();
+    await pending;
+    expect((await marker(memoryId(20))).embedding_marker).toBeNull();
+    app.services.advance();
+    expect((await httpSearch(app, 'how do we deploy')).results).toEqual([]);
+    expect((await httpSearch(app, 'pnpm verify')).results).toContainEqual(
+      expect.objectContaining({ id: memoryId(20), match: 'keyword' }),
+    );
+    await app.scheduled();
+    app.services.advance();
+    expect((await marker(memoryId(20))).embedding_marker).toBe(
+      `@cf/baai/bge-m3:${hash(content)}`,
+    );
+    expect((await httpSearch(app, 'pnpm verify')).results).toContainEqual(
+      expect.objectContaining({ id: memoryId(20), match: 'both' }),
+    );
+    await db
+      .prepare(
+        "INSERT INTO memories_fts(memories_fts, rank) VALUES ('integrity-check', 1)",
+      )
+      .run();
+  } finally {
+    gate.resolve();
+    await pending;
+  }
+});
+it('concurrent identical remembers schedule exactly one post-write embedding', async () => {
+  const results = await Promise.all(
+    Array.from({ length: 10 }, () => remembered(spanishRelease)),
+  );
+  expect(results.filter((r) => r.structuredContent?.created)).toHaveLength(1);
+  const id = results[0].structuredContent?.id as string;
+  await expect
+    .poll(async () => (await marker(id)).embedding_marker)
+    .toBe(`@cf/baai/bge-m3:${hash(spanishRelease)}`);
+  expect(app.services.embeddingCalls).toHaveLength(1);
+  expect(app.services.upserts).toHaveLength(1);
 });

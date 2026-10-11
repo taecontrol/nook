@@ -19,11 +19,14 @@ import {
   BucketHasMemories,
   InvalidMemory,
   InvalidMemoryCursor,
+  InvalidMemorySearch,
   Memory,
   MemoryCounts,
   MemoryNotFound,
   MemoryPage,
   MemoryQuery,
+  MemorySearchQuery,
+  OwnerMemorySearchResults,
 } from './memory.ts';
 import { SecretKeyUnavailable } from './run.ts';
 import {
@@ -57,6 +60,19 @@ const errors = [
 export const Api = HttpApi.make('nook')
   .add(
     HttpApiGroup.make('memories')
+      .add(
+        HttpApiEndpoint.get('search', '/api/memories/search', {
+          query: MemorySearchQuery,
+          success: OwnerMemorySearchResults,
+          error: [
+            ...errors,
+            InvalidBucketPath,
+            InvalidMemory,
+            InvalidMemorySearch,
+            BucketNotFound,
+          ],
+        }),
+      )
       .add(
         HttpApiEndpoint.get('counts', '/api/memories/counts', {
           success: MemoryCounts,
