@@ -8,7 +8,13 @@ import {
   Hourglass,
   MonitorSmartphone,
 } from 'lucide-react';
-import { Fragment, lazy, Suspense, useEffect, useRef, useState } from 'react';
+import {
+  type ComponentProps,
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { Alert, AlertTitle } from '@/components/ui/alert';
 import {
   AlertDialog,
@@ -51,9 +57,20 @@ import { useConfirmTarget } from './use-confirm-target';
 
 const icons = { stale: Hourglass, never: CircleDashed, recent: Activity };
 const loadAccessSheet = () => import('./machine-access-sheet');
-const AccessSheet = lazy(() =>
-  loadAccessSheet().then((module) => ({ default: module.AccessSheet })),
-);
+type AccessSheetComponent = typeof import('./machine-access-sheet').AccessSheet;
+type EditorModule = { Sheet: AccessSheetComponent } | { error: unknown };
+function MachineEditor({
+  loaded,
+  machine,
+  ...props
+}: {
+  loaded: EditorModule | undefined;
+  machine: Machine | null;
+} & Omit<ComponentProps<AccessSheetComponent>, 'machine'>) {
+  if (!loaded) return null;
+  if ('error' in loaded) throw loaded.error;
+  return machine ? <loaded.Sheet machine={machine} {...props} /> : null;
+}
 function Facts({ parts }: { parts: string[] }) {
   return parts.map((part, index) => (
     <Fragment key={part}>
@@ -444,6 +461,7 @@ export function MachinesPage() {
   const [session, setSession] = useState(0);
   const [saved, setSaved] = useState<SavedAccess | null>(null);
   const [gone, setGone] = useState<Machine | null>(null);
+  const [editor, setEditor] = useState<EditorModule>();
   // Relative times and the 30-day boundary also advance on an idle open page.
   useEffect(() => {
     const timer = setInterval(() => tick((value) => value + 1), 60_000);
@@ -490,28 +508,33 @@ export function MachinesPage() {
         saved={saved?.machine.id}
         onEdit={(machine, button) => {
           if (busy) return;
-          setSession((value) => value + 1);
-          setSaved(null);
-          setGone(null);
-          editing.open(machine, button);
+          // A resolved module mounts directly. Suspending a fresh lazy wrapper
+          // would delay the checked tree even after its intent preload finished.
+          void loadAccessSheet().then(
+            (module) => {
+              setEditor({ Sheet: module.AccessSheet });
+              setSession((value) => value + 1);
+              setSaved(null);
+              setGone(null);
+              editing.open(machine, button);
+            },
+            (error: unknown) => setEditor({ error }),
+          );
         }}
       />
-      {editing.shown && (
-        <Suspense fallback={null}>
-          <AccessSheet
-            machine={editing.shown}
-            open={editing.target !== null}
-            session={session}
-            onClose={editing.close}
-            onCloseAutoFocus={editing.restoreFocus}
-            onRevoked={setGone}
-            onSaved={(machine) => {
-              setSaved({ id: session, machine });
-              editing.close();
-            }}
-          />
-        </Suspense>
-      )}
+      <MachineEditor
+        loaded={editor}
+        machine={editing.shown}
+        open={editing.target !== null}
+        session={session}
+        onClose={editing.close}
+        onCloseAutoFocus={editing.restoreFocus}
+        onRevoked={setGone}
+        onSaved={(machine) => {
+          setSaved({ id: session, machine });
+          editing.close();
+        }}
+      />
       {/* Unmounted on close: a confirmation reopened while the previous one
           exits must not sit beneath it. */}
       {revocation.target && (

@@ -624,6 +624,43 @@ it('E17: the editor chunk and buckets preload on intent and do not join the Mach
   }
 });
 
+it('E17: an editor chunk transport failure uses the route error boundary and recovers after reload', async () => {
+  let failing = true;
+  const visit = await accessPage(browser, {
+    configure: async (page) => {
+      await page.route('**/machine-access-sheet-*.js', (route) =>
+        failing ? route.abort('failed') : route.continue(),
+      );
+    },
+  });
+  try {
+    await machineRow(visit.page, visit.machines[0].id)
+      .getByRole('button', { name: /Edit access/ })
+      .click();
+    await visit.page
+      .getByText('Something went wrong!', { exact: true })
+      .waitFor();
+    expect(
+      visit.requests.filter((request) => request.method === 'PUT'),
+    ).toHaveLength(0);
+    failing = false;
+    await visit.page.reload();
+    const sheet = await editAccess(visit.page, visit.machines[0]);
+    expect(
+      await sheet
+        .getByRole('checkbox', { name: 'work/acme', exact: true })
+        .isChecked(),
+    ).toBe(true);
+    expect(
+      (await listMachines(visit.app)).find(
+        (entry) => entry.id === visit.machines[0].id,
+      )?.grant,
+    ).toEqual(['work/acme']);
+  } finally {
+    await visit.close();
+  }
+});
+
 it('E12/E17: stale intent and focus reads cannot overwrite an optimistic grant during a pending save', async () => {
   const gate = deferred();
   const entered = deferred();
