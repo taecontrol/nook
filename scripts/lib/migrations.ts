@@ -129,6 +129,7 @@ export async function checkMigrationHistory({
 function database() {
   return new Miniflare({
     modules: true,
+    cf: false,
     script: 'export default {fetch(){return new Response()}}',
     d1Databases: ['DB'],
     d1Persist: false,

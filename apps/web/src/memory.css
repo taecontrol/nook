@@ -130,3 +130,10 @@
     position: relative;
   }
 }
+
+[data-search-snippet] mark {
+  background: var(--muted);
+  color: var(--foreground);
+  border-radius: 2px;
+  padding: 0 1px;
+}

@@ -23,6 +23,7 @@ import {
   BucketHasMemories,
   InvalidMemory,
   InvalidMemoryCursor,
+  InvalidMemorySearch,
   MemoryNotFound,
 } from './memory.ts';
 import { InvalidRun, SecretKeyUnavailable, SecretsForbidden } from './run.ts';
@@ -53,6 +54,7 @@ const errors = [
   MemoryNotFound,
   BucketHasMemories,
   InvalidMemoryCursor,
+  InvalidMemorySearch,
   InvalidMachineName,
   NoMatchingRequest,
   AlreadyHandled,

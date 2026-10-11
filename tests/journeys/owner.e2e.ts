@@ -3,7 +3,99 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { test } from '@e2e-dev/web';
 import { expect } from 'e2e';
 import { observe } from '../../scripts/observation.ts';
+import { spanishRelease } from '../fixtures/search-corpus.ts';
 import { privateKeyring } from '../support/cli.ts';
+
+test('Search E22: the owner finds a Spanish release by meaning from an ancestor bucket', async ({
+  app,
+  screen,
+  browser,
+}) => {
+  await app.open('/');
+  const origin = JSON.parse(
+    await browser.evaluate(() => JSON.stringify(location.origin)),
+  ) as string;
+  const bucket = await fetch(`${origin}/api/buckets`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: 'work/acme' }),
+  });
+  if (!bucket.ok)
+    throw new Error('The search journey requires its synthetic bucket.');
+  const response = await fetch(`${origin}/mcp`, {
+    method: 'POST',
+    headers: {
+      Connection: 'close',
+      Accept: 'application/json, text/event-stream',
+      'Content-Type': 'application/json',
+      'MCP-Protocol-Version': '2026-07-28',
+      'Mcp-Method': 'tools/call',
+      'Mcp-Name': 'remember',
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'remember',
+        arguments: {
+          bucket: 'work',
+          content: spanishRelease,
+          tags: ['deploy', 'cli'],
+        },
+        _meta: {
+          'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+          'io.modelcontextprotocol/clientInfo': {
+            name: 'synthetic-journey',
+            version: '1',
+          },
+          'io.modelcontextprotocol/clientCapabilities': {},
+        },
+      },
+    }),
+  });
+  const body = (await response.json()) as {
+    result?: { isError?: boolean; structuredContent?: { id: string } };
+  };
+  if (
+    !response.ok ||
+    body.result?.isError ||
+    !body.result?.structuredContent?.id
+  )
+    throw new Error(
+      'The real remember tool must store the Spanish journey memory.',
+    );
+  await screen.getByRole('link', { name: 'Memory', exact: true }).click();
+  await browser.locator('[data-path="work/acme"] a').click();
+  await screen
+    .getByRole('textbox', { name: 'Search memories visible in work/acme' })
+    .fill('how do we deploy');
+  await screen
+    .getByRole('textbox', { name: 'Search memories visible in work/acme' })
+    .press('Enter');
+  const result = browser.locator(
+    `[data-search-result="${body.result.structuredContent.id}"]`,
+  );
+  await expect(result).toContainText('Proceso de release');
+  await expect(result).toContainText('work');
+  await expect(result).toContainText('By meaning');
+  await result.click();
+  await expect(
+    screen.getByRole('article', { name: 'Memory detail' }),
+  ).toContainText('Para publicar una versión nueva');
+  if (process.env.COVERAGE_RUN)
+    await observe(
+      JSON.parse(
+        await browser.evaluate(() =>
+          JSON.stringify({
+            seam: 'browser',
+            loaded: globalThis.__authoredModules__ ?? {},
+            counters: globalThis.__coverage__ ?? {},
+          }),
+        ),
+      ),
+    );
+});
 
 test('Memory: the owner reads a memory written through MCP with provenance', async ({
   app,
@@ -65,10 +157,11 @@ test('Memory: the owner reads a memory written through MCP with provenance', asy
     throw new Error('The real remember tool must store the journey memory.');
   await screen.getByRole('link', { name: 'Memory', exact: true }).click();
   await browser.locator('[data-path="work/memory-journey"] a').click();
-  await expect(browser.locator('[data-memory-row]')).toContainText(
-    'Owner journey memory',
+  const memoryRow = browser.locator(
+    `[data-memory-row="${body.result.structuredContent.id}"]`,
   );
-  await browser.locator('[data-memory-row]').click();
+  await expect(memoryRow).toContainText('Owner journey memory');
+  await memoryRow.click();
   const detail = screen.getByRole('article', { name: 'Memory detail' });
   await expect(detail).toContainText('Prefer pnpm for project commands.');
   await expect(detail).toContainText('synthetic-journey 1');

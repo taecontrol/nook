@@ -8,7 +8,7 @@ The installation owner supplies the following settings:
 | --- | --- | --- |
 | `CLOUDFLARE_ACCOUNT_ID` | GitHub repository **Settings → Secrets and variables → Actions → Variables** | Cloudflare **Workers & Pages → Account Details → Account ID**, or dashboard search **Copy account ID**. |
 | `NOOK_HOSTNAME` | The same GitHub repository variables | The installation's hostname, without scheme or path. Its DNS zone must be active in the chosen Cloudflare account. |
-| `CLOUDFLARE_API_TOKEN` | GitHub repository **Settings → Secrets and variables → Actions → Secrets** | Create an account API token from the **Edit Cloudflare Workers** permission template, scoped to this account and the hostname's zone. Include **Account → D1 → Edit** so deployment can create the database and apply migrations. Initial creation requires the Workers product **Admin** role; an **Editor** can maintain an existing Worker. Changing a custom domain also needs **Zone → Workers Routes → Write** for that zone. |
+| `CLOUDFLARE_API_TOKEN` | GitHub repository **Settings → Secrets and variables → Actions → Secrets** | Create an account API token from the **Edit Cloudflare Workers** permission template, scoped to this account and the hostname's zone. Include **Account → D1 → Edit**, **Account → Vectorize → Edit**, and **Account → Workers AI → Read and Edit** for database migrations, search provisioning, and the AI binding. Initial creation requires the Workers product **Admin** role; an **Editor** can maintain an existing Worker. Changing a custom domain also needs **Zone → Workers Routes → Write** for that zone. |
 | `ACCESS_ISSUER` | Worker **nook → Settings → Variables and Secrets**, type **Secret** | `https://<team-name>.cloudflareaccess.com`, with no trailing slash. Find the team name under **Zero Trust → Settings**. |
 | `ACCESS_AUDIENCE` | The same Worker secrets | **Zero Trust → Access controls → Applications → the Nook application → Configure → Additional settings → Application Audience (AUD) Tag**. |
 | `OWNER_EMAIL` | The same Worker secrets | The exact email the owner's identity provider supplies to Access; use the same identity in the application's Allow policy. |
@@ -20,7 +20,7 @@ Before the first deployment, create a self-hosted Access application with a publ
 
 Every push to `main` deploys itself. When **Verify** succeeds on a `main` push, the Deploy workflow starts for that exact commit. It deploys only while `main` still points to that commit; when a later merge has moved `main`, it skips, because the later commit's own run deploys it. It checks the commit's successful Verify run, builds the product from that commit, and only then deploys using the repository settings. An installation without the `NOOK_HOSTNAME` variable, such as a fork that is not configured yet, skips automatic deployment. To redeploy by hand, use **Actions → Deploy → Run workflow** and select **main**; dispatches on other branches skip the deployment job.
 
-The workflow creates the `nook` D1 database when missing, applies its migrations, and then deploys the Worker and custom domain. Its binding resolves by database name; no database ID is committed. If the Worker did not already exist, add its three Access secrets and `VAULT_KEY` through the Worker settings afterwards and apply the secret changes there. Until all three Access secrets exist, owner-authenticated Worker requests return 401. Machine API requests use their separate credential boundary. Later workflow deployments preserve those secrets. The owner can also provision the Worker secrets beforehand through their own Cloudflare administration.
+The workflow creates the `nook` D1 database when missing, applies its migrations, provisions the configured Vectorize index and its indexed `bucket` metadata when missing, and then deploys the Worker and custom domain. Provisioning finishes before any embedding writes. The index name lives in `wrangler.jsonc`; D1 resolves by database name, without a committed database ID. If the Worker did not already exist, add its three Access secrets and `VAULT_KEY` through the Worker settings afterwards and apply the secret changes there. Until all three Access secrets exist, owner-authenticated Worker requests return 401. Machine API requests use their separate credential boundary. Later workflow deployments preserve those secrets. The owner can also provision the Worker secrets beforehand through their own Cloudflare administration.
 
 Complete production acceptance by recording a successful main deployment. In a fresh signed-out browser, confirm that `/`, a real hashed JavaScript asset, `/api/whoami`, and `/mcp` redirect to Access or are denied; none may serve the app or asset. Then sign in as the owner and capture the shell showing that identity. Retain outcomes and screenshots without cookies, JWTs, or secret values.
 
@@ -85,7 +85,7 @@ assertions; the origin cannot distinguish them from browser sessions.
 
 ## Remote MCP and Access Managed OAuth
 
-Nook serves `list_buckets`, `create_bucket`, `delete_bucket`, and `list_secrets` at `https://<hostname>/mcp`. The owner authenticates through the existing Access application with access to the whole bucket tree. The Worker verifies the forwarded Access assertion before MCP. Nook machine tokens use the separate `/api/machine/mcp` endpoint described below.
+Nook serves `list_buckets`, `create_bucket`, `delete_bucket`, `list_secrets`, `remember`, `get`, and `search` at `https://<hostname>/mcp`. The owner authenticates through the existing Access application with access to the whole bucket tree. The Worker verifies the forwarded Access assertion before MCP. Nook machine tokens use the separate `/api/machine/mcp` endpoint described below.
 
 In **Zero Trust → Access controls → Applications**, edit the existing self-hosted Nook application. Under **Advanced settings**, enable **Managed OAuth**, then save. Keep its whole-hostname protection and owner Allow policy. Access supplies the OAuth flow and forwards the user's JWT in `Cf-Access-Jwt-Assertion`; Nook does not implement an OAuth server. See [Cloudflare Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/).
 
@@ -139,6 +139,41 @@ Expect HTTP 401 and `WWW-Authenticate` pointing to OAuth discovery metadata. Con
 For E14, complete both client connection flows above and record successful `list_buckets` calls. With one client, confirm a bucket creation with the owner and call `create_bucket`. Return to the open `/buckets` tab and confirm that the new bucket appears under its parent without reloading. Returning refetches the tree once, even when its cached data is still fresh.
 
 Record E13 and E14 outcomes on the pull request without tokens, cookies, assertions, or secret values. The owner completes these captures after deployment.
+
+## Memory search
+
+Search combines exact words with meaning across the selected bucket, its ancestors, and `me`, within the caller's grant. Exact words are available when `remember` succeeds. Embeddings are written afterwards; Vectorize can take about a minute to expose them. The five-minute Cron Trigger repairs up to 50 pending or outdated memories per run, including memories stored before search was installed. Changing `EMBEDDING_MODEL` in configuration schedules re-embedding; the index still requires 1,024-dimensional vectors.
+
+Vectorize [creates metadata indexes asynchronously](https://developers.cloudflare.com/vectorize/get-started/intro/).
+Deployment waits for the string `bucket` index to appear in
+`list-metadata-index`, with up to 20 checks three seconds apart. If it never
+becomes ready, deployment stops before the Worker can write vectors without
+indexed bucket metadata. A rerun uses the existing ready index.
+
+The [Vectorize Free allowance](https://developers.cloudflare.com/vectorize/platform/pricing/) is five million stored dimensions per account. At 1,024 dimensions per memory, that is 4,882 memories, approximately 4,900, less other indexes' usage. Beyond that capacity, upserts fail and pending memories remain searchable by exact words. Meaning service failures produce an explicit incomplete-results notice. Nook does not enforce a separate quota.
+
+### Search E24: owner acceptance after merge (pending)
+
+1. Privately add **Account → Vectorize → Edit** and **Account → Workers AI → Read and Edit** to the deployment token. See Cloudflare's [token permissions](https://developers.cloudflare.com/fundamentals/api/reference/permissions/) and [Workers AI authentication](https://developers.cloudflare.com/workers-ai/get-started/rest-api/). Retain the existing Workers, D1, and zone permissions.
+2. After green `main` deploys, confirm that its workflow provisions the configured index and string `bucket` metadata index. If the automatic deployment ran before the permission change, dispatch **Deploy** from green **main**.
+3. Allow the scheduled repair to index pre-existing memories. In the connected Claude Code session, call `search` with an explicit bucket and a paraphrase or other-language query for a memory stored before this merge. Confirm a relevant `meaning` or `both` result from the permitted lineage, then call `get` with its id.
+4. Record the deployment run, client version, permitted bucket, result id and match type on the PR. Leave E24 pending until this production observation succeeds; exclude credentials and private memory content from the capture.
+
+### Back up a database with full-text search
+
+Cloudflare [does not support D1 exports containing virtual tables](https://developers.cloudflare.com/d1/best-practices/import-export-data/#known-limitations). Full `pnpm exec wrangler d1 export nook --remote --output owner-backup.sql` therefore fails while `memories_fts` exists. Time Travel remains available. For a SQL export, the owner uses a maintenance window: stop memory writes, remove only the derived search objects below, export, and immediately recreate them even if export fails.
+
+```sql
+DROP TRIGGER memories_fts_version_insert;
+DROP TRIGGER memories_fts_current_update;
+DROP TRIGGER memories_fts_delete;
+DROP TABLE memories_fts;
+DROP VIEW memory_current;
+```
+
+Execute that SQL privately in D1, then export to an owner-controlled file. Recreate the objects using [0010_memory_search.sql](../migrations/0010_memory_search.sql) **starting after its first `ALTER TABLE` statement**, including the final `rebuild`. The existing embedding marker column must not be added twice. Search is unavailable during this window; canonical memories and versions stay intact. Keep backup contents out of agent context.
+
+After restoring the export into a new database, recreate these same derived objects, clear `memories.embedding_marker` to `NULL`, and let Cron rebuild the vectors in the correctly provisioned index. Never edit or prune version rows to rebuild search. [ADR-0013](adrs/0013-search-indexes-derive-from-d1-and-converge-eventually.md) records why both indexes are disposable while D1 remains authoritative.
 
 ## CLI and the machine API Bypass
 

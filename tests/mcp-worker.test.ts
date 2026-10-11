@@ -57,6 +57,7 @@ it('E1: discovery preserves the three bucket tools alongside Vault discovery', a
     'list_buckets',
     'list_secrets',
     'remember',
+    'search',
   ]);
   const byName = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
   expect(byName.list_buckets.annotations).toMatchObject({ readOnlyHint: true });

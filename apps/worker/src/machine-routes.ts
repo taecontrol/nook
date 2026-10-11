@@ -9,7 +9,11 @@ import { mcpHandler } from './mcp.ts';
 import { runSecrets } from './run-secrets.ts';
 import { machineVault } from './vault.ts';
 
-export function machineMcpHandler(db: D1Database, request: Request) {
+export function machineMcpHandler(
+  db: D1Database,
+  request: Request,
+  options: Parameters<typeof mcpHandler>[2] = {},
+) {
   const unavailable = () =>
     Response.json({ _tag: 'ServiceUnavailable' }, { status: 503 });
   return Effect.runPromise(
@@ -26,10 +30,14 @@ export function machineMcpHandler(db: D1Database, request: Request) {
           ),
         onSuccess: ({ grant, id, machine }) =>
           Effect.promise(() =>
-            mcpHandler(db, {
-              grant,
-              principal: { kind: 'machine', id, name: machine },
-            }).fetch(request),
+            mcpHandler(
+              db,
+              {
+                grant,
+                principal: { kind: 'machine', id, name: machine },
+              },
+              options,
+            ).fetch(request),
           ),
       }),
       Effect.provide(D1Client.layer({ db })),

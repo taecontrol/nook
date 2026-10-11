@@ -106,6 +106,58 @@ export const MemoryCounts = Schema.Struct({
     Schema.Struct({ bucket: Schema.String, count: Schema.Number }),
   ),
 });
+export const SearchMemories = Schema.Struct({
+  bucket: Schema.String,
+  query: Schema.String,
+  tags: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+export const MemoryMatch = Schema.Literals(['keyword', 'meaning', 'both']);
+export const MemorySearchResult = Schema.Struct({
+  id: MemoryId,
+  bucket: Schema.String,
+  title: Schema.String,
+  tags: Schema.Array(Schema.String),
+  snippet: Schema.String,
+  match: MemoryMatch,
+});
+export type MemorySearchResult = typeof MemorySearchResult.Type;
+export const MeaningAvailability = Schema.Literals([
+  'available',
+  'unavailable',
+]);
+export const MemorySearchResults = Schema.Struct({
+  results: Schema.Array(MemorySearchResult),
+  meaning: MeaningAvailability,
+});
+export const OwnerMemorySearchResult = MemorySearchResult.mapFields(
+  (fields) => ({
+    ...fields,
+    highlights: Schema.Array(Schema.Tuple([Schema.Number, Schema.Number])),
+    createdAt: Schema.String,
+    provenance: Provenance,
+  }),
+);
+export type OwnerMemorySearchResult = typeof OwnerMemorySearchResult.Type;
+export const OwnerMemorySearchResults = Schema.Struct({
+  results: Schema.Array(OwnerMemorySearchResult),
+  meaning: MeaningAvailability,
+});
+export const MemorySearchQuery = Schema.Struct({
+  bucket: Schema.String,
+  scope: Schema.optionalKey(MemoryScope),
+  q: Schema.String,
+});
+export function validateSearchQuery(query: string): string | undefined {
+  if (!query.trim()) return 'Enter a search query.';
+  if (Array.from(query).length > 512)
+    return 'A search query can be at most 512 characters.';
+}
+export class InvalidMemorySearch extends Schema.Error<InvalidMemorySearch>(
+  'nook/InvalidMemorySearch',
+)(
+  { _tag: Schema.tag('InvalidMemorySearch'), message: Schema.String },
+  { httpApiStatus: 400 },
+) {}
 export class InvalidMemory extends Schema.Error<InvalidMemory>(
   'nook/InvalidMemory',
 )(

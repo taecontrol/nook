@@ -442,6 +442,7 @@ it('E16/E23: machines have no reveal route/capability and MCP keeps names-only V
       'list_buckets',
       'list_secrets',
       'remember',
+      'search',
     ]);
     const result = await driver.call('list_secrets', { bucket: 'work/acme' });
     expectNoValue(JSON.stringify({ tools, result }), [

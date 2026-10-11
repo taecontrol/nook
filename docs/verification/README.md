@@ -16,6 +16,17 @@ Run `pnpm verify` from the repository root with the pinned Node and pnpm version
 
 `pnpm test` builds the production target before running Vitest. A narrow run such as `pnpm test tests/worker.test.ts` uses the same HTTP target. After `pnpm test`, `pnpm test:journey` runs the journey against that target, with the same allowlisted environment and host-resource tripwire; strict cache replay and zero retries stay mandatory. `pnpm test:coverage` prepares its own separately instrumented build and needs no prior build. The complete test, coverage, verification, and load-time commands also keep their build, E2E, and browser subprocesses inside the isolation lifecycle.
 
+On Linux desktops where the user systemd manager adopts orphaned processes,
+run the unchanged gate inside a private PID namespace. The teardown fixtures
+expect an adopted child to have parent PID 1; the user manager otherwise adopts
+it under its host PID. This invocation preserves the current UID and adds
+process isolation without changing any check:
+
+```sh
+unshare --user --map-current-user --pid --fork --mount-proc \
+  --kill-child --forward-signals pnpm verify
+```
+
 All local identities, signing keys, and issuer responses are synthetic. Linux CLI tests require Node 26.10, `bubblewrap` (`bwrap`), `dbus-run-session`, `dbus-send`, `gnome-keyring-daemon`, and `secret-tool`. CI installs `bubblewrap`, `gnome-keyring`, `libsecret-tools`, and `dbus` in the test jobs. Each CLI fixture creates private HOME/XDG directories, including XDG_DATA_HOME for the encrypted keyring files, and a private bus with no service activation directories, asserts that its address differs from the inherited bus, and unlocks a real isolated keyring before launching the CLI. The daemon runs with `--foreground` alongside `--unlock --components=secrets`: the fixture waits for stdout EOF after initialization, then requires a real store/lookup/clear probe. The background launcher exits before initialization, so its exit is insufficient. Daemon streams are discarded. PATH shims record opener URLs and secret-tool argv, then delegate to the real binaries; the bus-identity shim delegates to the real dbus-send; values travel only over stdin. Missing-service tests deliberately omit the daemon. Fixtures reject bus overrides before every child, clean failed setup, stop the owned daemon and children before removing HOME, and kill any remaining private process group; shutdown has a bounded force-kill fallback. A concurrent fixture regression proves that inherited XDG data remains untouched. The runtime reads asset routing and compatibility settings from `wrangler.jsonc`, binds only to `127.0.0.1`, and takes explicit test bindings. Test port leases stay above Fetch's blocked-port range and outside Linux's ephemeral range. No test reads production credentials or contacts a Cloudflare account. Coverage endpoints and counters exist only in the test build.
 
 The macOS CLI acceptance runs only on a disposable GitHub-hosted `macos-latest` runner, with `pnpm test:coverage --macos-cli`. Only that workflow job sets the allowlisted `NOOK_TEST_MACOS_KEYCHAIN_BOOTSTRAP=github-hosted` opt-in. Without it, fixture setup fails with a message pointing to [#22](https://github.com/taecontrol/nook/issues/22); `CI=true` alone never enables creation. Local creation is forbidden on the owner's Mac. Each fixture creates and resolves a fresh temporary HOME, rejects the real owner HOME, and requires an empty user search list and an absent login keychain before creating `Library/Keychains/login.keychain-db` with an absolute path. Immediately after creation, both login and default keychain must resolve inside HOME before any item command or CLI child. No test changes the search list or default, locks, unlocks, deletes, or moves a keychain. Missing and locked states are reproduced with failing/stalling PATH shims. Every child requires the fixture file to exist and the shims to be first on PATH; `open` never delegates to the real opener. Commands and process groups stop before HOME is removed.
@@ -259,7 +270,7 @@ Issue #10 runs against the migrated production Worker in workerd and real local 
 | E9 | `memory-mcp.test.ts`: denied, missing and malformed ids share the not-found result; ancestors remain readable. |
 | E10 | `memory-mcp.test.ts`: missing bucket creates no rows. |
 | E11 | `memory-mcp.test.ts`: exact UTF-8 byte limit, Unicode, NUL, tags and directory boundaries. |
-| E12 | `memory-mcp.test.ts`, `mcp-worker.test.ts`: tool descriptions, annotations and the four preserved tools plus get/remember. Existing transport, grant, CLI-header and Vault-reveal tests require that six-tool inventory. |
+| E12 | `memory-mcp.test.ts`, `mcp-worker.test.ts`: tool descriptions, annotations and the four preserved tools plus get/remember. Search delivery adds `search`; transport, grant, CLI-header and Vault-reveal tests now require the seven-tool inventory. |
 | E13 | `memory-mcp.test.ts`: revocation rejects writes and retains machine provenance. |
 | E14 | `memory-mcp.test.ts`, `memory-worker.test.ts`: real D1 and corrupt persisted ordering/encoding failures return fixed private errors. |
 | E15 | `memory-worker.test.ts`: HTTP/MCP deletion blockers, precedence and direct foreign-key enforcement. |
@@ -289,5 +300,47 @@ Paging cursors are versioned, checksummed Base64url JSON bound to the bucket, sc
 The 28 viewport PNGs and two full phone detail PNGs are `memory-*` files in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. The selected hybrid's three independent desktop columns, shared Vault bucket tree, phone push flow, scope toggle, and nonclickable image chip are the visual reference. Captures omit the prototype scenario selector. A plain first heading already shown in full by the detail title is omitted from the body; long, multiline and formatted headings are retained. Long row titles remain available through the link's title attribute.
 
 The load-time stage uses the unchanged 9 Mbps down, 3 Mbps up, 85 ms latency profile at 390×844, cache disabled, without CPU throttling. Cold `/memory?bucket=work/acme` must show real memory rows within 1000 ms. Home-to-Memory navigation after settled hover preloading must show the bucket tree within 100 ms. Both measurements use five animation-frame samples and fail independently when absent, malformed, or over budget.
+
+## Memory search
+
+Issue #11 uses the production Worker bundle, migrated D1, and its genuine scheduled handler under Miniflare. MCP tests cover both protocols and both owner and machine endpoints. Chromium uses the existing temporary-profile launcher and host-resource tripwire. `pnpm verify` needs no Cloudflare account or credential.
+
+| Example | Evidence |
+| --- | --- |
+| E1–E3 | `memory-search-mcp.test.ts`: recorded cross-language ranking, compact fields without content, exact words, accents, case and prefix matches. |
+| E4–E6 | The same MCP matrix: D1 lineage and grant enforcement, including a vector index that ignores its filter, missing/forbidden buckets, and all required tags. |
+| E7–E10 | The same matrix: exact validation messages, hostile FTS text, empty and capped results, sanitized real D1 failure, both meaning failures, and revoked tokens before AI/index calls. |
+| E11–E16 | `memory-search-sync.test.ts`: immediate keyword visibility, controlled delayed vectors, failed post-write repair, previous-schema backfill, 50-row Cron budget, model changes, stale/orphan filtering, guarded late writes, and duplicate/concurrent remembers. Every migrated fixture is found by keyword and meaning. |
+| E17–E19 | `memory-search-web.test.ts`: exact 250 ms debounce and immediate Enter, URL reload/Back/bucket/scope retention, keyboard movement, reader preservation, highlights/badges, twenty-result cap, genuine loading/error/retry, incomplete/empty/fresh states, and stable column positions at both widths. Phone content flows vertically; desktop column sizes and each fixed header stay unchanged. |
+| E20 | The idle browser case observes the real HTTP boundary and requires zero search, embedding and vector requests. `load-time.test.ts` and `verify:load-time` retain the 1000 ms cold-open and 100 ms intent-navigation budgets; `memory-load-time.test.ts` proves the production measurement conditions. |
+| E21 | `memory-search-captures.test.ts`: eleven states × two sizes × two themes, 44 genuine-product PNGs. |
+| E22 | `tests/journeys/owner.e2e.ts`: deterministic strict-cache search and opening of the Spanish ancestor memory. |
+| E23 | `memory-search-deploy.test.ts`: the workflow's actual shell against a temporary command fixture, missing index/metadata combinations, idempotent reruns, delayed metadata readiness and timeout without deployment. |
+| E24 | Pending owner production acceptance in [deployment.md](../deployment.md#search-e24-owner-acceptance-after-merge-pending). |
+
+`tests/fixtures/bge-m3.json.gz` records exact-text embeddings from the authorized bge-m3 experiment. `scripts/record-search-fixtures.ts` is an explicit, separate recording tool and never runs in verification. The strict embedder rejects unrecorded input; `memory-search-stand-ins.test.ts` also proves the observed Vectorize metadata-index timing, replacement/insert behavior, delayed visibility and request limits. D1 round trips and AI/index calls are counted without recording SQL or bindings. Dense 16 KiB content, large bilingual content and six-level paths with valid 32-character segments are included.
+
+The MCP and owner HTTP cases also distinguish tag-free prefix and accent
+matches, all-tag filtering on keyword hits, duplicate-tag rejection before AI,
+the owner-only bucket scope, equal-score date/id ranking, compatibility-width
+keyword normalization, the sixteen-term limit, malformed AI responses without
+a vector query and malformed Vectorize responses with keyword fallback.
+Owner HTTP also preserves all three query-validation messages before any AI
+or vector call. The shared contract error registry includes
+`InvalidMemorySearch` with its annotated 400 status.
+Synchronization cases require the native external-content FTS integrity check
+to pass after deleting a canonical row. They hold a real embedding
+request to require creation and keyword search before indexing completes;
+they also inspect workerd's scheduled outcome after a failed upsert.
+`memory-search-snippet.test.ts`
+requires clipped long-word highlights and Unicode boundaries that preserve
+supplementary characters. `memory-refresh-web.test.ts` uses genuine tab
+visibility changes and a fixed browser date to require fresh search results
+when returning before the cached query expires. The existing counts-unavailable
+reader assertion continues to require the loaded-count wording.
+
+`pnpm dev` attaches these local services to Miniflare, using recorded vectors when available and deterministic non-semantic vectors for other text. The journey server passes `--strict-embeddings`. Neither local mode contacts Cloudflare; the decorator and stand-ins stay outside the deployed Worker bundle.
+
+The `memory-search-*.png` files live in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare them with the selected `inline` prototype: fixed list header/summary, three desktop columns, phone Results link, three-line snippets, highlighted exact words and quiet meaning badge. Captures use genuine ranks and counts rather than fabricated results. The degraded state uses `pnpm verify` for real keyword hits; the no-results state uses a not-yet-visible meaning index. Extremes use valid six-level, 32-character paths rather than the prototype's invalid 34-character segment. The scenario selector, request stubs and schema bypass do not enter production.
 
 `scripts/load-time-browser.ts` owns the browser measurement functions used by the production timing command and the measurement-condition tests. The latter run those same functions against the built product, proving the phone viewport, destination URL and visible first screen rather than accepting a finite duration from the wrong route.
