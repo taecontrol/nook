@@ -62,10 +62,9 @@ type Condition =
   | 'unchecked'
   | 'preload';
 type FrameState = {
-  frames: number[];
+  frames: { timestamp: number; entered: number }[];
   clicked: number;
   clickedFrame: number;
-  clickDate: number;
   qualified: number;
   checkpoint: number;
   requested?: boolean;
@@ -82,13 +81,12 @@ async function installOracle(page: Page, condition: Condition) {
       frames: [],
       clicked: 0,
       clickedFrame: 0,
-      clickDate: 0,
       qualified: 0,
       checkpoint: 0,
     };
     (window as ProbeWindow).rendererProbe = state;
     const recordFrame = (timestamp: number) => {
-      state.frames.push(timestamp);
+      state.frames.push({ timestamp, entered: performance.now() });
       requestAnimationFrame(recordFrame);
     };
     requestAnimationFrame(recordFrame);
@@ -120,7 +118,6 @@ async function installOracle(page: Page, condition: Condition) {
           return;
         state.clicked = performance.now();
         state.clickedFrame = state.frames.length;
-        state.clickDate = Date.now();
         const translations = {
           left: '-2000px, 0',
           right: '2000px, 0',
@@ -196,16 +193,22 @@ async function assertInterval(page: Page, returned: number) {
       .filter((entry) => entry.startTime >= state.clicked)
       .at(-1);
     const end = native ? native.startTime + native.duration : 0;
+    // Frame timestamps can precede callback execution under main-thread load.
+    // Readiness and the native mark use the callback-entry clock instead.
+    const qualifiedFrames = state.frames.filter(
+      (frame) => frame.entered > state.qualified && frame.entered <= end,
+    );
     return {
       clicked: state.clicked,
       qualified: state.qualified,
-      firstFrameAfterClick: state.frames.find((time) => time > state.clicked),
+      firstFrameAfterClick: state.frames.find(
+        (frame) => frame.entered > state.clicked,
+      )?.entered,
       native: native
         ? { start: native.startTime, duration: native.duration }
         : null,
-      qualifiedFrames: state.frames.filter(
-        (time) => time > state.qualified && time <= end,
-      ).length,
+      qualifiedFrames: new Set(qualifiedFrames.map((frame) => frame.timestamp))
+        .size,
     };
   });
   expect(observed.native).not.toBeNull();
@@ -280,12 +283,10 @@ it('E17: Edit waits for its real intent preload and a fresh quiet window', async
     const ready = new Promise<void>((done) => {
       intercepted = done;
     });
-    let responseReleased = 0;
     await page.route('**/api/buckets', async (route) => {
       const response = await route.fetch();
       intercepted();
       await held;
-      responseReleased = Date.now();
       await route.fulfill({ response });
     });
     let settled = false;
@@ -313,10 +314,20 @@ it('E17: Edit waits for its real intent preload and a fresh quiet window', async
     ).toBe(0);
     release?.();
     await measurement;
-    const clicked = await page.evaluate(
-      () => (window as ProbeWindow).rendererProbe.clickDate,
-    );
-    expect(clicked - responseReleased).toBeGreaterThanOrEqual(450);
+    const timing = await page.evaluate(() => {
+      const preload = performance
+        .getEntriesByType('resource')
+        .find((entry) => new URL(entry.name).pathname === '/api/buckets');
+      if (!(preload instanceof PerformanceResourceTiming))
+        throw new Error('The real bucket preload must have native timing.');
+      return {
+        responseEnd: preload.responseEnd,
+        quiet:
+          (window as ProbeWindow).rendererProbe.clicked - preload.responseEnd,
+      };
+    });
+    expect(timing.responseEnd).toBeGreaterThan(0);
+    expect(timing.quiet).toBeGreaterThanOrEqual(500);
   } finally {
     release?.();
     await context.close();
