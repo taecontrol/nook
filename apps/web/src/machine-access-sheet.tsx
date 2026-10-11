@@ -181,9 +181,7 @@ function OutcomeAlert({
     copy && (
       <Alert ref={alert} tabIndex={-1} variant="destructive">
         <CircleAlert />
-        <AlertTitle className="line-clamp-none wrap-anywhere">
-          {copy.title}
-        </AlertTitle>
+        <AlertTitle wrap>{copy.title}</AlertTitle>
         <AlertDescription>{copy.body}</AlertDescription>
       </Alert>
     )
@@ -194,7 +192,7 @@ function MissingRoots({ paths }: { paths: readonly string[] }) {
   return (
     <Alert>
       <TriangleAlert />
-      <AlertTitle className="line-clamp-none wrap-anywhere">
+      <AlertTitle wrap>
         {paths.length === 1
           ? 'A bucket in its access no longer exists'
           : 'Some buckets in its access no longer exist'}
