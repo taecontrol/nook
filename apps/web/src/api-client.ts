@@ -1,4 +1,9 @@
-import { Api, AuthorizationsApi, errorStatus } from '@nook/contract';
+import {
+  Api,
+  AuthorizationsApi,
+  type BucketGrant,
+  errorStatus,
+} from '@nook/contract';
 import { Effect, Schema } from 'effect';
 import { FetchHttpClient, type HttpClient, HttpClientError } from 'effect/http';
 import { HttpApiClient } from 'effect/http-api';
@@ -12,6 +17,7 @@ export class ApiError extends Error {
     readonly outcomeUnknown = false,
     readonly tag = 'ServiceUnavailable',
     message?: string,
+    readonly current?: BucketGrant,
   ) {
     super(message ?? `Request failed with ${status}`);
     this.hasPublicMessage = message !== undefined;
@@ -39,7 +45,7 @@ function apiRunner<Client>(
       Effect.flatMap(client, operation).pipe(
         Effect.provide(FetchHttpClient.layer),
         Effect.mapError((failure) => {
-          const error = failure as { _tag?: string };
+          const error = failure as { _tag?: string; current?: BucketGrant };
           const tag = error._tag ?? 'ServiceUnavailable';
           return new ApiError(
             statusOf(error, tag),
@@ -49,6 +55,7 @@ function apiRunner<Client>(
               tag === 'ServiceUnavailable',
             tag,
             publicMessage(error),
+            tag === 'MachineAccessChanged' ? error.current : undefined,
           );
         }),
       ),

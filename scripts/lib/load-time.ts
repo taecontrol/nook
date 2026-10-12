@@ -21,6 +21,7 @@ export type Measurements = {
   machines: number[];
   machinesNavigation: number[];
   approvalNavigation: number[];
+  machineAccessNavigation: number[];
   vault: number[];
   vaultNavigation: number[];
   audit: number[];
@@ -73,6 +74,11 @@ export function assertLoadTimes(measured: Measurements) {
     throw new Error(
       `Loaded approval tree median ${approval.toFixed(1)} ms exceeds ${loadTimeBudgets.navigationMs} ms.`,
     );
+  const access = median(measured.machineAccessNavigation ?? []);
+  if (access > loadTimeBudgets.navigationMs)
+    throw new Error(
+      `Loaded machine access tree median ${access.toFixed(1)} ms exceeds ${loadTimeBudgets.navigationMs} ms.`,
+    );
   for (const [key, label, budget] of screens) {
     const actual = median(measured[key] ?? []);
     if (actual > budget)
@@ -92,6 +98,7 @@ export function formatMeasurements(measured: Measurements) {
         machines: median(measured.machines),
         machinesNavigation: median(measured.machinesNavigation),
         approvalNavigation: median(measured.approvalNavigation),
+        machineAccessNavigation: median(measured.machineAccessNavigation),
         audit: median(measured.audit),
         auditNavigation: median(measured.auditNavigation),
         vault: median(measured.vault),

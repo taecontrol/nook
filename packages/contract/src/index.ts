@@ -14,7 +14,8 @@ import {
   InvalidBucketPath,
   ReservedBucket,
 } from './buckets.ts';
-import { Machine } from './machines.ts';
+import { GrantBucketNotFound, InvalidBucketGrant } from './grants.ts';
+import { Machine, MachineAccessChanged } from './machines.ts';
 import {
   BucketHasMemories,
   InvalidMemory,
@@ -221,6 +222,23 @@ export const Api = HttpApi.make('nook')
         HttpApiEndpoint.get('list', '/api/machines', {
           success: Schema.Struct({ machines: Schema.Array(Machine) }),
           error: errors,
+        }),
+      )
+      .add(
+        HttpApiEndpoint.put('saveGrant', '/api/machines/:id/grant', {
+          params: Schema.Struct({ id: Schema.String }),
+          payload: Schema.Struct({
+            grant: Schema.Unknown,
+            previous: Schema.Unknown,
+          }),
+          success: Machine,
+          error: [
+            ...errors,
+            InvalidBucketGrant,
+            GrantBucketNotFound,
+            MachineAccessChanged,
+            HttpApiError.NotFound,
+          ],
         }),
       )
       .add(

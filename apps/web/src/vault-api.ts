@@ -189,7 +189,7 @@ function useSecretState() {
       (mutation.state.context as { revision?: number } | undefined)?.revision ??
       0,
   }));
-  const query = useQuery(gate.queryOptions(secretsOptions, busy));
+  const query = useQuery(gate.queryOptions(secretsOptions, busy, queries));
   const revision =
     queries.getQueryState(secretsOptions.queryKey)?.dataUpdateCount ?? 0;
   const observed = observedWrites(

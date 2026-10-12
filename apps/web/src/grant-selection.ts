@@ -7,11 +7,14 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { refreshBucketList, useBucketList } from './buckets-api';
 
-export function useGrantSelection() {
+export function useGrantSelection(initial: BucketGrant = [RESERVED_BUCKET]) {
   const queries = useQueryClient();
   const buckets = useBucketList();
-  const [roots, setRoots] = useState<readonly string[]>([RESERVED_BUCKET]);
-  const [all, setAll] = useState(false);
+  const [roots, setRoots] = useState<readonly string[]>(
+    initial === 'all' ? [] : initial,
+  );
+  const [all, setAll] = useState(initial === 'all');
+  const [revision, setRevision] = useState(0);
   const [error, setError] = useState<string>();
   const grant: BucketGrant = all ? 'all' : roots;
   const ready = all || (buckets.isSuccess && !buckets.isFetching);
@@ -19,6 +22,7 @@ export function useGrantSelection() {
     const normalized = normalizeGrant(value);
     if (normalized !== 'all') setRoots(normalized);
     setError(undefined);
+    setRevision((value) => value + 1);
   };
   const refresh = async () => {
     try {
@@ -36,10 +40,12 @@ export function useGrantSelection() {
     grant,
     ready,
     error,
+    revision,
     retry: refresh,
     toggleAll: (value: boolean) => {
       setAll(value);
       setError(undefined);
+      setRevision((value) => value + 1);
     },
     toggle: (path: string) =>
       change(

@@ -8,6 +8,7 @@ export async function phonePage(browser: Browser, kind: string) {
       'machines',
       'machinesNavigation',
       'approvalNavigation',
+      'machineAccessNavigation',
       'audit',
       'auditNavigation',
       'memory',
@@ -254,6 +255,67 @@ async function navigate(
       ).duration,
   );
 }
+async function machineAccessNavigation(
+  page: Page,
+  origin: string,
+  preloadTimeout: number,
+) {
+  const edit = await settleNetworkAfter(page, preloadTimeout, async () => {
+    await page.goto(`${origin}/machines`);
+    const button = page
+      .getByRole('button', { name: /^Edit access of / })
+      .first();
+    await button.waitFor();
+    await button.hover();
+    return button;
+  });
+  await page.evaluate(() => {
+    document.addEventListener(
+      'click',
+      () => {
+        performance.mark('nook-access-start');
+        const shown = () => {
+          const tree = document.querySelector(
+            '[data-slot="sheet-content"][data-state="open"] [aria-label="Bucket access"]',
+          );
+          const row = tree?.querySelector('[data-grant-path="me"] > div');
+          const checked = tree?.querySelector(
+            '[role="checkbox"][aria-checked="true"]',
+          );
+          const box = row?.getBoundingClientRect();
+          if (
+            !box ||
+            !checked ||
+            box.left < 0 ||
+            box.right > innerWidth ||
+            box.top < 0 ||
+            box.bottom > innerHeight
+          ) {
+            requestAnimationFrame(shown);
+            return;
+          }
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => performance.mark('nook-access-shown')),
+          );
+        };
+        requestAnimationFrame(shown);
+      },
+      { once: true, capture: true },
+    );
+  });
+  await edit.click();
+  await page.waitForFunction(
+    () => performance.getEntriesByName('nook-access-shown').length > 0,
+  );
+  return page.evaluate(
+    () =>
+      performance.measure(
+        'nook-access-tree',
+        'nook-access-start',
+        'nook-access-shown',
+      ).duration,
+  );
+}
 export async function measureScreen(
   page: Page,
   origin: string,
@@ -271,6 +333,8 @@ export async function measureScreen(
   const destination = destinations[kind as keyof typeof destinations];
   if (kind === 'approvalNavigation')
     return approvalNavigation(page, origin, code);
+  if (kind === 'machineAccessNavigation')
+    return machineAccessNavigation(page, origin, preloadTimeout);
   return destination
     ? navigate(page, origin, destination, preloadTimeout)
     : cold(page, origin, kind as ColdScreen);

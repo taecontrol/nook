@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import type { BucketGrant } from '@nook/contract';
 import { beforeEach, expect, it } from 'vitest';
-import { ownerRuntime } from './support/authorizations.ts';
+import { jsonRequest, ownerRuntime } from './support/authorizations.ts';
 import {
   filesContain,
   type PrivateKeyring,
@@ -15,8 +15,10 @@ import {
   machineMcp,
   seedGrantTree,
 } from './support/grants.ts';
+import { saveAccess } from './support/machine-access.ts';
 import { machineProxy } from './support/machine-proxy.ts';
 import { expectPrivate, listMachines } from './support/machines.ts';
+import { expectOutput } from './support/private-assertions.ts';
 import { runtime, type TestRuntime } from './support/runtime.ts';
 
 let app: TestRuntime;
@@ -165,3 +167,82 @@ it.each([
     ]);
   },
 );
+
+async function loginForAccess(name: string, grant: BucketGrant) {
+  const child = keyring.start(['login', app.origin]);
+  const code = await readUserCode(child);
+  expect(
+    (
+      await jsonRequest(app, `/api/authorizations/${code}/approve`, {
+        machineName: name,
+        grant,
+      })
+    ).status,
+  ).toBe(204);
+  expect((await child.done).status).toBe(0);
+  const machine = (await listMachines(app)).find(
+    (entry) => entry.name === name,
+  );
+  if (!machine)
+    throw new Error('The approved machine must appear in the owner list.');
+  return machine;
+}
+it('Access E1: the next real whoami reports an added sibling without another login or token change', async () => {
+  await seedGrantTree(app, ['work/beta']);
+  const machine = await loginForAccess('framework-13', ['work/acme']);
+  const token = await keyring.lookup(app.origin);
+  const before = await listMachines(app);
+  const saved = await saveAccess(
+    app,
+    machine.id,
+    ['work/acme', 'work/beta'],
+    machine.grant,
+  );
+  expect(saved.status).toBe(200);
+  expect(await saved.json()).toEqual({
+    ...before[0],
+    grant: ['work/acme', 'work/beta'],
+  });
+  expect(
+    (await keyring.lookup(app.origin)) === token,
+    'The existing keyring credential is retained',
+  ).toBe(true);
+  const result = await keyring.start(['whoami']).done;
+  expect(result.status).toBe(0);
+  expectOutput(
+    result.stdout,
+    `framework-13 at ${app.origin}\nAccess: work/acme, work/beta (read/write, including current and future descendants)\nRead only: me, work\nAll other buckets: hidden`,
+    true,
+  );
+  expect(result.stderr).toBe('');
+  expectPrivate(result.stdout, [token]);
+});
+it('Access E2: the next real vault list denies a removed root and retains the other root', async () => {
+  const machine = await loginForAccess('build-server', [
+    'clients/acme-logistics',
+    'work/taecontrol/nook',
+  ]);
+  expect(
+    (await keyring.start(['vault', 'list', 'clients/acme-logistics']).done)
+      .status,
+  ).toBe(0);
+  expect(
+    (await saveAccess(app, machine.id, ['work/taecontrol/nook'], machine.grant))
+      .status,
+  ).toBe(200);
+  const denied = await keyring.start([
+    'vault',
+    'list',
+    'clients/acme-logistics',
+  ]).done;
+  expect(denied.status).toBe(1);
+  expectOutput(
+    denied.stdout + denied.stderr,
+    'Access to this bucket is forbidden.',
+    true,
+  );
+  expect(
+    (await keyring.start(['vault', 'list', 'work/taecontrol/nook']).done)
+      .status,
+  ).toBe(0);
+});

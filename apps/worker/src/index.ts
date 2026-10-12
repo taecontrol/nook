@@ -63,6 +63,9 @@ export function handlerForPrincipal(
       const store = yield* machineOperations;
       return handlers
         .handle('list', () => store.list(grant))
+        .handle('saveGrant', ({ params, payload }) =>
+          store.saveGrant(grant, params.id, payload.grant, payload.previous),
+        )
         .handle('revoke', ({ params }) => store.revoke(grant, params.id));
     }),
   ).pipe(Layer.provide(D1Client.layer({ db })));
