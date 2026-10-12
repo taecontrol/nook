@@ -128,6 +128,8 @@ with `{ grant, previous }`. One conditional UPDATE and its classification read
 share a D1 batch. A stale writer receives `MachineAccessChanged` and the current
 grant; an identical retry succeeds. No migration, token replacement, login, or
 audit entry is needed. Authentication reads the updated grant on the next request.
+Every requested root must exist, including a descendant covered by a requested
+ancestor when normalization collapses the stored grant.
 
 | Examples | Evidence |
 | --- | --- |

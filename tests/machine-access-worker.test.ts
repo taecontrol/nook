@@ -137,6 +137,23 @@ it.each(['never-existed', 'deleted-before-batch'])(
   },
 );
 
+it('E4: a missing requested descendant is rejected even when its present ancestor covers it', async () => {
+  const { machine } = await approved();
+  const before = await tokenSnapshot(app);
+  const response = await saveAccess(
+    app,
+    machine.id,
+    ['work', 'work/missing'],
+    machine.grant,
+  );
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({
+    _tag: 'GrantBucketNotFound',
+    message: 'Some selected buckets no longer exist. Choose again.',
+  });
+  await expectUnchanged(before);
+});
+
 it.each(
   [[], null, {}, 'work/acme', ['Work'], ['work/acme', 1]].map((grant) => ({
     grant,
@@ -337,6 +354,26 @@ it('E10: success, validation, conflicts, and real storage failures never expose 
   expectPrivate(log.messages.join('\n'), [token, hash]);
   await expectUnchanged(before);
 });
+
+it.each(['updated', 'current'] as const)(
+  'E10: invalid persisted metadata keeps the %s machine response private',
+  async (branch) => {
+    const { machine } = await approved();
+    const db = await app.mf.getD1Database('DB');
+    await db
+      .prepare('UPDATE machine_tokens SET created_at=? WHERE id=?')
+      .bind('invalid-persisted-timestamp', machine.id)
+      .run();
+    const response = await saveAccess(
+      app,
+      machine.id,
+      ['work/beta'],
+      branch === 'updated' ? ['work/acme'] : 'all',
+    );
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ _tag: 'ServiceUnavailable' });
+  },
+);
 
 it('E17: each save outcome uses exactly one D1 batch and no separate read', async () => {
   const labels: string[] = [];
