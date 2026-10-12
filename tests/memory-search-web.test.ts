@@ -303,6 +303,9 @@ it('E17: the debounce commits at 250 ms and Enter commits before the timer fires
   try {
     const { page } = visit;
     await memoryRows(page).first().waitFor();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get('memory'))
+      .toBe(memoryId(20));
     const time = new Date('2026-10-10T20:00:00Z');
     await page.clock.install({ time });
     await page.clock.pauseAt(new Date(time.getTime() + 1000));

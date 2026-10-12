@@ -118,6 +118,7 @@ it('E11/E12: an access save cancels an old machines read already in flight', asy
   } finally {
     oldRead.resolve();
     write.resolve();
+    await visit.page.unrouteAll({ behavior: 'wait' });
     await visit.close();
   }
 });

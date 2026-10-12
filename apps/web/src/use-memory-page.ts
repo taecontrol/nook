@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useBucketList } from './buckets-api';
 import { useDesktop } from './hooks/use-desktop';
 import {
+  type MemorySearch,
   memoriesOptions,
   memoryCountsOptions,
   memoryOptions,
@@ -42,22 +43,32 @@ function searchSelection(
   if (!searching) return newest;
   return placeholder ? undefined : result;
 }
+// Updates derive from the latest location, never from the render that
+// scheduled them, so overlapping navigations cannot erase each other's keys.
+function located(search: MemorySearch) {
+  return {
+    ...search,
+    bucket: search.bucket ?? RESERVED_BUCKET,
+    scope: search.scope ?? 'inherited',
+  };
+}
 function useAutoSelection(
   desktop: boolean,
   firstId: string | undefined,
-  search: { memory?: string; q?: string },
-  bucket: string,
-  scope: 'bucket' | 'inherited',
+  memory: string | undefined,
   navigate: ReturnType<typeof useNavigate>,
 ) {
   useEffect(() => {
-    if (desktop && firstId && !search.memory)
+    if (desktop && firstId && !memory)
       void navigate({
         to: '/memory',
-        search: { bucket, scope, memory: firstId, q: search.q },
+        search: (previous: MemorySearch) =>
+          previous.memory
+            ? previous
+            : { ...located(previous), memory: firstId },
         replace: true,
       });
-  }, [desktop, firstId, search.memory, search.q, bucket, scope, navigate]);
+  }, [desktop, firstId, memory, navigate]);
 }
 function useQueryDraft(q: string, navigate: (q: string | undefined) => void) {
   const [draft, setDraft] = useState(q);
@@ -102,7 +113,7 @@ export function useMemoryPage() {
     q,
     (next) =>
       void navigate({
-        search: { bucket, scope, memory: search.memory, q: next },
+        search: (previous: MemorySearch) => ({ ...located(previous), q: next }),
         replace: true,
       }),
   );
@@ -134,7 +145,7 @@ export function useMemoryPage() {
     results.data?.results[0]?.id,
     records[0]?.id,
   );
-  useAutoSelection(desktop, firstId, search, bucket, scope, navigate);
+  useAutoSelection(desktop, firstId, search.memory, navigate);
   return {
     search,
     bucket,

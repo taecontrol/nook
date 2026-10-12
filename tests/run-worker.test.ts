@@ -116,7 +116,7 @@ it.each(['mismatch', 'missing', 'corrupt'])(
     if (kind === 'corrupt')
       await (await app.mf.getD1Database('DB'))
         .prepare(
-          "UPDATE secrets SET ciphertext=replace(ciphertext, substr(ciphertext,1,1), 'z')",
+          "UPDATE secrets SET ciphertext=CASE substr(ciphertext,1,1) WHEN 'A' THEN 'B' ELSE 'A' END || substr(ciphertext,2)",
         )
         .run();
     else
