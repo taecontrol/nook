@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Memory } from '@nook/contract';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { access, accessFixture } from './support/access.ts';
@@ -248,6 +248,33 @@ describe.each(['owner', 'machine'] as const)('Update #12: %s', (endpoint) => {
       ).toMatchObject({ updated: true, version: 5 });
       await integrity();
     });
+    it.each(['self', 'other'] as const)(
+      'hash safety: a %s hash collision never writes or names a byte-different duplicate',
+      async (kind) => {
+        const db = await app.mf.getD1Database('DB');
+        if (kind === 'other')
+          await seedMemories(app, [
+            memoryFixture(2, {
+              content: 'Different bytes under the requested digest',
+            }),
+          ]);
+        // Reproduce the collision state without claiming a real SHA-256 collision.
+        await db
+          .prepare('UPDATE memories SET content_hash=? WHERE id=?')
+          .bind(
+            createHash('sha256').update(next).digest('hex'),
+            memoryId(kind === 'self' ? 1 : 2),
+          )
+          .run();
+        const before = await snapshot();
+        expectToolError(
+          await update(),
+          'Service unavailable. Try again later.',
+        );
+        expect(await snapshot()).toEqual(before);
+        await integrity();
+      },
+    );
     it('E7: forbidden ancestors and masked missing, malformed and unreadable ids never write or disclose content', async () => {
       await seedMemories(app, [
         memoryFixture(2, { bucket: 'work' }),
@@ -338,9 +365,11 @@ describe.each(['owner', 'machine'] as const)('Update #12: %s', (endpoint) => {
           expect(
             results.filter((r) => r.structuredContent?.updated === false),
           ).toHaveLength(9);
-        else
+        else {
+          expect(results.filter((r) => r.isError)).toHaveLength(9);
           for (const result of results.filter((r) => r.isError))
             expectToolError(result, changed(2, 1));
+        }
         expect((await snapshot()).versions).toHaveLength(2);
         await integrity();
       },

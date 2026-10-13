@@ -20,6 +20,38 @@ beforeAll(async () => {
   ]);
 });
 afterAll(() => app?.close());
+it('E20: history rejects malformed boundaries after authorization and accepts a positive integer version', async () => {
+  for (const before of [
+    '0',
+    '1.5',
+    '-1',
+    '999999999999999999999',
+    'junk',
+    '02',
+  ]) {
+    const response = await fetch(
+      `${app.origin}/api/memories/${memoryId(1)}/versions?${new URLSearchParams({ before })}`,
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ _tag: 'InvalidMemoryCursor' });
+  }
+  const valid = await fetch(
+    `${app.origin}/api/memories/${memoryId(1)}/versions?before=2`,
+  );
+  expect(valid.status).toBe(200);
+  expect((await valid.json()).versions).toHaveLength(1);
+  const handler = handlerForPrincipal(
+    'owner@nook.test',
+    await app.mf.getD1Database('DB'),
+    ['work/acme'],
+  );
+  const denied = await handler(
+    new Request(
+      `http://nook.test/api/memories/${memoryId(2)}/versions?before=0`,
+    ),
+  );
+  expect(denied.status).toBe(404);
+});
 it('E20/E21: existing memories have one exact version, grant denials are 404, and machine credentials cannot reach history', async () => {
   const response = await fetch(
     `${app.origin}/api/memories/${memoryId(1)}/versions`,
