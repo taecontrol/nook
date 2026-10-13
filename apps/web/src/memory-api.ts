@@ -49,7 +49,7 @@ export function memoryOptions(id: string) {
     staleTime: 30_000,
   });
 }
-export function memoryHistoryOptions(id: string) {
+export function memoryHistoryOptions(id: string, minimumVersion = 0) {
   return queryOptions({
     queryKey: ['memory-history', id],
     queryFn: async ({ signal }) => {
@@ -71,7 +71,8 @@ export function memoryHistoryOptions(id: string) {
     },
     retry: false,
     retryOnMount: false,
-    staleTime: 30_000,
+    staleTime: (query) =>
+      (query.state.data?.[0]?.version ?? 0) < minimumVersion ? 0 : 30_000,
   });
 }
 export function memorySearchOptions(

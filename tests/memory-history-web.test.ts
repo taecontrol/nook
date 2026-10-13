@@ -2,6 +2,7 @@ import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { deferred } from './support/machines.ts';
+import { memoryClient } from './support/memory.ts';
 import {
   historyPage,
   memories,
@@ -27,15 +28,95 @@ describe.each([
   { width: 1440, height: 900 },
   { width: 390, height: 844 },
 ])('#12 history at $width px', (viewport) => {
+  it('E22/E23/E24: fresh history reconciles an update made while the reading pane remains cached', async () => {
+    const visit = await historyPage(browser, {
+      viewport,
+      scenario: 'never-updated',
+    });
+    try {
+      const { page, app } = visit;
+      await history(page).waitFor();
+      expect(await history(page).textContent()).toContain('1 version');
+      const id = memories[1].id;
+      const update = await memoryClient(app, '2026-07-28').call('update', {
+        id,
+        expectedVersion: 1,
+        content: '# Updated package manager\nUse pnpm with a frozen lockfile.',
+        tags: ['tooling'],
+      });
+      expect(update.structuredContent).toMatchObject({
+        updated: true,
+        version: 2,
+      });
+      await history(page).click();
+      await page.locator('[data-version-row="2"]').waitFor();
+      expect(
+        await page.locator('[data-version-row="2"]').textContent(),
+      ).toContain('Current');
+      expect(
+        await page.locator('[data-version-row="1"]').textContent(),
+      ).not.toContain('Current');
+      await page.locator('[data-version-row="2"]').click();
+      await sheet(page)
+        .getByRole('heading', { name: 'Version 2 of 2' })
+        .waitFor();
+      await sheet(page)
+        .getByRole('button', { name: 'Close', exact: true })
+        .click();
+      await expect.poll(() => sheet(page).count()).toBe(0);
+      expect(await history(page).textContent()).toContain('2 versions');
+      expect(
+        await page
+          .getByRole('article', { name: 'Memory detail' })
+          .textContent(),
+      ).toContain('Updated package manager');
+    } finally {
+      await visit.close();
+    }
+  });
+  it('E2/E23: a tags-only reorder names the change instead of claiming nothing changed', async () => {
+    const visit = await historyPage(browser, {
+      viewport,
+      scenario: 'never-updated',
+    });
+    try {
+      const { page, app } = visit;
+      const client = memoryClient(app, '2026-07-28');
+      const content = memories[1].versions[0].content;
+      for (const [expectedVersion, tags] of [
+        [1, ['tooling', 'deploy']],
+        [2, ['deploy', 'tooling']],
+      ] as const)
+        expect(
+          (
+            await client.call('update', {
+              id: memories[1].id,
+              expectedVersion,
+              content,
+              tags,
+            })
+          ).structuredContent,
+        ).toMatchObject({ updated: true });
+      await history(page).click();
+      await page.locator('[data-version-row="3"]').waitFor();
+      expect(
+        await page.locator('[data-version-row="3"]').textContent(),
+      ).toContain('Tags only: reordered');
+    } finally {
+      await visit.close();
+    }
+  });
   it.each(['hover', 'focus'] as const)(
     'E22: History counts locally and %s preloads exactly once before opening',
     async (intent) => {
       const requests: string[] = [];
+      const scripts: string[] = [];
       const visit = await historyPage(browser, {
         viewport,
         configure: async (page) => {
           page.on('request', (r) => {
             if (r.url().includes('/versions')) requests.push(r.url());
+            if (r.resourceType() === 'script') scripts.push(r.url());
           });
         },
       });
@@ -48,9 +129,16 @@ describe.each([
             .textContent(),
         ).toContain('Updated');
         expect(requests).toEqual([]);
+        expect(scripts.some((url) => /memory-history-sheet/.test(url))).toBe(
+          false,
+        );
         if (intent === 'hover') await history(page).hover();
         else await history(page).focus();
         await expect.poll(() => requests.length).toBe(1);
+        await expect
+          .poll(() => scripts.some((url) => /memory-history-sheet/.test(url)))
+          .toBe(true);
+        expect(scripts.some((url) => /memory-diff/.test(url))).toBe(false);
         await history(page).click();
         await page.locator('[data-version-row]').last().waitFor();
         expect(requests).toHaveLength(1);
@@ -86,6 +174,9 @@ describe.each([
       expect(
         await rows.first().locator('time').getAttribute('title'),
       ).toBeTruthy();
+      expect(await rows.first().locator('time').textContent()).toMatch(
+        /^Oct 13, 2026, \d{1,2}:\d{2} [AP]M$/,
+      );
       expect(await rows.first().getAttribute('data-slot')).toBe('item');
       await rows.nth(2).click();
       await sheet(page)
@@ -109,6 +200,25 @@ describe.each([
       ).toContain('Removed:');
       expect(await sheet(page).locator('ins').count()).toBeGreaterThan(0);
       expect(await sheet(page).locator('del').count()).toBeGreaterThan(0);
+      for (const [kind, marker] of [
+        ['add', '+'],
+        ['del', '−'],
+      ])
+        expect(
+          await sheet(page)
+            .locator(`[data-diff-row="${kind}"] > [aria-hidden]`)
+            .allTextContents(),
+        ).toEqual(expect.arrayContaining([marker]));
+      const additions = (
+        await sheet(page).locator('ins').allTextContents()
+      ).join(' ');
+      const removals = (
+        await sheet(page).locator('del').allTextContents()
+      ).join(' ');
+      expect(additions).toContain('pnpm test:');
+      expect(removals).toContain('waits');
+      expect(additions).not.toContain('The workflow deploys');
+      expect(removals).not.toContain('The workflow deploys');
       await sheet(page).getByRole('button', { name: 'Newer version' }).click();
       await sheet(page)
         .getByText('The content is the same as in version 2.', { exact: true })
@@ -145,6 +255,29 @@ describe.each([
         name: /Show \d+ unchanged lines/,
       });
       await folds.first().waitFor();
+      const context = await folds.nth(1).evaluate((button) => {
+        const wrapper = button.parentElement;
+        const count = (
+          start: Element | null | undefined,
+          direction: 'nextElementSibling' | 'previousElementSibling',
+        ) => {
+          let current = start;
+          let n = 0;
+          while (current?.getAttribute('data-diff-row') === 'same') {
+            n++;
+            current = current[direction];
+          }
+          return n;
+        };
+        return {
+          before: count(
+            wrapper?.previousElementSibling,
+            'previousElementSibling',
+          ),
+          after: count(wrapper?.nextElementSibling, 'nextElementSibling'),
+        };
+      });
+      expect(context).toEqual({ before: 3, after: 3 });
       const before = await sheet(page)
         .locator('[data-diff-row="same"]')
         .count();

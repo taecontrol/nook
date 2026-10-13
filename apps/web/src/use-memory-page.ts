@@ -123,7 +123,13 @@ function useHistoryNavigation(
     changes: search.changes === '1',
     prefetchHistory: () => {
       if (search.memory)
-        void queries.prefetchQuery(memoryHistoryOptions(search.memory));
+        void queries.prefetchQuery(
+          memoryHistoryOptions(
+            search.memory,
+            queries.getQueryData(memoryOptions(search.memory).queryKey)
+              ?.version,
+          ),
+        );
     },
     openHistory: () => historyNavigate({ history: '1' }),
     closeHistory: () =>
