@@ -31,6 +31,7 @@ const notFound = '{"error":"Not found"}';
 // A new endpoint changes these lists, so its gate and token check get review.
 it('derives the owner gate and the machine token check from the contract', () => {
   expect(listed(ownerRoutes)).toEqual([
+    'GET /api/memories/:id/versions',
     'GET /api/memories/search',
     'GET /api/memories/counts',
     'GET /api/memories',
@@ -78,6 +79,9 @@ it.each([
   ['GET', '/API/BUCKETS', false],
   ['HEAD', '/api/buckets', true],
   ['HEAD', '/api/memories/x', true],
+  ['GET', '/api/memories/x/versions', true],
+  ['HEAD', '/api/memories/x/versions', true],
+  ['POST', '/api/memories/x/versions', false],
   ['POST', '/api/memories/x', false],
   ['GET', '/api/memories/x/y', false],
   ['POST', '/api/secrets/work%2FKEY/reveal', true],
@@ -134,6 +138,7 @@ it('serves HEAD on every owner read as the router serves GET', async () => {
     ['/api/memories/search', 400],
     ['/api/memories', 400],
     ['/api/memories/x', 404],
+    ['/api/memories/x/versions', 404],
     ['/api/unknown', 404],
   ] as const) {
     const response = await fetch(`${app.origin}${path}`, {
