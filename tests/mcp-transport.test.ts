@@ -125,7 +125,7 @@ it('E9: the synthetic owner accepts absent/same Origin and rejects a foreign Ori
     ])
       expect(
         (await mcpDriver(app.origin, '2026-07-28', headers).listTools()).tools,
-      ).toHaveLength(7);
+      ).toHaveLength(8);
     const response = await mcpDriver(app.origin, '2026-07-28', {
       Origin: 'https://foreign.test',
     }).request('tools/list');

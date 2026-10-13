@@ -294,7 +294,7 @@ it('E15: all machine MCP methods reject foreign Origin before authentication or 
           origin ? { Origin: origin } : {},
         ).listTools()
       ).tools,
-    ).toHaveLength(7);
+    ).toHaveLength(8);
   for (const method of ['POST', 'GET', 'DELETE']) {
     const response = await fetch(`${app.origin}/api/machine/mcp`, {
       method,

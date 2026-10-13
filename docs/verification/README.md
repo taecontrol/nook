@@ -307,7 +307,7 @@ Issue #10 runs against the migrated production Worker in workerd and real local 
 | E9 | `memory-mcp.test.ts`: denied, missing and malformed ids share the not-found result; ancestors remain readable. |
 | E10 | `memory-mcp.test.ts`: missing bucket creates no rows. |
 | E11 | `memory-mcp.test.ts`: exact UTF-8 byte limit, Unicode, NUL, tags and directory boundaries. |
-| E12 | `memory-mcp.test.ts`, `mcp-worker.test.ts`: tool descriptions, annotations and the four preserved tools plus get/remember. Search delivery adds `search`; transport, grant, CLI-header and Vault-reveal tests now require the seven-tool inventory. |
+| E12 | `memory-mcp.test.ts`, `mcp-worker.test.ts`: tool descriptions, annotations and the four preserved tools plus get/remember. Search delivery adds `search` and update delivery adds `update`; transport, grant, CLI-header and Vault-reveal tests require the eight-tool inventory. |
 | E13 | `memory-mcp.test.ts`: revocation rejects writes and retains machine provenance. |
 | E14 | `memory-mcp.test.ts`, `memory-worker.test.ts`: real D1 and corrupt persisted ordering/encoding failures return fixed private errors. |
 | E15 | `memory-worker.test.ts`: HTTP/MCP deletion blockers, precedence and direct foreign-key enforcement. |
