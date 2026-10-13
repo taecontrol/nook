@@ -455,6 +455,7 @@ function ReadingPane({ model }: { model: MemoryPageModel }) {
       {model.historyOpen && (
         <Suspense fallback={null}>
           <HistorySheet
+            key={memory.id}
             model={model}
             memory={memory}
             returnFocus={returnFocus}

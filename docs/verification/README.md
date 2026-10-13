@@ -401,7 +401,7 @@ tripwire remain mandatory under `pnpm verify`.
 | E20–E21 | `memory-history-worker.test.ts`: owner history with exact content/provenance, existing version-one rows, invalid and valid paging boundaries, restricted-grant 404s before cursor validation and machine credential boundaries. The browser's thirty-version case traverses history pages. |
 | E22 | `memory-history-web.test.ts`: zero pre-intent history requests, local version count, hover and keyboard preload of both data and the sheet chunk, no diff chunk on intent, and zero extra requests on open. |
 | E23–E25 | The same browser suite: shadcn Item rows, ordering, summaries including tag reorder, absolute times, writers, fixed header/internal scrolling, Markdown, arrows, directional source/word diffs and gutters, exactly three lines of fold context, tags-only copy, added/removed tags and disabled version-one comparison. It also covers a fresh history with cached detail; `memory-history-cache-race.test.ts` covers older cached history and held old responses after a newer detail, using genuine tab visibility changes. |
-| E26–E27 | The same suite: deep links, reload, Back, every dismissal and restored focus; real delayed reads, row-height skeletons, retry, inherited and version-one memories, and 16 KiB Unicode with six maximum-length segments and long provenance at 390 px. |
+| E26–E27 | The same suite: deep links, reload, Back, every dismissal and restored focus; real delayed reads, row-height skeletons, retry, inherited and version-one memories, and 16 KiB Unicode with six maximum-length segments and long provenance at 390 px. `memory-history-cache-race.test.ts` also jumps between open histories through genuine browser history and proves that local reconciliation belongs to the selected memory. |
 | E28 | `memory-history-web.test.ts` observes separate lazy sheet and diff script requests. Existing `memory-load-time.test.ts`, `load-time.test.ts` and `pnpm verify:load-time` retain the five-sample 4G budgets of 1000 ms cold and 100 ms after intent. |
 | E29 | `memory-history-captures.test.ts`: all seven chosen Sheet scenarios and reading/list/version/changes states at 1440×900 and 390×844 in both themes. Loading gates a genuine response; failure injects a service failure. |
 | E30 | Journey clarification pending: E25 disables comparison on version one, whereas E30 asks to activate it after opening version one. |
@@ -428,3 +428,9 @@ hosted integration. The owner completes hosted metadata and freshness evidence
 in E31. Sweep setup uses explicit scheduled times and advances the stand-in's
 asynchronous vector visibility between repair runs, so the assertions do not
 depend on the wall-clock rotation window.
+
+Cache-race evidence waits for fresh history on hover before opening and requires
+no extra history read on open. A held old response is followed by a held repair
+response; only the skeleton is visible until the known current version arrives.
+Each memory owns its Sheet's local reconciliation and diff state, including when
+the browser jumps directly between open histories.
