@@ -429,6 +429,12 @@ in E31. Sweep setup uses explicit scheduled times and advances the stand-in's
 asynchronous vector visibility between repair runs, so the assertions do not
 depend on the wall-clock rotation window.
 
+The existing 104-memory search corpus also advances vector visibility after
+each preparation run. A controlled first inspection window reproduced its
+former intermittent setup failure: 150 upserts instead of the asserted 104,
+before search began. The same window passes after the fixture repair, with
+all original ranking, compact-response, grant and query-budget assertions.
+
 Cache-race evidence waits for fresh history on hover before opening and requires
 no extra history read on open. A held old response is followed by a held repair
 response; only the skeleton is visible until the known current version arrives.
