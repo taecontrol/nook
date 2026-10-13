@@ -61,10 +61,10 @@ export async function searchRuntime() {
     return {
       ...app,
       services,
-      async scheduled() {
+      async scheduled(scheduledTime = new Date()) {
         await (await app.mf.getWorker()).scheduled({
           cron: '*/5 * * * *',
-          scheduledTime: new Date(),
+          scheduledTime,
         });
       },
       async close() {

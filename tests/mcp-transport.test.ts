@@ -50,7 +50,7 @@ it('E8a: Claude discovery, tool list and call work without initialization or ses
       capabilities: { tools: {} },
     });
     expect(discovery).not.toHaveProperty('instructions');
-    expect((await driver.listTools()).tools).toHaveLength(7);
+    expect((await driver.listTools()).tools).toHaveLength(8);
     const result = await driver.call('list_buckets');
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toMatchObject({

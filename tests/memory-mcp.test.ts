@@ -433,6 +433,7 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
         'list_secrets',
         'remember',
         'search',
+        'update',
       ]);
       const remember = tools.find((t) => t.name === 'remember');
       expect(remember?.description).toMatch(/bucket explicitly/i);

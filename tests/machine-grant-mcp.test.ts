@@ -145,7 +145,7 @@ it.each(['2026-07-28', '2025-06-18'] as const)(
           expect(result.protocolVersion).toBe(version);
         if (method === 'server/discover')
           expect(result.supportedVersions).toEqual(['2026-07-28']);
-        if (method === 'tools/list') expect(result.tools).toHaveLength(7);
+        if (method === 'tools/list') expect(result.tools).toHaveLength(8);
       }
     }
   },

@@ -7,6 +7,26 @@ const options = {
   returnMetadata: 'all' as const,
   filter: { bucket: { $in: ['allowed'] } },
 };
+it('Vectorize getByIds includes values and metadata, omits missing ids and shares delayed visibility with query', () => {
+  const services = new SearchStandIns();
+  const first = {
+    id: 'a',
+    values,
+    metadata: { bucket: 'allowed', contentHash: 'first' },
+  };
+  services.upsert([first]);
+  expect(services.getByIds(['a', 'absent'])).toEqual([]);
+  services.advance();
+  expect(services.getByIds(['absent', 'a'])).toEqual([first]);
+  const next = {
+    ...first,
+    metadata: { bucket: 'allowed', contentHash: 'next' },
+  };
+  services.upsert([next]);
+  expect(services.getByIds(['a'])).toEqual([first]);
+  services.advance();
+  expect(services.getByIds(['a'])).toEqual([next]);
+});
 it('recordings are strict: an unrecorded text fails rather than inventing semantic evidence', () => {
   const services = new SearchStandIns();
   expect(() =>

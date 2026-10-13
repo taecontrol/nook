@@ -64,6 +64,7 @@ export function searchWorker(worker: {
       query: (values: number[], options: unknown) =>
         invoke('query', values, options),
       upsert: (vectors: unknown) => invoke('upsert', vectors),
+      getByIds: (ids: string[]) => invoke('getByIds', ids),
     },
   });
   return {
