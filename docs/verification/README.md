@@ -393,14 +393,14 @@ tripwire remain mandatory under `pnpm verify`.
 
 | Examples | Tests or captures |
 | --- | --- |
-| E1–E8 | `memory-update-mcp.test.ts`: both protocols and both endpoints, immutable provenance, original creation time, exact tags, no-op retries, intervening writers, byte-checked duplicates, own earlier text, grant denials, private validation and exact UTF-8 limits. Rejected writes compare all version/head/marker facts and run FTS integrity checks. |
-| E9–E10 | The same matrix: ten distinct or identical writers append exactly one row; update/remember in both serialized orders preserve current-content identity. |
+| E1–E8 | `memory-update-mcp.test.ts`: both protocols and both endpoints, immutable provenance, original creation time, exact tags, no-op retries, intervening writers, byte-checked duplicates, own earlier text, grant denials, private validation and exact UTF-8 limits. Simulated self/other hash collisions return only ServiceUnavailable and never write. Rejected writes compare all version/head/marker facts and run FTS integrity checks. |
+| E9–E10 | The same matrix: ten distinct or identical writers append exactly one row; all nine distinct losers receive the changed error. Update/remember in both serialized orders preserve current-content identity. |
 | E11–E14 | The same matrix: real aborting triggers in S1 and S2 prove rollback and retry; revoked tokens fail before the SDK; exact inventory/annotations/descriptions; updated buckets retain HTTP and MCP deletion guards. |
 | E15 | `memory-history-worker.test.ts`: the existing D1 checkpoint decorator requires one bucket preflight and one three-statement batch for success, no-op, stale and duplicate outcomes. |
-| E16–E19 | `memory-update-search.test.ts`: current keyword postings/snippets/tags, stale meaning candidates filtered through MCP and HTTP, tags-only markers, late upsert completion, actual-index repair with no search, missing/wrong metadata, settle window, inspection failure, rotating sweep and 50/32 bounds. `memory-search-sync.test.ts` now updates through the real tool. |
-| E20–E21 | `memory-history-worker.test.ts`: owner history with exact content/provenance, existing version-one rows, restricted-grant 404s and machine credential boundaries. The browser's thirty-version case traverses history pages. |
-| E22 | `memory-history-web.test.ts`: zero pre-intent history requests, local version count, hover and keyboard prefetch, and zero extra requests on open. |
-| E23–E25 | The same browser suite: shadcn Item rows, ordering, summaries, times, writers, fixed header/internal scrolling, Markdown, arrows, source/word diffs, folding, tags-only copy, added/removed tags and disabled version-one comparison. |
+| E16–E19 | `memory-update-search.test.ts`: current keyword postings/snippets/tags, stale meaning candidates filtered through MCP and HTTP while query embeddings remain available, tags-only markers, pre-upsert id/hash filtering across equal-content memories in different buckets, late upsert completion, actual-index repair without search, missing/wrong metadata, settle window, inspection failure and mixed-marker rotating sweeps. Held inspection responses cannot erase a tags-only update or replacement-model acknowledgement. `memory-search-sync.test.ts` proves the shared 50/32 bounds and now updates through the real tool. |
+| E20–E21 | `memory-history-worker.test.ts`: owner history with exact content/provenance, existing version-one rows, invalid and valid paging boundaries, restricted-grant 404s before cursor validation and machine credential boundaries. The browser's thirty-version case traverses history pages. |
+| E22 | `memory-history-web.test.ts`: zero pre-intent history requests, local version count, hover and keyboard preload of both data and the sheet chunk, no diff chunk on intent, and zero extra requests on open. |
+| E23–E25 | The same browser suite: shadcn Item rows, ordering, summaries including tag reorder, absolute times, writers, fixed header/internal scrolling, Markdown, arrows, directional source/word diffs and gutters, exactly three lines of fold context, tags-only copy, added/removed tags and disabled version-one comparison. It also covers a fresh history with cached detail; `memory-history-cache-race.test.ts` covers older cached history and held old responses after a newer detail, using genuine tab visibility changes. |
 | E26–E27 | The same suite: deep links, reload, Back, every dismissal and restored focus; real delayed reads, row-height skeletons, retry, inherited and version-one memories, and 16 KiB Unicode with six maximum-length segments and long provenance at 390 px. |
 | E28 | `memory-history-web.test.ts` observes separate lazy sheet and diff script requests. Existing `memory-load-time.test.ts`, `load-time.test.ts` and `pnpm verify:load-time` retain the five-sample 4G budgets of 1000 ms cold and 100 ms after intent. |
 | E29 | `memory-history-captures.test.ts`: all seven chosen Sheet scenarios and reading/list/version/changes states at 1440×900 and 390×844 in both themes. Loading gates a genuine response; failure injects a service failure. |
@@ -421,3 +421,10 @@ filtering current markers. Repair cannot shrink the sweep's ordering window.
 IDs repaired in that invocation are deferred until a later inspection to
 allow asynchronous propagation. The accepted schema and its drift snapshot
 remain unchanged.
+
+The inspection acknowledgement case prepares the replacement-model marker in
+real D1; it tests conditional invalidation without claiming a two-deployment
+hosted integration. The owner completes hosted metadata and freshness evidence
+in E31. Sweep setup uses explicit scheduled times and advances the stand-in's
+asynchronous vector visibility between repair runs, so the assertions do not
+depend on the wall-clock rotation window.

@@ -33,7 +33,15 @@ The MCP `remember` tool takes an explicit existing bucket, Markdown content, opt
 
 The result contains the memory id and metadata. `get({"id": "…"})` reads its exact content and provenance. Retrying byte-identical content in the same bucket returns that memory with `created: false`, preserves its tags, and writes nothing. A changed byte or a different bucket creates another memory. Content is limited to 16 KiB of UTF-8; tags are unique lowercase bucket segments, at most ten tags of 32 characters each.
 
-Memory reads include the selected bucket, its ancestors, and `me`, within the caller's grant. In the web app, switch between that view and "Only this bucket". Each memory records the authenticated principal, client as reported, optional working directory, and server time. Markdown renders without executing HTML or fetching remote images. Buckets holding memories cannot be deleted. Search, editing, and forgetting are not available yet.
+Memory reads include the selected bucket, its ancestors, and `me`, within the caller's grant. In the web app, switch between that view and "Only this bucket", search by words or meaning, and open History to read earlier versions and changes. Each version records the authenticated principal, client as reported, optional working directory, and server time. Markdown renders without executing HTML or fetching remote images. Buckets holding memories cannot be deleted. Forgetting is not available yet.
+
+To replace a changed fact, call `get` first and pass its version as
+`expectedVersion` to `update`, with the same id and new content. Omitted tags
+are kept; `[]` clears them. A stale change is rejected, and another memory's
+identical current content in the same bucket is named as a duplicate.
+Retrying identical content and resulting tags returns `updated: false` when
+they already match; another writer can make a retry stale. Updates preserve
+the id, bucket, original creation time and earlier versions.
 
 ## Run a command with secrets
 
