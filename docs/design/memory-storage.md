@@ -240,8 +240,115 @@ The outcome follows from the results:
 ## Open risks
 
 - **#11:** the FTS5 external-content table needs `content=<view over current versions>` with `content_rowid=seq`. Spike it against D1's SQLite version before #11. Vectorize metadata stores a hash of the bucket path, because the path can exceed the 64-byte index prefix.
-- **#12:**
-  - An update that collides with another memory's current content is rejected with an error naming that memory.
-  - Whether omitted tags copy the current tags is still open.
+- **#12:** resolved in [Update and history (#12)](#update-and-history-12).
 - **Untrusted client strings:** User-Agent strings from other clients are bounded and filtered for control characters.
 - **ADR candidate:** the rationale for "content identity instead of a write id" and for recording `workingDirectory` instead of the repository that ADR-0004 mentions.
+
+## Update and history (#12)
+
+Status: Accepted, 2026-10-13, by the owner. Grounded on commit `0a24f2c`. Retire with the rest of this brief once its decisions live in code, tests, `docs/`, and ADR-0014.
+
+### Problem and scope
+
+Agents need to replace a memory's content when a fact changes, and the owner needs to see the earlier versions. This section fixes the MCP `update` contract, its retry and concurrency behavior, how it keeps the duplicate guard (ADR-0012) and both search derivatives (ADR-0013) correct, and the owner-only history read. It does not cover forget (#13), moving memories between buckets, owner editing or restoring, or a version cap.
+
+### Domain meaning (accepted by the owner)
+
+- An update creates version n+1 with its own provenance, from the same sources as `remember`. Version rows are immutable. The id, bucket, and `createdAt` never change. Reverting to an earlier version's text is a new version.
+- **Concurrency:** `update` requires the version the caller read. When the current version differs, nothing changes and the caller must `get` again.
+- **Retry identity:** when the current content is byte-identical to the request and the resulting tags equal the current tags (as JSON arrays, in order), the update already happened. It succeeds with `updated: false`, writes nothing, and keeps the current provenance, even when `expectedVersion` is stale.
+- **Tags:** omitted tags keep the current tags, and `[]` clears them. A version may change only tags.
+- **Duplicates:** content byte-identical to another memory's current content in the same bucket is rejected with that memory's id. The unique index `memories_current_content` stays.
+- **History is owner-only.** There is no MCP history tool and no `/api/machine/*` history route.
+
+### Caller usage
+
+```jsonc
+// tools/call update (owner /mcp or machine /api/machine/mcp)
+{ "id": "5f0c…", "expectedVersion": 2, "content": "# Release process\n…",
+  "tags": ["deploy"], "workingDirectory": "/Users/luis/code/acme-api" }   // tags and workingDirectory optional
+// → structuredContent
+{ "updated": true, "id": "5f0c…", "bucket": "work/acme", "version": 3,
+  "tags": ["deploy"], "createdAt": "2026-10-09T14:02:11.482Z", "updatedAt": "2026-10-13T10:41:07.913Z" }
+```
+
+Outcomes, in classification order:
+
+| Condition | Result | Writes |
+|---|---|---|
+| Missing, malformed, or unreadable id | "Memory not found." | No |
+| Readable but not writable (ancestor, `me`) | "Access to this bucket is forbidden." | No |
+| Invalid input | The contract's validation message; never echoes content | No |
+| Current content and resulting tags equal the request | `updated: false`, current facts | No |
+| Current version differs from `expectedVersion` | `MemoryChanged` (409): "This memory changed: it is now version 3, not 2. Get it again before updating." | No |
+| Another memory in the bucket has byte-identical current content | `DuplicateMemory` (409): "Memory <id> in this bucket already has this content." | No |
+| Otherwise | `updated: true`, version n+1 | Yes |
+| Same hash with different bytes, D1 failure, or an unexplained state | "Service unavailable. Try again later." Outcome unknown; retrying identical input is safe | Unknown |
+
+A retry after an unconfirmed attempt answers from the current state. If another writer changed the memory in between, the retry gets `MemoryChanged` even though the first attempt may have committed; the tool description says so. `update` is annotated `readOnlyHint: false`, `destructiveHint: true` (agents cannot see the replaced text), `idempotentHint: true`.
+
+### Architecture shape
+
+| Owner | Owns for #12 |
+|---|---|
+| `packages/contract/src/memory.ts` | `UpdateMemory` (`id`, `expectedVersion`, `content`, `tags?`, `workingDirectory?`), `Updated`, `MemoryChanged` 409, `DuplicateMemory` 409, the `expectedVersion` validation message, and `MemoryVersion` for the history read |
+| `apps/worker/src/memory.ts` | `memoryStore.update(principal, client, input)` and `history(id)`. The only SQL touching memory tables; the guard fragments, the batch, and the classifier |
+| `apps/worker/src/memory-index.ts` | `inspect(ids)` over `getByIds`, decoding vector metadata |
+| `apps/worker/src/mcp.ts` | The `update` tool: schemas, description, annotations, principal and client plumbing. No policy |
+| `apps/worker/src/index.ts` | Owner-only `GET /api/memories/:id/versions` |
+| `migrations/` | Unchanged. No migration; `schema.sql` does not change |
+
+`update` runs:
+
+1. Validate the id (else "Memory not found.") and the input. Hash the content.
+2. Preflight: `SELECT bucket FROM memories WHERE id = :id`. Missing or `!canRead` → not found; `!canWrite` → forbidden. Authorization stays in the shared grant functions.
+3. One atomic batch, bound to the authorized bucket:
+   - **S1** `INSERT INTO memory_versions … SELECT m.current_version + 1, :content, COALESCE(:tags, cur.tags), <provenance>, :now … WHERE m.id = :id AND m.bucket = :bucket AND m.current_version = :expected AND NOT <equals_request> AND NOT <duplicate_hash> AND NOT <self_collision> RETURNING version`
+   - **S2** `UPDATE memories SET current_version = current_version + 1, content_hash = :hash, updated_at = :now WHERE id = :id AND current_version = :expected AND EXISTS (version row current_version + 1)` — inert unless S1 wrote.
+   - **S3** the state row: `id`, `bucket`, `current_version`, timestamps, current tags, `equals_request`, `duplicate_id` (another current memory with the same hash and byte-equal content), and `hash_collision` (same hash, different bytes).
+4. Classify once from the batch: S1 returned a row → `updated: true`; otherwise the order in the table above.
+
+The guard conditions are written once as SQL fragments and used both in S1's `WHERE` and as S3's flags; TypeScript only orders the outcomes. Calls: one preflight query plus one three-statement batch for every outcome past authorization.
+
+**Keyword index.** S1 inserts version n+1 while the head still points to n, so `memories_fts_version_insert` does not fire. S2 fires `memories_fts_current_update`, which deletes the immutable version n postings and indexes version n+1. A tags-only update follows the same path.
+
+**Meaning index.**
+
+- A content change moves `content_hash`, so the marker `model:old_hash` becomes outdated and the scheduled sync re-embeds; `waitUntil` re-embeds immediately when the content changed. A tags-only update keeps the marker.
+- The shared `embedding` helper keeps only rows whose hash is still current before upserting, and writes the marker as `CASE WHEN content_hash = :hash THEN :marker ELSE NULL END`, so a superseded job clears the marker instead of leaving it.
+- **Vector inspection (owner decision: ships in #12).** Each scheduled run, after the existing marker repair, inspects up to 50 memories whose marker is current and whose `updated_at` is older than 10 minutes, in a stateless rotating window over `seq` derived from the scheduled time. It reads their vectors with `getByIds` and clears the marker of every memory whose vector is missing or whose `contentHash` or bucket digest differs from D1. The next run's marker repair re-embeds them, within the existing 50-embedding and 32-per-chunk bounds. An inspection failure changes nothing. This makes stale vectors converge without any search request, including a job that dies between upsert and marker write and an old-Worker job during deploy.
+- Search keeps re-reading every vector hit against the current hash and visible buckets in D1.
+
+**History read (reversible).** `GET /api/memories/:id/versions` returns `{ versions: MemoryVersion[] }`, newest first, each `{ version, content, tags, provenance }`. A missing or unreadable id is 404. Paging and exact shape are implementation choices.
+
+### Alternatives and tradeoffs
+
+- **Database-owned publication through triggers and a migration** (candidate B): rejected. It wrote the retry rule in three places, forbade pruning, moves, and imports, and broke existing schema tests. A `BEFORE UPDATE ON memory_versions` immutability trigger is deferred to #13 or a hardening change.
+- **Pre-read classification of rejections** (candidate A): rejected. It created a second decision path to save a round trip on rare outcomes.
+- **Last writer wins, or client write ids:** rejected by the owner's concurrency decision and ADR-0012.
+- **Per-version vector ids:** rejected. They need orphan cleanup and change the id scheme search and sync assume.
+- **Accepted costs:** two round trips per update; tag equality is order-sensitive; an ABA sequence makes a stale retry answer `updated: false`, truthful about current state; a full inspection sweep takes about `ceil(N / 50)` scheduled runs.
+
+### Synthesis provenance
+
+Base: candidate A (Claude). Grafts from candidate B (GPT): `expectedVersion` (as Vault's `ReplaceSecret`), byte-checked duplicates, `createdAt` in `Updated`, explicit retry-after-intervention wording, bucket-only preflight with one classification, and actual-index inspection. From the cross-judge: guard fragments defined once; stateless rotating window instead of a repair table; `destructiveHint: true`. Working material: `.work/arena/memory-update/`.
+
+### Implementation contract
+
+**Preserve:** the contract, outcome order, and wording above; no migration; the preflight-plus-batch shape with S1 before S2; guard fragments shared by S1 and S3; authorization only through `canRead`/`canWrite`; no MCP history; marker semantics and inspection bounds; owner-only history.
+
+**Free to choose:** helper names and exact SQL text; the tool description wording, which must say to pass the version from `get`, that omitted tags are kept and `[]` clears them, that duplicates name the other memory, and that retrying is safe but can answer "changed" after another writer; the history page shape; the inspection window arithmetic and how `getByIds` calls are chunked.
+
+**Validation obligations:**
+
+- MCP driver tests on both protocol shapes and both endpoints: round trip with new provenance and unchanged `createdAt`; omitted, cleared, and explicit tags; retry → `updated: false` with row counts unchanged; stale → `MemoryChanged`; stale-but-equal → `updated: false`; duplicate naming the id; forbidden ancestor and `me`; not found for sibling, missing, and malformed ids (the deny-outside-grant test); revoked token; content and tag boundaries; N distinct parallel updates → one winner; N identical → one version row; update against `remember` in both orders; D1 failure mid-batch with FTS integrity intact.
+- Search: an old-only word stops matching immediately; a stale vector is filtered; sync re-embeds; a late old-content upsert after the new marker is repaired by inspection with no search request; inspection failure is harmless; the 50/32 bounds hold.
+- D1 call observation: one preflight plus one three-statement batch per update past authorization.
+- Owner history HTTP: newest-first versions with provenance, 404 outside the grant, machine tokens denied.
+
+**Re-enter design if:** D1 rejects the batch shape; hosted `getByIds` does not return metadata, which its API reference says it does; or an observed agent need requires an MCP history read.
+
+### Open risks
+
+- Hosted `getByIds` freshness after a recent upsert is undocumented; the 10-minute settle window keeps inspection off rows still propagating. The owner verifies inspection on the deployed index after merge.
+- ADR candidate: ADR-0014, "Memory updates are guarded by the read version and recognized by current content", recording the retry identity, duplicate rejection, and actual-index inspection as the meaning of ADR-0013's eventual convergence.

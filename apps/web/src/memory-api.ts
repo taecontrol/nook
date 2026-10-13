@@ -49,6 +49,31 @@ export function memoryOptions(id: string) {
     staleTime: 30_000,
   });
 }
+export function memoryHistoryOptions(id: string) {
+  return queryOptions({
+    queryKey: ['memory-history', id],
+    queryFn: async ({ signal }) => {
+      const versions: import('@nook/contract').MemoryVersion[] = [];
+      let before: number | null = null;
+      do {
+        const page = await runApi(
+          (api) =>
+            api.memories.history({
+              params: { id },
+              query: before === null ? {} : { before: String(before) },
+            }),
+          signal,
+        );
+        versions.push(...page.versions);
+        before = page.next;
+      } while (before !== null);
+      return versions;
+    },
+    retry: false,
+    retryOnMount: false,
+    staleTime: 30_000,
+  });
+}
 export function memorySearchOptions(
   bucket: string,
   scope: MemoryScope,
@@ -72,6 +97,9 @@ export type MemorySearch = {
   memory?: string;
   scope?: MemoryScope;
   q?: string;
+  history?: '1';
+  version?: number;
+  changes?: '1';
 };
 export function preloadMemory(queries: QueryClient, search: MemorySearch) {
   preloadBuckets(queries);
@@ -80,6 +108,7 @@ export function preloadMemory(queries: QueryClient, search: MemorySearch) {
     memoriesOptions(search.bucket ?? RESERVED_BUCKET, search.scope),
   );
   if (search.memory) void queries.prefetchQuery(memoryOptions(search.memory));
+  preloadHistory(queries, search);
   if (search.q?.trim())
     void queries.prefetchQuery(
       memorySearchOptions(
@@ -88,4 +117,9 @@ export function preloadMemory(queries: QueryClient, search: MemorySearch) {
         search.q,
       ),
     );
+}
+
+function preloadHistory(queries: QueryClient, search: MemorySearch) {
+  if (search.memory && (search.history || search.version !== undefined))
+    void queries.prefetchQuery(memoryHistoryOptions(search.memory));
 }

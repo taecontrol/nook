@@ -381,3 +381,43 @@ reader assertion continues to require the loaded-count wording.
 The `memory-search-*.png` files live in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare them with the selected `inline` prototype: fixed list header/summary, three desktop columns, phone Results link, three-line snippets, highlighted exact words and quiet meaning badge. Captures use genuine ranks and counts rather than fabricated results. The degraded state uses `pnpm verify` for real keyword hits; the no-results state uses a not-yet-visible meaning index. Extremes use valid six-level, 32-character paths rather than the prototype's invalid 34-character segment. The scenario selector, request stubs and schema bypass do not enter production.
 
 `scripts/load-time-browser.ts` owns the browser measurement functions used by the production timing command and the measurement-condition tests. The latter run those same functions against the built product, proving the phone viewport, destination URL and visible first screen rather than accepting a finite duration from the wrong route.
+
+## Memory update and history (issue #12)
+
+The first acceptance commit, `1485d89`, adds tests before the implementation.
+Its workerd/Chromium run observes 120 expected failures at missing tools,
+routes and controls, with the four revoked-token cases already green.
+All identities, histories, Access assertions and index services are synthetic;
+the existing allowlisted environments, temporary profiles and host-resource
+tripwire remain mandatory under `pnpm verify`.
+
+| Examples | Tests or captures |
+| --- | --- |
+| E1–E8 | `memory-update-mcp.test.ts`: both protocols and both endpoints, immutable provenance, original creation time, exact tags, no-op retries, intervening writers, byte-checked duplicates, own earlier text, grant denials, private validation and exact UTF-8 limits. Rejected writes compare all version/head/marker facts and run FTS integrity checks. |
+| E9–E10 | The same matrix: ten distinct or identical writers append exactly one row; update/remember in both serialized orders preserve current-content identity. |
+| E11–E14 | The same matrix: real aborting triggers in S1 and S2 prove rollback and retry; revoked tokens fail before the SDK; exact inventory/annotations/descriptions; updated buckets retain HTTP and MCP deletion guards. |
+| E15 | `memory-history-worker.test.ts`: the existing D1 checkpoint decorator requires one bucket preflight and one three-statement batch for success, no-op, stale and duplicate outcomes. |
+| E16–E19 | `memory-update-search.test.ts`: current keyword postings/snippets/tags, stale meaning candidates filtered through MCP and HTTP, tags-only markers, late upsert completion, actual-index repair with no search, missing/wrong metadata, settle window, inspection failure, rotating sweep and 50/32 bounds. `memory-search-sync.test.ts` now updates through the real tool. |
+| E20–E21 | `memory-history-worker.test.ts`: owner history with exact content/provenance, existing version-one rows, restricted-grant 404s and machine credential boundaries. The browser's thirty-version case traverses history pages. |
+| E22 | `memory-history-web.test.ts`: zero pre-intent history requests, local version count, hover and keyboard prefetch, and zero extra requests on open. |
+| E23–E25 | The same browser suite: shadcn Item rows, ordering, summaries, times, writers, fixed header/internal scrolling, Markdown, arrows, source/word diffs, folding, tags-only copy, added/removed tags and disabled version-one comparison. |
+| E26–E27 | The same suite: deep links, reload, Back, every dismissal and restored focus; real delayed reads, row-height skeletons, retry, inherited and version-one memories, and 16 KiB Unicode with six maximum-length segments and long provenance at 390 px. |
+| E28 | `memory-history-web.test.ts` observes separate lazy sheet and diff script requests. Existing `memory-load-time.test.ts`, `load-time.test.ts` and `pnpm verify:load-time` retain the five-sample 4G budgets of 1000 ms cold and 100 ms after intent. |
+| E29 | `memory-history-captures.test.ts`: all seven chosen Sheet scenarios and reading/list/version/changes states at 1440×900 and 390×844 in both themes. Loading gates a genuine response; failure injects a service failure. |
+| E30 | Journey clarification pending: E25 disables comparison on version one, whereas E30 asks to activate it after opening version one. |
+| E31 | Pending owner hosted acceptance in [deployment.md](../deployment.md#memory-update-e31-owner-acceptance-after-deployment-pending). |
+
+The `memory-history-*.png` captures are in
+`.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare
+them with the chosen Sheet reference. The scenario picker, stub and LCS
+implementation stay outside production. History reads pages of 25 versions
+plus the next older version; the contract client follows pages for the
+complete newest-first list. Sheet and jsdiff load separately on intent/use.
+Badge's added/removed variants and Sheet's stacked layout are authored
+components, with no generated-code exemption for the changes.
+
+Vector inspection rotates over settled memories in stable `seq` order before
+filtering current markers. Repair cannot shrink the sweep's ordering window.
+IDs repaired in that invocation are deferred until a later inspection to
+allow asynchronous propagation. The accepted schema and its drift snapshot
+remain unchanged.

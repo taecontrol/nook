@@ -1,7 +1,6 @@
 {
   "apps/web/src/components/ui/alert-dialog.tsx": "f22f5b24314e0f6d77e2f7b3b0ac494b82fd685f93a1e64bebc75d2445871074",
   "apps/web/src/components/ui/avatar.tsx": "0c5c48b8a1dff4fdc5ff9b6cb79cc9cd138682b7d86868068f571befe9675e88",
-  "apps/web/src/components/ui/badge.tsx": "13a9380dfff853ee730c14a52df49f22aecd31f40f2998d7c1e7ec458b6e1650",
   "apps/web/src/components/ui/breadcrumb.tsx": "c75fcd3d9e8470188bc0dd4b27a2b26fff3ad42b9c9c534a953dc090ae2cba33",
   "apps/web/src/components/ui/button.tsx": "79dd6f75f8136394442202d6b8b922fb269eaad0a5dba579397c9d5b41f893bb",
   "apps/web/src/components/ui/card.tsx": "ef8305b12c3112dab42a4708b41b1ebcc042fa5ab4c20f039da8d45b09ed5059",

@@ -4,21 +4,26 @@ import {
   BucketNotFound,
   canRead,
   canWrite,
+  DuplicateMemory,
   InvalidBucketPath,
   InvalidMemory,
   InvalidMemoryCursor,
   InvalidMemorySearch,
   type Memory,
+  MemoryChanged,
   type MemoryClient,
   type MemoryListItem,
   MemoryNotFound,
   type MemoryScope,
+  type MemoryVersion,
   memoryTitle,
   type OwnerMemorySearchResult,
   type Principal,
   type Remember,
   readLineage,
+  type UpdateMemory,
   validateBucketPath,
+  validateExpectedVersion,
   validateMemoryContent,
   validateSearchQuery,
   validateTags,
@@ -106,7 +111,9 @@ function validBucket(bucket: string) {
     ? Effect.fail(new InvalidBucketPath({ message }))
     : Effect.void;
 }
-function validInput(input: Remember) {
+function validInput(
+  input: Pick<Remember, 'content' | 'tags' | 'workingDirectory'>,
+) {
   const message =
     validateMemoryContent(input.content) ??
     validateTags(input.tags ?? []) ??
@@ -114,6 +121,89 @@ function validInput(input: Remember) {
       ? undefined
       : validateWorkingDirectory(input.workingDirectory));
   return message ? Effect.fail(new InvalidMemory({ message })) : Effect.void;
+}
+function validUpdate(input: UpdateMemory) {
+  const message = validateExpectedVersion(input.expectedVersion);
+  return message
+    ? Effect.fail(new InvalidMemory({ message }))
+    : validInput(input);
+}
+function machineFacts(principal: Principal) {
+  return principal.kind === 'machine'
+    ? { id: principal.id, name: principal.name }
+    : { id: null, name: null };
+}
+function historyBoundary(before?: string) {
+  if (before === undefined) return Effect.succeed(undefined);
+  if (!/^[1-9]\d*$/.test(before) || !Number.isSafeInteger(Number(before)))
+    return Effect.fail(new InvalidMemoryCursor());
+  return Effect.succeed(Number(before));
+}
+function historyPage(rows: readonly Row[]) {
+  const page = rows.slice(0, 26);
+  return {
+    versions: page.map((row): MemoryVersion => {
+      const m = memory(row);
+      return {
+        version: m.version,
+        content: m.content,
+        tags: m.tags,
+        provenance: m.provenance,
+      };
+    }),
+    next: rows.length > 26 ? (page.at(-1)?.current_version ?? null) : null,
+  };
+}
+type UpdateState = {
+  id: string | null;
+  bucket: string;
+  current_version: number;
+  created_at: string;
+  updated_at: string;
+  tags: string;
+  equals_request: number;
+  stale: number;
+  duplicate_id: string | null;
+  hash_collision: number;
+  content_changed: number;
+};
+function updateOutcome(
+  state: UpdateState | undefined,
+  input: UpdateMemory,
+  updated: boolean,
+) {
+  return Effect.gen(function* () {
+    if (!state?.id) return yield* Effect.fail(notFound());
+    if (!updated && !state.equals_request) {
+      if (state.stale)
+        return yield* Effect.fail(
+          new MemoryChanged({
+            message: `This memory changed: it is now version ${state.current_version}, not ${input.expectedVersion}. Get it again before updating.`,
+          }),
+        );
+      if (state.duplicate_id)
+        return yield* Effect.fail(
+          new DuplicateMemory({
+            message: `Memory ${state.duplicate_id} in this bucket already has this content.`,
+          }),
+        );
+      return yield* Effect.fail(new HttpApiError.ServiceUnavailable());
+    }
+    if (state.hash_collision)
+      return yield* Effect.fail(new HttpApiError.ServiceUnavailable());
+    const tags = yield* Schema.decodeUnknownEffect(
+      Schema.fromJsonString(Schema.Array(Schema.String)),
+    )(state.tags).pipe(unavailable);
+    return {
+      updated,
+      id: state.id,
+      bucket: state.bucket,
+      version: state.current_version,
+      tags,
+      createdAt: state.created_at,
+      updatedAt: state.updated_at,
+    };
+  });
 }
 function validSearch(query: string, tags: readonly string[]) {
   const message = validateSearchQuery(query) ?? validateTags(tags);
@@ -240,17 +330,146 @@ export const memoryStore = (
     const embedding = (rows: readonly EmbeddingMemory[]) =>
       Effect.gen(function* () {
         if (!rows.length) return;
-        yield* index.write(rows).pipe(unavailable);
+        // Filter after the slow AI request, immediately before the external upsert.
+        const written = yield* index
+          .write(rows, (candidates) =>
+            Effect.gen(function* () {
+              const current = yield* sql<{
+                id: string;
+                content_hash: string;
+              }>`SELECT id, content_hash FROM memories WHERE ${sql.in(
+                'id',
+                candidates.map((row) => row.id),
+              )}`.pipe(unavailable);
+              return candidates.filter((row) =>
+                current.some(
+                  (m) => m.id === row.id && m.content_hash === row.content_hash,
+                ),
+              );
+            }),
+          )
+          .pipe(unavailable);
+        if (!written.length) return;
         yield* sql
           .batch(
-            rows.map(
+            written.map(
               (row) =>
-                sql`UPDATE memories SET embedding_marker=${`${index.model}:${row.content_hash}`} WHERE id=${row.id} AND content_hash=${row.content_hash}`,
+                sql`UPDATE memories SET embedding_marker=CASE WHEN content_hash=${row.content_hash} THEN ${`${index.model}:${row.content_hash}`} ELSE NULL END WHERE id=${row.id}`,
             ),
           )
           .pipe(unavailable);
       });
+    const bucketFor = (id: string, write = false) =>
+      Effect.gen(function* () {
+        if (!uuid.test(id)) return yield* Effect.fail(notFound());
+        const heads = yield* sql<{
+          bucket: string;
+        }>`SELECT bucket FROM memories WHERE id=${id}`.pipe(unavailable);
+        const bucket = heads[0]?.bucket;
+        if (!bucket || !canRead(grant, bucket))
+          return yield* Effect.fail(notFound());
+        if (write && !canWrite(grant, bucket))
+          return yield* Effect.fail(new HttpApiError.Forbidden());
+        return bucket;
+      });
+    const scheduleEmbedding = (rows: readonly EmbeddingMemory[]) => {
+      if (waitUntil)
+        waitUntil(
+          Effect.runPromise(
+            embedding(rows).pipe(Effect.catchCause(() => Effect.void)),
+          ),
+        );
+    };
+    const inspect = (scheduledTime: number, repaired: readonly string[]) =>
+      Effect.gen(function* () {
+        const cutoff = new Date(scheduledTime - 10 * 60_000).toISOString();
+        // The window rotates over stable seq order, including pending markers,
+        // so invalidation and repair cannot shrink the sweep under its cursor.
+        const slots = yield* sql<{
+          n: number;
+        }>`SELECT count(*) AS n FROM memories WHERE updated_at < ${cutoff}`.pipe(
+          unavailable,
+        );
+        const pages = Math.ceil((slots[0]?.n ?? 0) / 50);
+        if (!pages) return;
+        const offset = (Math.floor(scheduledTime / (5 * 60_000)) % pages) * 50;
+        const rows = yield* sql<{
+          id: string;
+          bucket: string;
+          content_hash: string;
+        }>`SELECT id,bucket,content_hash FROM (SELECT * FROM memories WHERE updated_at < ${cutoff} ORDER BY seq LIMIT 50 OFFSET ${offset}) WHERE embedding_marker=${index.model} || ':' || content_hash AND NOT ${sql.in('id', repaired)}`.pipe(
+          unavailable,
+        );
+        if (!rows.length) return;
+        const vectors = yield* index
+          .inspect(rows.map((row) => row.id))
+          .pipe(unavailable);
+        const wrong = yield* Effect.promise(async () => {
+          const stale = await Promise.all(
+            rows.map(async (row) => {
+              const vector = vectors.find((v) => v.id === row.id);
+              return !vector ||
+                vector.contentHash !== row.content_hash ||
+                vector.bucket !== (await sha256(row.bucket)).slice(0, 32)
+                ? row
+                : undefined;
+            }),
+          );
+          return stale.filter((row) => row !== undefined);
+        });
+        if (wrong.length)
+          yield* sql
+            .batch(
+              wrong.map(
+                (row) =>
+                  sql`UPDATE memories SET embedding_marker=NULL WHERE id=${row.id} AND content_hash=${row.content_hash} AND updated_at < ${cutoff} AND embedding_marker=${index.model} || ':' || content_hash`,
+              ),
+            )
+            .pipe(unavailable);
+      });
     return {
+      update: (
+        principal: Principal,
+        client: MemoryClient,
+        input: UpdateMemory,
+      ) =>
+        Effect.gen(function* () {
+          const bucket = yield* bucketFor(input.id, true);
+          yield* validUpdate(input);
+          const author = machineFacts(principal);
+          const hash = yield* Effect.promise(() => sha256(input.content));
+          const tags =
+            input.tags === undefined ? null : JSON.stringify(input.tags);
+          const now = new Date().toISOString();
+          // Each write guard also supplies the outcome read; only precedence is TypeScript.
+          const equal = sql`cur.content=${input.content} AND json(cur.tags)=json(COALESCE(${tags},cur.tags))`;
+          const stale = sql`m.current_version <> ${input.expectedVersion}`;
+          const other = sql`o.bucket=m.bucket AND o.id<>m.id AND o.content_hash=${hash}`;
+          const duplicate = sql`EXISTS (SELECT 1 FROM memories o WHERE ${other})`;
+          const collision = sql`m.content_hash=${hash} AND cur.content<>${input.content}`;
+          const [inserted, , states] = yield* sql
+            .batch([
+              sql`INSERT INTO memory_versions(memory_id,version,content,tags,client_name,client_version,principal,machine_id,machine_name,working_directory,created_at) SELECT m.id,m.current_version+1,${input.content},COALESCE(${tags},cur.tags),${client.name},${client.version},${principal.kind},${author.id},${author.name},${input.workingDirectory ?? null},${now} FROM memories m JOIN memory_versions cur ON cur.memory_id=m.id AND cur.version=m.current_version WHERE m.id=${input.id} AND m.bucket=${bucket} AND NOT (${stale}) AND NOT (${equal}) AND NOT (${duplicate}) AND NOT (${collision}) RETURNING version`,
+              sql`UPDATE memories SET current_version=current_version+1,content_hash=${hash},updated_at=${now} WHERE id=${input.id} AND bucket=${bucket} AND current_version=${input.expectedVersion} AND EXISTS (SELECT 1 FROM memory_versions v WHERE v.memory_id=memories.id AND v.version=memories.current_version+1)`,
+              sql<UpdateState>`SELECT m.id,m.bucket,m.current_version,m.created_at,m.updated_at,cur.tags,(${equal}) AS equals_request,(${stale}) AS stale, (SELECT o.id FROM memories o JOIN memory_versions ov ON ov.memory_id=o.id AND ov.version=o.current_version WHERE ${other} AND ov.content=${input.content}) AS duplicate_id, ((${collision}) OR (${duplicate} AND NOT EXISTS (SELECT 1 FROM memories o JOIN memory_versions ov ON ov.memory_id=o.id AND ov.version=o.current_version WHERE ${other} AND ov.content=${input.content}))) AS hash_collision, EXISTS (SELECT 1 FROM memory_versions previous WHERE previous.memory_id=m.id AND previous.version=m.current_version-1 AND previous.content<>cur.content) AS content_changed FROM (SELECT 1) LEFT JOIN memories m ON m.id=${input.id} AND m.bucket=${bucket} LEFT JOIN memory_versions cur ON cur.memory_id=m.id AND cur.version=m.current_version`,
+            ])
+            .pipe(unavailable);
+          const result = yield* updateOutcome(
+            states[0],
+            input,
+            inserted.length > 0,
+          );
+          if (result.updated && states[0]?.content_changed)
+            scheduleEmbedding([
+              {
+                id: input.id,
+                bucket,
+                content: input.content,
+                content_hash: hash,
+              },
+            ]);
+          return result;
+        }),
       remember: (principal: Principal, client: MemoryClient, input: Remember) =>
         Effect.gen(function* () {
           yield* validBucket(input.bucket);
@@ -290,7 +509,7 @@ export const memoryStore = (
             );
           return result;
         }),
-      sync: () =>
+      sync: (scheduledTime = Date.now()) =>
         Effect.gen(function* () {
           const raw =
             yield* sql`SELECT m.id, m.bucket, m.content_hash, v.content FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE embedding_marker IS NULL OR embedding_marker <> ${index.model} || ':' || m.content_hash ORDER BY m.seq LIMIT 50`.pipe(
@@ -306,7 +525,11 @@ export const memoryStore = (
               }),
             ),
           )(raw).pipe(unavailable);
-          return yield* embedding(rows);
+          yield* embedding(rows);
+          yield* inspect(
+            scheduledTime,
+            rows.map((row) => row.id),
+          ).pipe(Effect.catchCause(() => Effect.void));
         }),
       search: (
         bucket: string,
@@ -390,6 +613,23 @@ export const memoryStore = (
             unavailable,
           );
           return memory(row);
+        }),
+      history: (id: string, before?: string) =>
+        Effect.gen(function* () {
+          yield* bucketFor(id);
+          const beforeVersion = yield* historyBoundary(before);
+          const boundary =
+            beforeVersion === undefined
+              ? sql`1`
+              : sql`v.version < ${beforeVersion}`;
+          const raw =
+            yield* sql`SELECT m.id,m.bucket,v.version AS current_version,m.content_hash,m.created_at,m.updated_at,v.content,v.tags,v.client_name,v.client_version,v.principal,v.machine_id,v.machine_name,v.working_directory,v.created_at AS version_at FROM memory_versions v JOIN memories m ON m.id=v.memory_id WHERE m.id=${id} AND ${boundary} ORDER BY v.version DESC LIMIT 27`.pipe(
+              unavailable,
+            );
+          const rows = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(
+            raw,
+          ).pipe(unavailable);
+          return historyPage(rows);
         }),
       list: (
         bucket: string,

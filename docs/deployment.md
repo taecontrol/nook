@@ -159,6 +159,32 @@ The [Vectorize Free allowance](https://developers.cloudflare.com/vectorize/platf
 3. Allow the scheduled repair to index pre-existing memories. In the connected Claude Code session, call `search` with an explicit bucket and a paraphrase or other-language query for a memory stored before this merge. Confirm a relevant `meaning` or `both` result from the permitted lineage, then call `get` with its id.
 4. Record the deployment run, client version, permitted bucket, result id and match type on the PR. Leave E24 pending until this production observation succeeds; exclude credentials and private memory content from the capture.
 
+### Memory update E31: owner acceptance after deployment (pending)
+
+After merging issue #12 and deploying green main, the owner performs this
+check privately against the hosted Worker and Vectorize index. Local
+workerd evidence does not establish hosted `getByIds` metadata or freshness.
+
+1. Read a real memory with `get` and retain its version. Choose an old-only
+   word and replacement content containing a new-only word. Call `update`
+   with that `expectedVersion`; confirm the same id, a new version and the
+   original `createdAt`. Open History and confirm both versions and writers.
+2. Immediately search for the old-only word through MCP and the owner web
+   app. It must no longer match this memory or quote its old text. The
+   new-only word must find its current version by keyword. After vector
+   propagation, confirm the replacement by meaning as well.
+3. Leave the memory unchanged for at least ten minutes. Observe a scheduled
+   invocation through Cloudflare's private diagnostics and confirm its
+   inspection completes: `getByIds` returns the vector's metadata, including
+   `contentHash` and the bucket digest. A complete rotating sweep takes about
+   `ceil(N / 50)` scheduled runs. Do not add a public debug endpoint or log
+   memory content, credentials, vector values or private metadata.
+4. Record the deployment run, client version, update outcome, search
+   outcomes, scheduled run time and inspection-success boolean on the PR.
+   Keep E31 pending until these observations succeed. If hosted inspection
+   omits metadata, stop and revisit ADR-0014 instead of changing the
+   inspection policy silently.
+
 ### Back up a database with full-text search
 
 Cloudflare [does not support D1 exports containing virtual tables](https://developers.cloudflare.com/d1/best-practices/import-export-data/#known-limitations). Full `pnpm exec wrangler d1 export nook --remote --output owner-backup.sql` therefore fails while `memories_fts` exists. Time Travel remains available. For a SQL export, the owner uses a maintenance window: stop memory writes, remove only the derived search objects below, export, and immediately recreate them even if export fails.

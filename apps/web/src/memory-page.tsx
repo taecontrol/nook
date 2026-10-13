@@ -1,7 +1,12 @@
-import { type Memory, type MemoryListItem, memoryTitle } from '@nook/contract';
+import {
+  type MemoryListItem,
+  memoryTitle,
+  type Provenance as ProvenanceRecord,
+} from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import { cn } from 'cn';
-import { ArrowLeft, BookOpen, ChevronRight } from 'lucide-react';
+import { ArrowLeft, BookOpen, ChevronRight, History } from 'lucide-react';
+import { lazy, Suspense, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -22,6 +27,11 @@ import { ColumnSummary, SearchBody, SearchField } from './memory-search';
 import { formatDateTime, recentTime } from './time';
 import { type MemoryPageModel, useMemoryPage } from './use-memory-page';
 import './memory.css';
+
+const loadHistory = () => import('./memory-history-sheet');
+const HistorySheet = lazy(() =>
+  loadHistory().then((module) => ({ default: module.HistorySheet })),
+);
 
 function BucketNav({ model }: { model: MemoryPageModel }) {
   return (
@@ -258,14 +268,20 @@ function MemoryList({ model }: { model: MemoryPageModel }) {
     </section>
   );
 }
-function Provenance({ memory }: { memory: Memory }) {
-  const { client, workingDirectory, at } = memory.provenance;
+export function Provenance({
+  provenance,
+  label = 'Stored',
+}: {
+  provenance: ProvenanceRecord;
+  label?: string;
+}) {
+  const { client, workingDirectory, at } = provenance;
   return (
     <dl className="mt-5 grid gap-x-7 gap-y-3 border-y py-4 text-xs sm:grid-cols-2">
       <div>
         <dt className="text-muted-foreground">Written by</dt>
         <dd className="mt-0.5 font-medium wrap-anywhere">
-          {principalName(memory)}
+          {principalName({ provenance })}
         </dd>
       </div>
       <div>
@@ -278,7 +294,7 @@ function Provenance({ memory }: { memory: Memory }) {
         </dd>
       </div>
       <div>
-        <dt className="text-muted-foreground">Stored</dt>
+        <dt className="text-muted-foreground">{label}</dt>
         <dd>
           <time dateTime={at} className="mt-0.5 block font-medium">
             {formatDateTime(at)}
@@ -370,6 +386,7 @@ function MemoryBack({ model }: { model: MemoryPageModel }) {
   );
 }
 function ReadingPane({ model }: { model: MemoryPageModel }) {
+  const returnFocus = useRef<HTMLButtonElement>(null);
   const memory = model.selected;
   if (!memory)
     return (
@@ -393,11 +410,35 @@ function ReadingPane({ model }: { model: MemoryPageModel }) {
               ? 'Stored here'
               : 'Inherited memory'}
           </span>
+          <Button
+            ref={returnFocus}
+            variant="outline"
+            size="sm"
+            className="ml-auto"
+            data-memory-history
+            onMouseEnter={() => {
+              model.prefetchHistory();
+              void loadHistory();
+            }}
+            onFocus={() => {
+              model.prefetchHistory();
+              void loadHistory();
+            }}
+            onClick={model.openHistory}
+          >
+            <History /> History{' '}
+            <span>
+              {memory.version} {memory.version === 1 ? 'version' : 'versions'}
+            </span>
+          </Button>
         </div>
         <h2 className="max-w-3xl text-2xl font-semibold tracking-tight wrap-anywhere">
           {memoryTitle(memory.content)}
         </h2>
-        <Provenance memory={memory} />
+        <Provenance
+          provenance={memory.provenance}
+          label={memory.version > 1 ? 'Updated' : 'Stored'}
+        />
         {memory.tags.length > 0 && (
           <div data-memory-tags className="mt-4 flex flex-wrap gap-1.5">
             {memory.tags.map((tag) => (
@@ -411,6 +452,15 @@ function ReadingPane({ model }: { model: MemoryPageModel }) {
           <MemoryMarkdown content={memory.content} />
         </div>
       </div>
+      {model.historyOpen && (
+        <Suspense fallback={null}>
+          <HistorySheet
+            model={model}
+            memory={memory}
+            returnFocus={returnFocus}
+          />
+        </Suspense>
+      )}
     </article>
   );
 }

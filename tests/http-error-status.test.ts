@@ -21,6 +21,8 @@ const contractStatuses = {
   VaultNotConfigured: 503,
   InvalidMemory: 400,
   MemoryNotFound: 404,
+  MemoryChanged: 409,
+  DuplicateMemory: 409,
   BucketHasMemories: 409,
   InvalidMemoryCursor: 400,
   InvalidMemorySearch: 400,

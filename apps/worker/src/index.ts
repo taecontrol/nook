@@ -1,4 +1,8 @@
-import type { D1Database, ExecutionContext } from '@cloudflare/workers-types';
+import type {
+  D1Database,
+  ExecutionContext,
+  ScheduledController,
+} from '@cloudflare/workers-types';
 import { D1Client } from '@effect/sql-d1';
 import {
   Api,
@@ -39,6 +43,9 @@ export function handlerForPrincipal(
     Effect.gen(function* () {
       const store = yield* memoryStore(grant, index);
       return handlers
+        .handle('history', ({ params, query }) =>
+          store.history(params.id, query.before),
+        )
         .handle('search', ({ query }) =>
           store.search(query.bucket, query.q, [], query.scope),
         )
@@ -294,10 +301,13 @@ export default {
       response.headers.set('Cache-Control', 'no-store');
     return response;
   },
-  scheduled(_controller: unknown, env: SearchBindings & { DB: D1Database }) {
+  scheduled(
+    controller: ScheduledController,
+    env: SearchBindings & { DB: D1Database },
+  ) {
     return Effect.runPromise(
       memoryStore('all', memoryIndex(env)).pipe(
-        Effect.flatMap((store) => store.sync()),
+        Effect.flatMap((store) => store.sync(controller.scheduledTime)),
         Effect.provide(D1Client.layer({ db: env.DB })),
         // Failed writes leave their markers pending for the next scheduled run.
         Effect.catchCause(() => Effect.void),

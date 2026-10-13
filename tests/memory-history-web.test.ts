@@ -2,7 +2,11 @@ import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { deferred } from './support/machines.ts';
-import { historyPage, memories, seedHistory } from './support/memory-history.ts';
+import {
+  historyPage,
+  memories,
+  seedHistory,
+} from './support/memory-history.ts';
 
 let browser: Browser;
 let closeBrowser: (() => Promise<void>) | undefined;
@@ -11,6 +15,12 @@ beforeAll(async () => {
 });
 afterAll(() => closeBrowser?.());
 const sheet = (page: Page) => page.getByRole('dialog');
+const settleSheet = (page: Page) =>
+  sheet(page).evaluate((el) =>
+    Promise.all(
+      el.getAnimations().map((animation) => animation.finished.catch(() => {})),
+    ),
+  );
 const history = (page: Page) =>
   page.getByRole('button', { name: /History.*versions?/ });
 describe.each([
@@ -82,14 +92,20 @@ describe.each([
         .getByRole('heading', { name: 'Version 2 of 4' })
         .waitFor();
       expect(await sheet(page).textContent()).toContain('Working directory');
-      expect(await sheet(page).locator('.memory-markdown ol').count()).toBe(1);
+      expect(
+        await sheet(page).locator('[data-memory-markdown] ol').count(),
+      ).toBe(1);
       await sheet(page).getByRole('button', { name: 'Show changes' }).click();
       await sheet(page).locator('[data-memory-diff]').waitFor();
       expect(
-        await sheet(page).locator('[data-diff-row="add"]').textContent(),
+        (
+          await sheet(page).locator('[data-diff-row="add"]').allTextContents()
+        ).join(''),
       ).toContain('Added:');
       expect(
-        await sheet(page).locator('[data-diff-row="del"]').textContent(),
+        (
+          await sheet(page).locator('[data-diff-row="del"]').allTextContents()
+        ).join(''),
       ).toContain('Removed:');
       expect(await sheet(page).locator('ins').count()).toBeGreaterThan(0);
       expect(await sheet(page).locator('del').count()).toBeGreaterThan(0);
@@ -99,7 +115,8 @@ describe.each([
         .waitFor();
       expect(
         await sheet(page)
-          .getByText('Added tag ', { exact: false })
+          .locator('[data-slot="badge"]')
+          .filter({ hasText: 'Added tag ' })
           .textContent(),
       ).toContain('staging');
       await sheet(page).getByRole('button', { name: 'Older version' }).click();
@@ -218,6 +235,7 @@ describe.each([
       await sheet(page)
         .getByRole('status', { name: 'Loading history' })
         .waitFor();
+      await settleSheet(page);
       const header = await sheet(page)
         .getByRole('heading', { name: 'History' })
         .boundingBox();
@@ -266,6 +284,7 @@ describe.each([
           await sheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth),
         ).toBe(true);
         if (scenario === 'many') {
+          await settleSheet(page);
           const header = await sheet(page)
             .getByRole('heading', { name: 'History' })
             .boundingBox();
@@ -318,25 +337,67 @@ it('E28: first-screen Memory JavaScript omits the lazy history sheet and jsdiff 
   }
 });
 it('E27: 16 KiB Unicode, six 32-character segments, long names and directories fit a 390 px history version', async () => {
-  const bucket = Array.from({ length: 6 }, (_, i) => `${'x'.repeat(31)}${i}`).join('/');
-  const fixture = { ...memories[0], id: '00000000-0000-4000-8000-000000009999', bucket, versions: [
-    { ...memories[0].versions[0], content: 'é'.repeat(8192), tags: ['removed'], author: { ...memories[0].versions[0].author, principal: { kind: 'machine' as const, id: 'long-name', name: 'long-machine-'.repeat(9) }, workingDirectory: `/${'directory/'.repeat(300)}` } },
-    { ...memories[0].versions[1], content: 'ø'.repeat(8192), tags: ['added'] },
-  ] };
-  const visit = await historyPage(browser, { viewport: { width: 390, height: 844 }, configure: async (page, app) => {
-    await seedHistory(app, [fixture]);
-    await page.route('**/api/memories/*/versions*', (route) => route.continue());
-  } });
+  const bucket = Array.from(
+    { length: 6 },
+    (_, i) => `${'x'.repeat(31)}${i}`,
+  ).join('/');
+  const fixture = {
+    ...memories[0],
+    id: '00000000-0000-4000-8000-000000009999',
+    bucket,
+    versions: [
+      {
+        ...memories[0].versions[0],
+        content: 'é'.repeat(8192),
+        tags: ['removed'],
+        author: {
+          ...memories[0].versions[0].author,
+          principal: {
+            kind: 'machine' as const,
+            id: 'long-name',
+            name: 'long-machine-'.repeat(9),
+          },
+          workingDirectory: `/${'directory/'.repeat(300)}`,
+        },
+      },
+      {
+        ...memories[0].versions[1],
+        content: 'ø'.repeat(8192),
+        tags: ['added'],
+      },
+    ],
+  };
+  const visit = await historyPage(browser, {
+    viewport: { width: 390, height: 844 },
+    configure: async (page, app) => {
+      await seedHistory(app, [fixture]);
+      await page.route('**/api/memories/*/versions*', (route) =>
+        route.continue(),
+      );
+    },
+  });
   try {
     const { page } = visit;
-    await page.goto(`${visit.app.origin}/memory?bucket=${bucket}&memory=${fixture.id}&history=1&version=2&changes=1`);
+    await page.goto(
+      `${visit.app.origin}/memory?bucket=${bucket}&memory=${fixture.id}&history=1&version=2&changes=1`,
+    );
     await sheet(page).locator('[data-memory-diff]').waitFor();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
-    expect(await sheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBe(390);
+    expect(
+      await sheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth),
+    ).toBe(true);
     expect(await sheet(page).textContent()).toContain('Removed tag');
     expect(await sheet(page).textContent()).toContain('Added tag');
     await sheet(page).getByRole('button', { name: 'Older version' }).click();
-    await sheet(page).getByRole('heading', { name: 'Version 1 of 2' }).waitFor();
-    expect(await sheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-  } finally { await visit.close(); }
+    await sheet(page)
+      .getByRole('heading', { name: 'Version 1 of 2' })
+      .waitFor();
+    expect(
+      await sheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth),
+    ).toBe(true);
+  } finally {
+    await visit.close();
+  }
 });

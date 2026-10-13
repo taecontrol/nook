@@ -51,6 +51,20 @@ const buckets = createRoute({
     preloadBuckets(context.queryClient);
   },
 });
+function historySearch(search: Record<string, unknown>) {
+  return {
+    ...(search.history === '1' || search.history === 1
+      ? { history: '1' as const }
+      : {}),
+    ...(Number.isSafeInteger(Number(search.version)) &&
+    Number(search.version) > 0
+      ? { version: Number(search.version) }
+      : {}),
+    ...(search.changes === '1' || search.changes === 1
+      ? { changes: '1' as const }
+      : {}),
+  };
+}
 const router = createRouter({
   routeTree: root.addChildren([
     owner.addChildren([
@@ -76,6 +90,7 @@ const router = createRouter({
           ...(typeof search.q === 'string' && search.q.trim()
             ? { q: search.q }
             : {}),
+          ...historySearch(search),
         }),
         loaderDeps: ({ search }) => search,
         loader: ({ context, deps }) => {

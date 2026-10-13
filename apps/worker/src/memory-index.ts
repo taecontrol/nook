@@ -12,7 +12,7 @@ export type SearchBindings = {
       input: { text: string[]; truncate_inputs: boolean },
     ): Promise<unknown>;
   };
-  MEMORY_INDEX?: Pick<VectorizeIndex, 'query' | 'upsert'>;
+  MEMORY_INDEX?: Pick<VectorizeIndex, 'query' | 'upsert' | 'getByIds'>;
   EMBEDDING_MODEL?: string;
 };
 export type EmbeddingMemory = {
@@ -36,6 +36,19 @@ const Matches = Schema.Struct({
     }),
   ),
 });
+const InspectedVectors = Schema.Array(
+  Schema.Struct({
+    id: Schema.String,
+    metadata: Schema.optionalKey(
+      Schema.NullOr(
+        Schema.Struct({
+          bucket: Schema.optionalKey(Schema.String),
+          contentHash: Schema.optionalKey(Schema.String),
+        }),
+      ),
+    ),
+  }),
+);
 export type MeaningHit = { id: string; contentHash: string; rank: number };
 
 export function memoryIndex(env: SearchBindings = {}) {
@@ -85,7 +98,28 @@ export function memoryIndex(env: SearchBindings = {}) {
           }),
         );
       }),
-    write: (rows: readonly EmbeddingMemory[]) =>
+    inspect: (ids: string[]) =>
+      Effect.gen(function* () {
+        const raw = yield* Effect.tryPromise(() => {
+          if (!env.MEMORY_INDEX)
+            throw new Error('Meaning search is unavailable.');
+          return env.MEMORY_INDEX.getByIds(ids);
+        });
+        const vectors =
+          yield* Schema.decodeUnknownEffect(InspectedVectors)(raw);
+        return vectors.map((v) => ({
+          id: v.id,
+          bucket: v.metadata?.bucket,
+          contentHash: v.metadata?.contentHash,
+        }));
+      }),
+    write: (
+      rows: readonly EmbeddingMemory[],
+      current: (
+        rows: readonly EmbeddingMemory[],
+      ) => Effect.Effect<readonly EmbeddingMemory[], unknown> = (rows) =>
+        Effect.succeed(rows),
+    ) =>
       Effect.gen(function* () {
         const vectors: VectorizeVector[] = [];
         for (let offset = 0; offset < rows.length; offset += 32) {
@@ -105,11 +139,16 @@ export function memoryIndex(env: SearchBindings = {}) {
           );
           vectors.push(...entries);
         }
+        const accepted = yield* current(rows);
+        const ids = new Set(accepted.map((row) => row.id));
+        const fresh = vectors.filter((v) => ids.has(v.id));
+        if (!fresh.length) return accepted;
         yield* Effect.tryPromise(() => {
           if (!env.MEMORY_INDEX)
             throw new Error('Meaning search is unavailable.');
-          return env.MEMORY_INDEX.upsert(vectors);
+          return env.MEMORY_INDEX.upsert(fresh);
         });
+        return accepted;
       }),
   };
 }
