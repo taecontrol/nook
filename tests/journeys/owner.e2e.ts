@@ -97,7 +97,7 @@ test('Search E22: the owner finds a Spanish release by meaning from an ancestor 
     );
 });
 
-test('Memory: the owner reads a memory written through MCP with provenance', async ({
+test('Memory update E30: the owner reads both writers and compares version 2 after opening version 1', async ({
   app,
   screen,
   browser,
@@ -113,59 +113,131 @@ test('Memory: the owner reads a memory written through MCP with provenance', asy
   });
   if (!bucket.ok)
     throw new Error('The synthetic memory journey requires its bucket.');
-  const response = await fetch(`${origin}/mcp`, {
-    method: 'POST',
-    headers: {
-      Connection: 'close',
-      Accept: 'application/json, text/event-stream',
-      'Content-Type': 'application/json',
-      'MCP-Protocol-Version': '2026-07-28',
-      'Mcp-Method': 'tools/call',
-      'Mcp-Name': 'remember',
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
-      params: {
-        name: 'remember',
-        arguments: {
-          bucket: 'work/memory-journey',
-          content:
-            '# Owner journey memory\n\nPrefer pnpm for project commands.',
-          tags: ['tooling'],
-        },
-        _meta: {
-          'io.modelcontextprotocol/protocolVersion': '2026-07-28',
-          'io.modelcontextprotocol/clientInfo': {
-            name: 'synthetic-journey',
-            version: '1',
-          },
-          'io.modelcontextprotocol/clientCapabilities': {},
-        },
+  async function writeMemory(
+    name: 'remember' | 'update',
+    input: Record<string, unknown>,
+    clientVersion: string,
+  ) {
+    const response = await fetch(`${origin}/mcp`, {
+      method: 'POST',
+      headers: {
+        Connection: 'close',
+        Accept: 'application/json, text/event-stream',
+        'Content-Type': 'application/json',
+        'MCP-Protocol-Version': '2026-07-28',
+        'Mcp-Method': 'tools/call',
+        'Mcp-Name': name,
       },
-    }),
-  });
-  const body = (await response.json()) as {
-    result?: { isError?: boolean; structuredContent?: { id: string } };
-  };
-  if (
-    !response.ok ||
-    body.result?.isError ||
-    !body.result?.structuredContent?.id
-  )
-    throw new Error('The real remember tool must store the journey memory.');
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: clientVersion,
+        method: 'tools/call',
+        params: {
+          name,
+          arguments: input,
+          _meta: {
+            'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+            'io.modelcontextprotocol/clientInfo': {
+              name: 'synthetic-journey',
+              version: clientVersion,
+            },
+            'io.modelcontextprotocol/clientCapabilities': {},
+          },
+        },
+      }),
+    });
+    const body = (await response.json()) as {
+      result?: {
+        isError?: boolean;
+        structuredContent?: {
+          id: string;
+          version: number;
+          updated?: boolean;
+        };
+      };
+    };
+    if (
+      !response.ok ||
+      body.result?.isError ||
+      !body.result?.structuredContent?.id
+    )
+      throw new Error(`The real ${name} tool must write the journey memory.`);
+    return body.result.structuredContent;
+  }
+  const remembered = await writeMemory(
+    'remember',
+    {
+      bucket: 'work/memory-journey',
+      content: '# Owner journey memory\n\nPrefer pnpm for project commands.',
+      tags: ['tooling'],
+    },
+    '1',
+  );
+  if (remembered.version !== 1)
+    throw new Error('The journey must begin with the first version.');
+  const updated = await writeMemory(
+    'update',
+    {
+      id: remembered.id,
+      expectedVersion: remembered.version,
+      content: '# Owner journey memory\n\nRun pnpm verify before shipping.',
+    },
+    '2',
+  );
+  if (!updated.updated || updated.version !== 2 || updated.id !== remembered.id)
+    throw new Error(
+      'The real update tool must append version 2 to the memory.',
+    );
   await screen.getByRole('link', { name: 'Memory', exact: true }).click();
   await browser.locator('[data-path="work/memory-journey"] a').click();
-  const memoryRow = browser.locator(
-    `[data-memory-row="${body.result.structuredContent.id}"]`,
-  );
+  const memoryRow = browser.locator(`[data-memory-row="${remembered.id}"]`);
   await expect(memoryRow).toContainText('Owner journey memory');
   await memoryRow.click();
   const detail = screen.getByRole('article', { name: 'Memory detail' });
-  await expect(detail).toContainText('Prefer pnpm for project commands.');
-  await expect(detail).toContainText('synthetic-journey 1');
+  await expect(detail).toContainText('Run pnpm verify before shipping.');
+  await expect(detail).toContainText('synthetic-journey 2');
   await expect(detail).toContainText('Owner');
+  await detail
+    .getByRole('button', { name: 'History 2 versions', exact: true })
+    .click();
+  const sheet = screen.getByRole('dialog');
+  await expect(browser.locator('[data-version-row]')).toHaveCount(2);
+  await expect(browser.locator('[data-version-row="2"]')).toContainText(
+    'Owner · synthetic-journey 2',
+  );
+  const firstVersion = browser.locator('[data-version-row="1"]');
+  await expect(firstVersion).toContainText('Owner · synthetic-journey 1');
+  await firstVersion.click();
+  await expect(
+    sheet.getByRole('heading', { name: 'Version 1 of 2', exact: true }),
+  ).toBeVisible();
+  await expect(sheet).toContainText('Prefer pnpm for project commands.');
+  const showChanges = sheet.getByRole('button', {
+    name: 'Show changes',
+    exact: true,
+  });
+  await expect(showChanges).toBeDisabled();
+  await expect(
+    sheet.getByText('First version, nothing to compare', { exact: true }),
+  ).toBeVisible();
+  await sheet
+    .getByRole('button', { name: 'Newer version', exact: true })
+    .click();
+  await expect(
+    sheet.getByRole('heading', { name: 'Version 2 of 2', exact: true }),
+  ).toBeVisible();
+  await expect(showChanges).toBeEnabled();
+  await showChanges.click();
+  await expect(showChanges).toHaveAttribute('aria-pressed', 'true');
+  await expect(
+    sheet.getByText('Compared with version 1', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    browser.locator('[data-memory-diff] [data-diff-row="del"]'),
+  ).toContainText('Removed: Prefer pnpm for project commands.');
+  await expect(
+    browser.locator('[data-memory-diff] [data-diff-row="add"]'),
+  ).toContainText('Added: Run pnpm verify before shipping.');
   if (process.env.COVERAGE_RUN)
     await observe(
       JSON.parse(

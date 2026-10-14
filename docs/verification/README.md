@@ -404,7 +404,7 @@ tripwire remain mandatory under `pnpm verify`.
 | E26–E27 | The same suite: deep links, reload, Back, every dismissal and restored focus; real delayed reads, row-height skeletons, retry, inherited and version-one memories, and 16 KiB Unicode with six maximum-length segments and long provenance at 390 px. `memory-history-cache-race.test.ts` also jumps between open histories through genuine browser history and proves that local reconciliation belongs to the selected memory. |
 | E28 | `memory-history-web.test.ts` observes separate lazy sheet and diff script requests. Existing `memory-load-time.test.ts`, `load-time.test.ts` and `pnpm verify:load-time` retain the five-sample 4G budgets of 1000 ms cold and 100 ms after intent. |
 | E29 | `memory-history-captures.test.ts`: all seven chosen Sheet scenarios and reading/list/version/changes states at 1440×900 and 390×844 in both themes. Loading gates a genuine response; failure injects a service failure. |
-| E30 | Journey clarification pending: E25 disables comparison on version one, whereas E30 asks to activate it after opening version one. |
+| E30 | `tests/journeys/owner.e2e.ts`: real MCP remember/update, current reading content, exactly two history versions with their writers, version-one text with disabled Show changes and "First version, nothing to compare", then the newer arrow to version two and its directional source diff. Deterministic locators run under `pnpm test:journey` after `pnpm test`, with mandatory strict cache replay and zero retries. |
 | E31 | Pending owner hosted acceptance in [deployment.md](../deployment.md#memory-update-e31-owner-acceptance-after-deployment-pending). |
 
 The `memory-history-*.png` captures are in
