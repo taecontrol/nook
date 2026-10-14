@@ -97,7 +97,7 @@ test('Search E22: the owner finds a Spanish release by meaning from an ancestor 
     );
 });
 
-test('Memory update E30: the owner reads both writers and compares version 2 after opening version 1', async ({
+test('Memory update E30 / forget E18: the owner reads history, then permanently forgets the memory', async ({
   app,
   screen,
   browser,
@@ -238,6 +238,31 @@ test('Memory update E30: the owner reads both writers and compares version 2 aft
   await expect(
     browser.locator('[data-memory-diff] [data-diff-row="add"]'),
   ).toContainText('Added: Run pnpm verify before shipping.');
+  await sheet.getByRole('button', { name: 'Close', exact: true }).click();
+  await detail
+    .getByRole('button', { name: 'More actions', exact: true })
+    .click();
+  await screen
+    .getByRole('menuitem', { name: 'Forget memory…', exact: true })
+    .click();
+  const confirmation = screen.getByRole('alertdialog');
+  await expect(confirmation).toContainText('all 2 versions');
+  await confirmation
+    .getByRole('button', { name: 'Forget memory', exact: true })
+    .click();
+  await expect(
+    screen.getByText('Forgot Owner journey memory', { exact: true }),
+  ).toBeVisible();
+  await expect(memoryRow).toHaveCount(0);
+  await app.open('/memory?bucket=work/memory-journey');
+  await expect(memoryRow).toHaveCount(0);
+  const historyAfterForget = await fetch(
+    `${origin}/api/memories/${remembered.id}/versions`,
+  );
+  if (historyAfterForget.status !== 404)
+    throw new Error(
+      'Forgotten history must stay absent after the page reload.',
+    );
   if (process.env.COVERAGE_RUN)
     await observe(
       JSON.parse(

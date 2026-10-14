@@ -11,6 +11,7 @@ function decorate(
   db: D1Database,
   observeStatements: boolean,
   observeBatchSize: boolean,
+  failBatchStatement?: number,
 ): D1Database {
   const originals = new WeakMap<D1PreparedStatement, D1PreparedStatement>();
   function wrap(statement: D1PreparedStatement): D1PreparedStatement {
@@ -34,9 +35,14 @@ function decorate(
     async batch<T>(statements: D1PreparedStatement[]) {
       await checkpoint('before-batch');
       if (observeBatchSize) await checkpoint(`batch-${statements.length}`);
-      const result = await db.batch<T>(
-        statements.map((statement) => originals.get(statement) ?? statement),
+      const native = statements.map(
+        (statement) => originals.get(statement) ?? statement,
       );
+      if (failBatchStatement !== undefined && native.length === 4)
+        native[failBatchStatement] = db.prepare(
+          'SELECT * FROM synthetic_unavailable',
+        );
+      const result = await db.batch<T>(native);
       await checkpoint('after-batch');
       return result;
     },
@@ -53,6 +59,7 @@ export function vaultCheckpointWorker(
   options: {
     observeStatements?: boolean;
     observeBatchSize?: boolean;
+    failBatchStatement?: number;
     omitIp?: boolean;
   } = {},
 ) {
@@ -90,6 +97,7 @@ export function vaultCheckpointWorker(
           env.DB,
           options.observeStatements ?? false,
           options.observeBatchSize ?? false,
+          options.failBatchStatement,
         ),
       });
     },
