@@ -21,6 +21,14 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError, describeFailure } from './api-client';
 import { BucketTree, BucketTreeSkeleton } from './bucket-tree';
 import { LoadFailure } from './failure';
+import {
+  ForgetDialog,
+  ForgetProblem,
+  ForgettingRow,
+  MemoryActions,
+  pendingRows,
+  UnconfirmedForget,
+} from './memory-forget';
 import { principalName } from './memory-format';
 import { MemoryMarkdown } from './memory-markdown';
 import { ColumnSummary, SearchBody, SearchField } from './memory-search';
@@ -71,7 +79,8 @@ function BucketNav({ model }: { model: MemoryPageModel }) {
             variant="outline"
             size="sm"
             className="mt-2"
-            onClick={() => void model.countsQuery.refetch()}
+            disabled={model.busy}
+            onClick={model.retryCounts}
           >
             Retry counts
           </Button>
@@ -94,47 +103,54 @@ function MemoryRow({
   const selected = model.search.memory === memory.id;
   return (
     <li className={cn('border-b', selected && 'bg-accent')}>
-      <Item asChild size="sm" className="w-full min-w-0">
-        <Link
-          to="/memory"
-          search={{
-            bucket: model.bucket,
-            scope: model.scope,
-            memory: memory.id,
-            q: model.q || undefined,
-          }}
-          data-memory-row={memory.id}
-          data-inherited={inherited ? 'true' : undefined}
-          title={memory.title}
-          aria-current={selected ? 'true' : undefined}
-        >
-          <ItemContent className="min-w-0">
-            <ItemTitle className="block min-w-0 max-w-full">
-              <span className="block truncate">{memory.title}</span>
-            </ItemTitle>
-            <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-              <span
-                title={memory.bucket}
-                className={cn(
-                  'max-w-24 truncate font-mono',
-                  inherited && 'font-semibold text-foreground',
-                )}
-              >
-                {memory.bucket}
-              </span>
-              <span aria-hidden>·</span>
-              <span
-                className="shrink-0 tabular-nums"
-                title={formatDateTime(memory.createdAt)}
-              >
-                {recentTime(memory.createdAt)}
-              </span>
-              <span aria-hidden>·</span>
-              <span className="min-w-0 truncate">{principalName(memory)}</span>
-            </div>
-          </ItemContent>
-        </Link>
-      </Item>
+      <div className="flex min-w-0 items-center gap-1 pr-3">
+        <Item asChild size="sm" className="min-w-0 flex-1">
+          <Link
+            to="/memory"
+            search={{
+              bucket: model.bucket,
+              scope: model.scope,
+              memory: memory.id,
+              q: model.q || undefined,
+            }}
+            className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
+            data-memory-row={memory.id}
+            data-inherited={inherited ? 'true' : undefined}
+            title={memory.title}
+            aria-current={selected ? 'true' : undefined}
+          >
+            <ItemContent className="min-w-0">
+              <ItemTitle className="block min-w-0 max-w-full">
+                <span className="block truncate">{memory.title}</span>
+              </ItemTitle>
+              <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                <span
+                  title={memory.bucket}
+                  className={cn(
+                    'max-w-24 truncate font-mono',
+                    inherited && 'font-semibold text-foreground',
+                  )}
+                >
+                  {memory.bucket}
+                </span>
+                <span aria-hidden>·</span>
+                <span
+                  className="shrink-0 tabular-nums"
+                  title={formatDateTime(memory.createdAt)}
+                >
+                  {recentTime(memory.createdAt)}
+                </span>
+                <span aria-hidden>·</span>
+                <span className="min-w-0 truncate">
+                  {principalName(memory)}
+                </span>
+              </div>
+            </ItemContent>
+          </Link>
+        </Item>
+        <MemoryActions subject={memory} model={model} />
+      </div>
+      <ForgetProblem model={model} id={memory.id} />
     </li>
   );
 }
@@ -150,7 +166,13 @@ function ListSkeleton() {
     </div>
   );
 }
+function emptyListCopy(model: MemoryPageModel) {
+  return model.scope === 'bucket'
+    ? `There are no memories stored in ${model.bucket}. Include inherited to see memories from its ancestors.`
+    : `There are no memories visible in ${model.bucket}. Agents can store new memories with remember.`;
+}
 function EmptyList({ model }: { model: MemoryPageModel }) {
+  const forgotten = model.forget.notice?.viewBucket === model.bucket;
   return (
     <div className="px-5 py-16">
       <Empty>
@@ -158,9 +180,13 @@ function EmptyList({ model }: { model: MemoryPageModel }) {
           <EmptyMedia variant="icon">
             <BookOpen />
           </EmptyMedia>
-          <EmptyTitle>No memories yet</EmptyTitle>
+          <EmptyTitle>
+            {forgotten ? 'No memories left' : 'No memories yet'}
+          </EmptyTitle>
           <EmptyDescription>
-            {model.firstRun ? (
+            {forgotten ? (
+              emptyListCopy(model)
+            ) : model.firstRun ? (
               <>
                 <span>Agents have not stored any memories yet.</span> Use MCP{' '}
                 <code>remember</code> to store one in a bucket.
@@ -186,29 +212,31 @@ function ListBody({ model }: { model: MemoryPageModel }) {
           description={describeFailure(model.list.error, 'read memories')}
           cached={false}
           retrying={model.list.isFetching}
-          onRetry={() => {
-            void model.list.refetch();
-            if (model.countsQuery.isError) void model.countsQuery.refetch();
-            if (model.detail.isError) void model.detail.refetch();
-          }}
+          disabled={model.busy}
+          onRetry={model.retryList}
         />
       </div>
     );
-  if (!model.records.length) return <EmptyList model={model} />;
+  const rows = pendingRows(model.records, model);
+  if (!rows.length) return <EmptyList model={model} />;
   return (
     <>
       <ul>
-        {model.records.map((memory) => (
-          <MemoryRow key={memory.id} memory={memory} model={model} />
-        ))}
+        {rows.map((entry) =>
+          entry.kind === 'pending' ? (
+            <ForgettingRow key="pending" title={entry.title} />
+          ) : (
+            <MemoryRow key={entry.row.id} memory={entry.row} model={model} />
+          ),
+        )}
       </ul>
       {model.list.hasNextPage && (
         <div className="p-3 text-center">
           <Button
             variant="outline"
             size="sm"
-            disabled={model.list.isFetchingNextPage}
-            onClick={() => void model.list.fetchNextPage()}
+            disabled={model.busy || model.list.isFetchingNextPage}
+            onClick={model.loadMore}
           >
             {model.list.isFetchingNextPage ? 'Loading…' : 'Load more'}
           </Button>
@@ -230,6 +258,8 @@ function MemoryList({ model }: { model: MemoryPageModel }) {
       <div className="sticky top-0 z-10 border-b bg-background px-4 py-3">
         <div
           title={model.bucket}
+          data-memory-list-heading
+          tabIndex={-1}
           className="line-clamp-2 font-mono text-sm font-semibold wrap-anywhere"
         >
           {model.bucket}
@@ -260,6 +290,7 @@ function MemoryList({ model }: { model: MemoryPageModel }) {
         </fieldset>
       </div>
       <ColumnSummary model={model} />
+      <UnconfirmedForget model={model} />
       {model.searching ? (
         <SearchBody model={model} />
       ) : (
@@ -315,6 +346,18 @@ export function Provenance({
     </dl>
   );
 }
+function emptyReading(model: MemoryPageModel) {
+  if (model.forget.notice?.viewBucket === model.bucket && !model.records.length)
+    return {
+      title: 'Nothing to read',
+      description: `No memories are stored in ${model.bucket}.`,
+    };
+  return {
+    title: 'Choose a memory',
+    description:
+      'Select a memory to read its full content and see who stored it.',
+  };
+}
 function ReadingState({ model }: { model: MemoryPageModel }) {
   if (model.search.memory && model.detail.isPending)
     return (
@@ -342,11 +385,13 @@ function ReadingState({ model }: { model: MemoryPageModel }) {
           description={describeFailure(model.detail.error, 'read memories')}
           cached={false}
           retrying={model.detail.isFetching}
-          onRetry={() => void model.detail.refetch()}
+          disabled={model.busy}
+          onRetry={model.retryDetail}
           retryLabel="Retry memory"
         />
       </div>
     );
+  const empty = emptyReading(model);
   return (
     <section
       aria-label="Reading pane"
@@ -357,10 +402,8 @@ function ReadingState({ model }: { model: MemoryPageModel }) {
           <EmptyMedia variant="icon">
             <BookOpen />
           </EmptyMedia>
-          <EmptyTitle>Choose a memory</EmptyTitle>
-          <EmptyDescription>
-            Select a memory to read its full content and see who stored it.
-          </EmptyDescription>
+          <EmptyTitle>{empty.title}</EmptyTitle>
+          <EmptyDescription>{empty.description}</EmptyDescription>
         </EmptyHeader>
       </Empty>
     </section>
@@ -399,6 +442,7 @@ function ReadingPane({ model }: { model: MemoryPageModel }) {
     <article aria-label="Memory detail" data-memory-reading className="min-w-0">
       <MemoryBack model={model} />
       <div className="px-5 pt-6 pb-16 lg:px-8 lg:pt-7">
+        <ForgetProblem model={model} id={memory.id} pane />
         <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <Badge variant="outline" className="max-w-full whitespace-normal">
             <span className="max-w-full font-mono wrap-anywhere">
@@ -431,6 +475,16 @@ function ReadingPane({ model }: { model: MemoryPageModel }) {
               {memory.version} {memory.version === 1 ? 'version' : 'versions'}
             </span>
           </Button>
+          <MemoryActions
+            pane
+            subject={{
+              id: memory.id,
+              bucket: memory.bucket,
+              title: memoryTitle(memory.content),
+              version: memory.version,
+            }}
+            model={model}
+          />
         </div>
         <h2 className="max-w-3xl text-2xl font-semibold tracking-tight wrap-anywhere">
           {memoryTitle(memory.content)}
@@ -529,6 +583,7 @@ export function MemoryPage() {
           <ReadingPane model={model} />
         </div>
       </div>
+      <ForgetDialog model={model} />
     </div>
   );
 }

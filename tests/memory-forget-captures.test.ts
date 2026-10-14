@@ -4,7 +4,12 @@ import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { deferred } from './support/machines.ts';
-import { memoryClient, memoryFixture, memoryId } from './support/memory.ts';
+import {
+  memoryClient,
+  memoryFixture,
+  memoryId,
+  typicalMemories,
+} from './support/memory.ts';
 import {
   confirmForget,
   forgetDialog,
@@ -75,10 +80,28 @@ async function present(
     await page.getByRole('menuitem', { name: 'Forget memory…' }).waitFor();
     return;
   }
+  if (state === 'search') {
+    if (phone)
+      await page.getByRole('link', { name: 'Results', exact: true }).click();
+    await openForget(page, memoryId(5));
+    await expect
+      .poll(() =>
+        forgetDialog(page)
+          .getByRole('button', { name: 'Forget memory', exact: true })
+          .isEnabled(),
+      )
+      .toBe(true);
+    return;
+  }
   await openForget(page);
   if (['confirm', 'search', 'inherited'].includes(state)) return;
   if (state === 'changed') await newer(app);
-  await confirmForget(page);
+  if (state === 'forgetting' || state === 'forgotten') {
+    await forgetDialog(page)
+      .getByRole('button', { name: 'Forget memory', exact: true })
+      .focus();
+    await page.keyboard.press('Enter');
+  } else await confirmForget(page);
   await outcome(page, state);
 }
 async function outcome(page: Page, state: State) {
@@ -98,11 +121,16 @@ async function outcome(page: Page, state: State) {
   else
     await page.getByText('Forgot Release process', { exact: true }).waitFor();
 }
+function captureTarget(state: State) {
+  if (state === 'inherited') return memoryId(6);
+  if (state === 'last') return memoryId(8);
+  return state === 'search' ? memoryId(2) : forgottenId;
+}
 it.each(states.flatMap((state) => sizes.map((size) => ({ state, size }))))(
   'E23: capture $state at $size.name $size.theme against hybrid B+C',
   async ({ state, size }) => {
     const gate = deferred();
-    const target = state === 'inherited' ? memoryId(6) : forgottenId;
+    const target = captureTarget(state);
     const bucket = state === 'last' ? 'work/acme/api' : 'work/acme';
     const visit = await forgetPage(browser, {
       viewport: size,
@@ -110,14 +138,15 @@ it.each(states.flatMap((state) => sizes.map((size) => ({ state, size }))))(
       ...(state === 'last'
         ? {
             seeds: [
-              memoryFixture(1, {
+              ...typicalMemories,
+              memoryFixture(8, {
                 bucket,
-                content: '# Release process\nOnly memory.',
+                content: '# API rate limits\nUse per-token limits on writes.',
               }),
             ],
           }
         : {}),
-      start: `/memory?bucket=${bucket}&memory=${target}${state === 'search' ? '&q=deploy' : ''}`,
+      start: `/memory?bucket=${bucket}&memory=${target}${state === 'search' ? '&q=deploy' : state === 'last' ? '&scope=bucket' : ''}`,
       configure: async (page, app) => {
         if (state === 'forgetting')
           await page.route(
@@ -139,6 +168,22 @@ it.each(states.flatMap((state) => sizes.map((size) => ({ state, size }))))(
       const { page, app } = visit;
       await page.getByRole('article', { name: 'Memory detail' }).waitFor();
       await present(page, app, state, size.name === 'phone');
+      if (state === 'forgetting' && size.name === 'desktop')
+        await page
+          .getByRole('article', { name: 'Memory detail' })
+          .getByRole('heading', { name: 'Acme API deployment', exact: true })
+          .waitFor();
+      if (
+        ['forgetting', 'forgotten'].includes(state) &&
+        size.name === 'desktop'
+      )
+        await expect
+          .poll(() =>
+            page
+              .locator(`[data-memory-row="${memoryId(2)}"]`)
+              .evaluate((el) => document.activeElement === el),
+          )
+          .toBe(true);
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth),
       ).toBe(size.width);

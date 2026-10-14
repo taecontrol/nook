@@ -43,6 +43,14 @@ export function handlerForPrincipal(
     Effect.gen(function* () {
       const store = yield* memoryStore(grant, index);
       return handlers
+        .handle('forget', ({ params, query }) =>
+          store
+            .forget(
+              { id: params.id, expectedVersion: query.expectedVersion },
+              true,
+            )
+            .pipe(Effect.asVoid),
+        )
         .handle('history', ({ params, query }) =>
           store.history(params.id, query.before),
         )

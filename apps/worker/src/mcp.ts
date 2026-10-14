@@ -6,6 +6,8 @@ import {
   type BucketGrant,
   BucketPath,
   CreatedBucket,
+  ForgetMemory,
+  Forgotten,
   Memory,
   type MemoryClient,
   MemorySearchResults,
@@ -46,6 +48,7 @@ type MemoryError = Effect.Error<
   ReturnType<
     | MemoryStore['remember']
     | MemoryStore['update']
+    | MemoryStore['forget']
     | MemoryStore['get']
     | MemoryStore['search']
   >
@@ -59,6 +62,22 @@ function updateInput() {
     UpdateMemory.mapFields((fields) => ({
       ...fields,
       expectedVersion: Schema.Unknown,
+    })),
+  );
+  return {
+    ...advertised,
+    '~standard': {
+      ...advertised['~standard'],
+      validate: boundary['~standard'].validate,
+    },
+  };
+}
+function forgetInput() {
+  const advertised = standard(ForgetMemory);
+  const boundary = standard(
+    ForgetMemory.mapFields((fields) => ({
+      ...fields,
+      expectedVersion: Schema.optionalKey(Schema.Unknown),
     })),
   );
   return {
@@ -182,6 +201,26 @@ export function mcpHandler(
                 input,
               ),
             ),
+          ),
+        ),
+    );
+    server.registerTool(
+      'forget',
+      {
+        description:
+          'Permanently delete a memory and all versions, including its keyword and meaning search entries. Pass the version from get as expectedVersion. If it changed, get it again before forgetting. After a lost response, Memory not found on a retry means it is already gone.',
+        inputSchema: forgetInput(),
+        outputSchema: standard(Forgotten),
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: false,
+        },
+      },
+      (input) =>
+        execute(
+          memoryStore(grant).pipe(
+            Effect.flatMap((store) => store.forget(input)),
           ),
         ),
     );

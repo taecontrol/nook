@@ -34,6 +34,14 @@ Set `VAULT_KEY` as a **Secret** on the `nook` Worker, next to the Access secrets
 
 Vault stores AES-GCM ciphertext in D1. Delete and replace remove the current ciphertext, but [D1 Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/) retains previous database states during its retention window. Nook does not purge that history.
 
+Memory forgetting removes the canonical memory, all versions and keyword
+postings in one atomic write. D1 can still keep deleted bytes in free pages;
+`secure_delete` is unavailable. Time Travel keeps prior database states for
+30 days on Workers Paid and 7 days on Free, including forgotten memories.
+Nook cannot purge either. Meaning vectors are removed and their absence
+confirmed after a 30-minute settle window on healthy scheduled runs. A vector
+absent from Vectorize does not prove erasure from provider storage.
+
 After merging and the green-main deployment, the owner performs these checks. Local workerd tests prove the same behavior, but production foreign-key enforcement and an approximately 85 KiB ciphertext bound parameter still need this observation.
 
 1. In the production database's D1 console, run `PRAGMA foreign_keys;` and require `1`. Cloudflare documents [foreign-key enforcement](https://developers.cloudflare.com/d1/sql-api/foreign-keys/) by default.
@@ -184,6 +192,35 @@ workerd evidence does not establish hosted `getByIds` metadata or freshness.
    Keep E31 pending until these observations succeed. If hosted inspection
    omits metadata, stop and revisit ADR-0014 instead of changing the
    inspection policy silently.
+
+### Forget: owner acceptance after deployment (pending)
+
+After merging issue #13 and deploying green main, perform this check privately
+with synthetic memories. Migration 0011 must be applied before the new Worker;
+it is additive and needs no vector backfill.
+
+1. Read a synthetic memory with MCP `get`, then `forget` with its version.
+   Confirm the compact result, immediate not-found detail/history, absence
+   from lists/counts and both searches, and the not-found retry. Repeat from
+   the web confirmation at desktop and phone sizes.
+2. Use private Cloudflare diagnostics to exercise the native
+   `deleteByIds` binding with 50 synthetic ids, including an unknown UUID.
+   Confirm it accepts the size and unknown id without stalling removal.
+   The production sweep inspects first and deletes only present forgotten
+   ids, in one call of at most 50; the hosted size and unknown-id behavior
+   are not documented by the [client API](https://developers.cloudflare.com/vectorize/reference/client-api/).
+3. Observe scheduled removal and actual index propagation. The pending id/time
+   must survive early absence and outages, then disappear only after a run
+   observes vector absence at least 30 minutes after forgetting. Confirm
+   propagation stays within the 15-minute margin used by
+   [ADR-0015](adrs/0015-forgetting-is-version-guarded-and-vector-removal-settles-after-late-writers.md).
+4. Record the deployment run, call-size/outcome booleans, scheduled timestamps
+   and propagation duration on the PR. Keep this hosted acceptance pending
+   until they succeed. A rejected batch size, unknown-id failure that stalls
+   the sweep, or propagation beyond the margin requires re-entering design.
+
+Do not publish content, vector values, credentials or private bucket names.
+Index absence establishes convergence, not physical erasure by the provider.
 
 ### Back up a database with full-text search
 

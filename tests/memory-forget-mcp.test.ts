@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { Log, LogLevel } from 'miniflare';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { access, accessFixture } from './support/access.ts';
 import { seedGrantTree } from './support/grants.ts';
@@ -11,6 +12,7 @@ import {
   memoryId,
   seedMemories,
   seedMemoryMachine,
+  tenTags,
 } from './support/memory.ts';
 import {
   changedForget,
@@ -23,11 +25,19 @@ import {
 } from './support/memory-forget.ts';
 import { runtime, type TestRuntime } from './support/runtime.ts';
 
+const prefix = '# Release process\n\n';
+const suffix = `\n\nVersion 3: ${uniqueTerm}`;
+const dense =
+  prefix +
+  '界'.repeat(5400) +
+  'x'.repeat(16384 - Buffer.byteLength(prefix + suffix) - 5400 * 3);
+
 describe.each(['owner', 'machine'] as const)('Forget #13: %s', (endpoint) => {
   describe.each(['2026-07-28', '2025-06-18'] as const)('%s', (protocol) => {
     let app: TestRuntime;
     let assertion: string;
     let client: ReturnType<typeof memoryClient>;
+    const logs: string[] = [];
     beforeAll(async () => {
       const issuer = await accessFixture();
       app = await runtime({
@@ -35,6 +45,18 @@ describe.each(['owner', 'machine'] as const)('Forget #13: %s', (endpoint) => {
         outboundService: issuer.outboundService,
       });
       assertion = await issuer.assertion();
+      class PrivateLog extends Log {
+        override log(message: string) {
+          logs.push(message);
+        }
+      }
+      await app.setBindings(access, {
+        log: new PrivateLog(LogLevel.VERBOSE),
+        handleRuntimeStdio(stdout, stderr) {
+          for (const stream of [stdout, stderr])
+            stream.on('data', (chunk) => logs.push(chunk.toString()));
+        },
+      });
       await seedGrantTree(app, [...memoryBuckets, 'work/other']);
     });
     beforeEach(async () => {
@@ -49,7 +71,9 @@ describe.each(['owner', 'machine'] as const)('Forget #13: %s', (endpoint) => {
       )
         await db.prepare('DELETE FROM memory_vector_removals').run();
       await db.prepare('DELETE FROM machine_tokens').run();
-      await seedMemories(app, [memoryFixture(1)]);
+      await seedMemories(app, [
+        memoryFixture(1, { content: dense, tags: tenTags }),
+      ]);
       await versionThree(app);
       const { token } = await seedMemoryMachine(app, ['work/acme']);
       client = memoryClient(app, protocol, {
@@ -68,6 +92,10 @@ describe.each(['owner', 'machine'] as const)('Forget #13: %s', (endpoint) => {
         headers: { 'Cf-Access-Jwt-Assertion': assertion },
       });
     it('E1/E12: permanent forget removes every version and FTS byte, returning only non-content facts', async () => {
+      const current = (await client.call('get', { id: forgottenId }))
+        .structuredContent;
+      expect(Buffer.byteLength(current?.content as string)).toBe(16384);
+      expect(current?.tags).toEqual(tenTags);
       const before = new Date().toISOString();
       const result = await forget();
       expect(result.isError).not.toBe(true);
@@ -168,7 +196,24 @@ describe.each(['owner', 'machine'] as const)('Forget #13: %s', (endpoint) => {
         await forget({ expectedVersion: 2 }),
         changedForget(3, 2),
       );
-      expect(await forgetSnapshot(app)).toEqual(before);
+      const after = await forgetSnapshot(app);
+      // The accepted batch always compacts FTS, including a guarded no-op.
+      expect(after.heads).toEqual(before.heads);
+      expect(after.versions).toEqual(before.versions);
+      expect(after.removals).toEqual(before.removals);
+      expect(
+        (
+          await (
+            await app.mf.getD1Database('DB')
+          )
+            .prepare(
+              'SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?',
+            )
+            .bind(uniqueTerm)
+            .all()
+        ).results,
+      ).toHaveLength(1);
+      await ftsIntegrity(app);
     });
     it('E6: one of ten concurrent forgets wins; retries are not found and record only one removal', async () => {
       const results = await Promise.all(
@@ -268,6 +313,10 @@ describe.each(['owner', 'machine'] as const)('Forget #13: %s', (endpoint) => {
           'CREATE INDEX memory_vector_removals_age ON memory_vector_removals(forgotten_at,id)',
         )
         .run();
+      expect(
+        logs.some((message) => message.includes(uniqueTerm)),
+        'Storage failures never log memory content',
+      ).toBe(false);
     });
     it('E11: discovery documents permanent deletion, read version and lost-response retries without owner policy', async () => {
       const tool = (await client.listTools()).tools.find(

@@ -358,3 +358,188 @@ it('E19: a search confirmation waits for detail to obtain the displayed version'
     await visit.close();
   }
 });
+it('E18/E20: a committed DELETE with a lost response is confirmed by not-found without restoring forgotten content', async () => {
+  const visit = await forgetPage(browser);
+  try {
+    const { page } = visit;
+    await openForget(page);
+    await page.route('**/api/memories/*?expectedVersion=*', async (route) => {
+      const response = await route.fetch();
+      expect(response.status()).toBe(204);
+      await route.abort();
+    });
+    await confirmForget(page);
+    await page.getByText('Forgot Release process', { exact: true }).waitFor();
+    expect(await row(page).count()).toBe(0);
+    expect(await detail(page).textContent()).not.toContain('Release process');
+    await page.reload();
+    await memoryRows(page).first().waitFor();
+    expect(await row(page).count()).toBe(0);
+  } finally {
+    await visit.close();
+  }
+});
+it('E18: an authoritative not-found refresh cannot render previously cached detail or History', async () => {
+  const visit = await forgetPage(browser);
+  try {
+    const { page, app } = visit;
+    await detail(page)
+      .getByRole('heading', { name: 'Release process', exact: true })
+      .waitFor();
+    expect(
+      (
+        await memoryClient(app, '2026-07-28').call('forget', {
+          id: forgottenId,
+          expectedVersion: 3,
+        })
+      ).isError,
+    ).not.toBe(true);
+    await page.clock.setFixedTime(new Date('2030-01-01T00:00:00Z'));
+    const missing = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === `/api/memories/${forgottenId}` &&
+        response.status() === 404,
+    );
+    await row(page).hover();
+    await missing;
+    await expect.poll(() => detail(page).count()).toBe(0);
+    expect(
+      await page.getByRole('button', { name: /History.*versions?/ }).count(),
+    ).toBe(0);
+  } finally {
+    await visit.close();
+  }
+});
+it('E20: failed conflict refresh offers a read retry, never the old version or an automatic DELETE', async () => {
+  const visit = await forgetPage(browser);
+  let unavailable = true;
+  let deletes = 0;
+  try {
+    const { page, app } = visit;
+    page.on('request', (request) => {
+      if (request.method() === 'DELETE') deletes++;
+    });
+    await openForget(page);
+    const client = memoryClient(app, '2026-07-28');
+    const current = (await client.call('get', { id: forgottenId }))
+      .structuredContent;
+    expect(
+      (
+        await client.call('update', {
+          id: forgottenId,
+          expectedVersion: 3,
+          content: current?.content,
+          tags: ['changed'],
+        })
+      ).isError,
+    ).not.toBe(true);
+    await page.route(`**/api/memories/${forgottenId}`, async (route) => {
+      if (unavailable)
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: '{"_tag":"ServiceUnavailable"}',
+        });
+      else await route.continue();
+    });
+    await confirmForget(page);
+    await page
+      .getByRole('button', { name: 'Refresh memory', exact: true })
+      .waitFor();
+    expect(
+      await page.getByRole('button', { name: 'Forget version 3…' }).count(),
+    ).toBe(0);
+    expect(deletes).toBe(1);
+    unavailable = false;
+    await page
+      .getByRole('button', { name: 'Refresh memory', exact: true })
+      .click();
+    await page.getByRole('button', { name: 'Forget version 4…' }).waitFor();
+    expect(deletes).toBe(1);
+  } finally {
+    await visit.close();
+  }
+});
+it('E20: an unreadable lost-response outcome stays hidden and checks again without repeating DELETE', async () => {
+  const visit = await forgetPage(browser);
+  let unavailable = true;
+  let deletes = 0;
+  try {
+    const { page } = visit;
+    await openForget(page);
+    page.on('request', (request) => {
+      if (request.method() === 'DELETE') deletes++;
+    });
+    await page.route('**/api/memories/*?expectedVersion=*', async (route) => {
+      await route.fetch();
+      await route.abort();
+    });
+    await page.route(`**/api/memories/${forgottenId}`, async (route) => {
+      if (unavailable)
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: '{"_tag":"ServiceUnavailable"}',
+        });
+      else await route.continue();
+    });
+    await confirmForget(page);
+    const alert = page
+      .getByRole('alert')
+      .filter({ hasText: 'Forget not confirmed' });
+    await alert.waitFor();
+    expect(await row(page).count()).toBe(0);
+    expect(await alert.textContent()).not.toContain('Nothing was deleted');
+    expect(await detail(page).textContent()).not.toContain('Release process');
+    unavailable = false;
+    await alert
+      .getByRole('button', { name: 'Check again', exact: true })
+      .click();
+    await page.getByText('Forgot Release process', { exact: true }).waitFor();
+    expect(deletes).toBe(1);
+  } finally {
+    await visit.close();
+  }
+});
+it('E19/E24: a pending inherited memory does not enter the bucket-only view', async () => {
+  const gate = deferred();
+  const visit = await forgetPage(browser, {
+    configure: async (page) => {
+      await page.route('**/api/memories/*?expectedVersion=*', async (route) => {
+        await gate.promise;
+        await route.continue().catch(() => {});
+      });
+    },
+  });
+  try {
+    const { page } = visit;
+    await page
+      .getByRole('button', { name: 'Only this bucket', exact: true })
+      .click();
+    await expect.poll(() => memoryRows(page).count()).toBe(3);
+    await page
+      .getByRole('button', { name: 'Include inherited', exact: true })
+      .click();
+    await expect.poll(() => memoryRows(page).count()).toBe(7);
+    await openForget(page, memoryId(6));
+    await confirmForget(page);
+    await page.getByText('Forgetting Prefer pnpm…', { exact: true }).waitFor();
+    await page
+      .getByRole('button', { name: 'Only this bucket', exact: true })
+      .click();
+    await expect
+      .poll(() =>
+        page
+          .getByRole('button', { name: 'Only this bucket', exact: true })
+          .getAttribute('aria-pressed'),
+      )
+      .toBe('true');
+    expect(
+      await page.getByText('Forgetting Prefer pnpm…', { exact: true }).count(),
+    ).toBe(0);
+    expect(await memoryRows(page).count()).toBe(3);
+  } finally {
+    gate.resolve();
+    await visit.close();
+  }
+});

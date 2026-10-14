@@ -1,7 +1,10 @@
 import { afterEach, expect, it } from 'vitest';
 import { handlerForPrincipal } from '../apps/worker/src/index.ts';
+import { access, accessFixture } from './support/access.ts';
+import { seedGrantTree } from './support/grants.ts';
 import { expectToolError } from './support/mcp.ts';
 import {
+  memoryBuckets,
   memoryClient,
   memoryFixture,
   memoryId,
@@ -15,7 +18,7 @@ import {
   forgottenId,
   versionThree,
 } from './support/memory-forget.ts';
-import type { TestRuntime } from './support/runtime.ts';
+import { runtime, type TestRuntime } from './support/runtime.ts';
 import { vaultCheckpoints } from './support/vault-checkpoints.ts';
 
 let app: TestRuntime;
@@ -62,14 +65,25 @@ it('E17: owner DELETE has exact success, missing, stale and validation outcomes'
   });
 });
 it('E17: the owner route rejects machine credentials, foreign Origin and outside-grant memories before validation', async () => {
-  app = await memoryRuntime();
+  const issuer = await accessFixture();
+  app = await runtime({
+    bindings: access,
+    outboundService: issuer.outboundService,
+  });
+  const assertion = await issuer.assertion();
+  await seedGrantTree(app, memoryBuckets);
   await seedMemories(app, [
     memoryFixture(1),
     memoryFixture(2, { bucket: 'personal' }),
   ]);
   const before = await forgetSnapshot(app);
   expect(
-    (await remove('1', { Origin: 'https://foreign.example' })).status,
+    (
+      await remove('1', {
+        Origin: 'https://foreign.example',
+        'Cf-Access-Jwt-Assertion': assertion,
+      })
+    ).status,
   ).toBe(403);
   const handler = handlerForPrincipal(
     'owner@nook.test',

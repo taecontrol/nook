@@ -24,7 +24,13 @@ import { Item, ItemContent, ItemTitle } from '@/components/ui/item';
 import { Kbd } from '@/components/ui/kbd';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
-
+import {
+  ForgetNotice,
+  ForgetProblem,
+  ForgettingRow,
+  MemoryActions,
+  pendingRows,
+} from './memory-forget';
 import { formatDateTime, recentTime } from './time';
 import type { MemoryPageModel } from './use-memory-page';
 
@@ -139,13 +145,17 @@ export function ColumnSummary({ model }: { model: MemoryPageModel }) {
       aria-live="polite"
       className="flex h-9 items-center justify-between gap-3 border-b px-4 text-xs text-muted-foreground"
     >
-      <span className="min-w-0 truncate">
+      <span className="shrink-0">
         {model.searching ? searchSummary(model) : listSummary(model)}
       </span>
-      {model.searching && (
-        <span className="flex shrink-0 items-center gap-1 max-lg:hidden">
-          <Kbd>Esc</Kbd> clears
-        </span>
+      {model.forget.notice?.viewBucket === model.bucket ? (
+        <ForgetNotice model={model} />
+      ) : (
+        model.searching && (
+          <span className="flex shrink-0 items-center gap-1 max-lg:hidden">
+            <Kbd>Esc</Kbd> clears
+          </span>
+        )
       )}
     </div>
   );
@@ -205,52 +215,59 @@ function SearchRow({
   const selected = model.search.memory === result.id;
   return (
     <li className={cn('border-b', selected && 'bg-accent')}>
-      <Item asChild size="sm" className="w-full min-w-0">
-        <Link
-          to="/memory"
-          search={{
-            bucket: model.bucket,
-            scope: model.scope,
-            q: model.q,
-            memory: result.id,
-          }}
-          data-search-result={result.id}
-          aria-current={selected ? 'true' : undefined}
-          title={result.title}
-          onKeyDown={(event) => resultKey(event, model)}
-        >
-          <ItemContent className="min-w-0">
-            <ItemTitle className="block min-w-0 max-w-full">
-              <span className="line-clamp-2 wrap-anywhere">{result.title}</span>
-            </ItemTitle>
-            <Snippet result={result} />
-            <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-              <span
-                title={result.bucket}
-                className={cn(
-                  'max-w-36 truncate font-mono',
-                  result.bucket !== model.bucket &&
-                    'font-semibold text-foreground',
+      <div className="flex min-w-0 items-center gap-1 pr-3">
+        <Item asChild size="sm" className="min-w-0 flex-1">
+          <Link
+            to="/memory"
+            search={{
+              bucket: model.bucket,
+              scope: model.scope,
+              q: model.q,
+              memory: result.id,
+            }}
+            className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
+            data-search-result={result.id}
+            aria-current={selected ? 'true' : undefined}
+            title={result.title}
+            onKeyDown={(event) => resultKey(event, model)}
+          >
+            <ItemContent className="min-w-0">
+              <ItemTitle className="block min-w-0 max-w-full">
+                <span className="line-clamp-2 wrap-anywhere">
+                  {result.title}
+                </span>
+              </ItemTitle>
+              <Snippet result={result} />
+              <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                <span
+                  title={result.bucket}
+                  className={cn(
+                    'max-w-36 truncate font-mono',
+                    result.bucket !== model.bucket &&
+                      'font-semibold text-foreground',
+                  )}
+                >
+                  {bucketLabel(result.bucket)}
+                </span>
+                <span aria-hidden>·</span>
+                <span
+                  className="shrink-0 tabular-nums"
+                  title={formatDateTime(result.createdAt)}
+                >
+                  {recentTime(result.createdAt)}
+                </span>
+                {result.match === 'meaning' && (
+                  <Badge variant="outline" className="ml-auto shrink-0">
+                    By meaning
+                  </Badge>
                 )}
-              >
-                {bucketLabel(result.bucket)}
-              </span>
-              <span aria-hidden>·</span>
-              <span
-                className="shrink-0 tabular-nums"
-                title={formatDateTime(result.createdAt)}
-              >
-                {recentTime(result.createdAt)}
-              </span>
-              {result.match === 'meaning' && (
-                <Badge variant="outline" className="ml-auto shrink-0">
-                  By meaning
-                </Badge>
-              )}
-            </div>
-          </ItemContent>
-        </Link>
-      </Item>
+              </div>
+            </ItemContent>
+          </Link>
+        </Item>
+        <MemoryActions subject={result} model={model} />
+      </div>
+      <ForgetProblem model={model} id={result.id} />
     </li>
   );
 }
@@ -284,7 +301,8 @@ function SearchError({ model }: { model: MemoryPageModel }) {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void model.results.refetch()}
+            disabled={model.busy}
+            onClick={model.retrySearch}
           >
             Try again
           </Button>
@@ -306,7 +324,8 @@ function MeaningUnavailable({ model }: { model: MemoryPageModel }) {
             variant="outline"
             size="sm"
             className="mt-2"
-            onClick={() => void model.results.refetch()}
+            disabled={model.busy}
+            onClick={model.retrySearch}
           >
             Try again
           </Button>
@@ -367,11 +386,15 @@ export function SearchBody({ model }: { model: MemoryPageModel }) {
       {model.results.data.meaning === 'unavailable' && (
         <MeaningUnavailable model={model} />
       )}
-      {model.results.data.results.length ? (
+      {pendingRows(model.results.data.results, model).length ? (
         <ul>
-          {model.results.data.results.map((result) => (
-            <SearchRow key={result.id} result={result} model={model} />
-          ))}
+          {pendingRows(model.results.data.results, model).map((entry) =>
+            entry.kind === 'pending' ? (
+              <ForgettingRow key="pending" title={entry.title} />
+            ) : (
+              <SearchRow key={entry.row.id} result={entry.row} model={model} />
+            ),
+          )}
         </ul>
       ) : (
         <NoResults model={model} />

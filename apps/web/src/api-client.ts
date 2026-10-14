@@ -103,6 +103,7 @@ function publicMessage(error: unknown) {
     'SecretKeyUnavailable',
     'BucketHasSecrets',
     'BucketHasMemories',
+    'MemoryChanged',
   ].includes(typed._tag ?? '')
     ? typed.message
     : undefined;

@@ -33,7 +33,23 @@ The MCP `remember` tool takes an explicit existing bucket, Markdown content, opt
 
 The result contains the memory id and metadata. `get({"id": "…"})` reads its exact content and provenance. Retrying byte-identical content in the same bucket returns that memory with `created: false`, preserves its tags, and writes nothing. A changed byte or a different bucket creates another memory. Content is limited to 16 KiB of UTF-8; tags are unique lowercase bucket segments, at most ten tags of 32 characters each.
 
-Memory reads include the selected bucket, its ancestors, and `me`, within the caller's grant. In the web app, switch between that view and "Only this bucket", search by words or meaning, and open History to read earlier versions and changes. Each version records the authenticated principal, client as reported, optional working directory, and server time. Markdown renders without executing HTML or fetching remote images. Buckets holding memories cannot be deleted. Forgetting is not available yet.
+Memory reads include the selected bucket, its ancestors, and `me`, within the caller's grant. In the web app, switch between that view and "Only this bucket", search by words or meaning, and open History to read earlier versions and changes. Each version records the authenticated principal, client as reported, optional working directory, and server time. Markdown renders without executing HTML or fetching remote images. Buckets holding memories cannot be deleted until their memories are forgotten.
+
+Choose "Forget memory…" from a row's actions or the reading pane's More actions,
+then confirm once. Agents call MCP `forget` with the id and the version from
+`get` as `expectedVersion`. Forgetting permanently removes the memory, every
+version and the keyword index entries; every Nook read and search excludes it
+immediately. A changed version is rejected without deleting anything; read
+again before deciding. A retry after successful forgetting answers "Memory
+not found." There is no undo or trash. On healthy scheduled runs, Nook confirms
+the meaning vector's absence after a 30-minute settle window, including late
+embedding writes. Index outages retain the pending removal for another run.
+
+Forgetting cannot guarantee physical erasure from Cloudflare storage. D1 may
+keep deleted bytes in free pages and does not allow `secure_delete`.
+[Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/)
+keeps prior states for 30 days on Workers Paid and 7 days on Free; Nook cannot
+purge them. Absence from Vectorize does not prove erasure from provider storage.
 
 To replace a changed fact, call `get` first and pass its version as
 `expectedVersion` to `update`, with the same id and new content. Omitted tags

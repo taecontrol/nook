@@ -6,6 +6,21 @@ import {
 } from '@tanstack/react-query';
 import { runApi } from './api-client';
 import { preloadBuckets } from './buckets-api';
+import { createWriteGate } from './write-gate';
+
+export const memoryWriteKey = ['memory-write'] as const;
+export const memoryWriteGate = createWriteGate(memoryWriteKey, {
+  disableWhileBusy: true,
+});
+export function canLoadMemory(queries: QueryClient, id: string) {
+  if (!id) return false;
+  const writing = queries
+    .getMutationCache()
+    .findAll({ mutationKey: memoryWriteKey, status: 'pending' });
+  return !writing.some(
+    (write) => (write.state.variables as { id: string }).id === id,
+  );
+}
 
 export const memoryCountsOptions = queryOptions({
   queryKey: ['memory-counts'],
@@ -104,6 +119,7 @@ export type MemorySearch = {
 };
 export function preloadMemory(queries: QueryClient, search: MemorySearch) {
   preloadBuckets(queries);
+  if (memoryWriteGate.isWriting(queries)) return;
   void queries.prefetchQuery(memoryCountsOptions);
   void queries.prefetchInfiniteQuery(
     memoriesOptions(search.bucket ?? RESERVED_BUCKET, search.scope),

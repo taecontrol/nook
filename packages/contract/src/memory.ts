@@ -82,6 +82,17 @@ export const UpdateMemory = Schema.Struct({
   workingDirectory: Schema.optionalKey(Schema.String),
 });
 export type UpdateMemory = typeof UpdateMemory.Type;
+export const ForgetMemory = Schema.Struct({
+  id: Schema.String,
+  expectedVersion: Schema.Number.check(Schema.isFinite()),
+});
+export type ForgetMemory = typeof ForgetMemory.Type;
+export const Forgotten = Schema.Struct({
+  id: MemoryId,
+  bucket: Schema.String,
+  version: Schema.Number,
+});
+export type Forgotten = typeof Forgotten.Type;
 export function validateExpectedVersion(version: unknown): string | undefined {
   if (
     typeof version !== 'number' ||
