@@ -417,11 +417,12 @@ describe.each(['owner', 'machine'] as const)('Update #12: %s', (endpoint) => {
       expect(await response.json()).toEqual({ _tag: 'Unauthorized' });
       expect(await snapshot()).toEqual(before);
     });
-    it('E13: the eight plain tools describe guarded, destructive, idempotent updates', async () => {
+    it('E13: the nine plain tools describe guarded, destructive, idempotent updates', async () => {
       const { tools } = await client.listTools();
       expect(tools.map((t) => t.name).sort()).toEqual([
         'create_bucket',
         'delete_bucket',
+        'forget',
         'get',
         'list_buckets',
         'list_secrets',

@@ -103,6 +103,7 @@ const publicTags = new Set([
   'SecretKeyUnavailable',
   'BucketHasSecrets',
   'BucketHasMemories',
+  'MemoryChanged',
 ]);
 it.each(Object.entries(webStatuses))(
   'the web client preserves %s as %s and exposes only allowlisted messages',

@@ -22,6 +22,7 @@ import {
   InvalidMemoryCursor,
   InvalidMemorySearch,
   Memory,
+  MemoryChanged,
   MemoryCounts,
   MemoryHistory,
   MemoryHistoryQuery,
@@ -64,6 +65,16 @@ const errors = [
 export const Api = HttpApi.make('nook')
   .add(
     HttpApiGroup.make('memories')
+      .add(
+        HttpApiEndpoint.delete('forget', '/api/memories/:id', {
+          params: Schema.Struct({ id: Schema.String }),
+          query: Schema.Struct({
+            expectedVersion: Schema.optionalKey(Schema.String),
+          }),
+          success: Schema.Void.annotate({ httpApiStatus: 204 }),
+          error: [...errors, MemoryNotFound, MemoryChanged, InvalidMemory],
+        }),
+      )
       .add(
         HttpApiEndpoint.get('history', '/api/memories/:id/versions', {
           params: Schema.Struct({ id: Schema.String }),

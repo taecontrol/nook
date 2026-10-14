@@ -428,6 +428,7 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
       expect(tools.map((t) => t.name).sort()).toEqual([
         'create_bucket',
         'delete_bucket',
+        'forget',
         'get',
         'list_buckets',
         'list_secrets',

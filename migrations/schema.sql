@@ -3,6 +3,7 @@ CREATE INDEX audit_entries_secret ON audit_entries(path, at DESC, id DESC);
 CREATE UNIQUE INDEX machine_tokens_id ON machine_tokens(id);
 CREATE UNIQUE INDEX memories_current_content ON memories(bucket, content_hash);
 CREATE INDEX memories_feed ON memories(bucket, created_at DESC, id DESC);
+CREATE INDEX memory_vector_removals_age ON memory_vector_removals(forgotten_at, id);
 CREATE TABLE "audit_entries" (
   id TEXT PRIMARY KEY NOT NULL,
   at TEXT NOT NULL,
@@ -54,6 +55,10 @@ CREATE TABLE 'memories_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID;
 CREATE TABLE 'memories_fts_data'(id INTEGER PRIMARY KEY, block BLOB);
 CREATE TABLE 'memories_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB);
 CREATE TABLE 'memories_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID;
+CREATE TABLE memory_vector_removals (
+  id TEXT PRIMARY KEY CHECK (length(id) = 36),
+  forgotten_at TEXT NOT NULL
+);
 CREATE TABLE memory_versions (
   memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
   version INTEGER NOT NULL CHECK (version >= 1),

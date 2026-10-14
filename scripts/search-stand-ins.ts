@@ -67,6 +67,8 @@ export class SearchStandIns {
   upserts: LocalVector[][] = [];
   inspections: string[][] = [];
   failInspection = false;
+  failDelete = false;
+  deletions: string[][] = [];
   d1Trips = 0;
   missing = new Set<string>();
   indexes = new Set(['bucket']);
@@ -83,6 +85,7 @@ export class SearchStandIns {
     this.queries = [];
     this.upserts = [];
     this.inspections = [];
+    this.deletions = [];
     this.d1Trips = 0;
   }
   clear() {
@@ -125,13 +128,23 @@ export class SearchStandIns {
   }
   getByIds(ids: string[]) {
     this.inspections.push(ids);
-    if (this.failInspection) throw new Error('Synthetic inspection failure.');
+    if (this.failInspection || this.failIndex)
+      throw new Error('Synthetic inspection failure.');
     return ids.flatMap((id) => {
       const vector = this.visible.get(id);
       return vector
         ? [{ id: vector.id, values: vector.values, metadata: vector.metadata }]
         : [];
     });
+  }
+  deleteByIds(ids: string[]) {
+    this.deletions.push(ids);
+    if (this.failDelete || this.failIndex)
+      throw new Error('Synthetic delete failure.');
+    if (ids.length > 50) throw new Error('Too many removal ids.');
+    for (const id of ids) this.written.delete(id);
+    if (this.autoAdvance) this.advance();
+    return { mutationId: 'synthetic-delete' };
   }
   query(values: number[], options: Query) {
     this.queries.push(options);
@@ -177,6 +190,8 @@ export class SearchStandIns {
         return Response.json(this.upsert(args[0] as LocalVector[]));
       if (path === '/getByIds')
         return Response.json(this.getByIds(args[0] as string[]));
+      if (path === '/deleteByIds')
+        return Response.json(this.deleteByIds(args[0] as string[]));
       return new Response('Unknown fixture call.', { status: 404 });
     } catch {
       return new Response('Synthetic search service failure.', { status: 503 });

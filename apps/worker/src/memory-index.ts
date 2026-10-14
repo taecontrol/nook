@@ -12,7 +12,10 @@ export type SearchBindings = {
       input: { text: string[]; truncate_inputs: boolean },
     ): Promise<unknown>;
   };
-  MEMORY_INDEX?: Pick<VectorizeIndex, 'query' | 'upsert' | 'getByIds'>;
+  MEMORY_INDEX?: Pick<
+    VectorizeIndex,
+    'query' | 'upsert' | 'getByIds' | 'deleteByIds'
+  >;
   EMBEDDING_MODEL?: string;
 };
 export type EmbeddingMemory = {
@@ -72,6 +75,12 @@ export function memoryIndex(env: SearchBindings = {}) {
     });
   return {
     model,
+    remove: (ids: string[]) =>
+      Effect.tryPromise(() => {
+        if (!env.MEMORY_INDEX)
+          throw new Error('Meaning search is unavailable.');
+        return env.MEMORY_INDEX.deleteByIds(ids);
+      }),
     query: (query: string, paths: readonly string[]) =>
       Effect.gen(function* () {
         const [values] = yield* embed([query]);

@@ -44,7 +44,11 @@ export function createWriteGate(
         ...options,
         // Query checks this before focus/remount reads, including the interval
         // before React renders a newly pending mutation.
-        ...(disableWhileBusy ? { enabled: () => !isWriting(queries) } : {}),
+        // Retain the previous disabled state after settlement so observers
+        // resume queries first mounted during the write.
+        ...(disableWhileBusy
+          ? { enabled: () => !busy && !isWriting(queries) }
+          : {}),
         staleTime: busy ? Infinity : options.staleTime,
         refetchOnWindowFocus: busy
           ? (false as const)

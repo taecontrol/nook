@@ -438,6 +438,7 @@ it('E16/E23: machines have no reveal route/capability and MCP keeps names-only V
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
       'create_bucket',
       'delete_bucket',
+      'forget',
       'get',
       'list_buckets',
       'list_secrets',

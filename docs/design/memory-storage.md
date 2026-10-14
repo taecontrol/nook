@@ -352,3 +352,148 @@ Base: candidate A (Claude). Grafts from candidate B (GPT): `expectedVersion` (as
 
 - Hosted `getByIds` freshness after a recent upsert is undocumented; the 10-minute settle window keeps inspection off rows still propagating. The owner verifies inspection on the deployed index after merge.
 - ADR candidate: ADR-0014, "Memory updates are guarded by the read version and recognized by current content", recording the retry identity, duplicate rejection, and actual-index inspection as the meaning of ADR-0013's eventual convergence.
+
+## Forget (#13)
+
+Status: Accepted, 2026-10-14, by the owner. Grounded on commit `05c14bd`. Retire with the rest of this brief once its decisions live in code, tests, `docs/`, and the ADR candidate below.
+
+### Problem and scope
+
+The owner, or an agent through MCP, must be able to remove a memory so that its content, versions, and search entries are gone. This section fixes the MCP `forget` contract, the owner HTTP operation the web app calls, the D1 write, how both search derivatives stay correct, and how the meaning-search vector of a forgotten memory converges to absent. It does not cover the web interaction (decided by the accepted prototype in the spec), audit entries, bulk forgetting, or undo.
+
+### Grounding
+
+- **ADRs:** ADR-0004 (forgetting deletes the memory, all its versions, and its search index entries; no soft delete), ADR-0007 (atomic batches, no transactions), ADR-0013 (D1 authoritative; derivatives converge), ADR-0014 (read-version guard; settled inspection of the real index).
+- **Spike, 2026-10-14** (Miniflare 4.20260730.0, real migrations, D1 binding; `/tmp/forget-spike`): `PRAGMA foreign_keys` is 1; `DELETE FROM memories` cascades every version and `memories_fts_delete` removes the postings; FTS `integrity-check` passes and `MATCH` finds nothing. The term still physically remains in `memories_fts_data` until a merge; `INSERT INTO memories_fts(memories_fts) VALUES('optimize')` removes it, inside `db.batch`, in 5–21 ms at 2,001 memories of about 2 KB. `PRAGMA secure_delete` is not authorized, and deleted bytes remain in free pages. `meta.changes` counts cascade and trigger writes, so outcomes come from `RETURNING` and a state read.
+- **Platform documentation:** `deleteByIds` is asynchronous ("typically takes a few seconds"); its id limit, unknown-id behavior, ordering against upserts, and physical purge are undocumented; the binding cannot list vectors. `ctx.waitUntil` work runs "up to 30 seconds after the response is sent" and is then cancelled; a Cron Trigger invocation has at most 15 minutes of wall time. D1 Time Travel is always on: 30 days on Workers Paid, 7 on Free.
+- **Arena:** two independent candidates (Claude, GPT) and a cross-judge. Working material: `.work/arena/memory-forget/`.
+
+### Domain meaning (accepted by the owner)
+
+- Forgetting permanently deletes the memory, all its versions, and its keyword and meaning search entries. There is no trash, undo, or restore.
+- **Concurrency:** `forget` requires the version the caller read. When the current version differs, nothing is deleted and the caller must `get` again.
+- **Retry:** a retry after a lost response answers "Memory not found.", the same answer as for an id outside the grant. There is no `forgotten: false` outcome.
+- **Vector convergence:** the vector of a forgotten memory becomes absent even when Vectorize is down at forget time, when the request dies after the D1 commit, and when an in-flight embedding job upserts the old vector after the delete. Search never surfaces a forgotten memory meanwhile, because every vector hit is re-read in D1.
+- **Physical remnants:** Nook leaves no remnant in its keyword index. It cannot erase D1 free pages, Time Travel history, or provider storage; the documentation says so.
+- **Tool description:** it states that forgetting is permanent and deletes all versions, that `expectedVersion` comes from `get`, and that "Memory not found" after a retry means the memory is already gone. It carries no rule about confirming with the owner.
+
+### Caller usage
+
+```jsonc
+// tools/call forget (owner /mcp or machine /api/machine/mcp)
+{ "id": "5f0c…", "expectedVersion": 2 }
+// → structuredContent
+{ "id": "5f0c…", "bucket": "work/acme", "version": 2 }
+```
+
+Owner HTTP, owner-only and outside `/api/machine/*`: `DELETE /api/memories/:id?expectedVersion=2` → 204. It lives in the contract's `memories` group, so owner routes and `knownRoute` derive it.
+
+Outcomes, in classification order:
+
+| Condition | MCP | HTTP | Writes |
+|---|---|---|---|
+| Malformed id (no D1 trip), missing, or unreadable | "Memory not found." | 404 `MemoryNotFound` | No |
+| Readable but not writable (ancestor, `me`) | "Access to this bucket is forbidden." | 403 `Forbidden` | No |
+| `expectedVersion` missing or not a positive integer | "Use a positive integer for expectedVersion." | 400 `InvalidMemory` | No |
+| The guarded delete returned a row | success body | 204 | Yes |
+| The head exists at another version | `MemoryChanged`: "This memory changed: it is now version 3, not 2. Get it again before forgetting." | 409 | No |
+| The head is gone (a concurrent forget won) | "Memory not found." | 404 | No |
+| Unexplained state or D1 failure | "Service unavailable. Try again later." Outcome unknown; a retry answers success or not found | 503 | Unknown |
+
+Authorization precedes version validation, so an invalid version never reveals a memory outside the grant. A 409 means fetch again; clients never resubmit automatically with the newer version. `forget` is annotated `readOnlyHint: false`, `destructiveHint: true`, `idempotentHint: false`.
+
+### Architecture shape
+
+| Owner | Owns for #13 |
+|---|---|
+| `packages/contract/src/memory.ts` | `ForgetMemory` (`id`, `expectedVersion`), `Forgotten` (`id`, `bucket`, `version`); reuses `MemoryChanged`, `MemoryNotFound`, `InvalidMemory`, `validateExpectedVersion` |
+| `packages/contract/src/index.ts` | `DELETE /api/memories/:id` with query `expectedVersion` (string), 204, errors `MemoryNotFound`, `MemoryChanged`, `InvalidMemory` |
+| `apps/worker/src/memory.ts` | `memoryStore.forget(input)` and its classifier; the removal sweep, called from `sync` with its own failure isolation. Still the only SQL that touches memory tables. The store parses the query version, like `historyBoundary` |
+| `apps/worker/src/memory-index.ts` | `remove(ids)` over `deleteByIds`; the binding type adds `deleteByIds` |
+| `apps/worker/src/mcp.ts` | The `forget` tool: schemas (advertised number, validated as unknown like `updateInput`), description, annotations. No policy |
+| `apps/worker/src/index.ts` | The owner handler |
+| `migrations/0011_memory_vector_removals.sql`, `schema.sql` | One additive table |
+| Search stand-ins | `deleteByIds` with recorded calls, failure flag, and propagation through `advance()` |
+
+```sql
+-- A pending removal of a derived vector. Non-content facts only.
+CREATE TABLE memory_vector_removals (
+  id TEXT PRIMARY KEY CHECK (length(id) = 36),
+  forgotten_at TEXT NOT NULL
+);
+CREATE INDEX memory_vector_removals_age ON memory_vector_removals(forgotten_at, id);
+```
+
+The record has no bucket and no foreign key: `deleteByIds` needs neither, a bucket name can itself be personal, and the bucket deletion guard stays unchanged.
+
+`forget` runs:
+
+1. Preflight `bucketFor(id, true)`: malformed id → not found without a trip; missing or `!canRead` → not found; `!canWrite` → forbidden. Then validate `expectedVersion`.
+2. One atomic batch bound to the authorized bucket, with one guard fragment shared by S1 and S2:
+   - **S1** `INSERT INTO memory_vector_removals(id, forgotten_at) SELECT id, :now FROM memories WHERE id=:id AND bucket=:bucket AND current_version=:expected`
+   - **S2** `DELETE FROM memories WHERE id=:id AND bucket=:bucket AND current_version=:expected AND EXISTS (SELECT 1 FROM memory_vector_removals r WHERE r.id=memories.id) RETURNING seq` — a delete without its record is impossible. Versions cascade; `memories_fts_delete` removes the postings.
+   - **S3** `INSERT INTO memories_fts(memories_fts) VALUES('optimize')`
+   - **S4** `SELECT m.current_version FROM (SELECT 1) LEFT JOIN memories m ON m.id=:id AND m.bucket=:bucket`
+3. Classify once: S2 returned a row → success; S4 shows another version → `MemoryChanged`; S4 shows no head → not found; otherwise unavailable.
+
+**Removal sweep** (every scheduled run, before embedding repair, failures isolated so an AI or index outage cannot block either):
+
+1. Select up to 50 records, oldest first, whose memory no longer exists in D1.
+2. `getByIds` on them; `deleteByIds` only the ids still present, in one call (chunk size is a named constant).
+3. Delete the records that were absent and are settled: `scheduledTime ≥ forgotten_at + 30 min`.
+
+**Why 30 minutes:** a late upsert needs an embedding job whose D1 re-read preceded the forget commit; the job then issues the upsert in the same invocation. Embedding runs only in `waitUntil` (at most 30 s after the response) and in the scheduled run (at most 15 minutes of wall time); old Worker versions share these limits. So no upsert of a forgotten id is issued later than about 15 minutes after the forget. The other 15 minutes are a propagation margin, 15–30 times the observed 30–60 s.
+
+### Concurrency and failure behavior
+
+- **Lost response, then retry:** not found. N parallel forgets: one success, N−1 not found, one record.
+- **Forget × update:** update first → the stale forget gets 409. Forget first → update gets not found and schedules no embedding.
+- **Forget × remember of identical content:** remember first returns the existing id with `created: false`, and forget then deletes it. Forget first frees the duplicate slot; remember creates a new id and vector that the old record cannot touch.
+- **Forget × in-flight embedding:** the record persists, so the sweep deletes the late vector and confirms absence after the settle.
+- **Forget × bucket delete:** the bucket delete answers "Delete its memories first." until the memories are forgotten; then it succeeds.
+- **D1 failure mid-batch:** nothing changes (atomic batch); 503.
+- **Vectorize down:** forget is unaffected; the sweep retries every run.
+- **Deploy:** migrations run before `wrangler deploy`. An old Worker ignores the additive table. A new Worker without the table fails S1, so the batch rolls back to 503 with nothing deleted.
+- **Data from before the change:** every existing vector belongs to a live memory, so no backfill is needed.
+
+### Hidden complexity
+
+- **`forget`:** id validation, grants, the shared guard, record-before-delete, cascade, FTS purge, and classification. Callers state an id and a version.
+- **The sweep:** the settle rule, presence-gated deletes, confirmation by observed absence, and bounds. It never assumes upsert/delete ordering.
+- **`memoryIndex.remove`:** the asynchronous mutation. Nothing keys on its acknowledgement.
+- **The MCP adapter:** an advertised number validated as unknown, so the store owns the wording.
+
+### Alternatives and tradeoffs
+
+- **Keep removal records forever, one `deleteByIds` per id, claim fencing, `POST /forget`** (candidate B): rejected. The documented invocation limits bound late writers; repeated deletes are idempotent; the DELETE query already has precedent in Vault.
+- **A 10-minute settle** (candidate A): rejected, below the 15-minute cron wall-time limit.
+- **Queues or a Durable Object alarm:** rejected. Enqueueing cannot be atomic with the D1 commit, and the binding cannot rediscover a lost removal.
+- **An immediate `deleteByIds` in the request or `waitUntil`:** rejected as a second convergence path. The owner HTTP group has no `ctx`, and the sweep is needed anyway.
+- **A tombstone row in `memories`:** rejected as soft deletion.
+- **Re-reading D1 after every upsert:** optional hardening only; the invocation can die before it, so the settle rule is still required.
+- **Accepted costs:** the vector lingers about 5–30 minutes, invisible to search; `optimize` runs on every guarded forget; one new table.
+
+### Synthesis provenance
+
+Base: candidate A (Claude). Grafts from candidate B (GPT): tests for a zero-trip malformed id and for authorization before version validation; documentation that vector absence does not prove provider erasure and that a 409 is never resubmitted automatically. From the cross-judge: the 30-minute settle, one batched delete with a named chunk size, no dead `ON CONFLICT`, the store parsing the query version, and `{id, bucket, version}` as the success body (owner-accepted). Working material: `.work/arena/memory-forget/`.
+
+### Implementation contract
+
+**Preserve:** the contract, outcome order, and wording above; authorization only through `canRead`/`canWrite`; the preflight plus one four-statement batch with S1 before S2 and the shared guard fragment; outcome from `RETURNING` and S4, never `meta.changes`; the record schema with non-content facts only; the sweep's presence-gated delete and the 30-minute settle; no Vectorize call in the request; `schema.sql` updated.
+
+**Free to choose:** helper names and exact SQL text; the tool description wording within the rules above; the sweep's chunk size within 50 and how it orders ties; whether to add the optional post-upsert re-read.
+
+**Validation obligations:**
+
+- MCP driver tests on both protocol shapes and both endpoints: round trip, after which `get` and `history` are not found, `list` and `counts` exclude the memory, no version rows remain, a unique term matches nothing and is absent from `memories_fts_data`, the FTS integrity check passes, and one record exists. Deny outside the grant: sibling, missing, and malformed ids are not found; ancestor and `me` are forbidden; nothing changes. Invalid versions (0, −1, 1.5, "2", missing) give the exact message without writing, and never before authorization. A malformed id costs no D1 trip. Stale → exact 409. Retry → not found. N parallel forgets → one winner. Forget × update both orders; forget then identical remember; bucket delete before and after; mid-batch D1 failure leaves everything intact; a database without 0011 gives 503 with nothing deleted. Tool description and annotations asserted.
+- Owner HTTP: 204, 404, 409 body, 400; machine tokens denied; foreign Origin rejected.
+- Vector: the first run deletes the vector; a run 30 minutes later, after propagation, drops the record; outages (`failIndex`, `failInspection`, delete failure) keep the record; an embedding outage does not block the sweep; a gated late upsert (waitUntil and cron) is deleted and its record cleared only after the settle; a lingering vector never surfaces in search; at most 50 ids per call.
+- D1 call observation: one preflight plus one batch per forget past authorization. Migration replay, drift, and `schema.sql`.
+
+**Re-enter design if:** D1 rejects the batch shape or the `EXISTS` guard; hosted `deleteByIds` rejects 50 ids per call or unknown ids in a way that stalls the sweep; or the deployed index shows propagation beyond the 15-minute margin.
+
+### Open risks
+
+- Vectorize documents no maximum propagation delay, no mutation ordering, and no `getByIds` freshness. The 30-minute rule fails only if propagation exceeds its margin. The owner verifies on the deployed index after merge. `describe()`'s `processedUpToMutation` is a possible future watermark, documented only in the type definitions.
+- Documentation: replace README's "Forgetting is not available yet." with what forgetting guarantees, D1 free pages without `secure_delete`, Time Travel retention (30 days Paid / 7 Free), and that vector absence does not prove provider erasure; add the same next to Vault's note in `docs/deployment.md`.
+- ADR candidate: "Forgetting is version-guarded and its vector removal is confirmed after the longest writer plus a propagation margin", recording what ADR-0013's convergence means for deletion.

@@ -43,6 +43,7 @@ export function localSearchWorker(worker: Worker) {
           invoke('query', values, options),
         upsert: (vectors: unknown) => invoke('upsert', vectors),
         getByIds: (ids: string[]) => invoke('getByIds', ids),
+        deleteByIds: (ids: string[]) => invoke('deleteByIds', ids),
       },
     };
   }

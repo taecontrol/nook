@@ -6,16 +6,20 @@ import {
 } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
+import { ApiError } from './api-client';
 import { useBucketList } from './buckets-api';
 import { useDesktop } from './hooks/use-desktop';
 import {
+  canLoadMemory,
   type MemorySearch,
   memoriesOptions,
   memoryCountsOptions,
   memoryHistoryOptions,
   memoryOptions,
   memorySearchOptions,
+  memoryWriteGate,
 } from './memory-api';
+import { useMemoryForget } from './use-memory-forget';
 
 function countSummary(
   rows: readonly { bucket: string; count: number }[] | undefined,
@@ -33,7 +37,12 @@ function countSummary(
       counts !== null && [...counts.values()].every((count) => count === 0),
   };
 }
-function visibleMemory(detail: Memory | undefined, visible: readonly string[]) {
+function visibleMemory(
+  detail: Memory | undefined,
+  visible: readonly string[],
+  error: Error | null,
+) {
+  if (error instanceof ApiError && error.status === 404) return null;
   return detail && visible.includes(detail.bucket) ? detail : null;
 }
 function visibleBuckets(bucket: string, scope: 'bucket' | 'inherited') {
@@ -47,6 +56,21 @@ function searchSelection(
 ) {
   if (!searching) return newest;
   return placeholder ? undefined : result;
+}
+function forgetOrder(
+  searching: boolean,
+  results: readonly { id: string }[] | undefined,
+  records: readonly { id: string }[],
+) {
+  return (searching ? (results ?? []) : records).map((row) => row.id);
+}
+function idleRead(
+  queries: ReturnType<typeof useQueryClient>,
+  read: () => unknown,
+) {
+  return () => {
+    if (!memoryWriteGate.isWriting(queries)) void read();
+  };
 }
 // Updates derive from the latest location, never from the render that
 // scheduled them, so overlapping navigations cannot erase each other's keys.
@@ -122,7 +146,7 @@ function useHistoryNavigation(
     version: search.version,
     changes: search.changes === '1',
     prefetchHistory: () => {
-      if (search.memory)
+      if (search.memory && !memoryWriteGate.isWriting(queries))
         void queries.prefetchQuery(
           memoryHistoryOptions(
             search.memory,
@@ -152,6 +176,13 @@ function useHistoryNavigation(
 export function useMemoryPage() {
   const search = useSearch({ from: '/owner/memory' });
   const navigate = useNavigate({ from: '/memory' });
+  const queries = useQueryClient();
+  const busy = memoryWriteGate.useBusy();
+  const guarded = <
+    Options extends { staleTime?: unknown; refetchOnWindowFocus?: unknown },
+  >(
+    options: Options,
+  ) => memoryWriteGate.queryOptions(options, busy, queries);
   const desktop = useDesktop();
   const bucket = search.bucket ?? RESERVED_BUCKET;
   const scope = search.scope ?? 'inherited';
@@ -166,7 +197,8 @@ export function useMemoryPage() {
       }),
   );
   const results = useQuery({
-    ...memorySearchOptions(bucket, scope, q),
+    ...guarded(memorySearchOptions(bucket, scope, q)),
+    enabled: () => searching && !busy && !memoryWriteGate.isWriting(queries),
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[1] === bucket &&
       previousQuery?.queryKey[2] === scope
@@ -174,15 +206,17 @@ export function useMemoryPage() {
         : undefined,
   });
   const buckets = useBucketList();
-  const countsQuery = useQuery(memoryCountsOptions);
-  const list = useInfiniteQuery(memoriesOptions(bucket, scope));
+  const countsQuery = useQuery(guarded(memoryCountsOptions));
+  const list = useInfiniteQuery(guarded(memoriesOptions(bucket, scope)));
   const records = list.data?.pages.flatMap((page) => page.memories) ?? [];
+  const detailId = search.memory ?? '';
+  const loadDetail = canLoadMemory(queries, detailId);
   const detail = useQuery({
-    ...memoryOptions(search.memory ?? ''),
-    enabled: Boolean(search.memory),
+    ...guarded(memoryOptions(detailId)),
+    enabled: () => loadDetail && canLoadMemory(queries, detailId),
   });
   const visible = visibleBuckets(bucket, scope);
-  const selected = visibleMemory(detail.data, visible);
+  const selected = visibleMemory(detail.data, visible, detail.error);
   const { counts, total, firstRun } = countSummary(
     countsQuery.data?.counts,
     visible,
@@ -195,6 +229,14 @@ export function useMemoryPage() {
   );
   useAutoSelection(desktop, firstId, search.memory, navigate);
   const history = useHistoryNavigation(search, navigate);
+  const forget = useMemoryForget({
+    order: forgetOrder(searching, results.data?.results, records),
+    desktop,
+    memory: search.memory,
+    bucket,
+    q,
+    scope,
+  });
   return {
     search,
     bucket,
@@ -213,6 +255,17 @@ export function useMemoryPage() {
     selected,
     total,
     firstRun,
+    busy,
+    forget,
+    loadMore: idleRead(queries, () => list.fetchNextPage()),
+    retrySearch: idleRead(queries, () => results.refetch()),
+    retryCounts: idleRead(queries, () => countsQuery.refetch()),
+    retryDetail: idleRead(queries, () => detail.refetch()),
+    retryList: idleRead(queries, () => {
+      void list.refetch();
+      if (countsQuery.isError) void countsQuery.refetch();
+      if (detail.isError) void detail.refetch();
+    }),
     ...history,
     browse: !desktop && !search.bucket,
     detailOpen: !desktop && Boolean(search.memory),

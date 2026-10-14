@@ -11,6 +11,7 @@ export async function vaultCheckpoints(
   options: {
     observeStatements?: boolean;
     observeBatchSize?: boolean;
+    failBatchStatement?: number;
     omitIp?: boolean;
   } = {},
 ) {
