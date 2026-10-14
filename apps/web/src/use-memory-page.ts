@@ -198,7 +198,7 @@ export function useMemoryPage() {
   );
   const results = useQuery({
     ...guarded(memorySearchOptions(bucket, scope, q)),
-    enabled: () => searching && !memoryWriteGate.isWriting(queries),
+    enabled: () => searching && !busy && !memoryWriteGate.isWriting(queries),
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[1] === bucket &&
       previousQuery?.queryKey[2] === scope
@@ -209,9 +209,11 @@ export function useMemoryPage() {
   const countsQuery = useQuery(guarded(memoryCountsOptions));
   const list = useInfiniteQuery(guarded(memoriesOptions(bucket, scope)));
   const records = list.data?.pages.flatMap((page) => page.memories) ?? [];
+  const detailId = search.memory ?? '';
+  const loadDetail = canLoadMemory(queries, detailId);
   const detail = useQuery({
-    ...guarded(memoryOptions(search.memory ?? '')),
-    enabled: () => canLoadMemory(queries, search.memory ?? ''),
+    ...guarded(memoryOptions(detailId)),
+    enabled: () => loadDetail && canLoadMemory(queries, detailId),
   });
   const visible = visibleBuckets(bucket, scope);
   const selected = visibleMemory(detail.data, visible, detail.error);

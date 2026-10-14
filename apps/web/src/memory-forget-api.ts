@@ -35,6 +35,12 @@ const queryKinds = new Set([
   'memory-history',
 ]);
 const memoryQuery = (query: Query) => queryKinds.has(String(query.queryKey[0]));
+function affectedQuery(query: Query, subject: ForgetRequest) {
+  const kind = query.queryKey[0];
+  return kind === 'memory' || kind === 'memory-history'
+    ? query.queryKey[1] === subject.id
+    : memoryQuery(query);
+}
 function removedList(data: Pages, id: string): Pages {
   return {
     ...data,
@@ -135,10 +141,11 @@ export function useForgetMemory() {
     mutationFn: forgetRequest,
     onMutate: async (subject) => {
       await queries.cancelQueries({ predicate: memoryQuery });
-      const snapshot = queries.getQueriesData({ predicate: memoryQuery });
-      for (const query of queries
-        .getQueryCache()
-        .findAll({ predicate: memoryQuery }))
+      const affected = {
+        predicate: (query: Query) => affectedQuery(query, subject),
+      };
+      const snapshot = queries.getQueriesData(affected);
+      for (const query of queries.getQueryCache().findAll(affected))
         removeCached(queries, query, subject);
       return snapshot;
     },

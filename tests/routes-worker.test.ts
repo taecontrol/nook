@@ -31,6 +31,7 @@ const notFound = '{"error":"Not found"}';
 // A new endpoint changes these lists, so its gate and token check get review.
 it('derives the owner gate and the machine token check from the contract', () => {
   expect(listed(ownerRoutes)).toEqual([
+    'DELETE /api/memories/:id',
     'GET /api/memories/:id/versions',
     'GET /api/memories/search',
     'GET /api/memories/counts',
@@ -71,6 +72,8 @@ it('derives the owner gate and the machine token check from the contract', () =>
 });
 
 it.each([
+  ['DELETE', '/api/memories/x', true],
+  ['DELETE', '/api/memories/x/y', false],
   ['DELETE', '/api/buckets/work%2Facme', true],
   ['DELETE', '/api/buckets/work/acme', false],
   ['DELETE', '/api/buckets/', false],

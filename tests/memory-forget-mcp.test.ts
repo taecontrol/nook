@@ -3,6 +3,7 @@ import { Log, LogLevel } from 'miniflare';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { access, accessFixture } from './support/access.ts';
 import { seedGrantTree } from './support/grants.ts';
+import { deferred } from './support/machines.ts';
 import { expectToolError } from './support/mcp.ts';
 import {
   listMemoryPage,
@@ -24,6 +25,7 @@ import {
   versionThree,
 } from './support/memory-forget.ts';
 import { runtime, type TestRuntime } from './support/runtime.ts';
+import { vaultCheckpoints } from './support/vault-checkpoints.ts';
 
 const prefix = '# Release process\n\n';
 const suffix = `\n\nVersion 3: ${uniqueTerm}`;
@@ -31,6 +33,47 @@ const dense =
   prefix +
   '界'.repeat(5400) +
   'x'.repeat(16384 - Buffer.byteLength(prefix + suffix) - 5400 * 3);
+
+it('E6: a losing forget that already passed preflight returns not found', async () => {
+  const arrived = deferred();
+  const gate = deferred();
+  let holding = false;
+  let held = false;
+  const app = await vaultCheckpoints(async (stage) => {
+    if (holding && !held && stage === '/before-batch') {
+      held = true;
+      arrived.resolve();
+      await gate.promise;
+    }
+    return true;
+  });
+  let first: ReturnType<ReturnType<typeof memoryClient>['call']> | undefined;
+  try {
+    await seedMemories(app, [memoryFixture(1)]);
+    await versionThree(app);
+    const client = memoryClient(app, '2026-07-28');
+    holding = true;
+    first = client.call('forget', { id: forgottenId, expectedVersion: 3 });
+    await arrived.promise;
+    const winner = await client.call('forget', {
+      id: forgottenId,
+      expectedVersion: 3,
+    });
+    expect(winner.isError).not.toBe(true);
+    expect(winner.structuredContent).toEqual({
+      id: forgottenId,
+      bucket: 'work/acme',
+      version: 3,
+    });
+    gate.resolve();
+    expectToolError(await first, 'Memory not found.');
+    expect(await removalRows(app)).toHaveLength(1);
+  } finally {
+    gate.resolve();
+    await first;
+    await app.close();
+  }
+});
 
 describe.each(['owner', 'machine'] as const)('Forget #13: %s', (endpoint) => {
   describe.each(['2026-07-28', '2025-06-18'] as const)('%s', (protocol) => {

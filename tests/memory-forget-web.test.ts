@@ -16,6 +16,7 @@ import {
   forgetPage,
   forgottenId,
   openForget,
+  uniqueTerm,
 } from './support/memory-forget.ts';
 
 let browser: Browser;
@@ -268,15 +269,20 @@ describe.each([
     }
   });
 });
-it.each(['list', 'search'] as const)(
-  'E19: %s row forgetting keeps scroll and focus at its neighbor without changing an unrelated pane',
-  async (source) => {
+it.each([
+  { source: 'list', height: 900 },
+  { source: 'search', height: 900 },
+  { source: 'list', height: 300 },
+] as const)(
+  'E19: $source row forgetting at $height px keeps scroll and focus at its neighbor without changing an unrelated pane',
+  async ({ source, height }) => {
     const seeds =
       source === 'list'
         ? [...typicalMemories, ...manyMemories]
         : typicalMemories;
     const visit = await forgetPage(browser, {
       seeds,
+      viewport: { width: 1440, height },
       start: `/memory?bucket=work/acme&memory=${forgottenId}${source === 'search' ? '&q=deploy' : ''}`,
     });
     try {
@@ -337,6 +343,13 @@ it('E19: a search confirmation waits for detail to obtain the displayed version'
   try {
     const { page } = visit;
     await openForget(page, memoryId(2));
+    await expect
+      .poll(() =>
+        forgetDialog(page)
+          .getByRole('button', { name: 'Cancel', exact: true })
+          .evaluate((el) => document.activeElement === el),
+      )
+      .toBe(true);
     expect(
       await forgetDialog(page)
         .getByRole('button', { name: 'Forget memory', exact: true })
@@ -355,6 +368,277 @@ it('E19: a search confirmation waits for detail to obtain the displayed version'
     );
   } finally {
     gate.resolve();
+    await visit.close();
+  }
+});
+it('E20: exact cached detail and history return before held recovery reads', async () => {
+  const recovery = deferred();
+  const visit = await forgetPage(browser);
+  let confirmationRead = true;
+  try {
+    const { page, app } = visit;
+    await page.getByRole('button', { name: /History.*3 versions/ }).click();
+    await page.locator('[data-version-row="1"]').waitFor();
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Close', exact: true })
+      .click();
+    await (await app.mf.getD1Database('DB'))
+      .prepare(
+        "CREATE TRIGGER synthetic_forget_abort BEFORE DELETE ON memories BEGIN SELECT RAISE(ABORT,'synthetic failure'); END",
+      )
+      .run();
+    await page.route(`**/api/memories/${forgottenId}{,/*}`, async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.continue();
+        return;
+      }
+      // Permit the authoritative outcome read; hold later recovery reads.
+      if (
+        confirmationRead &&
+        new URL(route.request().url()).pathname ===
+          `/api/memories/${forgottenId}`
+      ) {
+        confirmationRead = false;
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      await recovery.promise;
+      await route.fulfill({ response }).catch(() => {});
+    });
+    await openForget(page);
+    await confirmForget(page);
+    await page
+      .getByRole('alert')
+      .filter({ hasText: 'Not forgotten' })
+      .waitFor();
+    await detail(page)
+      .getByRole('heading', { name: 'Release process', exact: true })
+      .waitFor();
+    expect(await detail(page).textContent()).toContain(uniqueTerm);
+    await page.getByRole('button', { name: /History.*3 versions/ }).click();
+    await page.locator('[data-version-row="1"]').waitFor();
+    expect(await page.locator('[data-version-row]').count()).toBe(3);
+  } finally {
+    recovery.resolve();
+    await visit.close();
+  }
+});
+it('E18/E24: a first search started while forgetting resumes after settlement', async () => {
+  const gate = deferred();
+  const arrived = deferred();
+  const visit = await forgetPage(browser);
+  let searchReads = 0;
+  try {
+    const { page } = visit;
+    await page.route('**/api/memories/*?expectedVersion=*', async (route) => {
+      arrived.resolve();
+      await gate.promise;
+      await route.continue().catch(() => {});
+    });
+    await openForget(page);
+    await confirmForget(page);
+    await arrived.promise;
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/api/memories/search')
+        searchReads++;
+    });
+    const search = page.getByRole('textbox', { name: /Search memories/ });
+    await search.fill(uniqueTerm);
+    await search.press('Enter');
+    const loading = page.getByRole('status', {
+      name: 'Searching memories',
+      exact: true,
+    });
+    await loading.waitFor();
+    expect(searchReads).toBe(0);
+    expect(await row(page).count()).toBe(0);
+    gate.resolve();
+    await loading.waitFor({ state: 'hidden' });
+    await page.getByText('No memories found', { exact: true }).waitFor();
+    expect(searchReads).toBe(1);
+    expect(await row(page).count()).toBe(0);
+  } finally {
+    gate.resolve();
+    await visit.close();
+  }
+});
+it('E18/E24: a pending Back to forgotten detail reads authoritative absence after settlement', async () => {
+  const gate = deferred();
+  const arrived = deferred();
+  const visit = await forgetPage(browser);
+  try {
+    const { page } = visit;
+    await page.getByRole('button', { name: /History.*3 versions/ }).click();
+    await page.locator('[data-version-row="1"]').click();
+    await page
+      .getByRole('dialog')
+      .getByText('Version 1', { exact: true })
+      .waitFor();
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Close', exact: true })
+      .click();
+    await page.route('**/api/memories/*?expectedVersion=*', async (route) => {
+      arrived.resolve();
+      await gate.promise;
+      await route.continue().catch(() => {});
+    });
+    await openForget(page);
+    await confirmForget(page);
+    await arrived.promise;
+    await page.goBack();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get('memory'))
+      .toBe(forgottenId);
+    const loading = page.getByRole('status', {
+      name: 'Loading memory',
+      exact: true,
+    });
+    await loading.waitFor();
+    expect(await detail(page).count()).toBe(0);
+    const absent = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === `/api/memories/${forgottenId}` &&
+        response.status() === 404,
+    );
+    gate.resolve();
+    await absent;
+    await loading.waitFor({ state: 'hidden' });
+    expect(await detail(page).count()).toBe(0);
+    expect(await page.locator('[data-history-sheet]').count()).toBe(0);
+    expect(await page.locator('[data-version-row]').count()).toBe(0);
+  } finally {
+    gate.resolve();
+    await visit.close();
+  }
+});
+it('E18/E24: a first load in another inheriting bucket resumes only after forgetting settles', async () => {
+  const gate = deferred();
+  const arrived = deferred();
+  const visit = await forgetPage(browser);
+  let childReads = 0;
+  try {
+    const { page } = visit;
+    await page.route('**/api/memories/*?expectedVersion=*', async (route) => {
+      arrived.resolve();
+      await gate.promise;
+      await route.continue().catch(() => {});
+    });
+    await openForget(page);
+    await confirmForget(page);
+    await arrived.promise;
+    page.on('request', (request) => {
+      const url = new URL(request.url());
+      if (
+        url.pathname === '/api/memories' &&
+        url.searchParams.get('bucket') === 'work/acme/api'
+      )
+        childReads++;
+    });
+    await page.locator('[data-path="work/acme/api"]').getByRole('link').click();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get('bucket'))
+      .toBe('work/acme/api');
+    const loading = page.getByRole('status', {
+      name: 'Loading memories',
+      exact: true,
+    });
+    await loading.waitFor();
+    expect(childReads).toBe(0);
+    expect(await row(page).count()).toBe(0);
+    gate.resolve();
+    await loading.waitFor({ state: 'hidden' });
+    await memoryRows(page).first().waitFor();
+    expect(childReads).toBe(1);
+    expect(await row(page).count()).toBe(0);
+  } finally {
+    gate.resolve();
+    await visit.close();
+  }
+});
+it('E18/E20: one failed forget cannot restore a neighbor history that already returned not found', async () => {
+  const gate = deferred();
+  const arrived = deferred();
+  const recovery = deferred();
+  const neighbor = memoryId(2);
+  let recovering = false;
+  const visit = await forgetPage(browser, {
+    start: `/memory?bucket=work/acme&memory=${neighbor}`,
+    configure: async (page, app) => {
+      await (await app.mf.getD1Database('DB'))
+        .prepare(
+          `CREATE TRIGGER synthetic_forget_abort BEFORE DELETE ON memories WHEN OLD.id='${forgottenId}' BEGIN SELECT RAISE(ABORT,'synthetic failure'); END`,
+        )
+        .run();
+      await page.route(
+        `**/api/memories/${forgottenId}?expectedVersion=*`,
+        async (route) => {
+          arrived.resolve();
+          await gate.promise;
+          await route.continue().catch(() => {});
+        },
+      );
+      await page.route(`**/api/memories/${neighbor}{,/*}`, async (route) => {
+        if (!recovering) {
+          await route.continue();
+          return;
+        }
+        const response = await route.fetch();
+        await recovery.promise;
+        await route.fulfill({ response }).catch(() => {});
+      });
+    },
+  });
+  try {
+    const { page, app } = visit;
+    const history = page.locator('[data-history-sheet]');
+    const bodyTitle = history.getByText('Acme API deployment', { exact: true });
+    await page.getByRole('button', { name: /History.*1 version/ }).click();
+    await page.locator('[data-version-row="1"]').click();
+    await bodyTitle.waitFor();
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Close', exact: true })
+      .click();
+    await openForget(page, forgottenId);
+    await confirmForget(page);
+    await arrived.promise;
+    await page.clock.setFixedTime(new Date('2030-01-01T00:00:00Z'));
+    expect(
+      (
+        await memoryClient(app, '2026-07-28').call('forget', {
+          id: neighbor,
+          expectedVersion: 1,
+        })
+      ).isError,
+    ).not.toBe(true);
+    const absent = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname ===
+          `/api/memories/${neighbor}/versions` && response.status() === 404,
+    );
+    await page.goBack();
+    await absent;
+    await history
+      .getByText('Could not load history', { exact: true })
+      .waitFor();
+    expect(await bodyTitle.count()).toBe(0);
+    recovering = true;
+    gate.resolve();
+    await expect.poll(() => row(page).count()).toBe(1);
+    await page
+      .getByRole('alert', { includeHidden: true })
+      .filter({ hasText: 'Not forgotten' })
+      .waitFor();
+    expect(await bodyTitle.count()).toBe(0);
+    await history
+      .getByText('Could not load history', { exact: true })
+      .waitFor();
+  } finally {
+    gate.resolve();
+    recovery.resolve();
     await visit.close();
   }
 });
@@ -501,6 +785,80 @@ it('E20: an unreadable lost-response outcome stays hidden and checks again witho
     await visit.close();
   }
 });
+it.each([3, 4])(
+  'E20: Check again reads a still-live version %s without automatically submitting another DELETE',
+  async (version) => {
+    const visit = await forgetPage(browser);
+    let unavailable = true;
+    let loseDelivery = true;
+    let deletes = 0;
+    try {
+      const { page, app } = visit;
+      await openForget(page);
+      page.on('request', (request) => {
+        if (request.method() === 'DELETE') deletes++;
+      });
+      await page.route('**/api/memories/*?expectedVersion=*', async (route) => {
+        if (loseDelivery) await route.abort();
+        else await route.continue();
+      });
+      await page.route(`**/api/memories/${forgottenId}`, async (route) => {
+        if (unavailable)
+          await route.fulfill({
+            status: 503,
+            contentType: 'application/json',
+            body: '{"_tag":"ServiceUnavailable"}',
+          });
+        else await route.continue();
+      });
+      await confirmForget(page);
+      const unknown = page
+        .getByRole('alert')
+        .filter({ hasText: 'Forget not confirmed' });
+      await unknown.waitFor();
+      expect(await unknown.textContent()).not.toContain('Nothing was deleted');
+      if (version === 4) {
+        const client = memoryClient(app, '2026-07-28');
+        const current = (await client.call('get', { id: forgottenId }))
+          .structuredContent;
+        expect(
+          (
+            await client.call('update', {
+              id: forgottenId,
+              expectedVersion: 3,
+              content: current?.content,
+              tags: ['changed'],
+            })
+          ).isError,
+        ).not.toBe(true);
+      }
+      unavailable = false;
+      await unknown
+        .getByRole('button', { name: 'Check again', exact: true })
+        .click();
+      await row(page).waitFor();
+      expect(deletes).toBe(1);
+      loseDelivery = false;
+      if (version === 3)
+        await page
+          .getByRole('button', { name: 'Try again', exact: true })
+          .click();
+      else {
+        await page.getByRole('button', { name: 'Forget version 4…' }).click();
+        expect(await forgetDialog(page).textContent()).toContain(
+          'You are forgetting version 4',
+        );
+        expect(deletes).toBe(1);
+        await confirmForget(page);
+      }
+      await page.getByText('Forgot Release process', { exact: true }).waitFor();
+      expect(deletes).toBe(2);
+      expect(await row(page).count()).toBe(0);
+    } finally {
+      await visit.close();
+    }
+  },
+);
 it('E19/E24: a pending inherited memory does not enter the bucket-only view', async () => {
   const gate = deferred();
   const visit = await forgetPage(browser, {

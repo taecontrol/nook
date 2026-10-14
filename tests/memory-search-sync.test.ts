@@ -184,6 +184,13 @@ it('E13: migration rebuilds populated current versions and Cron backfills at mos
       expect.objectContaining({ id: manyMemories[i].id, match: 'keyword' }),
     );
   app.services.failEmbedding = false;
+  expect(
+    (
+      await db
+        .prepare('SELECT count(*) AS n FROM memory_vector_removals')
+        .first()
+    )?.n,
+  ).toBe(0);
   app.services.resetCalls();
   await app.scheduled();
   expect(app.services.embeddingCalls).toHaveLength(2);
@@ -196,7 +203,8 @@ it('E13: migration rebuilds populated current versions and Cron backfills at mos
     app.services.embeddingCalls.reduce((n, c) => n + c.text.length, 0),
   ).toBe(50);
   expect(app.services.upserts).toHaveLength(1);
-  expect(app.services.d1Trips).toBe(5);
+  // The empty removal sweep adds one read to the existing five-trip backfill.
+  expect(app.services.d1Trips).toBe(6);
   expect(
     (
       await db

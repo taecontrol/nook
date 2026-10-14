@@ -83,7 +83,11 @@ async function present(
   if (state === 'search') {
     if (phone)
       await page.getByRole('link', { name: 'Results', exact: true }).click();
-    await openForget(page, memoryId(5));
+    const trigger = page.locator(`[data-memory-actions="${memoryId(5)}"]`);
+    await trigger.focus();
+    await trigger.press('Enter');
+    await page.getByRole('menuitem', { name: 'Forget memory…' }).press('Enter');
+    await forgetDialog(page).waitFor();
     await expect
       .poll(() =>
         forgetDialog(page)
@@ -187,10 +191,18 @@ it.each(states.flatMap((state) => sizes.map((size) => ({ state, size }))))(
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth),
       ).toBe(size.width);
-      if (['confirm', 'search', 'inherited'].includes(state))
+      if (['confirm', 'search', 'inherited'].includes(state)) {
         expect(await forgetDialog(page).textContent()).toContain(
           'What is deleted',
         );
+        await expect
+          .poll(() =>
+            forgetDialog(page)
+              .getByRole('button', { name: 'Cancel', exact: true })
+              .evaluate((el) => document.activeElement === el),
+          )
+          .toBe(true);
+      }
       await page.screenshot({
         path: resolve(
           directory,

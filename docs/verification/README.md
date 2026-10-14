@@ -451,10 +451,10 @@ profiles and the unchanged host-resource tripwire.
 
 | Examples | Tests or capture evidence |
 | --- | --- |
-| E1, E3–E6, E9–E12 | `memory-forget-mcp.test.ts`: compact result, cascaded history, lists/counts, keyword MATCH and FTS blob purge/integrity, one non-content removal record, sixteen-KiB multibyte content and ten tags, private grant denials before validation, invalid versions, stale rejection, one concurrent winner, retries, bucket deletion, real aborting triggers, missing migration, discovery and content-free logs. |
+| E1, E3–E6, E9–E12 | `memory-forget-mcp.test.ts`: compact result, cascaded history, lists/counts, keyword MATCH and FTS blob purge/integrity, one non-content removal record, sixteen-KiB multibyte content and ten tags, private grant denials before validation, invalid versions, stale rejection, one concurrent winner, retries, a forced losing batch after successful preflight, bucket deletion, real aborting triggers, missing migration, discovery and content-free logs. |
 | E2, E7–E8, E13–E16 | `memory-forget-search.test.ts` and the MCP suite: lingering vectors and held old keyword searches filtered against final D1 state, both update orders, new identity after identical remember, delayed deletion visibility, thirty-minute confirmation, all index/inspection/delete failures, embedding outage independence, gated late waitUntil/Cron upserts and sixty bounded removals excluding live ids. Missing migration isolates the sweep while embedding repair succeeds. |
-| E10, E17, E24 | `memory-forget-worker.test.ts`: each of the four batch statements fails without changing rows or index bytes, exact owner HTTP outcomes, authenticated foreign-Origin rejection, machine and restricted-grant denial, zero-trip malformed id, one preflight plus one four-statement batch. Search tests observe no index call during forget and the sweep's one/two database trips plus bounded inspection/deletion. |
-| E18–E22, E24 | `memory-forget-web.test.ts`: row and pane menus, one shared versioned dialog, held real DELETE proving optimistic removal/counts/selection, adjacent focus without scrolling, list and search entry points, explicit 503 retry, real concurrent version four with refreshed History, lost successful responses, unavailable confirmation reads, failed conflict refresh without offering a stale version, authoritative 404 eviction, inherited-scope transitions, last-memory empty states, keyboard focus/trap/Escape and the phone detail path. |
+| E10, E17, E24 | `memory-forget-worker.test.ts`: each of the four batch statements fails without changing rows or index bytes, exact owner HTTP outcomes, authenticated foreign-Origin rejection, machine and restricted-grant denial, zero-trip malformed id, one preflight plus one four-statement batch. Search tests observe no index call during either MCP or owner HTTP forget and the sweep's one/two database trips plus bounded inspection/deletion. |
+| E18–E22, E24 | `memory-forget-web.test.ts`: row and pane menus, one shared versioned dialog, held real DELETE proving optimistic removal/counts/selection, adjacent focus without scrolling at 900/300px heights, list and search entry points, explicit 503 retry, exact detail/history rollback with recovery reads held, preservation of a neighbor history's authoritative 404 during another failed forget, first list/search/Back-detail reads resuming after settlement, real concurrent version four with refreshed History, lost successful responses, read-only recovery of still-live heads, unavailable confirmation reads, failed conflict refresh without offering a stale version, authoritative 404 eviction, inherited-scope transitions, last-memory empty states, keyboard focus/trap/Escape and the phone detail path. |
 | E18, E20, E24 cache races | `memory-forget-cache.test.ts`: cached infinite pages, both scopes, search and history, a held old read, browser Back to cached detail/history and real tab refocus during a held write, no guarded background reads, and exact success/rollback visibility. The newly selected neighbor can load while the forgotten id stays blocked. |
 | E18 journey | `tests/journeys/owner.e2e.ts`: real remember/update, history and comparison followed by web forgetting, summary, absent row after reopening and 404 history; deterministic locators, strict cache and zero retries. |
 | E23 | `memory-forget-captures.test.ts`: ten accepted hybrid states at 1440×900 light/dark and 390×844 light, thirty production PNGs. |
@@ -471,6 +471,8 @@ selection and focus, summary and empty states. Captures use genuine counts,
 immutable versions and failures, and omit the prototype's scenario picker.
 The failure copy also names the memory, as E20 requires. Data timestamps and
 synthetic writer snapshots reflect the test fixture rather than the prototype.
+Confirmation captures wait for Cancel's actual autofocus. Search captures use
+keyboard selection of the real row menu so that its focus ring is visible.
 
 The accepted always-present FTS optimize statement can compact shadow blobs
 on a stale no-op. Its test therefore preserves canonical rows and removal
@@ -480,6 +482,13 @@ valid Access identity so it reaches that guard. The many-memory cache fixture
 uses its actual next row (102) and a unique keyword, avoiding the twenty-result
 search cap. These correct test preconditions and oracles without changing the
 accepted outcome.
+
+Existing exact contract inventories include the owner DELETE route, nine
+tools and eleven numbered migrations. The web error-message allowlist now
+includes the contract's non-content MemoryChanged message. The existing
+five-trip fifty-memory Cron backfill now includes one additional empty
+removal-sweep read; its maintained assertion requires exactly six trips and
+first proves that the removal table is empty.
 
 Hosted deleteByIds call limits, unknown-id behavior and propagation remain the
 owner's [post-deployment acceptance](../deployment.md#forget-owner-acceptance-after-deployment-pending).
@@ -493,3 +502,21 @@ rollback snapshots after settlement. A failed conflict refresh offers Refresh
 memory until a new version is actually read. Captures also retain the summary
 count, put alerts at the top of the pane, use a nonselected long search result,
 and preserve inherited memories in the bucket-only last-memory scenario.
+
+The second review reproduced a failed forget restoring a neighbor's history
+after that history had already returned 404. Rollback now owns only the
+subject's detail/history snapshots, preserving newer neighbor state. Mutations
+also exposed first reads staying disabled after settlement: callbacks retain
+their rendered disabled state as well as checking the live mutation cache, so
+list, search and Back-detail observers see the enable transition. These four
+production regressions have failing-before-fix and passing-after-fix keepers.
+
+Mutation proof used disposable compiled runtimes in this worktree and the
+normal host-isolated test harness. Seventy-two historical executions include
+sixty-three killed mutations and nine original/final green results; narrower
+maintained keepers now kill the original concurrency, detail/history rollback
+and first-load gate evidence gaps. Two independent UI-discrimination limits
+remain explicit: retaining only history is hidden by the evicted detail, and
+default focus preserves scroll in the tested tall and short windows. Production
+still evicts history and uses preventScroll; source review confirms both,
+without claiming that those individual lines have independent browser proof.

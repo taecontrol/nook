@@ -34,6 +34,20 @@ async function forgotten() {
   return Date.parse(row.forgotten_at);
 }
 const sweep = (time: number) => app.scheduled(new Date(time));
+it('E24: owner HTTP forget makes no native vector request', async () => {
+  await indexMemories(app, [memoryFixture(20, { content: spanishRelease })]);
+  const result = await fetch(
+    `${app.origin}/api/memories/${id}?expectedVersion=1`,
+    { method: 'DELETE' },
+  );
+  expect(result.status).toBe(204);
+  expect(app.services.d1Trips).toBe(2);
+  expect(app.services.embeddingCalls).toEqual([]);
+  expect(app.services.queries).toEqual([]);
+  expect(app.services.upserts).toEqual([]);
+  expect(app.services.inspections).toEqual([]);
+  expect(app.services.deletions).toEqual([]);
+});
 it.each(['HTTP', 'MCP'] as const)(
   'E2/E12: a %s keyword search held by meaning lookup cannot return a memory forgotten meanwhile',
   async (endpoint) => {
