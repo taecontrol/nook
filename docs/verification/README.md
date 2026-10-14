@@ -350,7 +350,7 @@ Issue #11 uses the production Worker bundle, migrated D1, and its genuine schedu
 | E11–E16 | `memory-search-sync.test.ts`: immediate keyword visibility, controlled delayed vectors, failed post-write repair, previous-schema backfill, 50-row Cron budget, model changes, stale/orphan filtering, guarded late writes, and duplicate/concurrent remembers. Every migrated fixture is found by keyword and meaning. |
 | E17–E19 | `memory-search-web.test.ts`: exact 250 ms debounce and immediate Enter, URL reload/Back/bucket/scope retention, keyboard movement, reader preservation, highlights/badges, twenty-result cap, genuine loading/error/retry, incomplete/empty/fresh states, and stable column positions at both widths. Phone content flows vertically; desktop column sizes and each fixed header stay unchanged. |
 | E20 | The idle browser case observes the real HTTP boundary and requires zero search, embedding and vector requests. `load-time.test.ts` and `verify:load-time` retain the 1000 ms cold-open and 100 ms intent-navigation budgets; `memory-load-time.test.ts` proves the production measurement conditions. |
-| E21 | `memory-search-captures.test.ts`: eleven states × two sizes × two themes, 44 genuine-product PNGs. |
+| E21 | `memory-search-reference-captures.test.ts`: eleven states × two sizes × two themes, 44 genuine-product PNGs. |
 | E22 | `tests/journeys/owner.e2e.ts`: deterministic strict-cache search and opening of the Spanish ancestor memory. |
 | E23 | `memory-search-deploy.test.ts`: the workflow's actual shell against a temporary command fixture, missing index/metadata combinations, idempotent reruns, delayed metadata readiness and timeout without deployment. |
 | E24 | Pending owner production acceptance in [deployment.md](../deployment.md#search-e24-owner-acceptance-after-merge-pending). |
@@ -457,7 +457,7 @@ profiles and the unchanged host-resource tripwire.
 | E18–E22, E24 | `memory-forget-web.test.ts`: row and pane menus, one shared versioned dialog, held real DELETE proving optimistic removal/counts/selection, adjacent focus without scrolling at 900/300px heights, list and search entry points, explicit 503 retry, exact detail/history rollback with recovery reads held, preservation of a neighbor history's authoritative 404 during another failed forget, first list/search/Back-detail reads resuming after settlement, real concurrent version four with refreshed History, lost successful responses, read-only recovery of still-live heads, unavailable confirmation reads, failed conflict refresh without offering a stale version, authoritative 404 eviction, inherited-scope transitions, last-memory empty states, keyboard focus/trap/Escape and the phone detail path. |
 | E18, E20, E24 cache races | `memory-forget-cache.test.ts`: cached infinite pages, both scopes, search and history, a held old read, browser Back to cached detail/history and real tab refocus during a held write, no guarded background reads, and exact success/rollback visibility. The newly selected neighbor can load while the forgotten id stays blocked. |
 | E18 journey | `tests/journeys/owner.e2e.ts`: real remember/update, history and comparison followed by web forgetting, summary, absent row after reopening and 404 history; deterministic locators, strict cache and zero retries. |
-| E23 | `memory-forget-captures.test.ts`: ten accepted hybrid states at 1440×900 light/dark and 390×844 light, thirty production PNGs. |
+| E23 | `memory-forget-visual-captures.test.ts`: ten accepted hybrid states at 1440×900 light/dark and 390×844 light, thirty production PNGs. |
 | E24 load budgets | Unchanged `memory-load-time.test.ts`, `load-time.test.ts` and `pnpm verify:load-time` enforce five-sample 4G cold-open (1000 ms) and intent-navigation (100 ms) budgets. |
 | E25 | README, `docs/deployment.md` beside Vault's retention note, and ADR-0015 document permanent/version-guarded forgetting, the thirty-minute settle, D1 free pages without secure_delete, Paid/Free Time Travel retention and the limits of provider erasure. |
 
@@ -489,6 +489,13 @@ includes the contract's non-content MemoryChanged message. The existing
 five-trip fifty-memory Cron backfill now includes one additional empty
 removal-sweep read; its maintained assertion requires exactly six trips and
 first proves that the removal table is empty.
+
+The first PR CI run (38614694459) reached the unchanged fifteen-minute job
+limit in Linux shard 2 while browser suites were still making progress; no
+assertion failed. Vitest's native filename-hash partition had placed both
+capture suites in that shard. The descriptive visual/reference filenames
+redistribute them using the existing sequencer. All cases, assertions, four
+Linux shards, coverage requirements and timeouts remain unchanged.
 
 Hosted deleteByIds call limits, unknown-id behavior and propagation remain the
 owner's [post-deployment acceptance](../deployment.md#forget-owner-acceptance-after-deployment-pending).
