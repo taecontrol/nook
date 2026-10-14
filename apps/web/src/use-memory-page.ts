@@ -1,5 +1,9 @@
 import { type Memory, RESERVED_BUCKET, readLineage } from '@nook/contract';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { useBucketList } from './buckets-api';
@@ -8,6 +12,7 @@ import {
   type MemorySearch,
   memoriesOptions,
   memoryCountsOptions,
+  memoryHistoryOptions,
   memoryOptions,
   memorySearchOptions,
 } from './memory-api';
@@ -101,6 +106,49 @@ function useQueryDraft(q: string, navigate: (q: string | undefined) => void) {
     },
   };
 }
+function useHistoryNavigation(
+  search: MemorySearch,
+  navigate: ReturnType<typeof useNavigate>,
+) {
+  const queries = useQueryClient();
+  const historyNavigate = (patch: Partial<MemorySearch>, replace = false) =>
+    void navigate({
+      to: '/memory',
+      search: (previous: MemorySearch) => ({ ...located(previous), ...patch }),
+      replace,
+    });
+  return {
+    historyOpen: search.history === '1' || search.version !== undefined,
+    version: search.version,
+    changes: search.changes === '1',
+    prefetchHistory: () => {
+      if (search.memory)
+        void queries.prefetchQuery(
+          memoryHistoryOptions(
+            search.memory,
+            queries.getQueryData(memoryOptions(search.memory).queryKey)
+              ?.version,
+          ),
+        );
+    },
+    openHistory: () => historyNavigate({ history: '1' }),
+    closeHistory: () =>
+      historyNavigate({
+        history: undefined,
+        version: undefined,
+        changes: undefined,
+      }),
+    showAllVersions: () =>
+      historyNavigate({ history: '1', version: undefined }),
+    selectVersion: (version: number) =>
+      historyNavigate({ history: '1', version }),
+    toggleChanges: () =>
+      historyNavigate(
+        { changes: search.changes === '1' ? undefined : '1' },
+        true,
+      ),
+  };
+}
 export function useMemoryPage() {
   const search = useSearch({ from: '/owner/memory' });
   const navigate = useNavigate({ from: '/memory' });
@@ -146,6 +194,7 @@ export function useMemoryPage() {
     records[0]?.id,
   );
   useAutoSelection(desktop, firstId, search.memory, navigate);
+  const history = useHistoryNavigation(search, navigate);
   return {
     search,
     bucket,
@@ -164,6 +213,7 @@ export function useMemoryPage() {
     selected,
     total,
     firstRun,
+    ...history,
     browse: !desktop && !search.bucket,
     detailOpen: !desktop && Boolean(search.memory),
     changeScope: (next: 'bucket' | 'inherited') =>

@@ -65,6 +65,8 @@ export class SearchStandIns {
   }[] = [];
   queries: Query[] = [];
   upserts: LocalVector[][] = [];
+  inspections: string[][] = [];
+  failInspection = false;
   d1Trips = 0;
   missing = new Set<string>();
   indexes = new Set(['bucket']);
@@ -80,6 +82,7 @@ export class SearchStandIns {
     this.embeddingCalls = [];
     this.queries = [];
     this.upserts = [];
+    this.inspections = [];
     this.d1Trips = 0;
   }
   clear() {
@@ -119,6 +122,16 @@ export class SearchStandIns {
   }
   insert(vectors: LocalVector[]) {
     return this.upsert(vectors.filter((v) => !this.written.has(v.id)));
+  }
+  getByIds(ids: string[]) {
+    this.inspections.push(ids);
+    if (this.failInspection) throw new Error('Synthetic inspection failure.');
+    return ids.flatMap((id) => {
+      const vector = this.visible.get(id);
+      return vector
+        ? [{ id: vector.id, values: vector.values, metadata: vector.metadata }]
+        : [];
+    });
   }
   query(values: number[], options: Query) {
     this.queries.push(options);
@@ -162,6 +175,8 @@ export class SearchStandIns {
         return Response.json(this.query(args[0] as number[], args[1] as Query));
       if (path === '/upsert')
         return Response.json(this.upsert(args[0] as LocalVector[]));
+      if (path === '/getByIds')
+        return Response.json(this.getByIds(args[0] as string[]));
       return new Response('Unknown fixture call.', { status: 404 });
     } catch {
       return new Response('Synthetic search service failure.', { status: 503 });

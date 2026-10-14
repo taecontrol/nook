@@ -81,10 +81,11 @@ describe.each(['owner', 'machine'] as const)(
         async ({ seeds, size, top }) => {
           await seedMemories(app, seeds);
           expect((await memoryCounts(app)).memories).toBe(size);
-          for (let offset = 0; offset < seeds.length; offset += 50)
-            await app.scheduled();
+          for (let offset = 0; offset < seeds.length; offset += 50) {
+            await app.scheduled(new Date('2030-01-01T00:00:00Z'));
+            app.services.advance();
+          }
           expect(app.services.upserts.flat()).toHaveLength(size);
-          app.services.advance();
           app.services.resetCalls();
           const result = results(await search('how do we deploy'));
           expect(result.results.slice(0, top)).toContainEqual(

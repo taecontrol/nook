@@ -64,7 +64,7 @@ it('E11/E16: keyword is immediate, vectors stay hidden until visible, and an ide
     .toBe(`@cf/baai/bge-m3:${hash(spanishRelease)}`);
   expect(app.services.embeddingCalls).toHaveLength(1);
   expect(app.services.upserts).toHaveLength(1);
-  expect(app.services.d1Trips).toBe(2);
+  expect(app.services.d1Trips).toBe(3);
   expect(
     (await httpSearch(app, 'publicar')).results.map((m) => m.id),
   ).toContain(id);
@@ -196,7 +196,7 @@ it('E13: migration rebuilds populated current versions and Cron backfills at mos
     app.services.embeddingCalls.reduce((n, c) => n + c.text.length, 0),
   ).toBe(50);
   expect(app.services.upserts).toHaveLength(1);
-  expect(app.services.d1Trips).toBe(2);
+  expect(app.services.d1Trips).toBe(5);
   expect(
     (
       await db
@@ -206,6 +206,7 @@ it('E13: migration rebuilds populated current versions and Cron backfills at mos
         .first()
     )?.n,
   ).toBe(50);
+  app.services.advance();
   app.services.resetCalls();
   await app.scheduled();
   expect(
@@ -320,6 +321,7 @@ it('the embedding marker cannot mark a newer version current after a late old-co
   await seedMemories(app, [searchMemories[0]]);
   const arrived = deferred();
   const gate = deferred();
+  let currentUnavailable = true;
   await app.setBindings(
     {
       LOCAL_OWNER: 'synthetic-owner',
@@ -329,6 +331,14 @@ it('the embedding marker cannot mark a newer version current after a late old-co
     {
       outboundService: async (request) => {
         if (new URL(request.url).pathname === '/run') {
+          const [, input] = (await request.clone().json()) as [
+            string,
+            { text: string[] },
+          ];
+          if (input.text[0] === searchMemories[3].content && currentUnavailable)
+            return new Response('Synthetic current embedding failure', {
+              status: 503,
+            });
           arrived.resolve();
           await gate.promise;
         }
@@ -341,18 +351,15 @@ it('the embedding marker cannot mark a newer version current after a late old-co
     await arrived.promise;
     const db = await app.mf.getD1Database('DB');
     const content = searchMemories[3].content;
-    await db.batch([
-      db
-        .prepare(
-          'INSERT INTO memory_versions SELECT memory_id, 2, ?, tags, client_name, client_version, principal, machine_id, machine_name, working_directory, created_at FROM memory_versions WHERE memory_id=? AND version=1',
-        )
-        .bind(content, memoryId(20)),
-      db
-        .prepare(
-          'UPDATE memories SET current_version=2, content_hash=? WHERE id=?',
-        )
-        .bind(hash(content), memoryId(20)),
-    ]);
+    expect(
+      (
+        await memoryClient(app, '2026-07-28').call('update', {
+          id: memoryId(20),
+          expectedVersion: 1,
+          content,
+        })
+      ).structuredContent,
+    ).toMatchObject({ updated: true, version: 2 });
     gate.resolve();
     await pending;
     expect((await marker(memoryId(20))).embedding_marker).toBeNull();
@@ -361,6 +368,7 @@ it('the embedding marker cannot mark a newer version current after a late old-co
     expect((await httpSearch(app, 'pnpm verify')).results).toContainEqual(
       expect.objectContaining({ id: memoryId(20), match: 'keyword' }),
     );
+    currentUnavailable = false;
     await app.scheduled();
     app.services.advance();
     expect((await marker(memoryId(20))).embedding_marker).toBe(

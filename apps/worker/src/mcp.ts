@@ -14,6 +14,8 @@ import {
   Remembered,
   SearchMemories,
   Secret,
+  Updated,
+  UpdateMemory,
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
 import { bucketOperations } from './buckets.ts';
@@ -42,10 +44,31 @@ type VaultError = Effect.Error<ReturnType<VaultStore['list']>>;
 type MemoryStore = Effect.Success<ReturnType<typeof memoryStore>>;
 type MemoryError = Effect.Error<
   ReturnType<
-    MemoryStore['remember'] | MemoryStore['get'] | MemoryStore['search']
+    | MemoryStore['remember']
+    | MemoryStore['update']
+    | MemoryStore['get']
+    | MemoryStore['search']
   >
 >;
 const unavailableMessage = 'Service unavailable. Try again later.';
+// Discovery advertises a number. The store owns invalid-version wording,
+// including wrong primitive types, rather than exposing an SDK parse error.
+function updateInput() {
+  const advertised = standard(UpdateMemory);
+  const boundary = standard(
+    UpdateMemory.mapFields((fields) => ({
+      ...fields,
+      expectedVersion: Schema.Unknown,
+    })),
+  );
+  return {
+    ...advertised,
+    '~standard': {
+      ...advertised['~standard'],
+      validate: boundary['~standard'].validate,
+    },
+  };
+}
 function errorResult(message: string) {
   return { isError: true, content: [{ type: 'text' as const, text: message }] };
 }
@@ -154,6 +177,32 @@ export function mcpHandler(
           memoryStore(grant, options.index, options.waitUntil).pipe(
             Effect.flatMap((store) =>
               store.remember(
+                principal,
+                clientFrom(ctx.mcpReq.envelope, userAgent),
+                input,
+              ),
+            ),
+          ),
+        ),
+    );
+    server.registerTool(
+      'update',
+      {
+        description:
+          'Replace a memory by creating an immutable version. Pass the version from get as expectedVersion. Omitted tags are kept; [] clears them. Optionally report an absolute workingDirectory. A duplicate names the other memory in this bucket. Retrying identical input after a failure or lost response is safe and returns updated: false when content and resulting tags already match. It can answer changed after another writer intervenes; get again before choosing a new update.',
+        inputSchema: updateInput(),
+        outputSchema: standard(Updated),
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: true,
+        },
+      },
+      (input, ctx) =>
+        execute(
+          memoryStore(grant, options.index, options.waitUntil).pipe(
+            Effect.flatMap((store) =>
+              store.update(
                 principal,
                 clientFrom(ctx.mcpReq.envelope, userAgent),
                 input,

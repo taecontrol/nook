@@ -23,6 +23,8 @@ import {
   InvalidMemorySearch,
   Memory,
   MemoryCounts,
+  MemoryHistory,
+  MemoryHistoryQuery,
   MemoryNotFound,
   MemoryPage,
   MemoryQuery,
@@ -62,6 +64,14 @@ const errors = [
 export const Api = HttpApi.make('nook')
   .add(
     HttpApiGroup.make('memories')
+      .add(
+        HttpApiEndpoint.get('history', '/api/memories/:id/versions', {
+          params: Schema.Struct({ id: Schema.String }),
+          query: MemoryHistoryQuery,
+          success: MemoryHistory,
+          error: [...errors, MemoryNotFound, InvalidMemoryCursor],
+        }),
+      )
       .add(
         HttpApiEndpoint.get('search', '/api/memories/search', {
           query: MemorySearchQuery,

@@ -74,6 +74,42 @@ export const Remembered = Schema.Struct({
   createdAt: Schema.String,
 });
 export type Remembered = typeof Remembered.Type;
+export const UpdateMemory = Schema.Struct({
+  id: Schema.String,
+  expectedVersion: Schema.Number,
+  content: Schema.String,
+  tags: Schema.optionalKey(Schema.Array(Schema.String)),
+  workingDirectory: Schema.optionalKey(Schema.String),
+});
+export type UpdateMemory = typeof UpdateMemory.Type;
+export function validateExpectedVersion(version: unknown): string | undefined {
+  if (
+    typeof version !== 'number' ||
+    !Number.isSafeInteger(version) ||
+    version < 1
+  )
+    return 'Use a positive integer for expectedVersion.';
+}
+export const Updated = Remembered.mapFields(({ created: _, ...fields }) => ({
+  ...fields,
+  updated: Schema.Boolean,
+  updatedAt: Schema.String,
+}));
+export type Updated = typeof Updated.Type;
+export const MemoryVersion = Schema.Struct({
+  version: Schema.Number,
+  content: Schema.String,
+  tags: Schema.Array(Schema.String),
+  provenance: Provenance,
+});
+export type MemoryVersion = typeof MemoryVersion.Type;
+export const MemoryHistory = Schema.Struct({
+  versions: Schema.Array(MemoryVersion),
+  next: Schema.NullOr(Schema.Number),
+});
+export const MemoryHistoryQuery = Schema.Struct({
+  before: Schema.optionalKey(Schema.String),
+});
 export const Memory = Schema.Struct({
   id: MemoryId,
   bucket: Schema.String,
@@ -179,3 +215,15 @@ export class BucketHasMemories extends Schema.Error<BucketHasMemories>(
 export class InvalidMemoryCursor extends Schema.Error<InvalidMemoryCursor>(
   'nook/InvalidMemoryCursor',
 )({ _tag: Schema.tag('InvalidMemoryCursor') }, { httpApiStatus: 400 }) {}
+export class MemoryChanged extends Schema.Error<MemoryChanged>(
+  'nook/MemoryChanged',
+)(
+  { _tag: Schema.tag('MemoryChanged'), message: Schema.String },
+  { httpApiStatus: 409 },
+) {}
+export class DuplicateMemory extends Schema.Error<DuplicateMemory>(
+  'nook/DuplicateMemory',
+)(
+  { _tag: Schema.tag('DuplicateMemory'), message: Schema.String },
+  { httpApiStatus: 409 },
+) {}
