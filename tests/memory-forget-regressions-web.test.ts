@@ -1,6 +1,7 @@
 import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
+import { access, accessFixture } from './support/access.ts';
 import { deferred } from './support/machines.ts';
 import {
   manyMemories,
@@ -243,3 +244,51 @@ it('E18/E24: forgetting the last loaded row keeps Load more usable during recove
     await visit.close();
   }
 });
+
+it.each([
+  { status: 401, expected: 'Your owner session expired' },
+  { status: 403, expected: 'Only this installation’s owner can' },
+])(
+  'E20: a genuine $status forget rejection preserves its recovery reason',
+  async ({ status, expected }) => {
+    const visit = await forgetPage(browser);
+    try {
+      const { page, app } = visit;
+      await detail(page).waitFor();
+      await openForget(page);
+      if (status === 401) {
+        await app.setBindings({ LOCAL_ORIGIN: app.origin });
+      } else {
+        // Authenticate a genuine synthetic Access identity that is not the owner.
+        const issuer = await accessFixture();
+        await app.setBindings(access, {
+          outboundService: issuer.outboundService,
+        });
+        await page.setExtraHTTPHeaders({
+          'Cf-Access-Jwt-Assertion': await issuer.assertion({
+            email: 'another-owner@nook.test',
+          }),
+        });
+      }
+      const rejected = page.waitForResponse(
+        (response) => response.request().method() === 'DELETE',
+      );
+      await confirmForget(page);
+      const response = await rejected;
+      expect(response.status()).toBe(status);
+      expect(await response.json()).toMatchObject({
+        _tag: status === 401 ? 'Unauthorized' : 'Forbidden',
+      });
+      const alert = page
+        .getByRole('alert')
+        .filter({ hasText: 'Not forgotten' });
+      await alert.waitFor();
+      const copy = await alert.innerText();
+      console.info('forget-auth-rejection', { status, copy });
+      expect(copy).toContain(expected);
+      expect(copy).not.toContain('(503)');
+    } finally {
+      await visit.close();
+    }
+  },
+);
