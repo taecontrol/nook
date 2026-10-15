@@ -34,6 +34,7 @@ import {
 import { Item, ItemContent, ItemMedia, ItemTitle } from '@/components/ui/item';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
+import { describeFailure } from './api-client';
 import { memoryOptions, memoryWriteGate } from './memory-api';
 import type { ForgetSubject } from './memory-forget-api';
 import { principalName } from './memory-format';
@@ -314,7 +315,11 @@ function problemCopy(
   current: MemoryPageModel['forget']['current'],
 ) {
   if (entry.status === 'failed')
-    return `${entry.subject.title} was not forgotten. Nook was unavailable (503). Nothing was deleted.`;
+    return `${entry.subject.title} was not forgotten. ${describeFailure(
+      entry.error,
+      'forget memories',
+      'Nothing was deleted.',
+    )}`;
   return `${current ? principalName(current) : 'Another writer'} saved version ${current?.version ?? 'a newer version'} while you were deciding, not ${entry.subject.version}. Nothing was deleted.`;
 }
 function ProblemAction({

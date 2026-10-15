@@ -34,6 +34,7 @@ function focusSoon(find: () => HTMLElement | null) {
 type ForgetEntry = {
   subject: ForgetRequest;
   status: 'pending' | 'failed' | 'changed' | 'unconfirmed';
+  error?: unknown;
   neighbor?: string;
   before?: string;
   viewBucket: string;
@@ -137,6 +138,7 @@ export function useMemoryForget({
       setEntry({
         subject,
         status: failureStatus(error),
+        error,
         neighbor,
         viewBucket: bucket,
         query: q,
