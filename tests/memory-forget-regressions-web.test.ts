@@ -2,7 +2,13 @@ import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { deferred } from './support/machines.ts';
-import { memoryFixture, memoryId, memoryRows } from './support/memory.ts';
+import {
+  manyMemories,
+  memoryFixture,
+  memoryId,
+  memoryRows,
+  typicalMemories,
+} from './support/memory.ts';
 import {
   confirmForget,
   forgetPage,
@@ -173,6 +179,67 @@ it('E18/E20: an older Check again response preserves a second memory forget prog
   } finally {
     checkGate.resolve();
     deleteGate.resolve();
+    await visit.close();
+  }
+});
+
+it('E18/E24: forgetting the last loaded row keeps Load more usable during recovery', async () => {
+  const recoveryGate = deferred();
+  const recoveryArrived = deferred();
+  const visit = await forgetPage(browser, {
+    seeds: [...typicalMemories, ...manyMemories],
+  });
+  try {
+    const { page } = visit;
+    await expect.poll(() => memoryRows(page).count()).toBe(25);
+    const boundary = await memoryRows(page)
+      .nth(24)
+      .getAttribute('data-memory-row');
+    expect(boundary).not.toBeNull();
+    await page.route('**/api/memories?*', async (route) => {
+      if (new URL(route.request().url()).searchParams.has('cursor')) {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      expect(response.status()).toBe(200);
+      recoveryArrived.resolve();
+      await recoveryGate.promise;
+      await route.fulfill({ response }).catch(() => {});
+    });
+    await openForget(page, boundary ?? '');
+    await confirmForget(page);
+    await page.getByText(/^Forgot /).waitFor();
+    await recoveryArrived.promise;
+    const more = page.getByRole('button', { name: 'Load more', exact: true });
+    // Waiting for cursor recovery is also a valid way to protect pagination.
+    if (await more.isDisabled()) recoveryGate.resolve();
+    const next = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === '/api/memories' && url.searchParams.has('cursor');
+    });
+    await more.click();
+    const response = await next;
+    const body = await response.json();
+    await rendered(page);
+    const error = page.getByText('Could not load memories', { exact: true });
+    console.info('forgotten-page-boundary', {
+      boundary,
+      status: response.status(),
+      error: body._tag,
+      visibleRows: await memoryRows(page).count(),
+      failures: await error.allTextContents(),
+    });
+    expect(await error.count()).toBe(0);
+    recoveryGate.resolve();
+    await expect
+      .poll(() => memoryRows(page).count())
+      .toBeGreaterThanOrEqual(49);
+    expect(await page.locator(`[data-memory-row="${boundary}"]`).count()).toBe(
+      0,
+    );
+  } finally {
+    recoveryGate.resolve();
     await visit.close();
   }
 });
