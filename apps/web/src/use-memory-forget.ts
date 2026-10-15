@@ -82,6 +82,7 @@ export function useMemoryForget({
   const [target, setTarget] = useState<ForgetSubject | null>(null);
   const shown = useLastValue(target);
   const [entry, setEntry] = useState<ForgetEntry | null>(null);
+  const operation = useRef(0);
   const [checking, setChecking] = useState(false);
   const [notice, setNotice] = useState<{
     title: string;
@@ -109,6 +110,7 @@ export function useMemoryForget({
   };
   const run = async (subject: ForgetRequest) => {
     if (memoryWriteGate.isWriting(queries)) return;
+    operation.current++;
     const neighbor = adjacent(order, subject.id);
     const wasOpen = memory === subject.id;
     const focusTarget = () =>
@@ -168,9 +170,11 @@ export function useMemoryForget({
     },
     check: async () => {
       if (!entry || checking) return;
+      const checkedOperation = operation.current;
       setChecking(true);
       try {
         const current = await readForgetOutcome(entry.subject.id);
+        if (operation.current !== checkedOperation) return;
         if (current) {
           queries.setQueryData(memoryOptions(current.id).queryKey, current);
           setEntry({
@@ -211,6 +215,7 @@ export function useMemoryForget({
       }
     },
     keep: () => {
+      operation.current++;
       const id = entry?.subject.id;
       setEntry(null);
       if (id) focusSoon(() => shownElement(memoryRowSelector(id)));
