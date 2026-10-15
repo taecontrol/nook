@@ -2,7 +2,7 @@ import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { deferred } from './support/machines.ts';
-import { memoryFixture, memoryRows } from './support/memory.ts';
+import { memoryFixture, memoryId, memoryRows } from './support/memory.ts';
 import {
   confirmForget,
   forgetPage,
@@ -103,3 +103,76 @@ it.each([false, true])(
     }
   },
 );
+
+it('E18/E20: an older Check again response preserves a second memory forget progress', async () => {
+  const checkGate = deferred();
+  const checkArrived = deferred();
+  const deleteGate = deferred();
+  const deleteArrived = deferred();
+  const visit = await forgetPage(browser);
+  let reads = 0;
+  try {
+    const { page } = visit;
+    await detail(page).waitFor();
+    await openForget(page);
+    await page.route('**/api/memories/*?expectedVersion=*', async (route) => {
+      if (new URL(route.request().url()).pathname.endsWith(forgottenId)) {
+        const response = await route.fetch();
+        expect(response.status()).toBe(204);
+        await route.abort();
+      } else {
+        deleteArrived.resolve();
+        await deleteGate.promise;
+        await route.continue().catch(() => {});
+      }
+    });
+    await page.route(`**/api/memories/${forgottenId}`, async (route) => {
+      const response = await route.fetch();
+      expect(response.status()).toBe(404);
+      if (++reads === 1) {
+        // Lose the authoritative outcome read after the real DELETE committed.
+        await route.abort();
+        return;
+      }
+      checkArrived.resolve();
+      await checkGate.promise;
+      await route.fulfill({ response }).catch(() => {});
+    });
+    await confirmForget(page);
+    const unconfirmed = page
+      .getByRole('alert')
+      .filter({ hasText: 'Forget not confirmed' });
+    await unconfirmed.waitFor();
+    await unconfirmed.getByRole('button', { name: 'Check again' }).click();
+    await checkArrived.promise;
+    await openForget(page, memoryId(2));
+    await confirmForget(page);
+    await deleteArrived.promise;
+    const progress = page.getByText('Forgetting Acme API deployment…', {
+      exact: true,
+    });
+    await progress.waitFor();
+    const checked = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === `/api/memories/${forgottenId}`,
+    );
+    checkGate.resolve();
+    await (await checked).finished();
+    // Let the delivered read and its React update finish while DELETE B is held.
+    await rendered(page);
+    console.info('check-again-during-forget', {
+      reads,
+      progress: await progress.count(),
+      statuses: await page.getByRole('status').allTextContents(),
+    });
+    expect(await progress.count()).toBe(1);
+    deleteGate.resolve();
+    await page
+      .getByText('Forgot Acme API deployment', { exact: true })
+      .waitFor();
+  } finally {
+    checkGate.resolve();
+    deleteGate.resolve();
+    await visit.close();
+  }
+});
