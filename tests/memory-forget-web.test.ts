@@ -91,7 +91,7 @@ describe.each([
       await visit.close();
     }
   });
-  it('E20: 503 restores the row and counts; explicit Try again is the only new request', async () => {
+  it('E20: 503 restores the row and counts; repeated Try again submits only one new request', async () => {
     let fail = true;
     let deletes = 0;
     const visit = await forgetPage(browser, {
@@ -134,7 +134,13 @@ describe.each([
         expect(await count(page).innerText()).toContain('3 memories');
       expect(deletes).toBe(1);
       fail = false;
-      await alert.getByRole('button', { name: 'Try again' }).click();
+      // Activate twice before React replaces the failed entry with progress.
+      await alert
+        .getByRole('button', { name: 'Try again' })
+        .evaluate((button: HTMLButtonElement) => {
+          button.click();
+          button.click();
+        });
       await page.getByText('Forgot Release process', { exact: true }).waitFor();
       expect(deletes).toBe(2);
     } finally {
