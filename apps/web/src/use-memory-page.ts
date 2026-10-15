@@ -263,7 +263,9 @@ export function useMemoryPage() {
     firstRun,
     busy,
     forget,
-    loadMore: idleRead(queries, () => list.fetchNextPage()),
+    loadMore: idleRead(queries, () =>
+      list.fetchNextPage({ cancelRefetch: false }),
+    ),
     retrySearch: idleRead(queries, () => results.refetch()),
     retryCounts: idleRead(queries, () => countsQuery.refetch()),
     retryDetail: idleRead(queries, () => detail.refetch()),
