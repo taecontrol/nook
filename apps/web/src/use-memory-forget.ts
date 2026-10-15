@@ -141,9 +141,10 @@ export function useMemoryForget({
         scope,
         inRows: order.includes(subject.id),
       });
-      const current = (router.state.location.search as MemorySearch).memory;
+      const current = (router.latestLocation.search as MemorySearch).memory;
       if (
         failureStatus(error) !== 'unconfirmed' &&
+        router.latestLocation.pathname === '/memory' &&
         shouldRestore(wasOpen, desktop, current, neighbor)
       )
         select(subject.id);

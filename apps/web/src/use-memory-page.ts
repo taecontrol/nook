@@ -4,7 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
-import { useNavigate, useSearch } from '@tanstack/react-router';
+import { useNavigate, useRouter, useSearch } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError } from './api-client';
 import { useBucketList } from './buckets-api';
@@ -87,8 +87,14 @@ function useAutoSelection(
   memory: string | undefined,
   navigate: ReturnType<typeof useNavigate>,
 ) {
+  const router = useRouter();
   useEffect(() => {
-    if (desktop && firstId && !memory)
+    if (
+      desktop &&
+      firstId &&
+      !memory &&
+      router.latestLocation.pathname === '/memory'
+    )
       void navigate({
         to: '/memory',
         search: (previous: MemorySearch) =>
@@ -97,7 +103,7 @@ function useAutoSelection(
             : { ...located(previous), memory: firstId },
         replace: true,
       });
-  }, [desktop, firstId, memory, navigate]);
+  }, [desktop, firstId, memory, navigate, router]);
 }
 function useQueryDraft(q: string, navigate: (q: string | undefined) => void) {
   const [draft, setDraft] = useState(q);
