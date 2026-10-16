@@ -1,4 +1,4 @@
-import { type MemoryScope, RESERVED_BUCKET } from '@nook/contract';
+import { type Memory, type MemoryScope, RESERVED_BUCKET } from '@nook/contract';
 import {
   infiniteQueryOptions,
   type QueryClient,
@@ -58,8 +58,14 @@ export function memoriesOptions(
 export function memoryOptions(id: string) {
   return queryOptions({
     queryKey: ['memory', id],
-    queryFn: ({ signal }) =>
-      runApi((api) => api.memories.get({ params: { id } }), signal),
+    queryFn: async ({ signal, client, queryKey }) => {
+      const memory = await runApi(
+        (api) => api.memories.get({ params: { id } }),
+        signal,
+      );
+      const current = client.getQueryData<Memory>(queryKey);
+      return current && current.version > memory.version ? current : memory;
+    },
     retry: false,
     staleTime: 30_000,
   });

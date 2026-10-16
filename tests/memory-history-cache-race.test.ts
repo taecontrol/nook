@@ -73,6 +73,55 @@ async function currentVersion(page: Page) {
   ).not.toContain('Current');
 }
 
+it('E23/E24: a held old detail cannot replace newer history after the Sheet closes', async () => {
+  const visit = await fixture();
+  const gate = deferred();
+  const arrived = deferred();
+  let held = false;
+  try {
+    const { page } = visit;
+    await visit.goto();
+    await historyButton(page).waitFor();
+    await page.route(`**/api/memories/${id}`, async (route) => {
+      const response = await route.fetch();
+      if (!held) {
+        held = true;
+        expect(await response.json()).toMatchObject({ version: 1 });
+        arrived.resolve();
+        await gate.promise;
+      }
+      await route.fulfill({ response }).catch(() => {});
+    });
+    await page.clock.setFixedTime(clock + 30_001);
+    const refocus = visit.refocus();
+    await arrived.promise;
+    await visit.update();
+    await historyButton(page).click();
+    await page.locator('[data-version-row="2"]').waitFor();
+    await currentVersion(page);
+    const pane = page.getByRole('article', { name: 'Memory detail' });
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect.poll(() => page.getByRole('dialog').count()).toBe(0);
+    await expect.poll(() => pane.textContent()).toContain('Use pnpm.');
+    const delivered = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === `/api/memories/${id}`,
+    );
+    gate.resolve();
+    await (await delivered).finished();
+    await refocus;
+    await page.waitForLoadState('networkidle');
+    console.info('old-detail-after-history-close', {
+      pane: await pane.textContent(),
+      history: await historyButton(page).textContent(),
+    });
+    expect(await pane.textContent()).toContain('Use pnpm.');
+    expect(await historyButton(page).textContent()).toContain('2 versions');
+  } finally {
+    gate.resolve();
+    await visit.close();
+  }
+});
+
 it('E23/E24: fresh detail invalidates an older history cache even while that history is otherwise fresh', async () => {
   const visit = await fixture();
   try {

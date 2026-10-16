@@ -235,7 +235,7 @@ function ListBody({ model }: { model: MemoryPageModel }) {
           <Button
             variant="outline"
             size="sm"
-            disabled={model.busy || model.list.isFetchingNextPage}
+            disabled={model.busy || model.list.isFetching}
             onClick={model.loadMore}
           >
             {model.list.isFetchingNextPage ? 'Loading…' : 'Load more'}
