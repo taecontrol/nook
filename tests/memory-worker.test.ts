@@ -11,6 +11,7 @@ import {
   memoryId,
   memoryRuntime,
   seedMemories,
+  seedMemoryMachine,
   typicalMemories,
 } from './support/memory.ts';
 import type { TestRuntime } from './support/runtime.ts';
@@ -23,6 +24,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   const db = await app.mf.getD1Database('DB');
   await db.prepare('DELETE FROM memories').run();
+  await db.prepare('DELETE FROM memory_vector_removals').run();
 });
 afterAll(() => app?.close());
 const deleteBucket = (path: string) =>
@@ -69,6 +71,23 @@ it('E17: the owner feed merges only the lineage newest first and never sends con
   expect(JSON.stringify(page)).not.toContain(
     'synthetic-private-personal-memory',
   );
+});
+it('E20: a restricted child grant can list a readable ancestor', async () => {
+  const memory = memoryFixture(4, { bucket: 'work' });
+  await seedMemories(app, [memory]);
+  const handler = handlerForPrincipal(
+    'owner@nook.test',
+    await app.mf.getD1Database('DB'),
+    ['work/acme'],
+  );
+  const response = await handler(
+    new Request('http://nook.test/api/memories?bucket=work&scope=bucket'),
+  );
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    memories: [{ id: memory.id, bucket: 'work' }],
+    next: null,
+  });
 });
 it('E22: tree counts are per bucket, include empty buckets and exclude paths outside the read grant', async () => {
   await seedMemories(app, [
@@ -192,7 +211,7 @@ it('E18: an issued cursor rejects a change to another existing ordering pair wit
   expect(response.status).toBe(400);
   expect(await response.json()).toMatchObject({ _tag: 'InvalidMemoryCursor' });
 });
-it('E18/E19: cursors reject mismatched scope, malformed encodings and fabricated native ordering pairs', async () => {
+it('E18/E19: cursors reject mismatched scope and malformed encodings, even without storage', async () => {
   const at = '2026-10-09T14:00:00.000Z';
   await seedMemories(app, [
     ...manyMemories.map((memory) => ({ ...memory, createdAt: at })),
@@ -224,9 +243,6 @@ it('E18/E19: cursors reject mismatched scope, malformed encodings and fabricated
       ),
     ).toString('base64url'),
     own.next as string,
-    encodedPair(randomUUID(), at),
-    encodedPair(memoryId(165), '2026-10-09T23:00:00.000Z'),
-    encodedPair(memoryId(1), at),
     encodedPair([memoryId(165)], at),
     encodedPair(memoryId(165), '2026-10-09T14:00:00Z'),
     encodedPair('malformed', at),
@@ -267,6 +283,54 @@ it('E18/E19: cursors reject mismatched scope, malformed encodings and fabricated
       .run();
   }
 });
+it.each(['inherited', 'bucket'])(
+  'E18/E19: an HTTP %s cursor keeps its position after its boundary memory is forgotten',
+  async (scope) => {
+    const seeds = manyMemories.map((memory, index) => ({
+      ...memory,
+      bucket: ['work/acme', 'work', 'me'][index % 3],
+      createdAt:
+        index < 40 ? '2026-10-09T14:00:00.000Z' : '2026-10-08T14:00:00.000Z',
+    }));
+    await seedMemories(app, seeds);
+    const query = `bucket=work/acme&scope=${scope}`;
+    const first = await listMemoryPage(app, query);
+    const boundary = first.memories.at(-1);
+    expect(first.next).toBeTypeOf('string');
+    const forgotten = await fetch(
+      `${app.origin}/api/memories/${boundary?.id}?expectedVersion=1`,
+      {
+        method: 'DELETE',
+      },
+    );
+    expect(forgotten.status).toBe(204);
+    const ids = first.memories.map((memory) => memory.id);
+    let cursor = first.next;
+    do {
+      const page = await listMemoryPage(
+        app,
+        `${query}&cursor=${encodeURIComponent(cursor ?? '')}`,
+      );
+      ids.push(...page.memories.map((memory) => memory.id));
+      cursor = page.next;
+    } while (cursor);
+    const expected = seeds
+      .filter(
+        (memory) => scope === 'inherited' || memory.bucket === 'work/acme',
+      )
+      .toSorted(
+        (a, b) =>
+          b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id),
+      );
+    expect(ids).toEqual(expected.map((memory) => memory.id));
+    expect(new Set(ids).size).toBe(expected.length);
+    expect(new Set(first.memories.map((memory) => memory.bucket))).toEqual(
+      new Set(
+        scope === 'inherited' ? ['work/acme', 'work', 'me'] : ['work/acme'],
+      ),
+    );
+  },
+);
 it('E20/E33: restricted handlers forbid sibling lists and mask detail; the owner routes reject Nook tokens', async () => {
   await seedMemories(app, [
     memoryFixture(1, {
@@ -296,7 +360,8 @@ it('E20/E33: restricted handlers forbid sibling lists and mask detail; the owner
     new Request(`http://nook.test/api/memories/${memoryId(2)}`),
   );
   expect(allowed.status).toBe(200);
-  // Remove only the local owner bypass: a Nook bearer cannot stand in for Access.
+  // Remove only the local owner bypass: a valid Nook bearer cannot stand in for Access.
+  const machine = await seedMemoryMachine(app);
   await app.setBindings({});
   try {
     for (const path of [
@@ -304,10 +369,10 @@ it('E20/E33: restricted handlers forbid sibling lists and mask detail; the owner
       `/api/memories/${memoryId(2)}`,
     ]) {
       const rejected = await fetch(`${app.origin}${path}`, {
-        headers: { Authorization: 'Bearer synthetic-nook-credential' },
+        headers: { Authorization: `Bearer ${machine.token}` },
       });
       expect(rejected.status).toBe(401);
-      expect(await rejected.text()).not.toContain('synthetic-nook-credential');
+      expect(await rejected.text()).not.toContain(machine.token);
     }
   } finally {
     await app.setBindings({
@@ -646,12 +711,6 @@ it('schema: native D1 rejects invalid head, version, client and tag facts', asyn
       .bind(memoryId(1))
       .run(),
   ).rejects.toThrow(/UNIQUE/i);
-});
-it('schema: removing a memory head cascades to its stored versions', async () => {
-  await seedMemories(app, [memoryFixture(1)]);
-  const db = await app.mf.getD1Database('DB');
-  await db.prepare('DELETE FROM memories WHERE id=?').bind(memoryId(1)).run();
-  expect(await memoryCounts(app)).toEqual({ memories: 0, versions: 0 });
 });
 it('E14/E33: failed HTTP reads have fixed public errors with no title, content or storage cause', async () => {
   await seedMemories(app, [

@@ -1,13 +1,11 @@
 import { D1Client } from '@effect/sql-d1';
 import {
   type BucketGrant,
-  BucketNotFound,
   canRead,
   canWrite,
   DuplicateMemory,
   type ForgetMemory,
   type Forgotten,
-  InvalidBucketPath,
   InvalidMemory,
   InvalidMemoryCursor,
   InvalidMemorySearch,
@@ -22,38 +20,32 @@ import {
   type OwnerMemorySearchResult,
   type Principal,
   type Remember,
-  readLineage,
   type UpdateMemory,
-  validateBucketPath,
   validateExpectedVersion,
   validateMemoryContent,
   validateSearchQuery,
   validateTags,
   validateWorkingDirectory,
+  visiblePaths,
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
+import { authorizeBucket, bucketExists, bucketNotFound } from './buckets.ts';
 import { sha256 } from './digest.ts';
 import { unavailable } from './http-errors.ts';
-import {
-  type EmbeddingMemory,
-  type MemoryIndex,
-  memoryIndex,
-} from './memory-index.ts';
+import { memoryBounds } from './memory-bounds.ts';
+import { type MemoryIndex, memoryIndex } from './memory-index.ts';
 import {
   keywordExpression,
   keywordSnippet,
   openingSnippet,
   rankedSearch,
 } from './memory-search.ts';
+import { memorySync } from './memory-sync.ts';
 
 const uuid =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const notFound = () => new MemoryNotFound({ message: 'Memory not found.' });
-const bucketMissing = () =>
-  new BucketNotFound({ message: 'Bucket not found.' });
-const vectorRemovalChunk = 50;
-const vectorRemovalSettleMs = 30 * 60_000;
 function forgetVersion(version: unknown, query: boolean) {
   if (query && typeof version === 'string' && /^[1-9]\d*$/.test(version))
     version = Number(version);
@@ -85,37 +77,74 @@ function forgetOutcome(
     );
   return Effect.fail(new HttpApiError.ServiceUnavailable());
 }
-const Facts = Schema.Struct({
+const TagsJson = Schema.fromJsonString(Schema.Array(Schema.String));
+function withProvenance<Fields extends Schema.Struct.Fields>(fields: Fields) {
+  const facts = {
+    ...fields,
+    client_name: Schema.String,
+    client_version: Schema.NullOr(Schema.String),
+    working_directory: Schema.NullOr(Schema.String),
+    version_at: Schema.String,
+  };
+  return Schema.Union([
+    Schema.Struct({
+      ...facts,
+      principal: Schema.Literal('owner'),
+      machine_id: Schema.Null,
+      machine_name: Schema.Null,
+    }),
+    Schema.Struct({
+      ...facts,
+      principal: Schema.Literal('machine'),
+      machine_id: Schema.String,
+      machine_name: Schema.String,
+    }),
+  ]);
+}
+const facts = {
   id: Schema.String,
   bucket: Schema.String,
   current_version: Schema.Number,
   content: Schema.String,
   content_hash: Schema.String,
   keyword_snippet: Schema.optionalKey(Schema.String),
-  meaning_rank: Schema.optionalKey(Schema.Number),
-  tags: Schema.fromJsonString(Schema.Array(Schema.String)),
+  tags: TagsJson,
   created_at: Schema.String,
   updated_at: Schema.String,
-  client_name: Schema.String,
-  client_version: Schema.NullOr(Schema.String),
-  working_directory: Schema.NullOr(Schema.String),
-  version_at: Schema.String,
-});
-const Row = Schema.Union([
-  Facts.mapFields((fields) => ({
-    ...fields,
-    principal: Schema.Literal('owner'),
-    machine_id: Schema.Null,
-    machine_name: Schema.Null,
-  })),
-  Facts.mapFields((fields) => ({
-    ...fields,
-    principal: Schema.Literal('machine'),
-    machine_id: Schema.String,
-    machine_name: Schema.String,
-  })),
-]);
+};
+const Row = withProvenance(facts);
 type Row = typeof Row.Type;
+const MeaningRow = withProvenance({ ...facts, meaning_rank: Schema.Number });
+const VersionRow = withProvenance({
+  version: Schema.Number,
+  content: Schema.String,
+  tags: TagsJson,
+});
+type VersionRow = typeof VersionRow.Type;
+const HistoryRow = Schema.Union([
+  VersionRow,
+  Schema.Struct({ version: Schema.Null }),
+]);
+const BucketRow = Schema.Struct({ bucket: Schema.String });
+const ForgetState = Schema.Struct({
+  current_version: Schema.NullOr(Schema.Number),
+});
+function decodedRows<S extends Schema.Top>(schema: S, raw: unknown) {
+  return Schema.decodeUnknownEffect(Schema.Array(schema))(raw).pipe(
+    unavailable,
+  );
+}
+function provenanceOf(row: Row | VersionRow): Memory['provenance'] {
+  return {
+    client: { name: row.client_name, version: row.client_version },
+    principal:
+      row.principal === 'machine'
+        ? { kind: 'machine', id: row.machine_id, name: row.machine_name }
+        : { kind: 'owner' },
+    workingDirectory: row.working_directory,
+    at: row.version_at,
+  };
+}
 function memory(row: Row): Memory {
   return {
     id: row.id,
@@ -125,26 +154,12 @@ function memory(row: Row): Memory {
     version: row.current_version,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    provenance: {
-      client: { name: row.client_name, version: row.client_version },
-      principal:
-        row.principal === 'machine'
-          ? { kind: 'machine', id: row.machine_id, name: row.machine_name }
-          : { kind: 'owner' },
-      workingDirectory: row.working_directory,
-      at: row.version_at,
-    },
+    provenance: provenanceOf(row),
   };
 }
 function summary(row: Row): MemoryListItem {
   const { content, ...facts } = memory(row);
   return { ...facts, title: memoryTitle(content) };
-}
-function validBucket(bucket: string) {
-  const message = validateBucketPath(bucket);
-  return message
-    ? Effect.fail(new InvalidBucketPath({ message }))
-    : Effect.void;
 }
 function validInput(
   input: Pick<Remember, 'content' | 'tags' | 'workingDirectory'>,
@@ -157,11 +172,14 @@ function validInput(
       : validateWorkingDirectory(input.workingDirectory));
   return message ? Effect.fail(new InvalidMemory({ message })) : Effect.void;
 }
-function validUpdate(input: UpdateMemory) {
+type UpdateRequest = Omit<UpdateMemory, 'expectedVersion'> & {
+  expectedVersion?: unknown;
+};
+function validUpdate(input: UpdateRequest) {
   const message = validateExpectedVersion(input.expectedVersion);
   return message
     ? Effect.fail(new InvalidMemory({ message }))
-    : validInput(input);
+    : validInput(input).pipe(Effect.as(input.expectedVersion as number));
 }
 function machineFacts(principal: Principal) {
   return principal.kind === 'machine'
@@ -174,34 +192,40 @@ function historyBoundary(before?: string) {
     return Effect.fail(new InvalidMemoryCursor());
   return Effect.succeed(Number(before));
 }
-function historyPage(rows: readonly Row[]) {
-  const page = rows.slice(0, 26);
+function historyPage(rows: readonly VersionRow[]) {
+  const page = rows.slice(0, memoryBounds.pageSize);
   return {
-    versions: page.map((row): MemoryVersion => {
-      const m = memory(row);
-      return {
-        version: m.version,
-        content: m.content,
-        tags: m.tags,
-        provenance: m.provenance,
-      };
-    }),
-    next: rows.length > 26 ? (page.at(-1)?.current_version ?? null) : null,
+    versions: page.map(
+      (row): MemoryVersion => ({
+        version: row.version,
+        content: row.content,
+        tags: row.tags,
+        provenance: provenanceOf(row),
+      }),
+    ),
+    next:
+      rows.length > memoryBounds.pageSize
+        ? (page.at(-1)?.version ?? null)
+        : null,
   };
 }
-type UpdateState = {
-  id: string | null;
-  bucket: string;
-  current_version: number;
-  created_at: string;
-  updated_at: string;
-  tags: string;
-  equals_request: number;
-  stale: number;
-  duplicate_id: string | null;
-  hash_collision: number;
-  content_changed: number;
-};
+const UpdateState = Schema.Union([
+  Schema.Struct({
+    id: Schema.String,
+    bucket: Schema.String,
+    current_version: Schema.Number,
+    created_at: Schema.String,
+    updated_at: Schema.String,
+    tags: Schema.String,
+    equals_request: Schema.Number,
+    stale: Schema.Number,
+    duplicate_id: Schema.NullOr(Schema.String),
+    hash_collision: Schema.Number,
+    content_changed: Schema.Number,
+  }),
+  Schema.Struct({ id: Schema.Null }),
+]);
+type UpdateState = typeof UpdateState.Type;
 function updateOutcome(
   state: UpdateState | undefined,
   input: UpdateMemory,
@@ -226,9 +250,9 @@ function updateOutcome(
     }
     if (state.hash_collision)
       return yield* Effect.fail(new HttpApiError.ServiceUnavailable());
-    const tags = yield* Schema.decodeUnknownEffect(
-      Schema.fromJsonString(Schema.Array(Schema.String)),
-    )(state.tags).pipe(unavailable);
+    const tags = yield* Schema.decodeUnknownEffect(TagsJson)(state.tags).pipe(
+      unavailable,
+    );
     return {
       updated,
       id: state.id,
@@ -251,14 +275,13 @@ function searchResult(
   match: 'keyword' | 'meaning',
   delimiter: string,
 ): OwnerMemorySearchResult {
-  const facts = memory(row);
   return {
     id: row.id,
     bucket: row.bucket,
     title: memoryTitle(row.content),
     tags: row.tags,
     createdAt: row.created_at,
-    provenance: facts.provenance,
+    provenance: provenanceOf(row),
     match,
     ...(row.keyword_snippet === undefined
       ? openingSnippet(row.content)
@@ -308,12 +331,12 @@ async function memoryPage(
   bucket: string,
   scope: MemoryScope,
 ) {
-  const page = rows.slice(0, 25);
+  const page = rows.slice(0, memoryBounds.pageSize);
   const last = page.at(-1);
   return {
     memories: page.map(summary),
     next:
-      rows.length > 25 && last
+      rows.length > memoryBounds.pageSize && last
         ? await encodeCursor({
             bucket,
             scope,
@@ -323,26 +346,30 @@ async function memoryPage(
         : null,
   };
 }
-type State = {
-  has_bucket: number;
-  id: string | null;
-  current_version: number;
-  created_at: string;
-  content: string;
-  tags: string;
-};
+const State = Schema.Union([
+  Schema.Struct({
+    has_bucket: Schema.Number,
+    id: Schema.String,
+    current_version: Schema.Number,
+    created_at: Schema.String,
+    content: Schema.String,
+    tags: Schema.String,
+  }),
+  Schema.Struct({ has_bucket: Schema.Number, id: Schema.Null }),
+]);
+type State = typeof State.Type;
 function rememberOutcome(
   state: State | undefined,
   input: Remember,
   created: boolean,
 ) {
   return Effect.gen(function* () {
-    if (!state?.has_bucket) return yield* Effect.fail(bucketMissing());
+    if (!state?.has_bucket) return yield* Effect.fail(bucketNotFound());
     if (!state.id || state.content !== input.content)
       return yield* Effect.fail(new HttpApiError.ServiceUnavailable());
-    const tags = yield* Schema.decodeUnknownEffect(
-      Schema.fromJsonString(Schema.Array(Schema.String)),
-    )(state.tags).pipe(unavailable);
+    const tags = yield* Schema.decodeUnknownEffect(TagsJson)(state.tags).pipe(
+      unavailable,
+    );
     return {
       created,
       id: state.id,
@@ -361,39 +388,19 @@ export const memoryStore = (
 ) =>
   Effect.gen(function* () {
     const sql = yield* D1Client.D1Client;
-    const columns = sql`m.id, m.bucket, m.current_version, m.content_hash, m.created_at, m.updated_at, v.content, v.tags, v.client_name, v.client_version, v.principal, v.machine_id, v.machine_name, v.working_directory, v.created_at AS version_at`;
-    const embedding = (rows: readonly EmbeddingMemory[]) =>
-      Effect.gen(function* () {
-        if (!rows.length) return;
-        // Filter after the slow AI request, immediately before the external upsert.
-        const written = yield* index
-          .write(rows, (candidates) =>
-            Effect.gen(function* () {
-              const current = yield* sql<{
-                id: string;
-                content_hash: string;
-              }>`SELECT id, content_hash FROM memories WHERE ${sql.in(
-                'id',
-                candidates.map((row) => row.id),
-              )}`.pipe(unavailable);
-              return candidates.filter((row) =>
-                current.some(
-                  (m) => m.id === row.id && m.content_hash === row.content_hash,
-                ),
-              );
-            }),
-          )
-          .pipe(unavailable);
-        if (!written.length) return;
-        yield* sql
-          .batch(
-            written.map(
-              (row) =>
-                sql`UPDATE memories SET embedding_marker=CASE WHEN content_hash=${row.content_hash} THEN ${`${index.model}:${row.content_hash}`} ELSE NULL END WHERE id=${row.id}`,
-            ),
-          )
-          .pipe(unavailable);
-      });
+    const { scheduleEmbedding } = yield* memorySync(index, waitUntil);
+    const provenanceSelect = sql`v.client_name, v.client_version, v.principal, v.machine_id, v.machine_name, v.working_directory, v.created_at AS version_at`;
+    const columns = sql`m.id, m.bucket, m.current_version, m.content_hash, m.created_at, m.updated_at, v.content, v.tags, ${provenanceSelect}`;
+    const provenanceColumns = sql`client_name,client_version,principal,machine_id,machine_name,working_directory,created_at`;
+    const provenanceValues = (
+      principal: Principal,
+      client: MemoryClient,
+      directory: string | undefined,
+      at: string,
+    ) => {
+      const author = machineFacts(principal);
+      return sql`${client.name},${client.version},${principal.kind},${author.id},${author.name},${directory ?? null},${at}`;
+    };
     const bucketFor = (id: string, write = false) =>
       Effect.gen(function* () {
         if (!uuid.test(id)) return yield* Effect.fail(notFound());
@@ -406,91 +413,6 @@ export const memoryStore = (
         if (write && !canWrite(grant, bucket))
           return yield* Effect.fail(new HttpApiError.Forbidden());
         return bucket;
-      });
-    const scheduleEmbedding = (rows: readonly EmbeddingMemory[]) => {
-      if (waitUntil)
-        waitUntil(
-          Effect.runPromise(
-            embedding(rows).pipe(Effect.catchCause(() => Effect.void)),
-          ),
-        );
-    };
-    const sweepRemovals = (scheduledTime: number) =>
-      Effect.gen(function* () {
-        const rows = yield* sql<{
-          id: string;
-          forgotten_at: string;
-        }>`SELECT r.id,r.forgotten_at FROM memory_vector_removals r WHERE NOT EXISTS (SELECT 1 FROM memories m WHERE m.id=r.id) ORDER BY r.forgotten_at,r.id LIMIT ${vectorRemovalChunk}`.pipe(
-          unavailable,
-        );
-        if (!rows.length) return;
-        const vectors = yield* index
-          .inspect(rows.map((row) => row.id))
-          .pipe(unavailable);
-        const present = new Set(vectors.map((vector) => vector.id));
-        const remove = rows
-          .filter((row) => present.has(row.id))
-          .map((row) => row.id);
-        if (remove.length) yield* index.remove(remove).pipe(unavailable);
-        const settled = rows
-          .filter(
-            (row) =>
-              !present.has(row.id) &&
-              scheduledTime >=
-                Date.parse(row.forgotten_at) + vectorRemovalSettleMs,
-          )
-          .map((row) => row.id);
-        if (settled.length)
-          yield* sql`DELETE FROM memory_vector_removals WHERE ${sql.in('id', settled)} AND NOT EXISTS (SELECT 1 FROM memories m WHERE m.id=memory_vector_removals.id)`.pipe(
-            unavailable,
-          );
-      });
-    const inspect = (scheduledTime: number, repaired: readonly string[]) =>
-      Effect.gen(function* () {
-        const cutoff = new Date(scheduledTime - 10 * 60_000).toISOString();
-        // The window rotates over stable seq order, including pending markers,
-        // so invalidation and repair cannot shrink the sweep under its cursor.
-        const slots = yield* sql<{
-          n: number;
-        }>`SELECT count(*) AS n FROM memories WHERE updated_at < ${cutoff}`.pipe(
-          unavailable,
-        );
-        const pages = Math.ceil((slots[0]?.n ?? 0) / 50);
-        if (!pages) return;
-        const offset = (Math.floor(scheduledTime / (5 * 60_000)) % pages) * 50;
-        const rows = yield* sql<{
-          id: string;
-          bucket: string;
-          content_hash: string;
-        }>`SELECT id,bucket,content_hash FROM (SELECT * FROM memories WHERE updated_at < ${cutoff} ORDER BY seq LIMIT 50 OFFSET ${offset}) WHERE embedding_marker=${index.model} || ':' || content_hash AND NOT ${sql.in('id', repaired)}`.pipe(
-          unavailable,
-        );
-        if (!rows.length) return;
-        const vectors = yield* index
-          .inspect(rows.map((row) => row.id))
-          .pipe(unavailable);
-        const wrong = yield* Effect.promise(async () => {
-          const stale = await Promise.all(
-            rows.map(async (row) => {
-              const vector = vectors.find((v) => v.id === row.id);
-              return !vector ||
-                vector.contentHash !== row.content_hash ||
-                vector.bucket !== (await sha256(row.bucket)).slice(0, 32)
-                ? row
-                : undefined;
-            }),
-          );
-          return stale.filter((row) => row !== undefined);
-        });
-        if (wrong.length)
-          yield* sql
-            .batch(
-              wrong.map(
-                (row) =>
-                  sql`UPDATE memories SET embedding_marker=NULL WHERE id=${row.id} AND content_hash=${row.content_hash} AND updated_at < ${cutoff} AND embedding_marker=${index.model} || ':' || content_hash`,
-              ),
-            )
-            .pipe(unavailable);
       });
     return {
       forget: (
@@ -506,14 +428,13 @@ export const memoryStore = (
               sql`INSERT INTO memory_vector_removals(id,forgotten_at) SELECT id,${new Date().toISOString()} FROM memories WHERE ${guard}`,
               sql`DELETE FROM memories WHERE ${guard} AND EXISTS (SELECT 1 FROM memory_vector_removals r WHERE r.id=memories.id) RETURNING seq`,
               sql`INSERT INTO memories_fts(memories_fts) VALUES('optimize')`,
-              sql<{
-                current_version: number | null;
-              }>`SELECT m.current_version FROM (SELECT 1) LEFT JOIN memories m ON m.id=${input.id} AND m.bucket=${bucket}`,
+              sql`SELECT m.current_version FROM (SELECT 1) LEFT JOIN memories m ON m.id=${input.id} AND m.bucket=${bucket}`,
             ])
             .pipe(unavailable);
+          const current = yield* decodedRows(ForgetState, states);
           return yield* forgetOutcome(
             deleted.length > 0,
-            states[0]?.current_version,
+            current[0]?.current_version,
             { id: input.id, expectedVersion: version },
             bucket,
           );
@@ -521,35 +442,42 @@ export const memoryStore = (
       update: (
         principal: Principal,
         client: MemoryClient,
-        input: UpdateMemory,
+        input: UpdateRequest,
       ) =>
         Effect.gen(function* () {
           const bucket = yield* bucketFor(input.id, true);
-          yield* validUpdate(input);
-          const author = machineFacts(principal);
+          const expectedVersion = yield* validUpdate(input);
           const hash = yield* Effect.promise(() => sha256(input.content));
           const tags =
             input.tags === undefined ? null : JSON.stringify(input.tags);
           const now = new Date().toISOString();
+          const provenance = provenanceValues(
+            principal,
+            client,
+            input.workingDirectory,
+            now,
+          );
           // Each write guard also supplies the outcome read; only precedence is TypeScript.
           const equal = sql`cur.content=${input.content} AND json(cur.tags)=json(COALESCE(${tags},cur.tags))`;
-          const stale = sql`m.current_version <> ${input.expectedVersion}`;
+          const stale = sql`m.current_version <> ${expectedVersion}`;
           const other = sql`o.bucket=m.bucket AND o.id<>m.id AND o.content_hash=${hash}`;
           const duplicate = sql`EXISTS (SELECT 1 FROM memories o WHERE ${other})`;
           const collision = sql`m.content_hash=${hash} AND cur.content<>${input.content}`;
           const [inserted, , states] = yield* sql
             .batch([
-              sql`INSERT INTO memory_versions(memory_id,version,content,tags,client_name,client_version,principal,machine_id,machine_name,working_directory,created_at) SELECT m.id,m.current_version+1,${input.content},COALESCE(${tags},cur.tags),${client.name},${client.version},${principal.kind},${author.id},${author.name},${input.workingDirectory ?? null},${now} FROM memories m JOIN memory_versions cur ON cur.memory_id=m.id AND cur.version=m.current_version WHERE m.id=${input.id} AND m.bucket=${bucket} AND NOT (${stale}) AND NOT (${equal}) AND NOT (${duplicate}) AND NOT (${collision}) RETURNING version`,
-              sql`UPDATE memories SET current_version=current_version+1,content_hash=${hash},updated_at=${now} WHERE id=${input.id} AND bucket=${bucket} AND current_version=${input.expectedVersion} AND EXISTS (SELECT 1 FROM memory_versions v WHERE v.memory_id=memories.id AND v.version=memories.current_version+1)`,
-              sql<UpdateState>`SELECT m.id,m.bucket,m.current_version,m.created_at,m.updated_at,cur.tags,(${equal}) AS equals_request,(${stale}) AS stale, (SELECT o.id FROM memories o JOIN memory_versions ov ON ov.memory_id=o.id AND ov.version=o.current_version WHERE ${other} AND ov.content=${input.content}) AS duplicate_id, ((${collision}) OR (${duplicate} AND NOT EXISTS (SELECT 1 FROM memories o JOIN memory_versions ov ON ov.memory_id=o.id AND ov.version=o.current_version WHERE ${other} AND ov.content=${input.content}))) AS hash_collision, EXISTS (SELECT 1 FROM memory_versions previous WHERE previous.memory_id=m.id AND previous.version=m.current_version-1 AND previous.content<>cur.content) AS content_changed FROM (SELECT 1) LEFT JOIN memories m ON m.id=${input.id} AND m.bucket=${bucket} LEFT JOIN memory_versions cur ON cur.memory_id=m.id AND cur.version=m.current_version`,
+              sql`INSERT INTO memory_versions(memory_id,version,content,tags,${provenanceColumns}) SELECT m.id,m.current_version+1,${input.content},COALESCE(${tags},cur.tags),${provenance} FROM memories m JOIN memory_versions cur ON cur.memory_id=m.id AND cur.version=m.current_version WHERE m.id=${input.id} AND m.bucket=${bucket} AND NOT (${stale}) AND NOT (${equal}) AND NOT (${duplicate}) AND NOT (${collision}) RETURNING version`,
+              sql`UPDATE memories SET current_version=current_version+1,content_hash=${hash},updated_at=${now} WHERE id=${input.id} AND bucket=${bucket} AND current_version=${expectedVersion} AND EXISTS (SELECT 1 FROM memory_versions v WHERE v.memory_id=memories.id AND v.version=memories.current_version+1)`,
+              sql`SELECT m.id,m.bucket,m.current_version,m.created_at,m.updated_at,cur.tags,(${equal}) AS equals_request,(${stale}) AS stale, (SELECT o.id FROM memories o JOIN memory_versions ov ON ov.memory_id=o.id AND ov.version=o.current_version WHERE ${other} AND ov.content=${input.content}) AS duplicate_id, ((${collision}) OR (${duplicate} AND NOT EXISTS (SELECT 1 FROM memories o JOIN memory_versions ov ON ov.memory_id=o.id AND ov.version=o.current_version WHERE ${other} AND ov.content=${input.content}))) AS hash_collision, EXISTS (SELECT 1 FROM memory_versions previous WHERE previous.memory_id=m.id AND previous.version=m.current_version-1 AND previous.content<>cur.content) AS content_changed FROM (SELECT 1) LEFT JOIN memories m ON m.id=${input.id} AND m.bucket=${bucket} LEFT JOIN memory_versions cur ON cur.memory_id=m.id AND cur.version=m.current_version`,
             ])
             .pipe(unavailable);
+          const decoded = yield* decodedRows(UpdateState, states);
+          const state = decoded[0];
           const result = yield* updateOutcome(
-            states[0],
-            input,
+            state,
+            { ...input, expectedVersion },
             inserted.length > 0,
           );
-          if (result.updated && states[0]?.content_changed)
+          if (result.updated && state?.id && state.content_changed)
             scheduleEmbedding([
               {
                 id: input.id,
@@ -562,67 +490,40 @@ export const memoryStore = (
         }),
       remember: (principal: Principal, client: MemoryClient, input: Remember) =>
         Effect.gen(function* () {
-          yield* validBucket(input.bucket);
-          if (!canWrite(grant, input.bucket))
-            return yield* Effect.fail(new HttpApiError.Forbidden());
+          yield* authorizeBucket(grant, input.bucket, 'write');
           yield* validInput(input);
           const hash = yield* Effect.promise(() => sha256(input.content));
           const id = crypto.randomUUID();
           const now = new Date().toISOString();
-          const machineId = principal.kind === 'machine' ? principal.id : null;
-          const machineName =
-            principal.kind === 'machine' ? principal.name : null;
+          const provenance = provenanceValues(
+            principal,
+            client,
+            input.workingDirectory,
+            now,
+          );
           const [inserted, , state] = yield* sql
             .batch([
-              sql`INSERT INTO memories(id, bucket, current_version, content_hash, created_at, updated_at) SELECT ${id}, ${input.bucket}, 1, ${hash}, ${now}, ${now} WHERE EXISTS (SELECT 1 FROM buckets WHERE path=${input.bucket}) ON CONFLICT(bucket, content_hash) DO NOTHING RETURNING id`,
-              sql`INSERT INTO memory_versions(memory_id, version, content, tags, client_name, client_version, principal, machine_id, machine_name, working_directory, created_at) SELECT id, 1, ${input.content}, ${JSON.stringify(input.tags ?? [])}, ${client.name}, ${client.version}, ${principal.kind}, ${machineId}, ${machineName}, ${input.workingDirectory ?? null}, ${now} FROM memories WHERE id=${id}`,
-              sql<State>`SELECT EXISTS (SELECT 1 FROM buckets WHERE path=${input.bucket}) AS has_bucket, m.id, m.current_version, m.created_at, v.content, v.tags FROM (SELECT 1) LEFT JOIN memories m ON m.bucket=${input.bucket} AND m.content_hash=${hash} LEFT JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version`,
+              sql`INSERT INTO memories(id, bucket, current_version, content_hash, created_at, updated_at) SELECT ${id}, ${input.bucket}, 1, ${hash}, ${now}, ${now} WHERE ${bucketExists(sql, input.bucket)} ON CONFLICT(bucket, content_hash) DO NOTHING RETURNING id`,
+              sql`INSERT INTO memory_versions(memory_id, version, content, tags, ${provenanceColumns}) SELECT id, 1, ${input.content}, ${JSON.stringify(input.tags ?? [])}, ${provenance} FROM memories WHERE id=${id}`,
+              sql`SELECT ${bucketExists(sql, input.bucket)} AS has_bucket, m.id, m.current_version, m.created_at, v.content, v.tags FROM (SELECT 1) LEFT JOIN memories m ON m.bucket=${input.bucket} AND m.content_hash=${hash} LEFT JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version`,
             ])
             .pipe(unavailable);
+          const decoded = yield* decodedRows(State, state);
           const result = yield* rememberOutcome(
-            state[0],
+            decoded[0],
             input,
             inserted.length > 0,
           );
-          if (result.created && waitUntil)
-            waitUntil(
-              Effect.runPromise(
-                embedding([
-                  {
-                    id,
-                    bucket: input.bucket,
-                    content: input.content,
-                    content_hash: hash,
-                  },
-                ]).pipe(Effect.catchCause(() => Effect.void)),
-              ),
-            );
+          if (result.created)
+            scheduleEmbedding([
+              {
+                id,
+                bucket: input.bucket,
+                content: input.content,
+                content_hash: hash,
+              },
+            ]);
           return result;
-        }),
-      sync: (scheduledTime = Date.now()) =>
-        Effect.gen(function* () {
-          yield* sweepRemovals(scheduledTime).pipe(
-            Effect.catchCause(() => Effect.void),
-          );
-          const raw =
-            yield* sql`SELECT m.id, m.bucket, m.content_hash, v.content FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE embedding_marker IS NULL OR embedding_marker <> ${index.model} || ':' || m.content_hash ORDER BY m.seq LIMIT 50`.pipe(
-              unavailable,
-            );
-          const rows = yield* Schema.decodeUnknownEffect(
-            Schema.Array(
-              Schema.Struct({
-                id: Schema.String,
-                bucket: Schema.String,
-                content_hash: Schema.String,
-                content: Schema.String,
-              }),
-            ),
-          )(raw).pipe(unavailable);
-          yield* embedding(rows);
-          yield* inspect(
-            scheduledTime,
-            rows.map((row) => row.id),
-          ).pipe(Effect.catchCause(() => Effect.void));
         }),
       search: (
         bucket: string,
@@ -632,32 +533,26 @@ export const memoryStore = (
         limit = 20,
       ) =>
         Effect.gen(function* () {
-          yield* validBucket(bucket);
-          if (!canRead(grant, bucket))
-            return yield* Effect.fail(new HttpApiError.Forbidden());
+          yield* authorizeBucket(grant, bucket, 'read');
           yield* validSearch(query, tags);
-          const paths = (
-            scope === 'bucket' ? [bucket] : readLineage(bucket)
-          ).filter((path) => canRead(grant, path));
+          const paths = visiblePaths(grant, bucket, scope);
           const expression = keywordExpression(query);
           const delimiter = `\u0001${crypto.randomUUID()}\u0002`;
           const tagged = sql`NOT EXISTS (SELECT 1 FROM json_each(${JSON.stringify(tags)}) wanted WHERE NOT EXISTS (SELECT 1 FROM json_each(v.tags) actual WHERE actual.value=wanted.value))`;
           const keywordQuery = expression
-            ? sql`SELECT ${columns}, snippet(memories_fts, 0, ${delimiter}, ${delimiter}, '…', 40) AS keyword_snippet FROM memories_fts JOIN memories m ON m.seq=memories_fts.rowid JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE memories_fts MATCH ${expression} AND ${sql.in('m.bucket', paths)} AND ${tagged} ORDER BY bm25(memories_fts), m.created_at DESC, m.id DESC LIMIT 50`
+            ? sql`SELECT ${columns}, snippet(memories_fts, 0, ${delimiter}, ${delimiter}, '…', 40) AS keyword_snippet FROM memories_fts JOIN memories m ON m.seq=memories_fts.rowid JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE memories_fts MATCH ${expression} AND ${sql.in('m.bucket', paths)} AND ${tagged} ORDER BY bm25(memories_fts), m.created_at DESC, m.id DESC LIMIT ${memoryBounds.keywordCandidates}`
             : sql`SELECT ${columns} FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE 0`;
           const [exists, rawKeyword] = yield* sql
             .batch([
               sql<{
                 has_bucket: number;
-              }>`SELECT EXISTS (SELECT 1 FROM buckets WHERE path=${bucket}) AS has_bucket`,
+              }>`SELECT ${bucketExists(sql, bucket)} AS has_bucket`,
               keywordQuery,
             ])
             .pipe(unavailable);
           if (!exists[0]?.has_bucket)
-            return yield* Effect.fail(bucketMissing());
-          const keyword = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(
-            rawKeyword,
-          ).pipe(unavailable);
+            return yield* Effect.fail(bucketNotFound());
+          const keyword = yield* decodedRows(Row, rawKeyword);
           const meaning = yield* index.query(query, paths).pipe(
             Effect.map((hits) => ({
               hits,
@@ -688,9 +583,7 @@ export const memoryStore = (
               sql`UPDATE memories SET embedding_marker=NULL WHERE ${sql.in('bucket', paths)} AND EXISTS (SELECT 1 FROM json_each(${hits}) hit WHERE json_extract(hit.value, '$.id')=memories.id AND json_extract(hit.value, '$.contentHash') <> memories.content_hash)`,
             ])
             .pipe(unavailable);
-          const semantic = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(
-            rawMeaning,
-          ).pipe(unavailable);
+          const semantic = yield* decodedRows(MeaningRow, rawMeaning);
           const currentIds = new Set(currentKeyword.map((row) => row.id));
           return {
             results: rankedSearch(
@@ -699,7 +592,7 @@ export const memoryStore = (
                 .map((row) => searchResult(row, 'keyword', delimiter)),
               semantic.map((row) => ({
                 result: searchResult(row, 'meaning', delimiter),
-                rank: row.meaning_rank as number,
+                rank: row.meaning_rank,
               })),
               limit,
             ),
@@ -713,7 +606,11 @@ export const memoryStore = (
             yield* sql`SELECT ${columns} FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE m.id=${id}`.pipe(
               unavailable,
             );
-          if (!rows[0] || !canRead(grant, rows[0].bucket as string))
+          if (!rows[0]) return yield* Effect.fail(notFound());
+          const head = yield* Schema.decodeUnknownEffect(BucketRow)(
+            rows[0],
+          ).pipe(unavailable);
+          if (!canRead(grant, head.bucket))
             return yield* Effect.fail(notFound());
           const row = yield* Schema.decodeUnknownEffect(Row)(rows[0]).pipe(
             unavailable,
@@ -722,20 +619,20 @@ export const memoryStore = (
         }),
       history: (id: string, before?: string) =>
         Effect.gen(function* () {
-          yield* bucketFor(id);
+          const bucket = yield* bucketFor(id);
           const beforeVersion = yield* historyBoundary(before);
           const boundary =
             beforeVersion === undefined
               ? sql`1`
               : sql`v.version < ${beforeVersion}`;
           const raw =
-            yield* sql`SELECT m.id,m.bucket,v.version AS current_version,m.content_hash,m.created_at,m.updated_at,v.content,v.tags,v.client_name,v.client_version,v.principal,v.machine_id,v.machine_name,v.working_directory,v.created_at AS version_at FROM memory_versions v JOIN memories m ON m.id=v.memory_id WHERE m.id=${id} AND ${boundary} ORDER BY v.version DESC LIMIT 27`.pipe(
+            yield* sql`SELECT v.version,v.content,v.tags,${provenanceSelect} FROM memories m LEFT JOIN memory_versions v ON v.memory_id=m.id AND ${boundary} WHERE m.id=${id} AND m.bucket=${bucket} ORDER BY v.version DESC LIMIT ${memoryBounds.pageSize + 1}`.pipe(
               unavailable,
             );
-          const rows = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(
-            raw,
-          ).pipe(unavailable);
-          return historyPage(rows);
+          if (!raw.length) return yield* Effect.fail(notFound());
+          // The left join distinguishes a live terminal page from a forgotten head.
+          const rows = yield* decodedRows(HistoryRow, raw);
+          return historyPage(rows.filter((row) => row.version !== null));
         }),
       list: (
         bucket: string,
@@ -743,35 +640,23 @@ export const memoryStore = (
         scope: MemoryScope = 'inherited',
       ) =>
         Effect.gen(function* () {
-          yield* validBucket(bucket);
-          if (!canRead(grant, bucket))
-            return yield* Effect.fail(new HttpApiError.Forbidden());
+          yield* authorizeBucket(grant, bucket, 'read');
           const after = yield* decodeCursor(bucket, scope, cursor);
-          const paths = (
-            scope === 'bucket' ? [bucket] : readLineage(bucket)
-          ).filter((path) => canRead(grant, path));
+          const paths = visiblePaths(grant, bucket, scope);
           const boundary = after
             ? sql`(m.created_at < ${after.at} OR (m.created_at=${after.at} AND m.id < ${after.id}))`
-            : sql`1`;
-          const validCursor = after
-            ? sql`EXISTS (SELECT 1 FROM memories WHERE id=${after.id} AND created_at=${after.at} AND ${sql.in('bucket', paths)})`
             : sql`1`;
           const [exists, raw] = yield* sql
             .batch([
               sql<{
                 has_bucket: number;
-                has_cursor: number;
-              }>`SELECT EXISTS (SELECT 1 FROM buckets WHERE path=${bucket}) AS has_bucket, ${validCursor} AS has_cursor`,
-              sql`SELECT ${columns} FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE ${sql.in('m.bucket', paths)} AND ${boundary} ORDER BY m.created_at DESC, m.id DESC LIMIT 26`,
+              }>`SELECT ${bucketExists(sql, bucket)} AS has_bucket`,
+              sql`SELECT ${columns} FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE ${sql.in('m.bucket', paths)} AND ${boundary} ORDER BY m.created_at DESC, m.id DESC LIMIT ${memoryBounds.pageSize + 1}`,
             ])
             .pipe(unavailable);
           if (!exists[0]?.has_bucket)
-            return yield* Effect.fail(bucketMissing());
-          if (!exists[0].has_cursor)
-            return yield* Effect.fail(new InvalidMemoryCursor());
-          const rows = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(
-            raw,
-          ).pipe(unavailable);
+            return yield* Effect.fail(bucketNotFound());
+          const rows = yield* decodedRows(Row, raw);
           return yield* Effect.tryPromise(() =>
             memoryPage(rows, bucket, scope),
           ).pipe(unavailable);
@@ -782,11 +667,10 @@ export const memoryStore = (
             yield* sql`SELECT b.path AS bucket, count(m.id) AS count FROM buckets b LEFT JOIN memories m ON m.bucket=b.path GROUP BY b.path ORDER BY b.path`.pipe(
               unavailable,
             );
-          const decoded = yield* Schema.decodeUnknownEffect(
-            Schema.Array(
-              Schema.Struct({ bucket: Schema.String, count: Schema.Number }),
-            ),
-          )(rows).pipe(unavailable);
+          const decoded = yield* decodedRows(
+            Schema.Struct({ bucket: Schema.String, count: Schema.Number }),
+            rows,
+          );
           return {
             counts: decoded.filter((row) => canRead(grant, row.bucket)),
           };

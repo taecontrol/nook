@@ -126,7 +126,7 @@ Local buckets and secrets use an in-memory D1 database, seeded with `me` by the 
 - `scripts`: builds, the local runtime, and verification.
 - `tests`: HTTP acceptance tests in workerd, browser states, and deterministic journeys.
 
-See [verification](docs/verification/README.md) for the checks and evidence, [deployment](docs/deployment.md) for installation configuration, and [ADRs](docs/adrs/) for the architectural decisions. [AGENTS.md](AGENTS.md) records the project's intent and obligations.
+See [verification](docs/verification/README.md) for the checks and evidence, [deployment](docs/deployment.md) for installation configuration, [Memory implementation](docs/memory.md) for storage ownership, and [ADRs](docs/adrs/) for the architectural decisions. [AGENTS.md](AGENTS.md) records the project's intent and obligations.
 
 ## License
 

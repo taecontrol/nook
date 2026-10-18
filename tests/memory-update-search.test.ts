@@ -23,6 +23,17 @@ beforeEach(async () => {
   app = await searchRuntime();
 });
 afterEach(() => app?.close());
+it('E18: scheduled inspection invalidates a missing vector even when embedding repair fails', async () => {
+  const settled = memoryFixture(20, { content: spanishRelease });
+  await indexMemories(app, [settled]);
+  app.services.clear();
+  await seedMemories(app, [memoryFixture(23, { content: newContent })]);
+  app.services.failEmbedding = true;
+  await app.scheduled(new Date('2030-01-01T00:00:00Z'));
+  expect(app.services.embeddingCalls).toHaveLength(1);
+  expect(app.services.inspections).toEqual([[settled.id]]);
+  expect(await marker()).toBeNull();
+});
 const client = () => memoryClient(app, '2026-07-28');
 const update = (content = newContent, tags?: string[]) =>
   client().call('update', {

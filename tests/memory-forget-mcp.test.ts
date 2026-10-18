@@ -192,32 +192,38 @@ describe.each(['owner', 'machine'] as const)('Forget #13: %s', (endpoint) => {
           rows[0].forgotten_at <= new Date().toISOString(),
       ).toBe(true);
     });
-    it('E3/E4/E12: grants precede validation and denied IDs never alter rows or FTS', async () => {
-      await seedMemories(app, [
-        memoryFixture(2, { bucket: 'personal' }),
-        memoryFixture(3, { bucket: 'work/other' }),
-        memoryFixture(4, { bucket: 'work' }),
-        memoryFixture(5, { bucket: 'me' }),
-      ]);
-      const machine = await seedMemoryMachine(app, ['work/acme']);
-      const restricted = memoryClient(app, protocol, {
-        machine: true,
-        headers: { Authorization: `Bearer ${machine.token}` },
+    if (endpoint === 'machine')
+      it('E3/E4/E12: grants precede validation and denied IDs never alter rows or FTS', async () => {
+        await seedMemories(app, [
+          memoryFixture(2, { bucket: 'personal' }),
+          memoryFixture(3, { bucket: 'work/other' }),
+          memoryFixture(4, { bucket: 'work' }),
+          memoryFixture(5, { bucket: 'me' }),
+        ]);
+        const machine = await seedMemoryMachine(app, ['work/acme']);
+        const restricted = memoryClient(app, protocol, {
+          machine: true,
+          headers: { Authorization: `Bearer ${machine.token}` },
+        });
+        const before = await forgetSnapshot(app);
+        for (const id of [
+          memoryId(2),
+          memoryId(3),
+          randomUUID(),
+          'malformed',
+        ]) {
+          expectToolError(
+            await restricted.call('forget', { id, expectedVersion: 0 }),
+            'Memory not found.',
+          );
+        }
+        for (const id of [memoryId(4), memoryId(5)])
+          expectToolError(
+            await restricted.call('forget', { id, expectedVersion: 0 }),
+            'Access to this bucket is forbidden.',
+          );
+        expect(await forgetSnapshot(app)).toEqual(before);
       });
-      const before = await forgetSnapshot(app);
-      for (const id of [memoryId(2), memoryId(3), randomUUID(), 'malformed']) {
-        expectToolError(
-          await restricted.call('forget', { id, expectedVersion: 0 }),
-          'Memory not found.',
-        );
-      }
-      for (const id of [memoryId(4), memoryId(5)])
-        expectToolError(
-          await restricted.call('forget', { id, expectedVersion: 0 }),
-          'Access to this bucket is forbidden.',
-        );
-      expect(await forgetSnapshot(app)).toEqual(before);
-    });
     it.each([0, -1, 1.5, '2', undefined])(
       'E4: invalid expectedVersion %s is private and has no write',
       async (expectedVersion) => {
@@ -334,28 +340,37 @@ describe.each(['owner', 'machine'] as const)('Forget #13: %s', (endpoint) => {
             `CREATE TRIGGER synthetic_forget_abort BEFORE ${event} ON ${table} BEGIN SELECT RAISE(ABORT,'private content ${uniqueTerm}'); END`,
           )
           .run();
+        try {
+          const before = await forgetSnapshot(app);
+          expectToolError(
+            await forget(),
+            'Service unavailable. Try again later.',
+          );
+          expect(await forgetSnapshot(app)).toEqual(before);
+        } finally {
+          await db.prepare('DROP TRIGGER synthetic_forget_abort').run();
+        }
+      }
+      await db.prepare('DROP TABLE memory_vector_removals').run();
+      try {
         const before = await forgetSnapshot(app);
         expectToolError(
           await forget(),
           'Service unavailable. Try again later.',
         );
         expect(await forgetSnapshot(app)).toEqual(before);
-        await db.prepare('DROP TRIGGER synthetic_forget_abort').run();
+      } finally {
+        await db
+          .prepare(
+            'CREATE TABLE memory_vector_removals (id TEXT PRIMARY KEY CHECK (length(id)=36), forgotten_at TEXT NOT NULL)',
+          )
+          .run();
+        await db
+          .prepare(
+            'CREATE INDEX memory_vector_removals_age ON memory_vector_removals(forgotten_at,id)',
+          )
+          .run();
       }
-      await db.prepare('DROP TABLE memory_vector_removals').run();
-      const before = await forgetSnapshot(app);
-      expectToolError(await forget(), 'Service unavailable. Try again later.');
-      expect(await forgetSnapshot(app)).toEqual(before);
-      await db
-        .prepare(
-          'CREATE TABLE memory_vector_removals (id TEXT PRIMARY KEY CHECK (length(id)=36), forgotten_at TEXT NOT NULL)',
-        )
-        .run();
-      await db
-        .prepare(
-          'CREATE INDEX memory_vector_removals_age ON memory_vector_removals(forgotten_at,id)',
-        )
-        .run();
       expect(
         logs.some((message) => message.includes(uniqueTerm)),
         'Storage failures never log memory content',
@@ -381,7 +396,7 @@ describe.each(['owner', 'machine'] as const)('Forget #13: %s', (endpoint) => {
       );
       expect(tool?.description).not.toMatch(/confirm.*owner|owner.*confirm/i);
       expect(tool?.inputSchema).toMatchObject({
-        properties: { expectedVersion: { type: 'number' } },
+        properties: { expectedVersion: { type: 'integer', minimum: 1 } },
         required: ['id', 'expectedVersion'],
       });
     });

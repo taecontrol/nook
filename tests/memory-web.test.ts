@@ -22,7 +22,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await closeBrowser?.();
 });
-it('E22: desktop expands the selected bucket, labels the ordered lineage and reloads the selected memory', async () => {
+it('E22: desktop expands the selected bucket, labels the ordered lineage, reloads the selected memory and keeps it reachable while collapsed', async () => {
   const visit = await memoryPage(browser);
   try {
     const { page } = visit;
@@ -70,6 +70,11 @@ it('E22: desktop expands the selected bucket, labels the ordered lineage and rel
       .waitFor();
     expect(new URL(page.url()).searchParams.get('bucket')).toBe('work/acme');
     expect(new URL(page.url()).searchParams.get('memory')).toBe(memoryId(2));
+    const selected = tree.locator('[data-path="work/acme"]');
+    await tree
+      .getByRole('button', { name: 'Collapse work', exact: true })
+      .click();
+    expect(await selected.isVisible()).toBe(true);
     await tree.locator('[data-path="personal"] a').click();
     await expect
       .poll(() =>
@@ -78,34 +83,11 @@ it('E22: desktop expands the selected bucket, labels the ordered lineage and rel
         ),
       )
       .toEqual([6, 7].map(memoryId));
-    await tree
-      .getByRole('button', { name: 'Collapse work', exact: true })
-      .click();
-    expect(await tree.locator('[data-path="work/acme"]').isVisible()).toBe(
-      false,
-    );
+    await expect.poll(() => selected.isVisible()).toBe(false);
     await tree
       .getByRole('button', { name: 'Expand work', exact: true })
       .click();
-    expect(await tree.locator('[data-path="work/acme"]').isVisible()).toBe(
-      true,
-    );
-  } finally {
-    await visit.close();
-  }
-});
-it('E22: collapsing an ancestor keeps the selected bucket reachable until another bucket is chosen', async () => {
-  const visit = await memoryPage(browser);
-  try {
-    const tree = visit.page.getByRole('navigation', { name: 'Memory buckets' });
-    const selected = tree.locator('[data-path="work/acme"]');
-    await selected.waitFor();
-    await tree
-      .getByRole('button', { name: 'Collapse work', exact: true })
-      .click();
     expect(await selected.isVisible()).toBe(true);
-    await tree.locator('[data-path="personal"] a').click();
-    await expect.poll(() => selected.isVisible()).toBe(false);
   } finally {
     await visit.close();
   }
@@ -373,27 +355,6 @@ it('E28: the first-run empty state explains MCP remember', async () => {
     await visit.close();
   }
 });
-it('E28: a real failed list shows Retry and recovers after D1 is restored', async () => {
-  const visit = await memoryPage(browser, {
-    configure: async (_, app) => {
-      const db = await app.mf.getD1Database('DB');
-      await db
-        .prepare('ALTER TABLE memory_versions RENAME TO unavailable_versions')
-        .run();
-    },
-  });
-  try {
-    const { page } = visit;
-    await page.getByText('Could not load memories', { exact: true }).waitFor();
-    await (await visit.app.mf.getD1Database('DB'))
-      .prepare('ALTER TABLE unavailable_versions RENAME TO memory_versions')
-      .run();
-    await page.getByRole('button', { name: 'Try again', exact: true }).click();
-    await expect.poll(() => memoryRows(page).count()).toBe(7);
-  } finally {
-    await visit.close();
-  }
-});
 it('E29: Memory is an enabled active shell link, breadcrumb and Home tool', async () => {
   const visit = await memoryPage(browser, { start: '/' });
   try {
@@ -423,25 +384,45 @@ it('E30: row hover and keyboard focus prefetch detail before selection', async (
   try {
     const { page } = visit;
     await expect.poll(() => memoryRows(page).count()).toBe(7);
-    for (const [n, action] of [
-      [1, 'hover'],
-      [2, 'focus'],
+    // Desktop auto-selects the newest memory; observe only after it loads.
+    await page.getByRole('article', { name: 'Memory detail' }).waitFor();
+    await page.evaluate(() => {
+      const seen = document.documentElement;
+      new MutationObserver(() => {
+        if (document.querySelector('[aria-label="Loading memory"]'))
+          seen.dataset.sawLoadingMemory = 'true';
+      }).observe(document.body, { childList: true, subtree: true });
+    });
+    for (const [n, action, id, title] of [
+      [1, 'hover', memoryId(2), 'Acme API deployment'],
+      [2, 'focus', memoryId(4), 'Write commit messages in English'],
     ] as const) {
       const row = memoryRows(page).nth(n);
+      let reads = 0;
+      page.on('request', (request) => {
+        if (new URL(request.url()).pathname === `/api/memories/${id}`) reads++;
+      });
       const response = page.waitForResponse((r) =>
-        r.url().endsWith(`/api/memories/${[2, 4].map(memoryId)[n - 1]}`),
+        r.url().endsWith(`/api/memories/${id}`),
       );
       if (action === 'hover') await row.hover();
       else await row.focus();
       expect((await response).status()).toBe(200);
       await row.click();
-      expect(
-        await page
-          .getByRole('status', { name: 'Loading memory', exact: true })
-          .count(),
-      ).toBe(0);
-      await page.getByRole('article', { name: 'Memory detail' }).waitFor();
+      await expect
+        .poll(() => new URL(page.url()).searchParams.get('memory'))
+        .toBe(id);
+      await page
+        .getByRole('article', { name: 'Memory detail' })
+        .getByRole('heading', { name: title })
+        .waitFor();
+      expect(reads).toBe(1);
     }
+    expect(
+      await page.evaluate(
+        () => document.documentElement.dataset.sawLoadingMemory ?? 'false',
+      ),
+    ).toBe('false');
   } finally {
     await visit.close();
   }

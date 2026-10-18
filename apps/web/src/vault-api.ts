@@ -8,7 +8,7 @@ import {
 } from '@tanstack/react-query';
 import { Redacted } from 'effect';
 import { useRef } from 'react';
-import { ApiError, runApi } from './api-client';
+import { ApiError, runApi, writeOutcome } from './api-client';
 import { preloadBuckets } from './buckets-api';
 import type { WriteOp } from './vault-state';
 import { createWriteGate, observedWrites } from './write-gate';
@@ -47,12 +47,7 @@ function without(secrets: readonly OwnerSecret[], path: string) {
   return secrets.filter((secret) => secret.path !== path);
 }
 export function unconfirmed(error: Error | null) {
-  return (
-    error instanceof ApiError &&
-    (error.outcomeUnknown ||
-      error.tag === 'ServiceUnavailable' ||
-      error.ambiguous)
-  );
+  return error !== null && writeOutcome(error) !== 'definitive';
 }
 function sendOnce(write: SecretWrite, value: Redacted.Redacted<string>) {
   const { secret, op, writeId, expectedVersion } = write;
@@ -87,7 +82,15 @@ function negativeReply(
       secret: null,
       message: `${write.secret.path} is no longer stored.`,
     };
-  error.ambiguous = ambiguous;
+  // A definitive retry cannot settle an earlier attempt that lost its answer.
+  if (ambiguous)
+    throw new ApiError(
+      error.status,
+      true,
+      error.tag,
+      error.hasPublicMessage ? error.message : undefined,
+      error.current,
+    );
   throw error;
 }
 async function send(write: SecretWrite, value: Redacted.Redacted<string>) {

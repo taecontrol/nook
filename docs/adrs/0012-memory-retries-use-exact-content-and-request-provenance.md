@@ -32,5 +32,5 @@ Provenance survives machine revocation and distinguishes authenticated identity 
 - [ADR-0004: Minimal Memory model](0004-minimal-memory-model-with-explicit-writes.md)
 - [ADR-0009: Stateless MCP](0009-stateless-mcp-with-the-typescript-sdk.md)
 - [ADR-0011: Vault retry identity](0011-vault-writes-are-idempotent-by-client-write-id-and-guarded-by-version.md)
-- [Accepted Memory storage design](../design/memory-storage.md)
+- [Memory implementation](../memory.md)
 - [Memory delivery, issue #10](https://github.com/taecontrol/nook/issues/10)

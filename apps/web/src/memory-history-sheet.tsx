@@ -17,12 +17,74 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { describeFailure } from './api-client';
 import { LoadFailure } from './failure';
-import { memoryHistoryOptions, memoryOptions } from './memory-api';
-import { tagChanges } from './memory-history-format';
+import {
+  historyBehind,
+  memoryHistoryOptions,
+  memoryKeys,
+  memoryWriteGate,
+} from './memory-api';
+import { Provenance } from './memory-format';
+import {
+  changeSummary,
+  principalLabel,
+  tagChanges,
+} from './memory-history-format';
 import { MemoryMarkdown } from './memory-markdown';
-import { Provenance } from './memory-page';
 import { formatDateTime, timeAgo } from './time';
 import type { MemoryPageModel } from './use-memory-page';
+
+function useMemoryHistory(detail: Memory) {
+  const queries = useQueryClient();
+  const busy = memoryWriteGate.useBusy();
+  const history = useQuery(
+    memoryWriteGate.queryOptions(
+      memoryHistoryOptions(detail.id, detail.version),
+      busy,
+      queries,
+    ),
+  );
+  const reconciled = useRef(0);
+  const behind = historyBehind(history.data, detail.version);
+  useEffect(() => {
+    if (
+      !history.data?.[0] ||
+      busy ||
+      memoryWriteGate.isWriting(queries) ||
+      !behind ||
+      history.isFetching ||
+      history.isError ||
+      reconciled.current === detail.version
+    )
+      return;
+    reconciled.current = detail.version;
+    void history.refetch();
+  }, [
+    history.data,
+    behind,
+    detail.version,
+    history.isFetching,
+    history.isError,
+    history.refetch,
+    queries,
+    busy,
+  ]);
+  const head = history.data?.[0];
+  const memory =
+    head && head.version > detail.version
+      ? { ...detail, ...head, updatedAt: head.provenance.at }
+      : detail;
+  useEffect(() => {
+    if (memory.version > detail.version)
+      queries.setQueryData(memoryKeys.detail(memory.id), memory);
+  }, [queries, detail, memory]);
+  return {
+    memory,
+    history: {
+      ...history,
+      isPending: history.isPending || (!history.isError && behind),
+    },
+  };
+}
 
 const ChangesView = lazy(() =>
   import('./memory-diff').then((module) => ({ default: module.ChangesView })),
@@ -33,22 +95,6 @@ type HistoryModel = MemoryPageModel & {
     'data' | 'error' | 'isPending' | 'isFetching' | 'isError' | 'refetch'
   >;
 };
-
-function principal(version: MemoryVersion) {
-  const { principal, client } = version.provenance;
-  const who = principal.kind === 'owner' ? 'Owner' : principal.name;
-  return `${who} · ${client.name}${client.version ? ` ${client.version}` : ''}`;
-}
-/** What this version changed, derived from the version before it. */
-function changeSummary(version: MemoryVersion, previous?: MemoryVersion) {
-  if (!previous) return 'First version';
-  const content = version.content !== previous.content;
-  const { added, removed } = tagChanges(previous.tags, version.tags);
-  const tags = [...added.map((t) => `+${t}`), ...removed.map((t) => `−${t}`)];
-  if (!content && !tags.length) return 'Tags only: reordered';
-  if (!content) return `Tags only: ${tags.join(' ')}`;
-  return tags.length ? `Content · tags ${tags.join(' ')}` : 'Content';
-}
 
 function VersionRows({
   versions,
@@ -93,10 +139,10 @@ function VersionRows({
                       </time>
                     </span>
                     <span
-                      title={principal(version)}
+                      title={principalLabel(version)}
                       className="mt-0.5 block truncate text-xs text-muted-foreground"
                     >
-                      {principal(version)}
+                      {principalLabel(version)}
                     </span>
                     <span className="mt-0.5 block text-xs">
                       {changeSummary(version, previous)}
@@ -135,6 +181,7 @@ function RowsSkeleton() {
   );
 }
 function HistoryFailure({ model }: { model: HistoryModel }) {
+  const queries = useQueryClient();
   return (
     <div className="p-4">
       <LoadFailure
@@ -142,7 +189,10 @@ function HistoryFailure({ model }: { model: HistoryModel }) {
         description={describeFailure(model.history.error, 'read memories')}
         cached={false}
         retrying={model.history.isFetching}
-        onRetry={() => void model.history.refetch()}
+        disabled={model.busy}
+        onRetry={() =>
+          memoryWriteGate.start(queries, () => void model.history.refetch())
+        }
         retryLabel="Retry history"
       />
     </div>
@@ -382,43 +432,8 @@ export function HistorySheet({
   /** The History button that opened the sheet; focus goes back to it on close. */
   returnFocus: RefObject<HTMLElement | null>;
 }) {
-  const queries = useQueryClient();
-  const history = useQuery(memoryHistoryOptions(detail.id, detail.version));
-  const reconciled = useRef(0);
-  const head = history.data?.[0];
-  useEffect(() => {
-    if (
-      !head ||
-      head.version >= detail.version ||
-      history.isFetching ||
-      history.isError ||
-      reconciled.current === detail.version
-    )
-      return;
-    reconciled.current = detail.version;
-    void history.refetch();
-  }, [
-    head,
-    detail.version,
-    history.isFetching,
-    history.isError,
-    history.refetch,
-  ]);
-  const memory = currentMemory(detail, history.data?.[0]);
-  useEffect(() => {
-    if (memory.version > detail.version)
-      queries.setQueryData(memoryOptions(detail.id).queryKey, memory);
-  }, [queries, detail, memory]);
-  const model = {
-    ...pageModel,
-    history: {
-      ...history,
-      isPending:
-        history.isPending ||
-        (!history.isError &&
-          (history.data?.[0]?.version ?? 0) < detail.version),
-    },
-  };
+  const { memory, history } = useMemoryHistory(detail);
+  const model = { ...pageModel, history };
   return (
     <Sheet
       open={model.historyOpen}
@@ -448,8 +463,4 @@ export function HistorySheet({
       </SheetContent>
     </Sheet>
   );
-}
-function currentMemory(detail: Memory, latest?: MemoryVersion): Memory {
-  if (!latest || latest.version <= detail.version) return detail;
-  return { ...detail, ...latest, updatedAt: latest.provenance.at };
 }

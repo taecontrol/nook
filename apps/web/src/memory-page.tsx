@@ -1,8 +1,4 @@
-import {
-  type MemoryListItem,
-  memoryTitle,
-  type Provenance as ProvenanceRecord,
-} from '@nook/contract';
+import { type MemoryListItem, memoryTitle } from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import { cn } from 'cn';
 import { ArrowLeft, BookOpen, ChevronRight, History } from 'lucide-react';
@@ -24,13 +20,15 @@ import { LoadFailure } from './failure';
 import {
   ForgetDialog,
   ForgetProblem,
+  ForgetReadFailure,
   ForgettingRow,
   MemoryActions,
   pendingRows,
   UnconfirmedForget,
 } from './memory-forget';
-import { principalName } from './memory-format';
+import { Provenance, principalName } from './memory-format';
 import { MemoryMarkdown } from './memory-markdown';
+import { memorySearch } from './memory-navigation';
 import { ColumnSummary, SearchBody, SearchField } from './memory-search';
 import { formatDateTime, recentTime } from './time';
 import { type MemoryPageModel, useMemoryPage } from './use-memory-page';
@@ -52,13 +50,14 @@ function BucketNav({ model }: { model: MemoryPageModel }) {
         {model.buckets.isPending ? (
           <BucketTreeSkeleton />
         ) : model.buckets.isError ? (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void model.buckets.refetch()}
-          >
-            Retry buckets
-          </Button>
+          <LoadFailure
+            title="Could not load buckets"
+            description={describeFailure(model.buckets.error, 'read buckets')}
+            cached={false}
+            retrying={model.buckets.isFetching}
+            onRetry={() => void model.buckets.refetch()}
+            retryLabel="Retry buckets"
+          />
         ) : (
           <BucketTree
             buckets={model.buckets.data.map((row) => row.path)}
@@ -73,18 +72,19 @@ function BucketNav({ model }: { model: MemoryPageModel }) {
         )}
       </div>
       {model.countsQuery.isError && (
-        <div className="pb-3 text-xs text-muted-foreground">
-          <p>Could not load memory counts</p>
-          <Button
-            variant="outline"
-            size="sm"
-            className="mt-2"
-            disabled={model.busy}
-            onClick={model.retryCounts}
-          >
-            Retry counts
-          </Button>
-        </div>
+        <LoadFailure
+          title="Could not load memory counts"
+          className="mb-3"
+          description={describeFailure(
+            model.countsQuery.error,
+            'read memory counts',
+          )}
+          cached={Boolean(model.countsQuery.data)}
+          retrying={model.countsQuery.isFetching}
+          disabled={model.busy}
+          onRetry={model.retryCounts}
+          retryLabel="Retry counts"
+        />
       )}
       <p className="border-t py-3 text-xs leading-5 text-muted-foreground">
         Open a bucket to see what agents working there can remember.
@@ -107,12 +107,7 @@ function MemoryRow({
         <Item asChild size="sm" className="min-w-0 flex-1">
           <Link
             to="/memory"
-            search={{
-              bucket: model.bucket,
-              scope: model.scope,
-              memory: memory.id,
-              q: model.q || undefined,
-            }}
+            search={memorySearch(model, { memory: memory.id })}
             className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
             data-memory-row={memory.id}
             data-inherited={inherited ? 'true' : undefined}
@@ -192,7 +187,7 @@ function EmptyList({ model }: { model: MemoryPageModel }) {
                 <code>remember</code> to store one in a bucket.
               </>
             ) : model.scope === 'bucket' ? (
-              `There are no memories stored in ${model.bucket}. Include inherited to see memories from its ancestors.`
+              emptyListCopy(model)
             ) : (
               `Agents working in ${model.bucket} have no memories to read yet.`
             )}
@@ -291,59 +286,13 @@ function MemoryList({ model }: { model: MemoryPageModel }) {
       </div>
       <ColumnSummary model={model} />
       <UnconfirmedForget model={model} />
+      <ForgetReadFailure model={model} />
       {model.searching ? (
         <SearchBody model={model} />
       ) : (
         <ListBody model={model} />
       )}
     </section>
-  );
-}
-export function Provenance({
-  provenance,
-  label = 'Stored',
-}: {
-  provenance: ProvenanceRecord;
-  label?: string;
-}) {
-  const { client, workingDirectory, at } = provenance;
-  return (
-    <dl className="mt-5 grid gap-x-7 gap-y-3 border-y py-4 text-xs sm:grid-cols-2">
-      <div>
-        <dt className="text-muted-foreground">Written by</dt>
-        <dd className="mt-0.5 font-medium wrap-anywhere">
-          {principalName({ provenance })}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-muted-foreground">
-          Client <span>(as reported)</span>
-        </dt>
-        <dd className="mt-0.5 font-medium wrap-anywhere">
-          {client.name}
-          {client.version ? ` ${client.version}` : ''}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-muted-foreground">{label}</dt>
-        <dd>
-          <time dateTime={at} className="mt-0.5 block font-medium">
-            {formatDateTime(at)}
-          </time>
-        </dd>
-      </div>
-      {workingDirectory && (
-        <div className="min-w-0">
-          <dt className="text-muted-foreground">Working directory</dt>
-          <dd
-            title={workingDirectory}
-            className="mt-0.5 break-all font-mono font-medium"
-          >
-            {workingDirectory}
-          </dd>
-        </div>
-      )}
-    </dl>
   );
 }
 function emptyReading(model: MemoryPageModel) {
@@ -413,14 +362,7 @@ function MemoryBack({ model }: { model: MemoryPageModel }) {
   return (
     <div className="sticky top-0 z-10 border-b bg-background px-5 py-3 lg:hidden">
       <Button asChild variant="ghost" size="sm">
-        <Link
-          to="/memory"
-          search={{
-            bucket: model.bucket,
-            scope: model.scope,
-            q: model.q || undefined,
-          }}
-        >
+        <Link to="/memory" search={memorySearch(model)}>
           <ArrowLeft />
           {model.q ? 'Results' : 'Memories'}
         </Link>
@@ -527,12 +469,8 @@ function PhoneBucketsLink({ model }: { model: MemoryPageModel }) {
           to="/memory"
           search={
             model.browse
-              ? {
-                  bucket: model.bucket,
-                  scope: model.scope,
-                  q: model.q || undefined,
-                }
-              : { scope: model.scope, q: model.q || undefined }
+              ? memorySearch(model)
+              : memorySearch({ scope: model.scope, q: model.q })
           }
         >
           {model.browse ? (

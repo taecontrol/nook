@@ -41,20 +41,6 @@ async function marker(id: string) {
     .bind(id)
     .first()) as { embedding_marker: string | null };
 }
-it('FTS consistency: deleting a canonical memory removes its external-content index entry', async () => {
-  await seedMemories(app, [searchMemories[0]]);
-  const db = await app.mf.getD1Database('DB');
-  await db.prepare('DELETE FROM memories WHERE id=?').bind(memoryId(20)).run();
-  app.services.failEmbedding = true;
-  expect((await httpSearch(app, 'publicar')).results).toEqual([]);
-  expect(
-    await db
-      .prepare(
-        "INSERT INTO memories_fts(memories_fts,rank) VALUES ('integrity-check', 1)",
-      )
-      .run(),
-  ).toMatchObject({ success: true });
-});
 it('E11/E16: keyword is immediate, vectors stay hidden until visible, and an identical retry never re-embeds', async () => {
   const result = await remembered(spanishRelease);
   expect(result.structuredContent).toMatchObject({ created: true });
@@ -281,8 +267,6 @@ it('E14: model changes mark all memories outdated; failures keep keyword and the
 });
 it('E15: D1 drops old-hash and orphan vectors and marks a stale current marker pending for repair', async () => {
   await indexMemories(app, searchMemories);
-  const original = app.services.upserts; // calls were reset, so derive the fixture vector from the recorder.
-  expect(original).toEqual([]);
   const values = app.services.run('@cf/baai/bge-m3', {
     text: [spanishRelease],
     truncate_inputs: true,

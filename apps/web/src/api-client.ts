@@ -9,7 +9,6 @@ import { FetchHttpClient, type HttpClient, HttpClientError } from 'effect/http';
 import { HttpApiClient } from 'effect/http-api';
 
 export class ApiError extends Error {
-  ambiguous = false;
   /** The message is one the contract lets the owner read. */
   readonly hasPublicMessage: boolean;
   constructor(
@@ -22,6 +21,12 @@ export class ApiError extends Error {
     super(message ?? `Request failed with ${status}`);
     this.hasPublicMessage = message !== undefined;
   }
+}
+
+export function writeOutcome(error: unknown): 'definitive' | 'unconfirmed' {
+  return error instanceof ApiError && !error.outcomeUnknown
+    ? 'definitive'
+    : 'unconfirmed';
 }
 // Errors the contract declares carry their status; Cloudflare Access answers
 // 401 and 403 before the Worker does; anything else is unavailable.
@@ -47,12 +52,15 @@ function apiRunner<Client>(
         Effect.mapError((failure) => {
           const error = failure as { _tag?: string; current?: BucketGrant };
           const tag = error._tag ?? 'ServiceUnavailable';
+          const status = statusOf(error, tag);
           return new ApiError(
-            statusOf(error, tag),
+            status,
             // Failed delivery or decoding and storage errors can follow commit.
-            HttpClientError.isHttpClientError(error) ||
-              Schema.isSchemaError(error) ||
-              tag === 'ServiceUnavailable',
+            status !== 401 &&
+              status !== 403 &&
+              (HttpClientError.isHttpClientError(error) ||
+                Schema.isSchemaError(error) ||
+                tag === 'ServiceUnavailable'),
             tag,
             publicMessage(error),
             tag === 'MachineAccessChanged' ? error.current : undefined,
@@ -84,6 +92,8 @@ export function describeFailure(
     );
   if (status === 403)
     return joined(`Only this installation’s owner can ${action}.`, outcome);
+  if (error instanceof ApiError && error.hasPublicMessage)
+    return joined(error.message, outcome);
   return joined(
     'Nook is unavailable right now.',
     outcome ?? 'Try again in a moment.',

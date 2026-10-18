@@ -1,16 +1,21 @@
-import type { MemoryListItem, OwnerMemorySearchResult } from '@nook/contract';
 import {
-  type Query,
   type QueryClient,
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query';
-import { ApiError, runApi } from './api-client';
+import { ApiError, runApi, writeOutcome } from './api-client';
 import {
   memoryHistoryOptions,
   memoryOptions,
   memoryWriteKey,
 } from './memory-api';
+import {
+  forgetFromCache,
+  invalidateMemoryLists,
+  memoryQuery,
+  restoreMemoryCache,
+  writeMemory,
+} from './memory-cache';
 
 export type ForgetSubject = {
   id: string;
@@ -19,74 +24,16 @@ export type ForgetSubject = {
   version?: number;
 };
 export type ForgetRequest = ForgetSubject & { version: number };
-type Pages = {
-  pages: { memories: MemoryListItem[]; next: string | null }[];
-  pageParams: unknown[];
-};
-type Results = {
-  results: OwnerMemorySearchResult[];
-  meaning: 'available' | 'unavailable';
-};
-const queryKinds = new Set([
-  'memories',
-  'memory-counts',
-  'memory-search',
-  'memory',
-  'memory-history',
-]);
-const memoryQuery = (query: Query) => queryKinds.has(String(query.queryKey[0]));
-function affectedQuery(query: Query, subject: ForgetRequest) {
-  const kind = query.queryKey[0];
-  return kind === 'memory' || kind === 'memory-history'
-    ? query.queryKey[1] === subject.id
-    : memoryQuery(query);
+export type ForgetWrite = ForgetRequest & { check?: true };
+export type ForgetResult = 'forgotten' | 'failed' | 'changed';
+
+export function latestForget(queries: QueryClient) {
+  return queries
+    .getMutationCache()
+    .findAll({ mutationKey: memoryWriteKey })
+    .at(-1);
 }
-function removedList(data: Pages, id: string): Pages {
-  return {
-    ...data,
-    pages: data.pages.map((page) => ({
-      ...page,
-      memories: page.memories.filter((memory) => memory.id !== id),
-    })),
-  };
-}
-function removeCached(
-  queries: QueryClient,
-  query: Query,
-  subject: ForgetRequest,
-) {
-  const key = query.queryKey;
-  const data = query.state.data;
-  if (data === undefined) return;
-  switch (key[0]) {
-    case 'memories':
-      queries.setQueryData(key, removedList(data as Pages, subject.id));
-      break;
-    case 'memory-counts': {
-      const counts = data as { counts: { bucket: string; count: number }[] };
-      queries.setQueryData(key, {
-        counts: counts.counts.map((row) =>
-          row.bucket === subject.bucket
-            ? { ...row, count: Math.max(0, row.count - 1) }
-            : row,
-        ),
-      });
-      break;
-    }
-    case 'memory-search': {
-      const results = data as Results;
-      queries.setQueryData(key, {
-        ...results,
-        results: results.results.filter((row) => row.id !== subject.id),
-      });
-      break;
-    }
-    default:
-      if (key[1] === subject.id)
-        queries.removeQueries({ queryKey: key, exact: true });
-  }
-}
-async function refreshChanged(queries: QueryClient, id: string) {
+export async function refreshChanged(queries: QueryClient, id: string) {
   queries.removeQueries({ queryKey: memoryOptions(id).queryKey, exact: true });
   queries.removeQueries({
     queryKey: memoryHistoryOptions(id).queryKey,
@@ -102,7 +49,6 @@ async function refreshChanged(queries: QueryClient, id: string) {
   });
 }
 
-export { refreshChanged };
 export async function readForgetOutcome(id: string) {
   try {
     return await runApi((api) => api.memories.get({ params: { id } }));
@@ -111,10 +57,7 @@ export async function readForgetOutcome(id: string) {
     throw error;
   }
 }
-function unknownOutcome(error: unknown): error is ApiError {
-  return error instanceof ApiError && error.outcomeUnknown;
-}
-async function forgetRequest(subject: ForgetRequest) {
+async function forgetRequest(subject: ForgetRequest): Promise<ForgetResult> {
   try {
     await runApi((api) =>
       api.memories.forget({
@@ -123,39 +66,50 @@ async function forgetRequest(subject: ForgetRequest) {
       }),
     );
   } catch (error) {
-    if (error instanceof ApiError && error.tag === 'MemoryNotFound') return;
-    if (unknownOutcome(error)) {
-      try {
-        if ((await readForgetOutcome(subject.id)) === null) return;
-      } catch {
-        error.ambiguous = true;
-      }
+    if (error instanceof ApiError && error.tag === 'MemoryNotFound')
+      return 'forgotten';
+    if (writeOutcome(error) !== 'definitive') {
+      const current = await readForgetOutcome(subject.id).catch(
+        () => undefined,
+      );
+      if (current === null) return 'forgotten';
     }
     throw error;
   }
+  return 'forgotten';
+}
+async function checkRequest(
+  queries: QueryClient,
+  subject: ForgetRequest,
+): Promise<ForgetResult> {
+  const token = latestForget(queries)?.mutationId;
+  const current = await readForgetOutcome(subject.id);
+  if (latestForget(queries)?.mutationId !== token) return 'forgotten';
+  if (!current) return 'forgotten';
+  writeMemory(queries, current);
+  await invalidateMemoryLists(queries);
+  return current.version === subject.version ? 'failed' : 'changed';
 }
 export function useForgetMemory() {
   const queries = useQueryClient();
   return useMutation({
     mutationKey: memoryWriteKey,
-    mutationFn: forgetRequest,
+    gcTime: Infinity,
+    mutationFn: (subject: ForgetWrite) =>
+      subject.check ? checkRequest(queries, subject) : forgetRequest(subject),
     onMutate: async (subject) => {
+      if (subject.check) return;
       await queries.cancelQueries({ predicate: memoryQuery });
-      const affected = {
-        predicate: (query: Query) => affectedQuery(query, subject),
-      };
-      const snapshot = queries.getQueriesData(affected);
-      for (const query of queries.getQueryCache().findAll(affected))
-        removeCached(queries, query, subject);
-      return snapshot;
+      return forgetFromCache(queries, subject);
     },
     onError: async (error, subject, snapshot) => {
-      if (error instanceof ApiError && error.ambiguous) return;
-      for (const [key, data] of snapshot ?? []) queries.setQueryData(key, data);
+      if (subject.check || writeOutcome(error) !== 'definitive') return;
+      if (snapshot) restoreMemoryCache(queries, snapshot);
       if (error instanceof ApiError && error.tag === 'MemoryChanged')
         await refreshChanged(queries, subject.id).catch(() => {});
     },
     onSettled: (_data, _error, _subject, snapshot) => {
+      // Do not retain forgotten content in the settled mutation.
       if (snapshot) snapshot.length = 0;
       return queries.invalidateQueries({
         predicate: memoryQuery,

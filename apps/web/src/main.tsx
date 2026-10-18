@@ -14,7 +14,8 @@ import { preloadBuckets } from './buckets-api';
 import { Home } from './home';
 import { identityOptions } from './identity';
 import { preloadMachines } from './machines-api';
-import { type MemorySearch, preloadMemory } from './memory-api';
+import { preloadMemory } from './memory-api';
+import { memoryLocation } from './memory-location';
 import { Shell } from './shell';
 import { preloadVault } from './vault-api';
 import './index.css';
@@ -51,20 +52,6 @@ const buckets = createRoute({
     preloadBuckets(context.queryClient);
   },
 });
-function historySearch(search: Record<string, unknown>) {
-  return {
-    ...(search.history === '1' || search.history === 1
-      ? { history: '1' as const }
-      : {}),
-    ...(Number.isSafeInteger(Number(search.version)) &&
-    Number(search.version) > 0
-      ? { version: Number(search.version) }
-      : {}),
-    ...(search.changes === '1' || search.changes === 1
-      ? { changes: '1' as const }
-      : {}),
-  };
-}
 const router = createRouter({
   routeTree: root.addChildren([
     owner.addChildren([
@@ -77,21 +64,8 @@ const router = createRouter({
           () => import('./memory-page'),
           'MemoryPage',
         ),
-        validateSearch: (search: Record<string, unknown>): MemorySearch => ({
-          ...(typeof search.bucket === 'string'
-            ? { bucket: search.bucket }
-            : {}),
-          ...(typeof search.memory === 'string'
-            ? { memory: search.memory }
-            : {}),
-          ...(search.scope === 'bucket' || search.scope === 'inherited'
-            ? { scope: search.scope }
-            : {}),
-          ...(typeof search.q === 'string' && search.q.trim()
-            ? { q: search.q }
-            : {}),
-          ...historySearch(search),
-        }),
+        validateSearch: (search: Record<string, unknown>) =>
+          memoryLocation(search).search,
         loaderDeps: ({ search }) => search,
         loader: ({ context, deps }) => {
           preloadMemory(context.queryClient, deps);

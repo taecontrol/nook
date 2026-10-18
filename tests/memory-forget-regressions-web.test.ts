@@ -50,7 +50,7 @@ it.each([false, true])(
         }),
       ],
       start: `/memory?bucket=work/acme/api&scope=bucket&memory=${forgottenId}`,
-      configure: async (page, app) => {
+      configure: async (page) => {
         if (holdRoute)
           await page.route('**/vault-page-*.js', async (route) => {
             vaultArrived.resolve();
@@ -58,19 +58,14 @@ it.each([false, true])(
             await route.continue().catch(() => {});
           });
         page.on('pageerror', (error) => errors.push(error.message));
-        await (await app.mf.getD1Database('DB'))
-          .prepare(
-            "CREATE TRIGGER synthetic_forget_abort BEFORE DELETE ON memories BEGIN SELECT RAISE(ABORT,'synthetic failure'); END",
-          )
-          .run();
         await page.route(
           '**/api/memories/*?expectedVersion=*',
           async (route) => {
-            const response = await route.fetch();
-            expect(response.status()).toBe(503);
             arrived.resolve();
             await gate.promise;
-            await route.fulfill({ response }).catch(() => {});
+            await route
+              .fulfill({ status: 403, body: 'Access denied' })
+              .catch(() => {});
           },
         );
       },
@@ -85,24 +80,22 @@ it.each([false, true])(
         .getByText('Forgetting Release process…', { exact: true })
         .waitFor();
       expect(await memoryRows(page).count()).toBe(0);
-      console.info('before-leaving-memory', { url: page.url() });
       await page.getByRole('link', { name: 'Vault', exact: true }).click();
       await expect.poll(() => new URL(page.url()).pathname).toBe('/vault');
       if (holdRoute) await vaultArrived.promise;
-      const recovery = page.waitForResponse(
-        (response) =>
-          response.request().method() === 'GET' &&
-          new URL(response.url()).pathname === `/api/memories/${forgottenId}`,
+      const rejection = page.waitForResponse(
+        (response) => response.request().method() === 'DELETE',
       );
       gate.resolve();
-      const response = await recovery;
-      expect(response.status()).toBe(200);
+      const response = await rejection;
+      expect(response.status()).toBe(403);
       await response.finished();
       await rendered(page);
       vaultGate.resolve();
       await page.waitForLoadState('networkidle');
-      console.info('late-forget-failure', { url: page.url(), errors });
       expect(new URL(page.url()).pathname).toBe('/vault');
+      await page.getByRole('heading', { name: 'Vault', exact: true }).waitFor();
+      expect(errors).toEqual([]);
     } finally {
       vaultGate.resolve();
       gate.resolve();
@@ -167,11 +160,6 @@ it('E18/E20: an older Check again response preserves a second memory forget prog
     await (await checked).finished();
     // Let the delivered read and its React update finish while DELETE B is held.
     await rendered(page);
-    console.info('check-again-during-forget', {
-      reads,
-      progress: await progress.count(),
-      statuses: await page.getByRole('status').allTextContents(),
-    });
     expect(await progress.count()).toBe(1);
     deleteGate.resolve();
     await page
@@ -220,17 +208,9 @@ it('E18/E24: forgetting the last loaded row keeps Load more usable during recove
       return url.pathname === '/api/memories' && url.searchParams.has('cursor');
     });
     await more.click();
-    const response = await next;
-    const body = await response.json();
+    await (await next).finished();
     await rendered(page);
     const error = page.getByText('Could not load memories', { exact: true });
-    console.info('forgotten-page-boundary', {
-      boundary,
-      status: response.status(),
-      error: body._tag,
-      visibleRows: await memoryRows(page).count(),
-      failures: await error.allTextContents(),
-    });
     expect(await error.count()).toBe(0);
     recoveryGate.resolve();
     await expect
@@ -284,7 +264,6 @@ it.each([
         .filter({ hasText: 'Not forgotten' });
       await alert.waitFor();
       const copy = await alert.innerText();
-      console.info('forget-auth-rejection', { status, copy });
       expect(copy).toContain(expected);
       expect(copy).not.toContain('(503)');
     } finally {

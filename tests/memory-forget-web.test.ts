@@ -91,7 +91,7 @@ describe.each([
       await visit.close();
     }
   });
-  it('E20: 503 restores the row and counts; repeated Try again submits only one new request', async () => {
+  it('E20: Check again resolves a 503 before retry; repeated Try again submits only one new request', async () => {
     let fail = true;
     let deletes = 0;
     const visit = await forgetPage(browser, {
@@ -121,6 +121,14 @@ describe.each([
       const { page } = visit;
       await openForget(page);
       await confirmForget(page);
+      const unconfirmed = page
+        .getByRole('alert')
+        .filter({ hasText: 'Forget not confirmed' });
+      await unconfirmed.waitFor();
+      expect(await unconfirmed.textContent()).not.toContain(
+        'Nothing was deleted',
+      );
+      await unconfirmed.getByRole('button', { name: 'Check again' }).click();
       const alert = page
         .getByRole('alert')
         .filter({ hasText: 'Not forgotten' });
@@ -380,32 +388,19 @@ it('E19: a search confirmation waits for detail to obtain the displayed version'
 it('E20: exact cached detail and history return before held recovery reads', async () => {
   const recovery = deferred();
   const visit = await forgetPage(browser);
-  let confirmationRead = true;
   try {
-    const { page, app } = visit;
+    const { page } = visit;
     await page.getByRole('button', { name: /History.*3 versions/ }).click();
     await page.locator('[data-version-row="1"]').waitFor();
     await page
       .getByRole('dialog')
       .getByRole('button', { name: 'Close', exact: true })
       .click();
-    await (await app.mf.getD1Database('DB'))
-      .prepare(
-        "CREATE TRIGGER synthetic_forget_abort BEFORE DELETE ON memories BEGIN SELECT RAISE(ABORT,'synthetic failure'); END",
-      )
-      .run();
+    await page.route('**/api/memories/*?expectedVersion=*', (route) =>
+      route.fulfill({ status: 403, body: 'Access denied' }),
+    );
     await page.route(`**/api/memories/${forgottenId}{,/*}`, async (route) => {
       if (route.request().method() !== 'GET') {
-        await route.continue();
-        return;
-      }
-      // Permit the authoritative outcome read; hold later recovery reads.
-      if (
-        confirmationRead &&
-        new URL(route.request().url()).pathname ===
-          `/api/memories/${forgottenId}`
-      ) {
-        confirmationRead = false;
         await route.continue();
         return;
       }
@@ -572,18 +567,15 @@ it('E18/E20: one failed forget cannot restore a neighbor history that already re
   let recovering = false;
   const visit = await forgetPage(browser, {
     start: `/memory?bucket=work/acme&memory=${neighbor}`,
-    configure: async (page, app) => {
-      await (await app.mf.getD1Database('DB'))
-        .prepare(
-          `CREATE TRIGGER synthetic_forget_abort BEFORE DELETE ON memories WHEN OLD.id='${forgottenId}' BEGIN SELECT RAISE(ABORT,'synthetic failure'); END`,
-        )
-        .run();
+    configure: async (page) => {
       await page.route(
         `**/api/memories/${forgottenId}?expectedVersion=*`,
         async (route) => {
           arrived.resolve();
           await gate.promise;
-          await route.continue().catch(() => {});
+          await route
+            .fulfill({ status: 403, body: 'Access denied' })
+            .catch(() => {});
         },
       );
       await page.route(`**/api/memories/${neighbor}{,/*}`, async (route) => {
@@ -608,9 +600,13 @@ it('E18/E20: one failed forget cannot restore a neighbor history that already re
       .getByRole('dialog')
       .getByRole('button', { name: 'Close', exact: true })
       .click();
-    await openForget(page, forgottenId);
-    await confirmForget(page);
-    await arrived.promise;
+    // Keep the previously rendered detail until the independent history read
+    // reports absence; the pending forget will cancel this stale detail read.
+    await page.route(`**/api/memories/${neighbor}`, async (route) => {
+      const response = await route.fetch();
+      await recovery.promise;
+      await route.fulfill({ response }).catch(() => {});
+    });
     await page.clock.setFixedTime(new Date('2030-01-01T00:00:00Z'));
     expect(
       (
@@ -631,6 +627,17 @@ it('E18/E20: one failed forget cannot restore a neighbor history that already re
       .getByText('Could not load history', { exact: true })
       .waitFor();
     expect(await bodyTitle.count()).toBe(0);
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Close', exact: true })
+      .click();
+    await openForget(page, forgottenId);
+    await confirmForget(page);
+    await arrived.promise;
+    await page.goBack();
+    await history
+      .getByText('Could not load history', { exact: true })
+      .waitFor();
     recovering = true;
     gate.resolve();
     await expect.poll(() => row(page).count()).toBe(1);

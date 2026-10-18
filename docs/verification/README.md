@@ -292,7 +292,7 @@ Fetch `origin/main` before verification: a migration present there cannot change
 
 ## Memory remember and reader
 
-Issue #10 runs against the migrated production Worker in workerd and real local D1, with synthetic Access assertions and machine tokens. MCP examples run on owner and machine endpoints under both observed protocol revisions. Browser tests use temporary Chromium contexts; the refocus case uses the genuine visibility fixture. The existing host-resource tripwire remains active. Memory writes create no Audit entry.
+Issue #10 runs against the migrated production Worker in workerd and real local D1, with synthetic Access assertions and machine tokens. MCP examples run on owner and machine endpoints under both observed protocol revisions; restricted-grant and revocation cases, which always use a machine token, run on the machine endpoint only. Browser tests use temporary Chromium contexts; the refocus case uses the genuine visibility fixture. The existing host-resource tripwire remains active. Memory writes create no Audit entry.
 
 | Example | Test or capture |
 | --- | --- |
@@ -327,20 +327,32 @@ Issue #10 runs against the migrated production Worker in workerd and real local 
 | E29 | `memory-web.test.ts`, `web.test.ts`: enabled Home/sidebar link, active state and breadcrumb. |
 | E30 | `memory-web.test.ts`, `memory-refresh-web.test.ts`, `memory-reader-regressions.test.ts`: hover/focus detail prefetch, real-tab agent-write refresh and preservation of a pending optimistic bucket through refocus. |
 | E31 | `load-time.test.ts`, `memory-load-time.test.ts`, `pnpm verify:load-time`: mandatory five-sample Memory budgets, real measurement viewport/destination/first-screen checks, production 4G cold open and intent navigation, with 60 bucket memories. |
-| E32 | `memory-captures.test.ts`: seven states at 1440×900 and 390×844, light/dark, plus full phone detail. |
+| E32 | `memory-captures.test.ts`: seven states at 1440×900 and 390×844, light/dark, plus full phone detail; desktop detail is the auto-selected work-acme capture. |
 | E33 | `memory-mcp.test.ts`, `memory-worker.test.ts`, `memory-web.test.ts`: private denials, failed writes, malformed array/object content under both protocols and endpoints, and console/network behavior. |
 
 `tests/journeys/owner.e2e.ts` additionally remembers through MCP and opens the stored memory using deterministic locators under strict cache replay and zero retries. `memory-worker.test.ts` observes real D1 calls through the existing test checkpoint wrapper: one three-statement batch for remember and duplicate retries, one statement for get, one two-statement batch per list page without per-item reads, and one aggregate statement for counts. Observations contain labels and batch sizes, never SQL, bindings or rows.
 
-Paging cursors are versioned, checksummed Base64url JSON bound to the bucket, scope and existing ordering pair. The checksum classifies ordinary payload alterations as malformed; authorization remains the bucket grant on every request. Native D1 tests also prove schema constraints, version deletion cascading and current-version joins without introducing an update API.
+Paging cursors are versioned, checksummed Base64url JSON bound to the bucket,
+scope and ordering position. The boundary memory may have been forgotten;
+HTTP tests forget the last row of page one and traverse the remaining pages
+without gaps or duplicates in both scopes. The checksum classifies ordinary
+payload alterations as malformed; authorization remains the bucket grant on
+every request. Native D1 tests also prove schema constraints and current-version
+joins; forgetting proves that deleting a head cascades to its versions.
 
-The 28 viewport PNGs and two full phone detail PNGs are `memory-*` files in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. The selected hybrid's three independent desktop columns, shared Vault bucket tree, phone push flow, scope toggle, and nonclickable image chip are the visual reference. Captures omit the prototype scenario selector. A plain first heading already shown in full by the detail title is omitted from the body; long, multiline and formatted headings are retained. Long row titles remain available through the link's title attribute.
+`memory-mcp-version-boundary.test.ts` pins the shared positive finite integer
+JSON Schema and identical missing-version wording for update and forget.
+`memory-contract.test.ts` rejects invalid version values and verifies that
+HTTP list/search declare no unreachable InvalidMemory error. Grant-denial
+tests also omit the update version to prove authorization still comes first.
+
+The 26 viewport PNGs and two full phone detail PNGs are `memory-*` files in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. The selected hybrid's three independent desktop columns, shared Vault bucket tree, phone push flow, scope toggle, and nonclickable image chip are the visual reference. Captures omit the prototype scenario selector. A plain first heading already shown in full by the detail title is omitted from the body; long, multiline and formatted headings are retained. Long row titles remain available through the link's title attribute.
 
 The load-time stage uses the unchanged 9 Mbps down, 3 Mbps up, 85 ms latency profile at 390×844, cache disabled, without CPU throttling. Cold `/memory?bucket=work/acme` must show real memory rows within 1000 ms. Home-to-Memory navigation after settled hover preloading must show the bucket tree within 100 ms. Both measurements use five animation-frame samples and fail independently when absent, malformed, or over budget.
 
 ## Memory search
 
-Issue #11 uses the production Worker bundle, migrated D1, and its genuine scheduled handler under Miniflare. MCP tests cover both protocols and both owner and machine endpoints. Chromium uses the existing temporary-profile launcher and host-resource tripwire. `pnpm verify` needs no Cloudflare account or credential.
+Issue #11 uses the production Worker bundle, migrated D1, and its genuine scheduled handler under Miniflare. MCP tests cover both protocols and both owner and machine endpoints; the revoked-token case runs on the machine endpoint only. Chromium uses the existing temporary-profile launcher and host-resource tripwire. `pnpm verify` needs no Cloudflare account or credential.
 
 | Example | Evidence |
 | --- | --- |
@@ -355,7 +367,7 @@ Issue #11 uses the production Worker bundle, migrated D1, and its genuine schedu
 | E23 | `memory-search-deploy.test.ts`: the workflow's actual shell against a temporary command fixture, missing index/metadata combinations, idempotent reruns, delayed metadata readiness and timeout without deployment. |
 | E24 | Pending owner production acceptance in [deployment.md](../deployment.md#search-e24-owner-acceptance-after-merge-pending). |
 
-`tests/fixtures/bge-m3.json.gz` records exact-text embeddings from the authorized bge-m3 experiment. `scripts/record-search-fixtures.ts` is an explicit, separate recording tool and never runs in verification. The strict embedder rejects unrecorded input; `memory-search-stand-ins.test.ts` also proves the observed Vectorize metadata-index timing, replacement/insert behavior, delayed visibility and request limits. D1 round trips and AI/index calls are counted without recording SQL or bindings. Dense 16 KiB content, large bilingual content and six-level paths with valid 32-character segments are included.
+`tests/fixtures/bge-m3.json.gz` records exact-text embeddings from the authorized bge-m3 experiment. `scripts/record-search-fixtures.ts` is an explicit, separate recording tool and never runs in verification. The strict embedder rejects unrecorded input; `memory-search-stand-ins.test.ts` also proves the observed Vectorize metadata-index timing, upsert replacement, delayed visibility and request limits. D1 round trips and AI/index calls are counted without recording SQL or bindings. Dense 16 KiB content, large bilingual content and six-level paths with valid 32-character segments are included.
 
 The MCP and owner HTTP cases also distinguish tag-free prefix and accent
 matches, all-tag filtering on keyword hits, duplicate-tag rejection before AI,
@@ -365,8 +377,8 @@ a vector query and malformed Vectorize responses with keyword fallback.
 Owner HTTP also preserves all three query-validation messages before any AI
 or vector call. The shared contract error registry includes
 `InvalidMemorySearch` with its annotated 400 status.
-Synchronization cases require the native external-content FTS integrity check
-to pass after deleting a canonical row. They hold a real embedding
+Forgetting requires the native external-content FTS integrity check to pass
+after deleting a canonical row. Synchronization cases hold a real embedding
 request to require creation and keyword search before indexing completes;
 they also inspect workerd's scheduled outcome after a failed upsert.
 `memory-search-snippet.test.ts`
@@ -393,15 +405,15 @@ tripwire remain mandatory under `pnpm verify`.
 
 | Examples | Tests or captures |
 | --- | --- |
-| E1–E8 | `memory-update-mcp.test.ts`: both protocols and both endpoints, immutable provenance, original creation time, exact tags, no-op retries, intervening writers, byte-checked duplicates, own earlier text, grant denials, private validation and exact UTF-8 limits. Simulated self/other hash collisions return only ServiceUnavailable and never write. Rejected writes compare all version/head/marker facts and run FTS integrity checks. |
+| E1–E8 | `memory-update-mcp.test.ts`: both protocols and both endpoints (grant denials on the machine endpoint), immutable provenance, original creation time, exact tags, no-op retries, intervening writers, byte-checked duplicates, own earlier text, grant denials, private validation and the 16385-byte UTF-8 rejection (remember E11 owns the shared 16 KiB acceptance). Simulated self/other hash collisions return only ServiceUnavailable and never write. Rejected writes compare all version/head/marker facts and run FTS integrity checks. |
 | E9–E10 | The same matrix: ten distinct or identical writers append exactly one row; all nine distinct losers receive the changed error. Update/remember in both serialized orders preserve current-content identity. |
-| E11–E14 | The same matrix: real aborting triggers in S1 and S2 prove rollback and retry; revoked tokens fail before the SDK; exact inventory/annotations/descriptions; updated buckets retain HTTP and MCP deletion guards. |
+| E11–E14 | The same matrix: real aborting triggers in S1 and S2 prove rollback and retry; revoked tokens fail before the SDK; exact update annotations/descriptions. The tool inventory belongs to `mcp-worker.test.ts` and `reveal-worker.test.ts`; `memory-worker.test.ts` E15 owns the memory deletion guard, which reads heads that update keeps. |
 | E15 | `memory-history-worker.test.ts`: the existing D1 checkpoint decorator requires one bucket preflight and one three-statement batch for success, no-op, stale and duplicate outcomes. |
 | E16–E19 | `memory-update-search.test.ts`: current keyword postings/snippets/tags, stale meaning candidates filtered through MCP and HTTP while query embeddings remain available, tags-only markers, pre-upsert id/hash filtering across equal-content memories in different buckets, late upsert completion, actual-index repair without search, missing/wrong metadata, settle window, inspection failure and mixed-marker rotating sweeps. Held inspection responses cannot erase a tags-only update or replacement-model acknowledgement. `memory-search-sync.test.ts` proves the shared 50/32 bounds and now updates through the real tool. |
 | E20–E21 | `memory-history-worker.test.ts`: owner history with exact content/provenance, existing version-one rows, invalid and valid paging boundaries, restricted-grant 404s before cursor validation and machine credential boundaries. The browser's thirty-version case traverses history pages. |
 | E22 | `memory-history-web.test.ts`: zero pre-intent history requests, local version count, hover and keyboard preload of both data and the sheet chunk, no diff chunk on intent, and zero extra requests on open. |
 | E23–E25 | The same browser suite: shadcn Item rows, ordering, summaries including tag reorder, absolute times, writers, fixed header/internal scrolling, Markdown, arrows, directional source/word diffs and gutters, exactly three lines of fold context, tags-only copy, added/removed tags and disabled version-one comparison. It also covers a fresh history with cached detail; `memory-history-cache-race.test.ts` covers older cached history and held old responses after a newer detail, using genuine tab visibility changes. |
-| E26–E27 | The same suite: deep links, reload, Back, every dismissal and restored focus; real delayed reads, row-height skeletons, retry, inherited and version-one memories, and 16 KiB Unicode with six maximum-length segments and long provenance at 390 px. `memory-history-cache-race.test.ts` also jumps between open histories through genuine browser history and proves that local reconciliation belongs to the selected memory. |
+| E26–E27 | The same suite: deep links, reload, Back, every dismissal (overlay at 1440 px, where it is reachable) and restored focus; real delayed reads, row-height skeletons, retry, inherited and version-one memories, and 16 KiB Unicode with six maximum-length segments and long provenance at 390 px. `memory-history-cache-race.test.ts` also jumps between open histories through genuine browser history and proves that local reconciliation belongs to the selected memory. |
 | E28 | `memory-history-web.test.ts` observes separate lazy sheet and diff script requests. Existing `memory-load-time.test.ts`, `load-time.test.ts` and `pnpm verify:load-time` retain the five-sample 4G budgets of 1000 ms cold and 100 ms after intent. |
 | E29 | `memory-history-captures.test.ts`: all seven chosen Sheet scenarios and reading/list/version/changes states at 1440×900 and 390×844 in both themes. Loading gates a genuine response; failure injects a service failure. |
 | E30 | `tests/journeys/owner.e2e.ts`: real MCP remember/update, current reading content, exactly two history versions with their writers, version-one text with disabled Show changes and "First version, nothing to compare", then the newer arrow to version two and its directional source diff. Deterministic locators run under `pnpm test:journey` after `pnpm test`, with mandatory strict cache replay and zero retries. |
@@ -410,8 +422,8 @@ tripwire remain mandatory under `pnpm verify`.
 The `memory-history-*.png` captures are in
 `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare
 them with the chosen Sheet reference. The scenario picker, stub and LCS
-implementation stay outside production. History reads pages of 25 versions
-plus the next older version; the contract client follows pages for the
+implementation stay outside production. Feed and history share a 25-item
+page size. History reads one extra row to detect another page; the contract client follows pages for the
 complete newest-first list. Sheet and jsdiff load separately on intent/use.
 Badge's added/removed variants and Sheet's stacked layout are authored
 components, with no generated-code exemption for the changes.
@@ -421,6 +433,14 @@ filtering current markers. Repair cannot shrink the sweep's ordering window.
 IDs repaired in that invocation are deferred until a later inspection to
 allow asynchronous propagation. The accepted schema and its drift snapshot
 remain unchanged.
+
+`memory-storage-bounds.test.ts` deliberately replaces the former 26-version
+history characterization with the owner-approved 25-version page, and also
+uses an old cursor to prove compatibility. The deterministic history/forget
+race in `memory-history-worker.test.ts` pauses after authorization, forgets
+through MCP, then requires HTTP 404. A live memory with no older versions
+still returns an empty terminal page. `memory-update-search.test.ts` requires
+inspection and marker invalidation even when pending embedding repair fails.
 
 The inspection acknowledgement case prepares the replacement-model marker in
 real D1; it tests conditional invalidation without claiming a two-deployment
@@ -452,8 +472,8 @@ profiles and the unchanged host-resource tripwire.
 | Examples | Tests or capture evidence |
 | --- | --- |
 | E1, E3–E6, E9–E12 | `memory-forget-mcp.test.ts`: compact result, cascaded history, lists/counts, keyword MATCH and FTS blob purge/integrity, one non-content removal record, sixteen-KiB multibyte content and ten tags, private grant denials before validation, invalid versions, stale rejection, one concurrent winner, retries, a forced losing batch after successful preflight, bucket deletion, real aborting triggers, missing migration, discovery and content-free logs. |
-| E2, E7–E8, E13–E16 | `memory-forget-search.test.ts` and the MCP suite: lingering vectors and held old keyword searches filtered against final D1 state, both update orders, new identity after identical remember, delayed deletion visibility, thirty-minute confirmation, all index/inspection/delete failures, embedding outage independence, gated late waitUntil/Cron upserts and sixty bounded removals excluding live ids. Missing migration isolates the sweep while embedding repair succeeds. |
-| E10, E17, E24 | `memory-forget-worker.test.ts`: each of the four batch statements fails without changing rows or index bytes, exact owner HTTP outcomes, authenticated foreign-Origin rejection, machine and restricted-grant denial, zero-trip malformed id, one preflight plus one four-statement batch. Search tests observe no index call during either MCP or owner HTTP forget and the sweep's one/two database trips plus bounded inspection/deletion. |
+| E2, E7–E8, E13–E16 | `memory-forget-search.test.ts` and the MCP suite: lingering vectors and a held old owner keyword search filtered against final D1 state (MCP shares the same store search), both update orders, new identity after identical remember, delayed deletion visibility, thirty-minute confirmation, inspection and deletion failures, embedding outage independence, gated late waitUntil/Cron upserts and sixty bounded removals excluding live ids. Missing migration isolates the sweep while embedding repair succeeds. |
+| E10, E17, E24 | `memory-forget-worker.test.ts`: the FTS optimize and final state statements fail after the earlier writes without changing rows or index bytes (the MCP suite aborts the removal insert and head deletion with real triggers), exact owner HTTP outcomes, authenticated foreign-Origin rejection, machine and restricted-grant denial, zero-trip malformed id, one preflight plus one four-statement batch. Search tests observe no index call during either MCP or owner HTTP forget and the sweep's one/two database trips plus bounded inspection/deletion. |
 | E18–E22, E24 | `memory-forget-web.test.ts`: row and pane menus, one shared versioned dialog, held real DELETE proving optimistic removal/counts/selection, adjacent focus without scrolling at 900/300px heights, list and search entry points, explicit 503 retry, exact detail/history rollback with recovery reads held, preservation of a neighbor history's authoritative 404 during another failed forget, first list/search/Back-detail reads resuming after settlement, real concurrent version four with refreshed History, lost successful responses, read-only recovery of still-live heads, unavailable confirmation reads, failed conflict refresh without offering a stale version, authoritative 404 eviction, inherited-scope transitions, last-memory empty states, keyboard focus/trap/Escape and the phone detail path. |
 | E18, E20, E24 cache races | `memory-forget-cache.test.ts`: cached infinite pages, both scopes, search and history, a held old read, browser Back to cached detail/history and real tab refocus during a held write, no guarded background reads, and exact success/rollback visibility. The newly selected neighbor can load while the forgotten id stays blocked. |
 | E18 journey | `tests/journeys/owner.e2e.ts`: real remember/update, history and comparison followed by web forgetting, summary, absent row after reopening and 404 history; deterministic locators, strict cache and zero retries. |

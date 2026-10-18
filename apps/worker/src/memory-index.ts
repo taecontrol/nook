@@ -3,7 +3,9 @@ import type {
   VectorizeVector,
 } from '@cloudflare/workers-types';
 import { Effect, Schema } from 'effect';
+import type { SqlClient, Statement } from 'effect/sql';
 import { sha256 } from './digest.ts';
+import { memoryBounds } from './memory-bounds.ts';
 
 export type SearchBindings = {
   AI?: {
@@ -54,6 +56,10 @@ const InspectedVectors = Schema.Array(
 );
 export type MeaningHit = { id: string; contentHash: string; rank: number };
 
+export async function vectorBucket(path: string) {
+  return (await sha256(path)).slice(0, 32);
+}
+
 export function memoryIndex(env: SearchBindings = {}) {
   const model = env.EMBEDDING_MODEL ?? '@cf/baai/bge-m3';
   const embed = (text: string[]) =>
@@ -75,6 +81,9 @@ export function memoryIndex(env: SearchBindings = {}) {
     });
   return {
     model,
+    marker: (hash: string) => `${model}:${hash}`,
+    markerSql: (sql: SqlClient.SqlClient, hash: Statement.Fragment) =>
+      sql`${model} || ':' || ${hash}`,
     remove: (ids: string[]) =>
       Effect.tryPromise(() => {
         if (!env.MEMORY_INDEX)
@@ -85,21 +94,19 @@ export function memoryIndex(env: SearchBindings = {}) {
       Effect.gen(function* () {
         const [values] = yield* embed([query]);
         const bucket = yield* Effect.promise(() =>
-          Promise.all(
-            paths.map(async (path) => (await sha256(path)).slice(0, 32)),
-          ),
+          Promise.all(paths.map(vectorBucket)),
         );
         const raw = yield* Effect.tryPromise(() => {
           if (!env.MEMORY_INDEX)
             throw new Error('Meaning search is unavailable.');
           return env.MEMORY_INDEX.query([...values], {
-            topK: 50,
+            topK: memoryBounds.meaningTopK,
             returnMetadata: 'all',
             filter: { bucket: { $in: bucket } },
           });
         });
         const { matches } = yield* Schema.decodeUnknownEffect(Matches)(raw);
-        return matches.slice(0, 50).map(
+        return matches.slice(0, memoryBounds.meaningTopK).map(
           (hit, i): MeaningHit => ({
             id: hit.id,
             contentHash: hit.metadata?.contentHash ?? '',
@@ -126,13 +133,19 @@ export function memoryIndex(env: SearchBindings = {}) {
       rows: readonly EmbeddingMemory[],
       current: (
         rows: readonly EmbeddingMemory[],
-      ) => Effect.Effect<readonly EmbeddingMemory[], unknown> = (rows) =>
-        Effect.succeed(rows),
+      ) => Effect.Effect<readonly EmbeddingMemory[], unknown>,
     ) =>
       Effect.gen(function* () {
         const vectors: VectorizeVector[] = [];
-        for (let offset = 0; offset < rows.length; offset += 32) {
-          const batch = rows.slice(offset, offset + 32);
+        for (
+          let offset = 0;
+          offset < rows.length;
+          offset += memoryBounds.embeddingChunk
+        ) {
+          const batch = rows.slice(
+            offset,
+            offset + memoryBounds.embeddingChunk,
+          );
           const data = yield* embed(batch.map((row) => row.content));
           const entries = yield* Effect.promise(() =>
             Promise.all(
@@ -140,7 +153,7 @@ export function memoryIndex(env: SearchBindings = {}) {
                 id: row.id,
                 values: [...data[i]],
                 metadata: {
-                  bucket: (await sha256(row.bucket)).slice(0, 32),
+                  bucket: await vectorBucket(row.bucket),
                   contentHash: row.content_hash,
                 },
               })),

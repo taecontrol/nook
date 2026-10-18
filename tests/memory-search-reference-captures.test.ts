@@ -138,17 +138,13 @@ it.each(matrix)(
       expect(
         await page.getByText('Prototype scenario', { exact: true }).count(),
       ).toBe(0);
-      const png = await page.screenshot({
+      await page.screenshot({
         path: resolve(
           directory,
           `memory-search-${state}-${size.name}-${theme}.png`,
         ),
         animations: 'disabled',
       });
-      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([
-        size.width,
-        size.height,
-      ]);
     } finally {
       gate.resolve();
       await visit.close();

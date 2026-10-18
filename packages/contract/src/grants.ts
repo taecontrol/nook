@@ -1,6 +1,9 @@
 import { Schema } from 'effect';
 import { BucketPath, bucketLineage, RESERVED_BUCKET } from './buckets.ts';
 
+export const BucketScope = Schema.Literals(['bucket', 'inherited']);
+export type BucketScope = typeof BucketScope.Type;
+
 export const BucketGrant = Schema.Union([
   Schema.Literal('all'),
   Schema.Array(BucketPath).check(Schema.isMinLength(1)),
@@ -19,6 +22,19 @@ export function canRead(grant: BucketGrant, path: string): boolean {
 }
 export function canWrite(grant: BucketGrant, path: string): boolean {
   return grant === 'all' || grant.some((root) => inside(path, root));
+}
+export function readLineage(bucket: string) {
+  const paths = bucketLineage(bucket).reverse();
+  return paths.includes(RESERVED_BUCKET) ? paths : [...paths, RESERVED_BUCKET];
+}
+export function visiblePaths(
+  grant: BucketGrant,
+  bucket: string,
+  scope: BucketScope,
+) {
+  return (scope === 'bucket' ? [bucket] : readLineage(bucket)).filter((path) =>
+    canRead(grant, path),
+  );
 }
 export function normalizeGrant(grant: BucketGrant): BucketGrant {
   if (grant === 'all') return grant;

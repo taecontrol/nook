@@ -151,7 +151,7 @@ it.each(states.flatMap((state) => sizes.map((size) => ({ state, size }))))(
           }
         : {}),
       start: `/memory?bucket=${bucket}&memory=${target}${state === 'search' ? '&q=deploy' : state === 'last' ? '&scope=bucket' : ''}`,
-      configure: async (page, app) => {
+      configure: async (page) => {
         if (state === 'forgetting')
           await page.route(
             '**/api/memories/*?expectedVersion=*',
@@ -161,11 +161,9 @@ it.each(states.flatMap((state) => sizes.map((size) => ({ state, size }))))(
             },
           );
         if (state === 'failed')
-          await (await app.mf.getD1Database('DB'))
-            .prepare(
-              "CREATE TRIGGER synthetic_forget_failure BEFORE DELETE ON memories BEGIN SELECT RAISE(ABORT,'synthetic failure'); END",
-            )
-            .run();
+          await page.route('**/api/memories/*?expectedVersion=*', (route) =>
+            route.fulfill({ status: 403, body: 'Access denied' }),
+          );
       },
     });
     try {

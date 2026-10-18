@@ -34,7 +34,6 @@ it('E17: debounce and Enter put q in the URL; reload, selection, Back, scope and
       await field(page).evaluate((node) => document.activeElement === node),
     ).toBe(true);
     await field(page).fill('how do we deploy');
-    expect(new URL(page.url()).searchParams.has('q')).toBe(false);
     await expect
       .poll(() => new URL(page.url()).searchParams.get('q'))
       .toBe('how do we deploy');
@@ -299,17 +298,26 @@ it('E20: an idle page has the search affordance and makes zero search requests',
   }
 });
 it('E17: the debounce commits at 250 ms and Enter commits before the timer fires', async () => {
-  const visit = await searchPage(browser, { seeds: searchMemories });
+  const visit = await searchPage(browser, {
+    seeds: searchMemories,
+    configure: async (_app, page) => {
+      // Draft timer cleanup must use the same clock that registered the timer.
+      await page.clock.install({ time: new Date('2026-10-10T20:00:00Z') });
+    },
+  });
   try {
     const { page } = visit;
     await memoryRows(page).first().waitFor();
     await expect
       .poll(() => new URL(page.url()).searchParams.get('memory'))
       .toBe(memoryId(20));
-    const time = new Date('2026-10-10T20:00:00Z');
-    await page.clock.install({ time });
-    await page.clock.pauseAt(new Date(time.getTime() + 1000));
+    await page
+      .getByRole('heading', { name: 'Proceso de release', exact: true })
+      .waitFor();
+    const pauseTime = await page.evaluate(() => Date.now() + 1000);
+    await page.clock.pauseAt(pauseTime);
     await field(page).fill('how do we deploy');
+    await expect.poll(() => field(page).inputValue()).toBe('how do we deploy');
     await page.clock.runFor(249);
     expect(new URL(page.url()).searchParams.has('q')).toBe(false);
     await page.clock.runFor(1);
@@ -317,6 +325,7 @@ it('E17: the debounce commits at 250 ms and Enter commits before the timer fires
       .poll(() => new URL(page.url()).searchParams.get('q'))
       .toBe('how do we deploy');
     await field(page).fill('pnpm verify');
+    await expect.poll(() => field(page).inputValue()).toBe('pnpm verify');
     await field(page).press('Enter');
     await expect
       .poll(() => new URL(page.url()).searchParams.get('q'))

@@ -1,5 +1,4 @@
 import { Schema } from 'effect';
-import { readLineage } from './buckets.ts';
 
 export const secretLimits = {
   name: 64,
@@ -30,9 +29,6 @@ export function validateSecretValue(value: string): string | undefined {
 }
 export function secretPath(secret: { bucket: string; name: string }) {
   return `${secret.bucket}/${secret.name}`;
-}
-export function secretLineage(bucket: string) {
-  return readLineage(bucket);
 }
 export const WriteId = Schema.String.check(Schema.isUUID(4));
 export const Secret = Schema.Struct({

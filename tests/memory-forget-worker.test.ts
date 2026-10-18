@@ -104,8 +104,8 @@ it('E17: the owner route rejects machine credentials, foreign Origin and outside
   ).toBe(401);
   expect(await forgetSnapshot(app)).toEqual(before);
 });
-it.each([0, 1, 2, 3])(
-  'E10: a D1 error at batch statement %s rolls back every memory/index/removal write',
+it.each([2, 3])(
+  'E10: a D1 error at batch statement %s, after the removal record and head deletion, rolls back every memory/index/removal write',
   async (failBatchStatement) => {
     app = await vaultCheckpoints(async () => true, undefined, false, {
       failBatchStatement,

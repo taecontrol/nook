@@ -1,7 +1,7 @@
 import type { OwnerMemorySearchResult } from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import { cn } from 'cn';
-import { Search, SearchX, ServerCrash, TriangleAlert, X } from 'lucide-react';
+import { Search, SearchX, TriangleAlert, X } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect } from 'react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +24,8 @@ import { Item, ItemContent, ItemTitle } from '@/components/ui/item';
 import { Kbd } from '@/components/ui/kbd';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
+import { describeFailure } from './api-client';
+import { LoadFailure } from './failure';
 import {
   ForgetNotice,
   ForgetProblem,
@@ -31,6 +33,7 @@ import {
   MemoryActions,
   pendingRows,
 } from './memory-forget';
+import { memorySearch } from './memory-navigation';
 import { formatDateTime, recentTime } from './time';
 import type { MemoryPageModel } from './use-memory-page';
 
@@ -219,12 +222,7 @@ function SearchRow({
         <Item asChild size="sm" className="min-w-0 flex-1">
           <Link
             to="/memory"
-            search={{
-              bucket: model.bucket,
-              scope: model.scope,
-              q: model.q,
-              memory: result.id,
-            }}
+            search={memorySearch(model, { memory: result.id })}
             className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
             data-search-result={result.id}
             aria-current={selected ? 'true' : undefined}
@@ -287,27 +285,18 @@ function SearchSkeleton() {
 function SearchError({ model }: { model: MemoryPageModel }) {
   return (
     <div className="px-5 py-12">
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <ServerCrash />
-          </EmptyMedia>
-          <EmptyTitle>Could not search memories</EmptyTitle>
-          <EmptyDescription>
-            Your query is still here. Try searching again.
-          </EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={model.busy}
-            onClick={model.retrySearch}
-          >
-            Try again
-          </Button>
-        </EmptyContent>
-      </Empty>
+      <LoadFailure
+        title="Could not search memories"
+        description={describeFailure(
+          model.results.error,
+          'search memories',
+          'Your query is still here. Try searching again.',
+        )}
+        cached={false}
+        retrying={model.results.isFetching}
+        disabled={model.busy}
+        onRetry={model.retrySearch}
+      />
     </div>
   );
 }
@@ -376,6 +365,7 @@ function NoResults({ model }: { model: MemoryPageModel }) {
 export function SearchBody({ model }: { model: MemoryPageModel }) {
   if (model.results.isError) return <SearchError model={model} />;
   if (!model.results.data) return <SearchSkeleton />;
+  const rows = pendingRows(model.results.data.results, model);
   return (
     <div
       id="memory-results"
@@ -386,9 +376,9 @@ export function SearchBody({ model }: { model: MemoryPageModel }) {
       {model.results.data.meaning === 'unavailable' && (
         <MeaningUnavailable model={model} />
       )}
-      {pendingRows(model.results.data.results, model).length ? (
+      {rows.length ? (
         <ul>
-          {pendingRows(model.results.data.results, model).map((entry) =>
+          {rows.map((entry) =>
             entry.kind === 'pending' ? (
               <ForgettingRow key="pending" title={entry.title} />
             ) : (

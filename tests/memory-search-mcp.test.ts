@@ -116,22 +116,13 @@ describe.each(['owner', 'machine'] as const)(
           expect(app.services.missing.size).toBe(0);
         },
       );
-      it('E2/E3: exact verification ranks first; diacritics, case and prefixes match through real FTS5', async () => {
+      it('E2: exact verification ranks first through real FTS5', async () => {
         await indexMemories(app, searchMemories);
         const exact = results(await search('pnpm verify'));
         expect(exact.results[0]).toMatchObject({ id: memoryId(23) });
         expect(['keyword', 'both']).toContain(exact.results[0].match);
         expect(exact.results[0].snippet).toContain('pnpm');
         expect(exact.results[0].snippet).toContain('verify');
-        app.services.failEmbedding = true;
-        const accents = results(await search('despliegue'));
-        expect(accents.results.map((r) => r.id)).toEqual(
-          expect.arrayContaining([memoryId(22), memoryId(24)]),
-        );
-        const prefix = results(await search('deploy'));
-        expect(prefix.results.map((r) => r.id)).toEqual(
-          expect.arrayContaining([memoryId(21), memoryId(25)]),
-        );
       });
       it('E3: accents, case and prefixes match content independently of tags and alternate spellings', async () => {
         await seedMemories(app, [
@@ -181,6 +172,25 @@ describe.each(['owner', 'machine'] as const)(
         expect(app.services.embeddingCalls).toEqual([]);
         expect(app.services.queries).toEqual([]);
       });
+      if (endpoint === 'machine')
+        it('E5: a child grant can search the reserved me bucket', async () => {
+          const memory = { ...searchMemories[0], bucket: 'me' };
+          await indexMemories(app, [memory]);
+          const machine = await seedMemoryMachine(app, ['work/acme']);
+          const restricted = memoryClient(app, version, {
+            machine: true,
+            headers: { Authorization: `Bearer ${machine.token}` },
+          });
+          expect(
+            results(
+              await restricted.call('search', {
+                bucket: 'me',
+                scope: 'bucket',
+                query: 'how do we deploy',
+              }),
+            ).results.map((row) => row.id),
+          ).toContain(memory.id);
+        });
       it.each([false, true])(
         'E4/E5: D1 enforces lineage even when Vectorize ignores the filter=%s; a narrow grant denies siblings',
         async (ignoreFilter) => {
@@ -284,6 +294,7 @@ describe.each(['owner', 'machine'] as const)(
       });
       it('E9: AI and vector failures degrade to keyword results; D1 failure and diagnostics never echo content or query', async () => {
         await seedMemories(app, [searchMemories[3]]);
+        logs.length = 0;
         class PrivateLog extends Log {
           override log(message: string) {
             logs.push(message);
@@ -321,11 +332,17 @@ describe.each(['owner', 'machine'] as const)(
         await db
           .prepare('ALTER TABLE memory_versions RENAME TO unavailable_versions')
           .run();
+        const logsBefore = logs.length;
         try {
           expectToolError(
             await search('pnpm verify'),
             'Service unavailable. Try again later.',
           );
+          await expect
+            .poll(() => logs.length, {
+              message: 'The failing search emitted runtime diagnostics',
+            })
+            .toBeGreaterThan(logsBefore);
         } finally {
           await db
             .prepare(
@@ -343,31 +360,32 @@ describe.each(['owner', 'machine'] as const)(
             privateText,
           );
       });
-      it('E10: a revoked token is unauthorized before any embedding or vector query', async () => {
-        await indexMemories(app, searchMemories);
-        expect(
-          results(await search('how do we deploy')).results.length,
-        ).toBeGreaterThan(0);
-        expect(app.services.embeddingCalls).toHaveLength(1);
-        app.services.resetCalls();
-        const revoked = await seedMemoryMachine(app);
-        await (await app.mf.getD1Database('DB'))
-          .prepare('DELETE FROM machine_tokens WHERE token_hash=?')
-          .bind(createHash('sha256').update(revoked.token).digest('hex'))
-          .run();
-        const machine = memoryClient(app, version, {
-          machine: true,
-          headers: { Authorization: `Bearer ${revoked.token}` },
+      if (endpoint === 'machine')
+        it('E10: a revoked token is unauthorized before any embedding or vector query', async () => {
+          await indexMemories(app, searchMemories);
+          expect(
+            results(await search('how do we deploy')).results.length,
+          ).toBeGreaterThan(0);
+          expect(app.services.embeddingCalls).toHaveLength(1);
+          app.services.resetCalls();
+          const revoked = await seedMemoryMachine(app);
+          await (await app.mf.getD1Database('DB'))
+            .prepare('DELETE FROM machine_tokens WHERE token_hash=?')
+            .bind(createHash('sha256').update(revoked.token).digest('hex'))
+            .run();
+          const machine = memoryClient(app, version, {
+            machine: true,
+            headers: { Authorization: `Bearer ${revoked.token}` },
+          });
+          const response = await machine.request('tools/call', {
+            name: 'search',
+            arguments: { bucket: 'work/acme', query: 'how do we deploy' },
+          });
+          expect(response.status).toBe(401);
+          expect(app.services.embeddingCalls).toEqual([]);
+          expect(app.services.queries).toEqual([]);
+          expect(app.services.upserts).toEqual([]);
         });
-        const response = await machine.request('tools/call', {
-          name: 'search',
-          arguments: { bucket: 'work/acme', query: 'how do we deploy' },
-        });
-        expect(response.status).toBe(401);
-        expect(app.services.embeddingCalls).toEqual([]);
-        expect(app.services.queries).toEqual([]);
-        expect(app.services.upserts).toEqual([]);
-      });
       it('discovery: search describes explicit buckets, compact results and get, and is read-only', async () => {
         const tool = (await client.listTools()).tools.find(
           (t) => t.name === 'search',

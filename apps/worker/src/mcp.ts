@@ -54,28 +54,16 @@ type MemoryError = Effect.Error<
   >
 >;
 const unavailableMessage = 'Service unavailable. Try again later.';
-// Discovery advertises a number. The store owns invalid-version wording,
-// including wrong primitive types, rather than exposing an SDK parse error.
-function updateInput() {
-  const advertised = standard(UpdateMemory);
+// Discovery advertises a positive integer. The store owns invalid-version
+// wording, including missing keys and wrong primitive types.
+function versionInput<
+  Fields extends Readonly<
+    Record<string, Schema.ConstraintDecoder<unknown> & Schema.Top>
+  >,
+>(schema: Schema.Struct<Fields>) {
+  const advertised = standard(schema);
   const boundary = standard(
-    UpdateMemory.mapFields((fields) => ({
-      ...fields,
-      expectedVersion: Schema.Unknown,
-    })),
-  );
-  return {
-    ...advertised,
-    '~standard': {
-      ...advertised['~standard'],
-      validate: boundary['~standard'].validate,
-    },
-  };
-}
-function forgetInput() {
-  const advertised = standard(ForgetMemory);
-  const boundary = standard(
-    ForgetMemory.mapFields((fields) => ({
+    schema.mapFields((fields) => ({
       ...fields,
       expectedVersion: Schema.optionalKey(Schema.Unknown),
     })),
@@ -178,6 +166,7 @@ export function mcpHandler(
   return createMcpHandler(({ requestInfo }) => {
     const server = new McpServer({ name: 'nook', version: '1.0.0' });
     const userAgent = requestInfo?.headers.get('User-Agent') ?? null;
+    const memories = memoryStore(grant, options.index, options.waitUntil);
     server.registerTool(
       'remember',
       {
@@ -193,7 +182,7 @@ export function mcpHandler(
       },
       (input, ctx) =>
         execute(
-          memoryStore(grant, options.index, options.waitUntil).pipe(
+          memories.pipe(
             Effect.flatMap((store) =>
               store.remember(
                 principal,
@@ -209,7 +198,7 @@ export function mcpHandler(
       {
         description:
           'Permanently delete a memory and all versions, including its keyword and meaning search entries. Pass the version from get as expectedVersion. If it changed, get it again before forgetting. After a lost response, Memory not found on a retry means it is already gone.',
-        inputSchema: forgetInput(),
+        inputSchema: versionInput(ForgetMemory),
         outputSchema: standard(Forgotten),
         annotations: {
           readOnlyHint: false,
@@ -218,18 +207,14 @@ export function mcpHandler(
         },
       },
       (input) =>
-        execute(
-          memoryStore(grant).pipe(
-            Effect.flatMap((store) => store.forget(input)),
-          ),
-        ),
+        execute(memories.pipe(Effect.flatMap((store) => store.forget(input)))),
     );
     server.registerTool(
       'update',
       {
         description:
           'Replace a memory by creating an immutable version. Pass the version from get as expectedVersion. Omitted tags are kept; [] clears them. Optionally report an absolute workingDirectory. A duplicate names the other memory in this bucket. Retrying identical input after a failure or lost response is safe and returns updated: false when content and resulting tags already match. It can answer changed after another writer intervenes; get again before choosing a new update.',
-        inputSchema: updateInput(),
+        inputSchema: versionInput(UpdateMemory),
         outputSchema: standard(Updated),
         annotations: {
           readOnlyHint: false,
@@ -239,7 +224,7 @@ export function mcpHandler(
       },
       (input, ctx) =>
         execute(
-          memoryStore(grant, options.index, options.waitUntil).pipe(
+          memories.pipe(
             Effect.flatMap((store) =>
               store.update(
                 principal,
@@ -261,7 +246,7 @@ export function mcpHandler(
       },
       ({ bucket, query, tags }) =>
         execute(
-          memoryStore(grant, options.index).pipe(
+          memories.pipe(
             Effect.flatMap((store) =>
               store.search(bucket, query, tags, 'inherited', 10),
             ),
@@ -301,9 +286,7 @@ export function mcpHandler(
         annotations: { readOnlyHint: true },
       },
       ({ id }) =>
-        execute(
-          memoryStore(grant).pipe(Effect.flatMap((store) => store.get(id))),
-        ),
+        execute(memories.pipe(Effect.flatMap((store) => store.get(id)))),
     );
     server.registerTool(
       'list_secrets',

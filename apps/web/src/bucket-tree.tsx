@@ -1,4 +1,4 @@
-import { type Bucket, bucketLineage, type MemoryScope } from '@nook/contract';
+import { type Bucket, type BucketScope, bucketLineage } from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import { cn } from 'cn';
 import { ChevronRight, Dot } from 'lucide-react';
@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/collapsible';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { memorySearch } from './memory-navigation';
 import { nameOf, parentOf } from './paths';
 
 export type BucketNode = {
@@ -172,7 +173,7 @@ export function TreeBranches({
 type TreeState = {
   to: '/vault' | '/memory';
   noun: 'secret' | 'memory';
-  scope: MemoryScope;
+  scope: BucketScope;
   query?: string;
   /** The bucket shown on the right; null on a phone's bucket list. */
   selected: string | null;
@@ -206,7 +207,7 @@ function Count({ path, state }: { path: string; state: TreeState }) {
 
 function bucketSearch(state: TreeState, path: string) {
   return state.to === '/memory'
-    ? { bucket: path, scope: state.scope, q: state.query }
+    ? memorySearch({ bucket: path, scope: state.scope, q: state.query })
     : { bucket: path };
 }
 
@@ -272,7 +273,7 @@ export function BucketTree({
   loading: boolean;
   to?: '/vault' | '/memory';
   noun?: 'secret' | 'memory';
-  scope?: MemoryScope;
+  scope?: BucketScope;
   query?: string;
 }) {
   const nodes = useMemo(

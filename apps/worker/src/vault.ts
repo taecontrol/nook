@@ -1,12 +1,8 @@
 import { D1Client } from '@effect/sql-d1';
 import {
   type BucketGrant,
-  BucketNotFound,
   type CreateMachineSecret,
   type CreateSecret,
-  canRead,
-  canWrite,
-  InvalidBucketPath,
   InvalidRun,
   InvalidSecret,
   type OwnerSecret,
@@ -16,19 +12,19 @@ import {
   SecretExists,
   SecretKeyUnavailable,
   SecretNotFound,
-  secretLineage,
   secretPath,
-  validateBucketPath,
   validatePurpose,
   validateSecretDescription,
   validateSecretName,
   validateSecretValue,
   validateWorkingDirectory,
+  visiblePaths,
 } from '@nook/contract';
 import { Effect, Redacted, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
 import { SqlSchema } from 'effect/sql';
 import { type AuditMachine, auditStore } from './audit.ts';
+import { authorizeBucket, bucketExists, bucketNotFound } from './buckets.ts';
 import { unavailable } from './http-errors.ts';
 import { open, parseKeyring, seal } from './vault-keyring.ts';
 
@@ -68,13 +64,6 @@ function publicMetadata(secret: OwnerSecret): Secret {
 function byName(a: Secret, b: Secret) {
   return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 }
-function authorized(grant: BucketGrant, bucket: string, write: boolean) {
-  const message = validateBucketPath(bucket);
-  if (message) return Effect.fail(new InvalidBucketPath({ message }));
-  if (!(write ? canWrite(grant, bucket) : canRead(grant, bucket)))
-    return Effect.fail(new HttpApiError.Forbidden());
-  return Effect.void;
-}
 function validName(name: string) {
   const message = validateSecretName(name);
   return message ? Effect.fail(new InvalidSecret({ message })) : Effect.void;
@@ -90,7 +79,7 @@ function target(grant: BucketGrant, path: string, write = true) {
     const separator = path.lastIndexOf('/');
     const bucket = path.slice(0, separator);
     const name = path.slice(separator + 1);
-    yield* authorized(grant, bucket, write);
+    yield* authorizeBucket(grant, bucket, write ? 'write' : 'read');
     yield* validName(name);
     return { bucket, name };
   });
@@ -112,8 +101,7 @@ function createOutcome(
   const row =
     inserted[0] ?? (state.version === writeId ? (state as Row) : undefined);
   if (row) return Effect.succeed(metadata(row));
-  if (!state.has_bucket)
-    return Effect.fail(new BucketNotFound({ message: 'Bucket not found.' }));
+  if (!state.has_bucket) return Effect.fail(bucketNotFound());
   return Effect.fail(new SecretExists({ message: `${path} already exists.` }));
 }
 function replaceOutcome(
@@ -131,20 +119,15 @@ const readStore = Effect.gen(function* () {
   const sql = yield* D1Client.D1Client;
   return (grant: BucketGrant, bucket: string) =>
     Effect.gen(function* () {
-      yield* authorized(grant, bucket, false);
-      const lineage = secretLineage(bucket).filter((path) =>
-        canRead(grant, path),
-      );
+      yield* authorizeBucket(grant, bucket, 'read');
+      const lineage = visiblePaths(grant, bucket, 'inherited');
       const [exists, rows] = yield* sql
         .batch([
-          sql`SELECT path FROM buckets WHERE path = ${bucket}`,
+          sql`SELECT 1 WHERE ${bucketExists(sql, bucket)}`,
           sql<Row>`SELECT bucket, name, description, updated_at, version FROM secrets WHERE ${sql.in('bucket', lineage)}`,
         ])
         .pipe(unavailable);
-      if (!exists.length)
-        return yield* Effect.fail(
-          new BucketNotFound({ message: 'Bucket not found.' }),
-        );
+      if (!exists.length) return yield* Effect.fail(bucketNotFound());
       const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(
         rows,
       ).pipe(unavailable);
@@ -169,7 +152,7 @@ function createStore(binding: string, grant: BucketGrant) {
     const sql = yield* D1Client.D1Client;
     return (input: CreateSecret, creation?: Creation) =>
       Effect.gen(function* () {
-        yield* authorized(grant, input.bucket, true);
+        yield* authorizeBucket(grant, input.bucket, 'write');
         yield* validName(input.name);
         yield* validValue(input);
         const ring = yield* parseKeyring(binding);
@@ -184,8 +167,8 @@ function createStore(binding: string, grant: BucketGrant) {
           : [];
         const [inserted, states] = yield* sql
           .batch([
-            sql<Row>`INSERT INTO secrets(bucket, name, description, version, key_id, iv, ciphertext, created_at, updated_at) SELECT ${input.bucket}, ${input.name}, ${input.description ?? ''}, ${input.writeId}, ${envelope.key_id}, ${envelope.iv}, ${envelope.ciphertext}, ${now}, ${now} WHERE EXISTS (SELECT 1 FROM buckets WHERE path = ${input.bucket}) ON CONFLICT(bucket, name) DO NOTHING RETURNING bucket, name, description, updated_at, version`,
-            sql<CreateState>`SELECT EXISTS(SELECT 1 FROM buckets WHERE path = ${input.bucket}) AS has_bucket, bucket, name, description, updated_at, version FROM (SELECT 1) LEFT JOIN secrets ON bucket = ${input.bucket} AND name = ${input.name}`,
+            sql<Row>`INSERT INTO secrets(bucket, name, description, version, key_id, iv, ciphertext, created_at, updated_at) SELECT ${input.bucket}, ${input.name}, ${input.description ?? ''}, ${input.writeId}, ${envelope.key_id}, ${envelope.iv}, ${envelope.ciphertext}, ${now}, ${now} WHERE ${bucketExists(sql, input.bucket)} ON CONFLICT(bucket, name) DO NOTHING RETURNING bucket, name, description, updated_at, version`,
+            sql<CreateState>`SELECT ${bucketExists(sql, input.bucket)} AS has_bucket, bucket, name, description, updated_at, version FROM (SELECT 1) LEFT JOIN secrets ON bucket = ${input.bucket} AND name = ${input.name}`,
             ...audit,
           ])
           .pipe(unavailable);
