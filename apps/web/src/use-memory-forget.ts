@@ -81,7 +81,13 @@ function forgetState(
     };
   return {
     entry: status
-      ? { ...ui, subject: write.subject, status, error: write.error }
+      ? {
+          ...ui,
+          id: write.id,
+          subject: write.subject,
+          status,
+          error: write.error,
+        }
       : null,
     notice: null,
   };
@@ -202,9 +208,8 @@ export function useMemoryForget({
     readFailure: reading?.id === write?.id ? reading?.error : undefined,
     dismissReadFailure: () => setReading(null),
     refreshCurrent: async () => {
-      if (!entry || !write || checking || memoryWriteGate.isWriting(queries))
-        return;
-      const token = write.id;
+      if (!entry || checking || memoryWriteGate.isWriting(queries)) return;
+      const token = entry.id;
       setReading({ id: token, pending: true });
       try {
         await refreshChanged(queries, entry.subject.id);

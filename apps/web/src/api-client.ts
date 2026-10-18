@@ -35,7 +35,8 @@ export function writeOutcome(
 }
 
 /** Preserve the original public reason after an earlier attempt lost its answer. */
-export function ambiguousWrite(error: ApiError) {
+export function ambiguousWrite(failure: unknown) {
+  const error = failure instanceof ApiError ? failure : new ApiError(503, true);
   return new ApiError(
     error.status,
     error.outcomeUnknown,

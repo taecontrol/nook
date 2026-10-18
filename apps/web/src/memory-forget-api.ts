@@ -72,9 +72,7 @@ async function forgetRequest(subject: ForgetRequest): Promise<ForgetResult> {
       try {
         if ((await readForgetOutcome(subject.id)) === null) return 'forgotten';
       } catch {
-        throw ambiguousWrite(
-          error instanceof ApiError ? error : new ApiError(503, true),
-        );
+        throw ambiguousWrite(error);
       }
     }
     throw error;
