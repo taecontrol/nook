@@ -36,10 +36,13 @@ immutable postings. History is owner-only. Memory writes add no audit entry.
 
 The contract owns schemas, validation, titles and the positive integer version
 policy. `memory.ts` owns request operations, their authorization and SQL,
-pagination, and index maintenance. `memory-index.ts` owns the AI and Vectorize
-protocols and shared marker SQL. `buckets.ts` owns deletion blockers, including
-its memory-head check. MCP and HTTP adapters call these owners without
-duplicating their policy.
+and pagination. `memory-sync.ts` owns post-write embedding, scheduled repair,
+forgotten-vector removal and rotating inspection, including their SQL and
+failure isolation. Requests schedule embedding only after a successful write;
+the Cron handler calls sync directly. `memory-index.ts` owns the AI and
+Vectorize protocols and shared marker SQL. `buckets.ts` owns deletion blockers,
+including its memory-head check. MCP and HTTP adapters call these owners
+without duplicating their policy.
 
 Feed pages use descending creation time and id so updating a memory cannot
 move it between pages. A cursor carries that position, bucket and scope with

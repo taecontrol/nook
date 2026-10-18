@@ -25,6 +25,7 @@ import { machineOperations } from './machines.ts';
 import { mcpHandler } from './mcp.ts';
 import { memoryStore } from './memory.ts';
 import { memoryIndex, type SearchBindings } from './memory-index.ts';
+import { memorySync } from './memory-sync.ts';
 import { matches, ownerRoutes, revealRoute, tokenRoutes } from './routes.ts';
 import { ownerVault } from './vault.ts';
 
@@ -314,7 +315,7 @@ export default {
     env: SearchBindings & { DB: D1Database },
   ) {
     return Effect.runPromise(
-      memoryStore('all', memoryIndex(env)).pipe(
+      memorySync(memoryIndex(env)).pipe(
         Effect.flatMap((store) => store.sync(controller.scheduledTime)),
         Effect.provide(D1Client.layer({ db: env.DB })),
         // Failed writes leave their markers pending for the next scheduled run.
