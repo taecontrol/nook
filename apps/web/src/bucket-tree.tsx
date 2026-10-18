@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/collapsible';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { memorySearch } from './memory-location';
 import { nameOf, parentOf } from './paths';
 
 export type BucketNode = {
@@ -206,7 +207,7 @@ function Count({ path, state }: { path: string; state: TreeState }) {
 
 function bucketSearch(state: TreeState, path: string) {
   return state.to === '/memory'
-    ? { bucket: path, scope: state.scope, q: state.query }
+    ? memorySearch({ bucket: path, scope: state.scope, q: state.query })
     : { bucket: path };
 }
 

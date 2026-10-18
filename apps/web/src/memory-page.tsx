@@ -30,6 +30,7 @@ import {
   UnconfirmedForget,
 } from './memory-forget';
 import { principalName } from './memory-format';
+import { memorySearch } from './memory-location';
 import { MemoryMarkdown } from './memory-markdown';
 import { ColumnSummary, SearchBody, SearchField } from './memory-search';
 import { formatDateTime, recentTime } from './time';
@@ -107,12 +108,7 @@ function MemoryRow({
         <Item asChild size="sm" className="min-w-0 flex-1">
           <Link
             to="/memory"
-            search={{
-              bucket: model.bucket,
-              scope: model.scope,
-              memory: memory.id,
-              q: model.q || undefined,
-            }}
+            search={memorySearch(model, { memory: memory.id })}
             className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
             data-memory-row={memory.id}
             data-inherited={inherited ? 'true' : undefined}
@@ -413,14 +409,7 @@ function MemoryBack({ model }: { model: MemoryPageModel }) {
   return (
     <div className="sticky top-0 z-10 border-b bg-background px-5 py-3 lg:hidden">
       <Button asChild variant="ghost" size="sm">
-        <Link
-          to="/memory"
-          search={{
-            bucket: model.bucket,
-            scope: model.scope,
-            q: model.q || undefined,
-          }}
-        >
+        <Link to="/memory" search={memorySearch(model)}>
           <ArrowLeft />
           {model.q ? 'Results' : 'Memories'}
         </Link>
@@ -527,12 +516,8 @@ function PhoneBucketsLink({ model }: { model: MemoryPageModel }) {
           to="/memory"
           search={
             model.browse
-              ? {
-                  bucket: model.bucket,
-                  scope: model.scope,
-                  q: model.q || undefined,
-                }
-              : { scope: model.scope, q: model.q || undefined }
+              ? memorySearch(model)
+              : memorySearch({ scope: model.scope, q: model.q })
           }
         >
           {model.browse ? (

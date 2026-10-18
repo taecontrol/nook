@@ -19,6 +19,7 @@ import { describeFailure } from './api-client';
 import { LoadFailure } from './failure';
 import { useMemoryHistory } from './memory-api';
 import { tagChanges } from './memory-history-format';
+import { memorySearch } from './memory-location';
 import { MemoryMarkdown } from './memory-markdown';
 import { Provenance } from './memory-page';
 import { formatDateTime, timeAgo } from './time';
@@ -68,11 +69,11 @@ function VersionRows({
             <Item asChild size="sm" className="w-full min-w-0 min-h-21">
               <Link
                 to="/memory"
-                search={{
+                search={memorySearch(model.search, {
                   ...model.search,
                   history: '1',
                   version: version.version,
-                }}
+                })}
                 data-version-row={version.version}
               >
                 <ItemContent className="min-w-0">

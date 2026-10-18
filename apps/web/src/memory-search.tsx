@@ -31,6 +31,7 @@ import {
   MemoryActions,
   pendingRows,
 } from './memory-forget';
+import { memorySearch } from './memory-location';
 import { formatDateTime, recentTime } from './time';
 import type { MemoryPageModel } from './use-memory-page';
 
@@ -219,12 +220,7 @@ function SearchRow({
         <Item asChild size="sm" className="min-w-0 flex-1">
           <Link
             to="/memory"
-            search={{
-              bucket: model.bucket,
-              scope: model.scope,
-              q: model.q,
-              memory: result.id,
-            }}
+            search={memorySearch(model, { memory: result.id })}
             className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
             data-search-result={result.id}
             aria-current={selected ? 'true' : undefined}

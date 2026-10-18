@@ -1,4 +1,4 @@
-import { type Memory, RESERVED_BUCKET, readLineage } from '@nook/contract';
+import { type Memory, readLineage } from '@nook/contract';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useRouter, useSearch } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
@@ -6,12 +6,17 @@ import { ApiError } from './api-client';
 import { useBucketList } from './buckets-api';
 import { useDesktop } from './hooks/use-desktop';
 import {
-  type MemorySearch,
   memoryHistoryOptions,
   memoryOptions,
   memoryWriteGate,
   useMemoryQueries,
 } from './memory-api';
+import {
+  type MemorySearch,
+  memoryLocation,
+  memoryQueryText,
+  memorySearch,
+} from './memory-location';
 import { useMemoryForget } from './use-memory-forget';
 
 function countSummary(
@@ -57,15 +62,6 @@ function forgetOrder(
 ) {
   return (searching ? (results ?? []) : records).map((row) => row.id);
 }
-// Updates derive from the latest location, never from the render that
-// scheduled them, so overlapping navigations cannot erase each other's keys.
-function located(search: MemorySearch) {
-  return {
-    ...search,
-    bucket: search.bucket ?? RESERVED_BUCKET,
-    scope: search.scope ?? 'inherited',
-  };
-}
 function useAutoSelection(
   desktop: boolean,
   firstId: string | undefined,
@@ -85,7 +81,10 @@ function useAutoSelection(
         search: (previous: MemorySearch) =>
           previous.memory
             ? previous
-            : { ...located(previous), memory: firstId },
+            : memorySearch(memoryLocation(previous), {
+                ...previous,
+                memory: firstId,
+              }),
         replace: true,
       });
   }, [desktop, firstId, memory, navigate, router]);
@@ -100,8 +99,8 @@ function useQueryDraft(q: string, navigate: (q: string | undefined) => void) {
     }
   }, [q]);
   const commit = (value: string) => {
-    const next = value.trim();
-    if (next === sent.current.trim()) return;
+    const next = memoryQueryText(value);
+    if (next === sent.current) return;
     sent.current = next;
     navigate(next || undefined);
   };
@@ -129,7 +128,8 @@ function useHistoryNavigation(
   const historyNavigate = (patch: Partial<MemorySearch>, replace = false) =>
     void navigate({
       to: '/memory',
-      search: (previous: MemorySearch) => ({ ...located(previous), ...patch }),
+      search: (previous: MemorySearch) =>
+        memorySearch(memoryLocation(previous), { ...previous, ...patch }),
       replace,
     });
   return {
@@ -170,15 +170,14 @@ export function useMemoryPage() {
   const navigate = useNavigate({ from: '/memory' });
   const queries = useQueryClient();
   const desktop = useDesktop();
-  const bucket = search.bucket ?? RESERVED_BUCKET;
-  const scope = search.scope ?? 'inherited';
-  const q = search.q?.trim() ?? '';
+  const { bucket, scope, q } = memoryLocation(search);
   const searching = Boolean(q);
   const draft = useQueryDraft(
     q,
     (next) =>
       void navigate({
-        search: (previous: MemorySearch) => ({ ...located(previous), q: next }),
+        search: (previous: MemorySearch) =>
+          memorySearch(memoryLocation(previous), { ...previous, q: next }),
         replace: true,
       }),
   );
@@ -254,12 +253,12 @@ export function useMemoryPage() {
     detailOpen: !desktop && Boolean(search.memory),
     changeScope: (next: 'bucket' | 'inherited') =>
       void navigate({
-        search: {
-          bucket,
-          scope: next,
-          q: q || undefined,
-          memory: q ? search.memory : undefined,
-        },
+        search: memorySearch(
+          { bucket, scope: next, q },
+          {
+            memory: q ? search.memory : undefined,
+          },
+        ),
         replace: true,
       }),
   };

@@ -1,9 +1,4 @@
-import {
-  type Memory,
-  type MemoryScope,
-  type MemoryVersion,
-  RESERVED_BUCKET,
-} from '@nook/contract';
+import type { Memory, MemoryScope, MemoryVersion } from '@nook/contract';
 import {
   type InferDataFromTag,
   infiniteQueryOptions,
@@ -17,6 +12,7 @@ import {
 import { useEffect, useRef } from 'react';
 import { runApi } from './api-client';
 import { preloadBuckets } from './buckets-api';
+import { type MemorySearch, memoryLocation } from './memory-location';
 import { createWriteGate } from './write-gate';
 
 export const memoryKeys = {
@@ -55,20 +51,18 @@ export const memoryCountsOptions = queryOptions({
   staleTime: 30_000,
   refetchOnWindowFocus: 'always',
 });
-export function memoriesOptions(
-  bucket: string,
-  scope: MemoryScope = 'inherited',
-) {
+export function memoriesOptions(bucket: string, scope?: MemoryScope) {
+  const location = memoryLocation({ bucket, scope });
   return infiniteQueryOptions({
-    queryKey: memoryKeys.list(bucket, scope),
+    queryKey: memoryKeys.list(location.bucket, location.scope),
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) =>
       runApi(
         (api) =>
           api.memories.list({
             query: {
-              bucket,
-              scope,
+              bucket: location.bucket,
+              scope: location.scope,
               ...(pageParam ? { cursor: pageParam } : {}),
             },
           }),
@@ -126,14 +120,15 @@ export function memorySearchOptions(
   scope: MemoryScope,
   q: string,
 ) {
+  q = memoryLocation({ q }).q;
   return queryOptions({
-    queryKey: memoryKeys.search(bucket, scope, q.trim()),
+    queryKey: memoryKeys.search(bucket, scope, q),
     queryFn: ({ signal }) =>
       runApi(
-        (api) => api.memories.search({ query: { bucket, scope, q: q.trim() } }),
+        (api) => api.memories.search({ query: { bucket, scope, q } }),
         signal,
       ),
-    enabled: Boolean(q.trim()),
+    enabled: Boolean(q),
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[1] === bucket &&
       previousQuery?.queryKey[2] === scope
@@ -144,37 +139,19 @@ export function memorySearchOptions(
     refetchOnWindowFocus: 'always',
   });
 }
-export type MemorySearch = {
-  bucket?: string;
-  memory?: string;
-  scope?: MemoryScope;
-  q?: string;
-  history?: '1';
-  version?: number;
-  changes?: '1';
-};
 export function preloadMemory(queries: QueryClient, search: MemorySearch) {
+  const { bucket, scope, q } = memoryLocation(search);
   preloadBuckets(queries);
   memoryWriteGate.preload(queries, memoryCountsOptions);
   memoryWriteGate.start(
     queries,
-    () =>
-      void queries.prefetchInfiniteQuery(
-        memoriesOptions(search.bucket ?? RESERVED_BUCKET, search.scope),
-      ),
+    () => void queries.prefetchInfiniteQuery(memoriesOptions(bucket, scope)),
   );
   if (search.memory)
     memoryWriteGate.preload(queries, memoryOptions(search.memory));
   preloadHistory(queries, search);
-  if (search.q?.trim())
-    memoryWriteGate.preload(
-      queries,
-      memorySearchOptions(
-        search.bucket ?? 'me',
-        search.scope ?? 'inherited',
-        search.q,
-      ),
-    );
+  if (q)
+    memoryWriteGate.preload(queries, memorySearchOptions(bucket, scope, q));
 }
 
 function preloadHistory(queries: QueryClient, search: MemorySearch) {

@@ -5,7 +5,6 @@ import { useRef, useState } from 'react';
 import { ApiError } from './api-client';
 import {
   invalidateMemoryLists,
-  type MemorySearch,
   memoryOptions,
   memoryWriteGate,
   writeMemory,
@@ -17,6 +16,7 @@ import {
   refreshChanged,
   useForgetMemory,
 } from './memory-forget-api';
+import { type MemorySearch, memorySearch } from './memory-location';
 import { useLastValue } from './use-confirm-target';
 
 export const memoryRowSelector = (id: string) =>
@@ -96,13 +96,14 @@ export function useMemoryForget({
   const select = (id?: string) =>
     void navigate({
       to: '/memory',
-      search: (previous: MemorySearch) => ({
-        ...previous,
-        memory: id,
-        history: undefined,
-        version: undefined,
-        changes: undefined,
-      }),
+      search: (previous: MemorySearch) =>
+        memorySearch(previous, {
+          ...previous,
+          memory: id,
+          history: undefined,
+          version: undefined,
+          changes: undefined,
+        }),
       replace: true,
     });
   const open = (subject: ForgetSubject, from: HTMLElement | null) => {
