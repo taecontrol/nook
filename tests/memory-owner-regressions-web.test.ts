@@ -1,4 +1,4 @@
-import type { Browser } from 'playwright';
+import type { Browser, Request } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { deferred } from './support/machines.ts';
@@ -37,9 +37,13 @@ it('Check again restores a search result after an unconfirmed forget', async () 
       await route.abort();
     });
     let reads = 0;
-    await page.route(`**/api/memories/${forgottenId}`, (route) =>
-      ++reads === 1 ? route.abort() : route.continue(),
-    );
+    let checking = false;
+    let checkRequest: Request | undefined;
+    await page.route(`**/api/memories/${forgottenId}`, (route) => {
+      if (++reads === 1) return route.abort();
+      if (checking) checkRequest ??= route.request();
+      return route.continue();
+    });
     await confirmForget(page);
     await arrived.promise;
     await page
@@ -51,10 +55,12 @@ it('Check again restores a search result after an unconfirmed forget', async () 
       hasText: 'Forget not confirmed',
     });
     await unknown.waitFor();
+    // Let the automatic detail refire finish before observing the explicit read.
+    await page.waitForLoadState('networkidle');
     const checked = page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === `/api/memories/${forgottenId}`,
+      (response) => response.request() === checkRequest,
     );
+    checking = true;
     await unknown.getByRole('button', { name: 'Check again' }).click();
     expect(await (await checked).json()).toMatchObject({ version: 3 });
     await expect.poll(() => result.count()).toBe(1);
@@ -102,9 +108,17 @@ it('whitespace-only typing leaves q absent and sends no search requests', async 
     await search.fill('   ');
     await search.press('Enter');
     await page.clock.runFor(251);
+    await page.clock.resume();
+    // Flush React's scheduled work and deliver any resulting network events.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    await page.waitForLoadState('networkidle');
     expect(new URL(page.url()).searchParams.has('q')).toBe(false);
     expect(requests).toBe(0);
-    await page.clock.resume();
   } finally {
     await visit.close();
   }
