@@ -110,10 +110,6 @@ it('E23/E24: a held old detail cannot replace newer history after the Sheet clos
     await (await delivered).finished();
     await refocus;
     await page.waitForLoadState('networkidle');
-    console.info('old-detail-after-history-close', {
-      pane: await pane.textContent(),
-      history: await historyButton(page).textContent(),
-    });
     expect(await pane.textContent()).toContain('Use pnpm.');
     expect(await historyButton(page).textContent()).toContain('2 versions');
   } finally {

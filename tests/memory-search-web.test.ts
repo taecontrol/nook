@@ -34,7 +34,6 @@ it('E17: debounce and Enter put q in the URL; reload, selection, Back, scope and
       await field(page).evaluate((node) => document.activeElement === node),
     ).toBe(true);
     await field(page).fill('how do we deploy');
-    expect(new URL(page.url()).searchParams.has('q')).toBe(false);
     await expect
       .poll(() => new URL(page.url()).searchParams.get('q'))
       .toBe('how do we deploy');

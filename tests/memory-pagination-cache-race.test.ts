@@ -69,15 +69,15 @@ it('E18/E24: a Load more activation during native refocus preserves cursor recov
     await page.bringToFront();
     await recoveryArrived.promise;
     recoveryGate.resolve();
-    await page.waitForLoadState('networkidle');
+    // The forgotten boundary disappears only once the recovered list renders.
+    await expect
+      .poll(() => page.locator(`[data-memory-row="${boundary}"]`).count())
+      .toBe(0);
     expect(
       await page.getByText('Could not load memories', { exact: true }).count(),
     ).toBe(0);
     const recovered = await memoryRows(page).count();
     expect(recovered).toBeGreaterThanOrEqual(25);
-    expect(await page.locator(`[data-memory-row="${boundary}"]`).count()).toBe(
-      0,
-    );
     const next = page.waitForResponse((response) => {
       const url = new URL(response.url());
       return url.pathname === '/api/memories' && url.searchParams.has('cursor');

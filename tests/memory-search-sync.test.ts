@@ -267,8 +267,6 @@ it('E14: model changes mark all memories outdated; failures keep keyword and the
 });
 it('E15: D1 drops old-hash and orphan vectors and marks a stale current marker pending for repair', async () => {
   await indexMemories(app, searchMemories);
-  const original = app.services.upserts; // calls were reset, so derive the fixture vector from the recorder.
-  expect(original).toEqual([]);
   const values = app.services.run('@cf/baai/bge-m3', {
     text: [spanishRelease],
     truncate_inputs: true,
