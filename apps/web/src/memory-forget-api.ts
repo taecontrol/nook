@@ -20,7 +20,7 @@ export type ForgetSubject = {
   version?: number;
 };
 export type ForgetRequest = ForgetSubject & { version: number };
-async function refreshChanged(queries: QueryClient, id: string) {
+export async function refreshChanged(queries: QueryClient, id: string) {
   queries.removeQueries({ queryKey: memoryOptions(id).queryKey, exact: true });
   queries.removeQueries({
     queryKey: memoryHistoryOptions(id).queryKey,
@@ -36,7 +36,6 @@ async function refreshChanged(queries: QueryClient, id: string) {
   });
 }
 
-export { refreshChanged };
 export async function readForgetOutcome(id: string) {
   try {
     return await runApi((api) => api.memories.get({ params: { id } }));

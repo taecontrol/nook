@@ -93,7 +93,7 @@ export function memoryHistoryOptions(id: string, minimumVersion = 0) {
   return queryOptions({
     queryKey: memoryKeys.history(id),
     queryFn: async ({ signal }) => {
-      const versions: import('@nook/contract').MemoryVersion[] = [];
+      const versions: MemoryVersion[] = [];
       let before: number | null = null;
       do {
         const page = await runApi(

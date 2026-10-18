@@ -1,4 +1,3 @@
-import { RESERVED_BUCKET } from '@nook/contract';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Bot,
@@ -35,6 +34,8 @@ import { Item, ItemContent, ItemMedia, ItemTitle } from '@/components/ui/item';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { describeFailure } from './api-client';
+import { agentsIn } from './bucket-format';
+import { parentBuckets } from './bucket-tree';
 import { memoryOptions, memoryWriteGate } from './memory-api';
 import type { ForgetSubject } from './memory-forget-api';
 import { principalName } from './memory-format';
@@ -115,17 +116,6 @@ function useForgetDetail(
     enabled: Boolean(target && shown?.version === undefined && !busy),
   });
 }
-function readers(bucket: string, paths: readonly string[]) {
-  if (bucket === RESERVED_BUCKET) return <>Agents working in any bucket</>;
-  return (
-    <>
-      Agents working in <span className="font-mono">{bucket}</span>
-      {paths.some((path) => path.startsWith(`${bucket}/`))
-        ? ' or a bucket inside it'
-        : ''}
-    </>
-  );
-}
 function versions(version?: number) {
   if (version === undefined) return 'all its versions';
   return version === 1 ? 'its only version' : `all ${version} versions`;
@@ -178,9 +168,12 @@ export function ForgetDialog({ model }: { model: MemoryPageModel }) {
               <ItemContent>
                 <ItemTitle>Who loses it</ItemTitle>
                 <p className="text-sm text-pretty text-muted-foreground wrap-anywhere">
-                  {readers(
+                  {agentsIn(
                     shown.bucket,
-                    model.buckets.data?.map((row) => row.path) ?? [],
+                    parentBuckets(
+                      model.buckets.data?.map((row) => row.path) ?? [],
+                    ).has(shown.bucket),
+                    <span className="font-mono">{shown.bucket}</span>,
                   )}
                   . They can’t get it or find it in search anymore.
                   {shown.bucket !== model.bucket && (

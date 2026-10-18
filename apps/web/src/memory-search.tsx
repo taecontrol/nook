@@ -372,6 +372,7 @@ function NoResults({ model }: { model: MemoryPageModel }) {
 export function SearchBody({ model }: { model: MemoryPageModel }) {
   if (model.results.isError) return <SearchError model={model} />;
   if (!model.results.data) return <SearchSkeleton />;
+  const rows = pendingRows(model.results.data.results, model);
   return (
     <div
       id="memory-results"
@@ -382,9 +383,9 @@ export function SearchBody({ model }: { model: MemoryPageModel }) {
       {model.results.data.meaning === 'unavailable' && (
         <MeaningUnavailable model={model} />
       )}
-      {pendingRows(model.results.data.results, model).length ? (
+      {rows.length ? (
         <ul>
-          {pendingRows(model.results.data.results, model).map((entry) =>
+          {rows.map((entry) =>
             entry.kind === 'pending' ? (
               <ForgettingRow key="pending" title={entry.title} />
             ) : (

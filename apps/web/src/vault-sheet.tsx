@@ -1,5 +1,4 @@
 import {
-  RESERVED_BUCKET,
   secretLimits,
   secretPath,
   validateSecretDescription,
@@ -43,6 +42,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
+import { reachText } from './bucket-format';
 import { noAutofill } from './no-autofill';
 import { Path as SharedPath } from './path-text';
 import { formatDate } from './time';
@@ -51,18 +51,6 @@ import type { Draft, SheetState } from './vault-state';
 
 function Path({ children }: { children: string }) {
   return <SharedPath className="text-foreground">{children}</SharedPath>;
-}
-
-/** The agents that find what is stored in `bucket`. */
-export function agentsIn(bucket: string, hasChildren: boolean) {
-  if (bucket === RESERVED_BUCKET) return 'Agents working in any bucket';
-  return hasChildren
-    ? `Agents working in ${bucket} or a bucket inside it`
-    : `Agents working in ${bucket}`;
-}
-
-export function reachText(bucket: string, hasChildren: boolean, what = 'it') {
-  return `${agentsIn(bucket, hasChildren)} find ${what}.`;
 }
 
 function sheetProblems(sheet: SheetState) {

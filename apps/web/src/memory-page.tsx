@@ -1,8 +1,4 @@
-import {
-  type MemoryListItem,
-  memoryTitle,
-  type Provenance as ProvenanceRecord,
-} from '@nook/contract';
+import { type MemoryListItem, memoryTitle } from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import { cn } from 'cn';
 import { ArrowLeft, BookOpen, ChevronRight, History } from 'lucide-react';
@@ -29,7 +25,7 @@ import {
   pendingRows,
   UnconfirmedForget,
 } from './memory-forget';
-import { principalName } from './memory-format';
+import { Provenance, principalName } from './memory-format';
 import { memorySearch } from './memory-location';
 import { MemoryMarkdown } from './memory-markdown';
 import { ColumnSummary, SearchBody, SearchField } from './memory-search';
@@ -188,7 +184,7 @@ function EmptyList({ model }: { model: MemoryPageModel }) {
                 <code>remember</code> to store one in a bucket.
               </>
             ) : model.scope === 'bucket' ? (
-              `There are no memories stored in ${model.bucket}. Include inherited to see memories from its ancestors.`
+              emptyListCopy(model)
             ) : (
               `Agents working in ${model.bucket} have no memories to read yet.`
             )}
@@ -293,53 +289,6 @@ function MemoryList({ model }: { model: MemoryPageModel }) {
         <ListBody model={model} />
       )}
     </section>
-  );
-}
-export function Provenance({
-  provenance,
-  label = 'Stored',
-}: {
-  provenance: ProvenanceRecord;
-  label?: string;
-}) {
-  const { client, workingDirectory, at } = provenance;
-  return (
-    <dl className="mt-5 grid gap-x-7 gap-y-3 border-y py-4 text-xs sm:grid-cols-2">
-      <div>
-        <dt className="text-muted-foreground">Written by</dt>
-        <dd className="mt-0.5 font-medium wrap-anywhere">
-          {principalName({ provenance })}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-muted-foreground">
-          Client <span>(as reported)</span>
-        </dt>
-        <dd className="mt-0.5 font-medium wrap-anywhere">
-          {client.name}
-          {client.version ? ` ${client.version}` : ''}
-        </dd>
-      </div>
-      <div>
-        <dt className="text-muted-foreground">{label}</dt>
-        <dd>
-          <time dateTime={at} className="mt-0.5 block font-medium">
-            {formatDateTime(at)}
-          </time>
-        </dd>
-      </div>
-      {workingDirectory && (
-        <div className="min-w-0">
-          <dt className="text-muted-foreground">Working directory</dt>
-          <dd
-            title={workingDirectory}
-            className="mt-0.5 break-all font-mono font-medium"
-          >
-            {workingDirectory}
-          </dd>
-        </div>
-      )}
-    </dl>
   );
 }
 function emptyReading(model: MemoryPageModel) {

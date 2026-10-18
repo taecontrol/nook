@@ -50,6 +50,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { describeFailure } from './api-client';
+import { agentsIn, reachText } from './bucket-format';
 import { BucketTree, BucketTreeSkeleton } from './bucket-tree';
 import { LoadFailure } from './failure';
 import { Path, PathList } from './path-text';
@@ -58,7 +59,7 @@ import { useLastValue } from './use-confirm-target';
 import { useVaultPage } from './use-vault-page';
 import { WriteFeedback } from './vault-feedback';
 import { ancestorsOf, plural, type Secret, secretsIn } from './vault-model';
-import { agentsIn, reachText, SecretSheet } from './vault-sheet';
+import { SecretSheet } from './vault-sheet';
 
 // Intent loads only the dialog's code; the value is fetched, and audited, on open.
 const loadRevealDialog = () => import('./reveal-dialog');

@@ -18,10 +18,14 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { describeFailure } from './api-client';
 import { LoadFailure } from './failure';
 import { useMemoryHistory } from './memory-api';
-import { tagChanges } from './memory-history-format';
+import {
+  changeSummary,
+  Provenance,
+  principalLabel,
+  tagChanges,
+} from './memory-format';
 import { memorySearch } from './memory-location';
 import { MemoryMarkdown } from './memory-markdown';
-import { Provenance } from './memory-page';
 import { formatDateTime, timeAgo } from './time';
 import type { MemoryPageModel } from './use-memory-page';
 
@@ -34,22 +38,6 @@ type HistoryModel = MemoryPageModel & {
     'data' | 'error' | 'isPending' | 'isFetching' | 'isError' | 'refetch'
   >;
 };
-
-function principal(version: MemoryVersion) {
-  const { principal, client } = version.provenance;
-  const who = principal.kind === 'owner' ? 'Owner' : principal.name;
-  return `${who} · ${client.name}${client.version ? ` ${client.version}` : ''}`;
-}
-/** What this version changed, derived from the version before it. */
-function changeSummary(version: MemoryVersion, previous?: MemoryVersion) {
-  if (!previous) return 'First version';
-  const content = version.content !== previous.content;
-  const { added, removed } = tagChanges(previous.tags, version.tags);
-  const tags = [...added.map((t) => `+${t}`), ...removed.map((t) => `−${t}`)];
-  if (!content && !tags.length) return 'Tags only: reordered';
-  if (!content) return `Tags only: ${tags.join(' ')}`;
-  return tags.length ? `Content · tags ${tags.join(' ')}` : 'Content';
-}
 
 function VersionRows({
   versions,
@@ -94,10 +82,10 @@ function VersionRows({
                       </time>
                     </span>
                     <span
-                      title={principal(version)}
+                      title={principalLabel(version)}
                       className="mt-0.5 block truncate text-xs text-muted-foreground"
                     >
-                      {principal(version)}
+                      {principalLabel(version)}
                     </span>
                     <span className="mt-0.5 block text-xs">
                       {changeSummary(version, previous)}
