@@ -15,6 +15,7 @@ it('a held Check again response cannot replace a newer cached memory version', a
   const gate = deferred();
   const arrived = deferred();
   let reads = 0;
+  let checkedMemory: unknown;
   try {
     const { page, app } = visit;
     await page.getByRole('button', { name: /History.*3 versions/ }).waitFor();
@@ -29,7 +30,7 @@ it('a held Check again response cannot replace a newer cached memory version', a
       }
       const response = await route.fetch();
       if (reads === 2) {
-        expect(await response.json()).toMatchObject({ version: 3 });
+        checkedMemory = await response.json();
         arrived.resolve();
         await gate.promise;
       }
@@ -41,6 +42,7 @@ it('a held Check again response cannot replace a newer cached memory version', a
       .filter({ hasText: 'Forget not confirmed' });
     await unknown.getByRole('button', { name: 'Check again' }).click();
     await arrived.promise;
+    expect(checkedMemory).toMatchObject({ version: 3 });
     expect(
       (
         await memoryClient(app, '2026-07-28').call('update', {
