@@ -281,13 +281,13 @@ it('#63: a failed Check again explains the failure and remains retryable', async
       .getByRole('button', { name: 'Check again' })
       .click();
     await expect
-      .poll(() =>
-        page
-          .getByRole('alert')
-          .filter({ hasText: 'Could not check this memory' })
-          .innerText(),
-      )
+      .poll(() => unconfirmed(page).innerText())
       .toContain('Your owner session expired');
+    expect(
+      await page
+        .getByText('Could not check this memory', { exact: true })
+        .count(),
+    ).toBe(0);
     expect(
       await unconfirmed(page)
         .getByRole('button', { name: 'Check again' })

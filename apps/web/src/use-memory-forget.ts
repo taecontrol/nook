@@ -149,6 +149,15 @@ export function useMemoryForget({
   }));
   const { entry, notice } = forgetState(write, extras);
   const [reading, setReading] = useState<ForgetRead | null>(null);
+  const restoreEntryFocus = () => {
+    if (entry)
+      focusSoon(
+        () =>
+          shownElement(memoryRowSelector(entry.subject.id)) ??
+          shownElement(memoryRowSelector(entry.neighbor ?? '')) ??
+          shownElement('[data-memory-list-heading]'),
+      );
+  };
   const isLatest = (id: number) => latestForget(queries)?.mutationId === id;
   const select = (id?: string) =>
     void navigate({
@@ -206,7 +215,10 @@ export function useMemoryForget({
     notice,
     checking,
     readFailure: reading?.id === write?.id ? reading?.error : undefined,
-    dismissReadFailure: () => setReading(null),
+    dismissReadFailure: () => {
+      setReading(null);
+      restoreEntryFocus();
+    },
     refreshCurrent: async () => {
       if (!entry || checking || memoryWriteGate.isWriting(queries)) return;
       const token = entry.id;
@@ -248,8 +260,7 @@ export function useMemoryForget({
       if (!write || !isLatest(write.id)) return;
       retireForgets(queries);
       extras.clear();
-      if (entry)
-        focusSoon(() => shownElement(memoryRowSelector(entry.subject.id)));
+      restoreEntryFocus();
     },
     current: entry
       ? queries.getQueryData(memoryOptions(entry.subject.id).queryKey)

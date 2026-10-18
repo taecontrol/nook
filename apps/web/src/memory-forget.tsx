@@ -408,7 +408,8 @@ export function UnconfirmedForget({ model }: { model: MemoryPageModel }) {
   );
 }
 export function ForgetReadFailure({ model }: { model: MemoryPageModel }) {
-  if (!model.forget.readFailure) return null;
+  if (!model.forget.readFailure || model.forget.entry?.status === 'unconfirmed')
+    return null;
   return (
     <div className="p-3">
       <DismissibleAlert

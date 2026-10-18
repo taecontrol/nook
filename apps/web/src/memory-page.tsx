@@ -53,7 +53,7 @@ function BucketNav({ model }: { model: MemoryPageModel }) {
           <LoadFailure
             title="Could not load buckets"
             description={describeFailure(model.buckets.error, 'read buckets')}
-            cached={Boolean(model.buckets.data)}
+            cached={false}
             retrying={model.buckets.isFetching}
             onRetry={() => void model.buckets.refetch()}
             retryLabel="Retry buckets"

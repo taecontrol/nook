@@ -26,8 +26,9 @@ export function useReturnFocus(fallback: () => HTMLElement | null) {
         focusSoon(after);
         return;
       }
-      if (trigger.current?.isConnected) trigger.current.focus();
-      else fallback()?.focus();
+      if (trigger.current?.isConnected)
+        trigger.current.focus({ preventScroll: true });
+      else fallback()?.focus({ preventScroll: true });
     },
   };
 }
