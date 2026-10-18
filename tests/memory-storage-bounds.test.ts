@@ -1,8 +1,58 @@
 import { expect, it } from 'vitest';
 import { memories } from './fixtures/memory-history.ts';
-import { manyMemories, memoryRuntime, seedMemories } from './support/memory.ts';
+import {
+  manyMemories,
+  memoryId,
+  memoryRuntime,
+  seedMemories,
+  typicalMemories,
+} from './support/memory.ts';
 import { seedHistory } from './support/memory-history.ts';
-import { indexMemories, searchRuntime } from './support/search.ts';
+import { httpSearch, indexMemories, searchRuntime } from './support/search.ts';
+
+it('meaning search asks Vectorize for 50 candidates', async () => {
+  const app = await searchRuntime();
+  try {
+    await indexMemories(app, [typicalMemories[1]]);
+    const found = await httpSearch(app, 'deploy');
+    expect(found.meaning).toBe('available');
+    expect(app.services.queries).toEqual([
+      expect.objectContaining({ topK: 50 }),
+    ]);
+  } finally {
+    await app.close();
+  }
+});
+
+it('51 keyword matches include the fiftieth candidate and exclude the fifty-first', async () => {
+  const app = await searchRuntime();
+  try {
+    // Equal-length recorded notes and dates leave descending ids as the
+    // keyword tiebreaker. Skip the fixtures with expanded titles.
+    const seeds = manyMemories
+      .filter((_, index) => index >= 10 && index % 13 !== 0)
+      .slice(0, 51)
+      .map((memory, index) => ({
+        ...memory,
+        id: memoryId(800 + index),
+        bucket: 'work/acme',
+        tags: ['deploy'],
+        createdAt: '2026-10-10T12:00:00.000Z',
+      }));
+    // Meaning matches at both edges make keyword membership visible in the
+    // public result's match field despite the final twenty-result limit.
+    await indexMemories(app, seeds.slice(0, 2));
+    await seedMemories(app, seeds.slice(2));
+    const found = await httpSearch(app, 'deploy', 'work/acme', 'bucket');
+    expect(found.meaning).toBe('available');
+    expect(found.results[0]).toMatchObject({ id: seeds[1].id, match: 'both' });
+    expect(found.results).toContainEqual(
+      expect.objectContaining({ id: seeds[0].id, match: 'meaning' }),
+    );
+  } finally {
+    await app.close();
+  }
+});
 
 it('owner history keeps its 26-version page and next boundary', async () => {
   const app = await memoryRuntime();
