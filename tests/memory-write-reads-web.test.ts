@@ -5,6 +5,7 @@ import { memoryId, memoryRuntime, seedMemories } from './support/memory.ts';
 import {
   confirmForget,
   forgottenId,
+  memoryQueries,
   openForget,
   versionThree,
 } from './support/memory-forget.ts';
@@ -78,10 +79,12 @@ it('#62: forget detail cannot refocus between submission and the pending render'
   const { page, context } = visible;
   const gate = deferred();
   const arrived = deferred();
+  const detailGate = deferred();
+  const detailArrived = deferred();
   let reads = 0;
   try {
     page.setDefaultTimeout(5000);
-    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.setViewportSize({ width: 390, height: 844 });
     const clock = Date.parse('2026-10-18T12:00:00Z');
     await page.clock.setFixedTime(clock);
     await seedMemories(app);
@@ -89,14 +92,47 @@ it('#62: forget detail cannot refocus between submission and the pending render'
     await page.goto(
       `${app.origin}/memory?bucket=work/acme&q=forgettableuniqueword`,
     );
+    await page.route(`**/api/memories/${forgottenId}`, async (route) => {
+      reads++;
+      detailArrived.resolve();
+      await detailGate.promise;
+      await route.continue().catch(() => {});
+    });
     await openForget(page, forgottenId);
+    await detailArrived.promise;
+    await page.locator('[aria-label="Loading version"]').waitFor();
+    detailGate.resolve();
     await page
       .getByRole('alertdialog')
       .getByText('You are forgetting version 3', { exact: false })
       .waitFor();
-    await page.route(`**/api/memories/${forgottenId}`, (route) => {
-      reads++;
-      return route.continue();
+    expect(reads, 'The dialog loads its own uncached detail').toBe(1);
+    reads = 0;
+    const queries = await memoryQueries(page);
+    // Deliver the focus notification at the mutation's native pending event,
+    // before React can close the dialog or render busy. QueryClient normally
+    // delivers this same notification after resuming paused mutations.
+    const focus = await queries.evaluateHandle((client) => {
+      const state = { reads: 0 };
+      const stopReads = client.getQueryCache().subscribe((event) => {
+        if (
+          event.type === 'updated' &&
+          event.action.type === 'fetch' &&
+          event.query.queryKey[0] === 'memory'
+        )
+          state.reads++;
+      });
+      const stopWrites = client.getMutationCache().subscribe((event) => {
+        if (event.type === 'updated' && event.action.type === 'pending')
+          client.getQueryCache().onFocus();
+      });
+      return {
+        state,
+        stop: () => {
+          stopReads();
+          stopWrites();
+        },
+      };
     });
     await page.route('**/api/memories/*?expectedVersion=*', async (route) => {
       arrived.resolve();
@@ -134,11 +170,18 @@ it('#62: forget detail cannot refocus between submission and the pending render'
       reads,
       'The gate must close synchronously before React renders pending',
     ).toBe(0);
+    expect(await focus.evaluate(({ state }) => state.reads)).toBe(0);
+    await focus.evaluate(({ stop }) => stop());
+    await focus.dispose();
+    await queries.dispose();
     gate.resolve();
     await page.getByText('Not forgotten', { exact: true }).waitFor();
+    await page.locator(`[data-search-result="${forgottenId}"]`).click();
+    await page.getByRole('article', { name: 'Memory detail' }).waitFor();
     await expect.poll(() => reads).toBeGreaterThan(0);
   } finally {
     gate.resolve();
+    detailGate.resolve();
     await page.unrouteAll({ behavior: 'ignoreErrors' });
     await observeBrowserPage(page);
     await visible.close();

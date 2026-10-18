@@ -332,6 +332,7 @@ describe.each(['owner', 'machine'] as const)(
         await db
           .prepare('ALTER TABLE memory_versions RENAME TO unavailable_versions')
           .run();
+        const logsBefore = logs.length;
         try {
           expectToolError(
             await search('pnpm verify'),
@@ -347,8 +348,8 @@ describe.each(['owner', 'machine'] as const)(
         const audit = await db.prepare('SELECT * FROM audit_entries').all();
         expect(
           logs.length,
-          'Runtime diagnostics were actually captured',
-        ).toBeGreaterThan(0);
+          'The failing search emitted runtime diagnostics',
+        ).toBeGreaterThan(logsBefore);
         for (const privateText of [
           'pnpm verify',
           searchMemories[3].content,

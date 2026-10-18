@@ -151,3 +151,37 @@ it('the Vault sheet explains access from child buckets', async () => {
     await visit.close();
   }
 });
+
+it('a failed bucket refetch uses a replacement failure when the Memory tree is hidden', async () => {
+  const visit = await memoryPage(browser);
+  try {
+    const { page } = visit;
+    const nav = page.getByRole('navigation', { name: 'Memory buckets' });
+    await nav.locator('[data-path="work/acme"]').waitFor();
+    await page.route('**/api/buckets', (route) =>
+      route.fulfill({
+        status: 503,
+        json: { _tag: 'ServiceUnavailable' },
+      }),
+    );
+    await page.clock.setFixedTime(new Date('2030-01-01T00:00:00Z'));
+    const failed = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === '/api/buckets' &&
+        response.status() === 503,
+    );
+    await page.getByRole('link', { name: 'Vault', exact: true }).click();
+    await (await failed).finished();
+    await page.getByRole('heading', { name: 'Vault', exact: true }).waitFor();
+    await page.goBack();
+    await nav.getByText('Could not load buckets', { exact: true }).waitFor();
+    expect(await nav.locator('[data-path]').count()).toBe(0);
+    expect(await nav.getByRole('alert').count()).toBe(0);
+    expect(await nav.innerText()).toContain('Nook is unavailable right now.');
+    await page.unroute('**/api/buckets');
+    await nav.getByRole('button', { name: 'Retry buckets' }).click();
+    await nav.locator('[data-path="work/acme"]').waitFor();
+  } finally {
+    await visit.close();
+  }
+});

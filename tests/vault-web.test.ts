@@ -609,6 +609,9 @@ it('E21: a negative retry after ambiguity stays pending until listing describes 
       .getByRole('alert')
       .filter({ hasText: 'could not confirm' })
       .waitFor();
+    expect(await visit.page.getByRole('alert').innerText()).toContain(
+      'work/acme/RESEND_API_KEY already exists.',
+    );
     expect(await visit.page.getByRole('alert').innerText()).not.toMatch(
       /nothing was stored/i,
     );

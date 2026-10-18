@@ -288,7 +288,7 @@ it.each(['inherited', 'bucket'])(
   async (scope) => {
     const seeds = manyMemories.map((memory, index) => ({
       ...memory,
-      bucket: 'work/acme',
+      bucket: ['work/acme', 'work', 'me'][index % 3],
       createdAt:
         index < 40 ? '2026-10-09T14:00:00.000Z' : '2026-10-08T14:00:00.000Z',
     }));
@@ -314,12 +314,21 @@ it.each(['inherited', 'bucket'])(
       ids.push(...page.memories.map((memory) => memory.id));
       cursor = page.next;
     } while (cursor);
-    const expected = seeds.toSorted(
-      (a, b) =>
-        b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id),
-    );
+    const expected = seeds
+      .filter(
+        (memory) => scope === 'inherited' || memory.bucket === 'work/acme',
+      )
+      .toSorted(
+        (a, b) =>
+          b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id),
+      );
     expect(ids).toEqual(expected.map((memory) => memory.id));
-    expect(new Set(ids).size).toBe(seeds.length);
+    expect(new Set(ids).size).toBe(expected.length);
+    expect(new Set(first.memories.map((memory) => memory.bucket))).toEqual(
+      new Set(
+        scope === 'inherited' ? ['work/acme', 'work', 'me'] : ['work/acme'],
+      ),
+    );
   },
 );
 it('E20/E33: restricted handlers forbid sibling lists and mask detail; the owner routes reject Nook tokens', async () => {

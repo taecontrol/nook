@@ -50,7 +50,7 @@ it.each([false, true])(
         }),
       ],
       start: `/memory?bucket=work/acme/api&scope=bucket&memory=${forgottenId}`,
-      configure: async (page, app) => {
+      configure: async (page) => {
         if (holdRoute)
           await page.route('**/vault-page-*.js', async (route) => {
             vaultArrived.resolve();
@@ -58,19 +58,14 @@ it.each([false, true])(
             await route.continue().catch(() => {});
           });
         page.on('pageerror', (error) => errors.push(error.message));
-        await (await app.mf.getD1Database('DB'))
-          .prepare(
-            "CREATE TRIGGER synthetic_forget_abort BEFORE DELETE ON memories BEGIN SELECT RAISE(ABORT,'synthetic failure'); END",
-          )
-          .run();
         await page.route(
           '**/api/memories/*?expectedVersion=*',
           async (route) => {
-            const response = await route.fetch();
-            expect(response.status()).toBe(503);
             arrived.resolve();
             await gate.promise;
-            await route.fulfill({ response }).catch(() => {});
+            await route
+              .fulfill({ status: 403, body: 'Access denied' })
+              .catch(() => {});
           },
         );
       },
@@ -88,14 +83,12 @@ it.each([false, true])(
       await page.getByRole('link', { name: 'Vault', exact: true }).click();
       await expect.poll(() => new URL(page.url()).pathname).toBe('/vault');
       if (holdRoute) await vaultArrived.promise;
-      const recovery = page.waitForResponse(
-        (response) =>
-          response.request().method() === 'GET' &&
-          new URL(response.url()).pathname === `/api/memories/${forgottenId}`,
+      const rejection = page.waitForResponse(
+        (response) => response.request().method() === 'DELETE',
       );
       gate.resolve();
-      const response = await recovery;
-      expect(response.status()).toBe(200);
+      const response = await rejection;
+      expect(response.status()).toBe(403);
       await response.finished();
       await rendered(page);
       vaultGate.resolve();

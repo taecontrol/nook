@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { QueryClient } from '@tanstack/react-query';
 import type { Browser, Page } from 'playwright';
 import { expect } from 'vitest';
 import { memoryClient, memoryId, memoryPage } from './memory.ts';
@@ -116,6 +117,27 @@ export function forgetPage(
   });
 }
 export const forgetDialog = (page: Page) => page.getByRole('alertdialog');
+export function memoryQueries(page: Page) {
+  return page.evaluateHandle(() => {
+    const element = document.querySelector('#root > *');
+    const key = Object.keys(element ?? {}).find((entry) =>
+      entry.startsWith('__reactFiber$'),
+    );
+    type Fiber = {
+      return?: Fiber;
+      memoizedProps?: { client?: QueryClient };
+    };
+    let fiber = key
+      ? (element as unknown as Record<string, Fiber>)[key]
+      : undefined;
+    while (fiber) {
+      const client = fiber.memoizedProps?.client;
+      if (client?.getMutationCache) return client;
+      fiber = fiber.return;
+    }
+    throw new Error('The mounted app has no QueryClient.');
+  });
+}
 export async function openForget(page: Page, id?: string) {
   const trigger = id
     ? page.locator(`[data-memory-actions="${id}"]`)

@@ -2,8 +2,9 @@ import type { Memory } from '@nook/contract';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { expect, it, vi } from 'vitest';
 import * as api from '../apps/web/src/api-client.ts';
-import { memoryOptions } from '../apps/web/src/memory-api.ts';
-import { writeMemory } from '../apps/web/src/memory-cache.ts';
+import { memoryOptions, memoryWriteKey } from '../apps/web/src/memory-api.ts';
+import { canLoadMemory, writeMemory } from '../apps/web/src/memory-cache.ts';
+import { deferred } from './support/machines.ts';
 
 it('a detail fetch publishes only its completed result and retains a newer cached version', async () => {
   const memory: Memory = {
@@ -41,5 +42,37 @@ it('a detail fetch publishes only its completed result and retains a newer cache
     unsubscribe();
     queries.clear();
     read.mockRestore();
+  }
+});
+
+it('outcome checks do not block detail reads while a newer forget blocks only its own memory', async () => {
+  const queries = new QueryClient();
+  const checking = deferred();
+  const forgetting = deferred();
+  const check = queries
+    .getMutationCache()
+    .build(queries, {
+      mutationKey: memoryWriteKey,
+      mutationFn: (_input: { id: string; check: true }) => checking.promise,
+    })
+    .execute({ id: 'checked-memory', check: true });
+  const forget = queries
+    .getMutationCache()
+    .build(queries, {
+      mutationKey: memoryWriteKey,
+      mutationFn: (_input: { id: string }) => forgetting.promise,
+    })
+    .execute({ id: 'forgotten-memory' });
+  try {
+    expect(queries.isMutating({ mutationKey: memoryWriteKey })).toBe(2);
+    expect(canLoadMemory(queries, 'checked-memory')).toBe(true);
+    expect(canLoadMemory(queries, 'forgotten-memory')).toBe(false);
+    expect(canLoadMemory(queries, 'another-memory')).toBe(true);
+    expect(canLoadMemory(queries, '')).toBe(false);
+  } finally {
+    checking.resolve();
+    forgetting.resolve();
+    await Promise.all([check, forget]);
+    queries.clear();
   }
 });
