@@ -81,6 +81,7 @@ it('#62: forget detail cannot refocus between submission and the pending render'
   const arrived = deferred();
   const detailGate = deferred();
   const detailArrived = deferred();
+  const nextDetailGate = deferred();
   let reads = 0;
   try {
     page.setDefaultTimeout(5000);
@@ -89,9 +90,7 @@ it('#62: forget detail cannot refocus between submission and the pending render'
     await page.clock.setFixedTime(clock);
     await seedMemories(app);
     await versionThree(app);
-    await page.goto(
-      `${app.origin}/memory?bucket=work/acme&q=forgettableuniqueword`,
-    );
+    await page.goto(`${app.origin}/memory?bucket=work/acme&q=deploy`);
     await page.route(`**/api/memories/${forgottenId}`, async (route) => {
       reads++;
       detailArrived.resolve();
@@ -176,12 +175,29 @@ it('#62: forget detail cannot refocus between submission and the pending render'
     await queries.dispose();
     gate.resolve();
     await page.getByText('Not forgotten', { exact: true }).waitFor();
-    await page.locator(`[data-search-result="${forgottenId}"]`).click();
-    await page.getByRole('article', { name: 'Memory detail' }).waitFor();
-    await expect.poll(() => reads).toBeGreaterThan(0);
+    let nextReads = 0;
+    await page.route(`**/api/memories/${memoryId(2)}`, async (route) => {
+      nextReads++;
+      await nextDetailGate.promise;
+      await route.continue().catch(() => {});
+    });
+    await openForget(page, memoryId(2));
+    await page.locator('[aria-label="Loading version"]').waitFor();
+    await expect
+      .poll(
+        () => nextReads,
+        'A new dialog can load uncached detail after settlement',
+      )
+      .toBe(1);
+    nextDetailGate.resolve();
+    await page
+      .getByRole('alertdialog')
+      .getByText('You are forgetting version 1', { exact: false })
+      .waitFor();
   } finally {
     gate.resolve();
     detailGate.resolve();
+    nextDetailGate.resolve();
     await page.unrouteAll({ behavior: 'ignoreErrors' });
     await observeBrowserPage(page);
     await visible.close();

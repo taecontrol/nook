@@ -338,6 +338,12 @@ describe.each(['owner', 'machine'] as const)(
             await search('pnpm verify'),
             'Service unavailable. Try again later.',
           );
+          await expect
+            .poll(
+              () => logs.length,
+              'The failing search emitted runtime diagnostics',
+            )
+            .toBeGreaterThan(logsBefore);
         } finally {
           await db
             .prepare(
@@ -346,10 +352,6 @@ describe.each(['owner', 'machine'] as const)(
             .run();
         }
         const audit = await db.prepare('SELECT * FROM audit_entries').all();
-        expect(
-          logs.length,
-          'The failing search emitted runtime diagnostics',
-        ).toBeGreaterThan(logsBefore);
         for (const privateText of [
           'pnpm verify',
           searchMemories[3].content,
