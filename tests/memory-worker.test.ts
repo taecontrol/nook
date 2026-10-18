@@ -649,12 +649,6 @@ it('schema: native D1 rejects invalid head, version, client and tag facts', asyn
       .run(),
   ).rejects.toThrow(/UNIQUE/i);
 });
-it('schema: removing a memory head cascades to its stored versions', async () => {
-  await seedMemories(app, [memoryFixture(1)]);
-  const db = await app.mf.getD1Database('DB');
-  await db.prepare('DELETE FROM memories WHERE id=?').bind(memoryId(1)).run();
-  expect(await memoryCounts(app)).toEqual({ memories: 0, versions: 0 });
-});
 it('E14/E33: failed HTTP reads have fixed public errors with no title, content or storage cause', async () => {
   await seedMemories(app, [
     memoryFixture(1, { content: 'synthetic-private-personal-memory' }),

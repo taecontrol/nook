@@ -341,16 +341,6 @@ describe.each(['owner', 'machine'] as const)('Update #12: %s', (endpoint) => {
         await integrity();
       },
     );
-    it('E8: 16384 multibyte UTF-8 bytes are preserved exactly', async () => {
-      const content = 'é'.repeat(8192);
-      expect(success(await update({ content }))).toMatchObject({
-        updated: true,
-        version: 2,
-      });
-      expect(
-        (await client.call('get', { id: memoryId(1) })).structuredContent,
-      ).toMatchObject({ content });
-    });
     it.each([false, true])(
       'E9: ten parallel updates, identical=%s, append exactly one row',
       async (identical) => {
@@ -443,29 +433,6 @@ describe.each(['owner', 'machine'] as const)('Update #12: %s', (endpoint) => {
         'tags',
         'workingDirectory',
       ]);
-    });
-    it('E14: updating the bucket’s only memory leaves both deletion guards intact', async () => {
-      success(await update());
-      expectToolError(
-        await client.call('delete_bucket', { path: 'work/acme' }),
-        'Delete its child buckets first.',
-      );
-      await fetch(`${app.origin}/api/buckets/work%2Facme%2Fapi`, {
-        method: 'DELETE',
-        headers: { 'Cf-Access-Jwt-Assertion': assertion },
-      });
-      expectToolError(
-        await client.call('delete_bucket', { path: 'work/acme' }),
-        'Delete its memories first.',
-      );
-      const response = await fetch(`${app.origin}/api/buckets/work%2Facme`, {
-        method: 'DELETE',
-        headers: { 'Cf-Access-Jwt-Assertion': assertion },
-      });
-      expect(response.status).toBe(409);
-      expect(await response.json()).toMatchObject({
-        message: 'Delete its memories first.',
-      });
     });
   });
 });

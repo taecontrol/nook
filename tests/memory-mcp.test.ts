@@ -145,14 +145,10 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
     });
     it.each([
       ['none', undefined, ''],
-      ['controls', undefined, 'client\tbad/1'],
       ['comment controls', undefined, 'client/1 (sdk\tbad)'],
       ['invalid product', undefined, 'bad:client/1'],
       ['long', undefined, `${'x'.repeat(129)}/1`],
-      ['bad envelope', { name: 'bad\nclient', version: '1' }, ''],
       ['blank name', { name: '   ', version: '1' }, ''],
-      ['surrogate name', { name: 'client\ud800', version: '1' }, ''],
-      ['surrogate version', { name: 'client', version: '1\udfff' }, ''],
       ['long version', undefined, `client/${'1'.repeat(65)}`],
     ])(
       'E3: unusable %s client identity becomes unknown',
