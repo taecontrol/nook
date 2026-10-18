@@ -343,31 +343,32 @@ describe.each(['owner', 'machine'] as const)(
             privateText,
           );
       });
-      it('E10: a revoked token is unauthorized before any embedding or vector query', async () => {
-        await indexMemories(app, searchMemories);
-        expect(
-          results(await search('how do we deploy')).results.length,
-        ).toBeGreaterThan(0);
-        expect(app.services.embeddingCalls).toHaveLength(1);
-        app.services.resetCalls();
-        const revoked = await seedMemoryMachine(app);
-        await (await app.mf.getD1Database('DB'))
-          .prepare('DELETE FROM machine_tokens WHERE token_hash=?')
-          .bind(createHash('sha256').update(revoked.token).digest('hex'))
-          .run();
-        const machine = memoryClient(app, version, {
-          machine: true,
-          headers: { Authorization: `Bearer ${revoked.token}` },
+      if (endpoint === 'machine')
+        it('E10: a revoked token is unauthorized before any embedding or vector query', async () => {
+          await indexMemories(app, searchMemories);
+          expect(
+            results(await search('how do we deploy')).results.length,
+          ).toBeGreaterThan(0);
+          expect(app.services.embeddingCalls).toHaveLength(1);
+          app.services.resetCalls();
+          const revoked = await seedMemoryMachine(app);
+          await (await app.mf.getD1Database('DB'))
+            .prepare('DELETE FROM machine_tokens WHERE token_hash=?')
+            .bind(createHash('sha256').update(revoked.token).digest('hex'))
+            .run();
+          const machine = memoryClient(app, version, {
+            machine: true,
+            headers: { Authorization: `Bearer ${revoked.token}` },
+          });
+          const response = await machine.request('tools/call', {
+            name: 'search',
+            arguments: { bucket: 'work/acme', query: 'how do we deploy' },
+          });
+          expect(response.status).toBe(401);
+          expect(app.services.embeddingCalls).toEqual([]);
+          expect(app.services.queries).toEqual([]);
+          expect(app.services.upserts).toEqual([]);
         });
-        const response = await machine.request('tools/call', {
-          name: 'search',
-          arguments: { bucket: 'work/acme', query: 'how do we deploy' },
-        });
-        expect(response.status).toBe(401);
-        expect(app.services.embeddingCalls).toEqual([]);
-        expect(app.services.queries).toEqual([]);
-        expect(app.services.upserts).toEqual([]);
-      });
       it('discovery: search describes explicit buckets, compact results and get, and is read-only', async () => {
         const tool = (await client.listTools()).tools.find(
           (t) => t.name === 'search',

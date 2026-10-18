@@ -275,38 +275,39 @@ describe.each(['owner', 'machine'] as const)('Update #12: %s', (endpoint) => {
         await integrity();
       },
     );
-    it('E7: forbidden ancestors and masked missing, malformed and unreadable ids never write or disclose content', async () => {
-      await seedMemories(app, [
-        memoryFixture(2, { bucket: 'work' }),
-        memoryFixture(3, { bucket: 'me' }),
-        memoryFixture(4, {
-          bucket: 'personal',
-          content: 'private-sibling-text',
-        }),
-      ]);
-      const restricted = memoryClient(app, protocol, {
-        machine: true,
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const before = await snapshot();
-      for (const [id, message] of [
-        [memoryId(2), 'Access to this bucket is forbidden.'],
-        [memoryId(3), 'Access to this bucket is forbidden.'],
-        [memoryId(4), 'Memory not found.'],
-        [randomUUID(), 'Memory not found.'],
-        ['malformed', 'Memory not found.'],
-      ]) {
-        const result = await restricted.call('update', {
-          id,
-          expectedVersion: 1,
-          content: next,
+    if (endpoint === 'machine')
+      it('E7: forbidden ancestors and masked missing, malformed and unreadable ids never write or disclose content', async () => {
+        await seedMemories(app, [
+          memoryFixture(2, { bucket: 'work' }),
+          memoryFixture(3, { bucket: 'me' }),
+          memoryFixture(4, {
+            bucket: 'personal',
+            content: 'private-sibling-text',
+          }),
+        ]);
+        const restricted = memoryClient(app, protocol, {
+          machine: true,
+          headers: { Authorization: `Bearer ${token}` },
         });
-        expectToolError(result, message);
-        expect(JSON.stringify(result)).not.toContain('private-sibling-text');
-        expect(await snapshot()).toEqual(before);
-      }
-      await integrity();
-    });
+        const before = await snapshot();
+        for (const [id, message] of [
+          [memoryId(2), 'Access to this bucket is forbidden.'],
+          [memoryId(3), 'Access to this bucket is forbidden.'],
+          [memoryId(4), 'Memory not found.'],
+          [randomUUID(), 'Memory not found.'],
+          ['malformed', 'Memory not found.'],
+        ]) {
+          const result = await restricted.call('update', {
+            id,
+            expectedVersion: 1,
+            content: next,
+          });
+          expectToolError(result, message);
+          expect(JSON.stringify(result)).not.toContain('private-sibling-text');
+          expect(await snapshot()).toEqual(before);
+        }
+        await integrity();
+      });
     it.each([
       [{ content: '' }, 'Enter memory content.'],
       [
@@ -398,25 +399,26 @@ describe.each(['owner', 'machine'] as const)('Update #12: %s', (endpoint) => {
       }
       expect(success(await update()).updated).toBe(true);
     });
-    it('E12: revoked tokens get 401 before SDK dispatch and do not write', async () => {
-      const db = await app.mf.getD1Database('DB');
-      await db
-        .prepare('DELETE FROM machine_tokens WHERE id=?')
-        .bind(machineId)
-        .run();
-      const before = await snapshot();
-      const revoked = memoryClient(app, protocol, {
-        machine: true,
-        headers: { Authorization: `Bearer ${token}` },
+    if (endpoint === 'machine')
+      it('E12: revoked tokens get 401 before SDK dispatch and do not write', async () => {
+        const db = await app.mf.getD1Database('DB');
+        await db
+          .prepare('DELETE FROM machine_tokens WHERE id=?')
+          .bind(machineId)
+          .run();
+        const before = await snapshot();
+        const revoked = memoryClient(app, protocol, {
+          machine: true,
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const response = await revoked.request('tools/call', {
+          name: 'update',
+          arguments: { id: memoryId(1), expectedVersion: 1, content: next },
+        });
+        expect(response.status).toBe(401);
+        expect(await response.json()).toEqual({ _tag: 'Unauthorized' });
+        expect(await snapshot()).toEqual(before);
       });
-      const response = await revoked.request('tools/call', {
-        name: 'update',
-        arguments: { id: memoryId(1), expectedVersion: 1, content: next },
-      });
-      expect(response.status).toBe(401);
-      expect(await response.json()).toEqual({ _tag: 'Unauthorized' });
-      expect(await snapshot()).toEqual(before);
-    });
     it('E13: the nine plain tools describe guarded, destructive, idempotent updates', async () => {
       const { tools } = await client.listTools();
       expect(tools.map((t) => t.name).sort()).toEqual([

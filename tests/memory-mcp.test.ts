@@ -301,40 +301,41 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
       expect(new Set(results.map((m) => m.id)).size).toBe(3);
       expect(await memoryCounts(app)).toEqual({ memories: 3, versions: 3 });
     });
-    it('E8/E9/E33: restricted writes deny siblings and reads mask absent, malformed and denied ids', async () => {
-      await seedMemories(app, [
-        memoryFixture(1, {
-          bucket: 'personal',
-          content: 'synthetic-private-personal-memory',
-        }),
-        memoryFixture(2, { bucket: 'me' }),
-        memoryFixture(3, { bucket: 'work' }),
-      ]);
-      const restricted = memoryClient(app, version, {
-        machine: true,
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const before = await memoryCounts(app);
-      expectToolError(
-        await restricted.call('remember', {
-          bucket: 'personal',
-          content: 'synthetic-failed-write-content',
-        }),
-        'Access to this bucket is forbidden.',
-      );
-      for (const id of [memoryId(1), randomUUID(), 'malformed']) {
-        const result = await restricted.call('get', { id });
-        expectToolError(result, 'Memory not found.');
-        expectPrivate(JSON.stringify(result), [
-          'synthetic-private-personal-memory',
-          token,
-          assertion,
+    if (endpoint === 'machine')
+      it('E8/E9/E33: restricted writes deny siblings and reads mask absent, malformed and denied ids', async () => {
+        await seedMemories(app, [
+          memoryFixture(1, {
+            bucket: 'personal',
+            content: 'synthetic-private-personal-memory',
+          }),
+          memoryFixture(2, { bucket: 'me' }),
+          memoryFixture(3, { bucket: 'work' }),
         ]);
-      }
-      for (const id of [memoryId(2), memoryId(3)])
-        expect((await restricted.call('get', { id })).isError).not.toBe(true);
-      expect(await memoryCounts(app)).toEqual(before);
-    });
+        const restricted = memoryClient(app, version, {
+          machine: true,
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const before = await memoryCounts(app);
+        expectToolError(
+          await restricted.call('remember', {
+            bucket: 'personal',
+            content: 'synthetic-failed-write-content',
+          }),
+          'Access to this bucket is forbidden.',
+        );
+        for (const id of [memoryId(1), randomUUID(), 'malformed']) {
+          const result = await restricted.call('get', { id });
+          expectToolError(result, 'Memory not found.');
+          expectPrivate(JSON.stringify(result), [
+            'synthetic-private-personal-memory',
+            token,
+            assertion,
+          ]);
+        }
+        for (const id of [memoryId(2), memoryId(3)])
+          expect((await restricted.call('get', { id })).isError).not.toBe(true);
+        expect(await memoryCounts(app)).toEqual(before);
+      });
     it('E10: a valid absent bucket reports not found and writes nothing', async () => {
       expectToolError(
         await call('remember', { bucket: 'work/absent', content }),
@@ -457,36 +458,40 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
         'workingDirectory',
       ]);
     });
-    it('E13: revocation denies remember before writes and retains the machine name snapshot', async () => {
-      const machine = memoryClient(app, version, {
-        machine: true,
-        headers: { Authorization: `Bearer ${token}` },
+    if (endpoint === 'machine')
+      it('E13: revocation denies remember before writes and retains the machine name snapshot', async () => {
+        const machine = memoryClient(app, version, {
+          machine: true,
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const m = stored(
+          await machine.call('remember', { bucket: 'work/acme', content }),
+        );
+        const response = await fetch(
+          `${app.origin}/api/machines/${machineId}`,
+          {
+            method: 'DELETE',
+            headers: { 'Cf-Access-Jwt-Assertion': assertion },
+          },
+        );
+        expect(response.status).toBe(204);
+        const before = await memoryCounts(app);
+        const rejected = await machine.request('tools/call', {
+          name: 'remember',
+          arguments: { bucket: 'work/acme', content: 'after revocation' },
+        });
+        expect(rejected.status).toBe(401);
+        expect(await rejected.json()).toEqual({ _tag: 'Unauthorized' });
+        expect(await memoryCounts(app)).toEqual(before);
+        const owner = memoryClient(app, version, {
+          headers: { 'Cf-Access-Jwt-Assertion': assertion },
+        });
+        expect(
+          (await owner.call('get', { id: m.id })).structuredContent?.provenance,
+        ).toMatchObject({
+          principal: { kind: 'machine', id: machineId, name: 'luis-mbp' },
+        });
       });
-      const m = stored(
-        await machine.call('remember', { bucket: 'work/acme', content }),
-      );
-      const response = await fetch(`${app.origin}/api/machines/${machineId}`, {
-        method: 'DELETE',
-        headers: { 'Cf-Access-Jwt-Assertion': assertion },
-      });
-      expect(response.status).toBe(204);
-      const before = await memoryCounts(app);
-      const rejected = await machine.request('tools/call', {
-        name: 'remember',
-        arguments: { bucket: 'work/acme', content: 'after revocation' },
-      });
-      expect(rejected.status).toBe(401);
-      expect(await rejected.json()).toEqual({ _tag: 'Unauthorized' });
-      expect(await memoryCounts(app)).toEqual(before);
-      const owner = memoryClient(app, version, {
-        headers: { 'Cf-Access-Jwt-Assertion': assertion },
-      });
-      expect(
-        (await owner.call('get', { id: m.id })).structuredContent?.provenance,
-      ).toMatchObject({
-        principal: { kind: 'machine', id: machineId, name: 'luis-mbp' },
-      });
-    });
     it('E14/E33: real D1 failures expose only unavailable and roll back the batch', async () => {
       const db = await app.mf.getD1Database('DB');
       await db
