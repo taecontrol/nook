@@ -1,8 +1,8 @@
 import { type Memory, type MemoryVersion, memoryTitle } from '@nook/contract';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ArrowLeft, ChevronLeft, ChevronRight, Diff } from 'lucide-react';
-import { lazy, type RefObject, Suspense, useEffect, useRef } from 'react';
+import { lazy, type RefObject, Suspense } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Item, ItemActions, ItemContent } from '@/components/ui/item';
@@ -17,7 +17,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { describeFailure } from './api-client';
 import { LoadFailure } from './failure';
-import { memoryHistoryOptions, memoryOptions } from './memory-api';
+import { useMemoryHistory } from './memory-api';
 import { tagChanges } from './memory-history-format';
 import { MemoryMarkdown } from './memory-markdown';
 import { Provenance } from './memory-page';
@@ -382,43 +382,8 @@ export function HistorySheet({
   /** The History button that opened the sheet; focus goes back to it on close. */
   returnFocus: RefObject<HTMLElement | null>;
 }) {
-  const queries = useQueryClient();
-  const history = useQuery(memoryHistoryOptions(detail.id, detail.version));
-  const reconciled = useRef(0);
-  const head = history.data?.[0];
-  useEffect(() => {
-    if (
-      !head ||
-      head.version >= detail.version ||
-      history.isFetching ||
-      history.isError ||
-      reconciled.current === detail.version
-    )
-      return;
-    reconciled.current = detail.version;
-    void history.refetch();
-  }, [
-    head,
-    detail.version,
-    history.isFetching,
-    history.isError,
-    history.refetch,
-  ]);
-  const memory = currentMemory(detail, history.data?.[0]);
-  useEffect(() => {
-    if (memory.version > detail.version)
-      queries.setQueryData(memoryOptions(detail.id).queryKey, memory);
-  }, [queries, detail, memory]);
-  const model = {
-    ...pageModel,
-    history: {
-      ...history,
-      isPending:
-        history.isPending ||
-        (!history.isError &&
-          (history.data?.[0]?.version ?? 0) < detail.version),
-    },
-  };
+  const { memory, history } = useMemoryHistory(detail);
+  const model = { ...pageModel, history };
   return (
     <Sheet
       open={model.historyOpen}
@@ -448,8 +413,4 @@ export function HistorySheet({
       </SheetContent>
     </Sheet>
   );
-}
-function currentMemory(detail: Memory, latest?: MemoryVersion): Memory {
-  if (!latest || latest.version <= detail.version) return detail;
-  return { ...detail, ...latest, updatedAt: latest.provenance.at };
 }

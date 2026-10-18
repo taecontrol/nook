@@ -1,15 +1,16 @@
-import type { MemoryListItem, OwnerMemorySearchResult } from '@nook/contract';
 import {
-  type Query,
   type QueryClient,
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query';
 import { ApiError, runApi } from './api-client';
 import {
+  forgetFromCache,
   memoryHistoryOptions,
   memoryOptions,
+  memoryQuery,
   memoryWriteKey,
+  restoreMemoryCache,
 } from './memory-api';
 
 export type ForgetSubject = {
@@ -19,73 +20,6 @@ export type ForgetSubject = {
   version?: number;
 };
 export type ForgetRequest = ForgetSubject & { version: number };
-type Pages = {
-  pages: { memories: MemoryListItem[]; next: string | null }[];
-  pageParams: unknown[];
-};
-type Results = {
-  results: OwnerMemorySearchResult[];
-  meaning: 'available' | 'unavailable';
-};
-const queryKinds = new Set([
-  'memories',
-  'memory-counts',
-  'memory-search',
-  'memory',
-  'memory-history',
-]);
-const memoryQuery = (query: Query) => queryKinds.has(String(query.queryKey[0]));
-function affectedQuery(query: Query, subject: ForgetRequest) {
-  const kind = query.queryKey[0];
-  return kind === 'memory' || kind === 'memory-history'
-    ? query.queryKey[1] === subject.id
-    : memoryQuery(query);
-}
-function removedList(data: Pages, id: string): Pages {
-  return {
-    ...data,
-    pages: data.pages.map((page) => ({
-      ...page,
-      memories: page.memories.filter((memory) => memory.id !== id),
-    })),
-  };
-}
-function removeCached(
-  queries: QueryClient,
-  query: Query,
-  subject: ForgetRequest,
-) {
-  const key = query.queryKey;
-  const data = query.state.data;
-  if (data === undefined) return;
-  switch (key[0]) {
-    case 'memories':
-      queries.setQueryData(key, removedList(data as Pages, subject.id));
-      break;
-    case 'memory-counts': {
-      const counts = data as { counts: { bucket: string; count: number }[] };
-      queries.setQueryData(key, {
-        counts: counts.counts.map((row) =>
-          row.bucket === subject.bucket
-            ? { ...row, count: Math.max(0, row.count - 1) }
-            : row,
-        ),
-      });
-      break;
-    }
-    case 'memory-search': {
-      const results = data as Results;
-      queries.setQueryData(key, {
-        ...results,
-        results: results.results.filter((row) => row.id !== subject.id),
-      });
-      break;
-    }
-    default:
-      if (key[1] === subject.id)
-        queries.removeQueries({ queryKey: key, exact: true });
-  }
-}
 async function refreshChanged(queries: QueryClient, id: string) {
   queries.removeQueries({ queryKey: memoryOptions(id).queryKey, exact: true });
   queries.removeQueries({
@@ -141,21 +75,16 @@ export function useForgetMemory() {
     mutationFn: forgetRequest,
     onMutate: async (subject) => {
       await queries.cancelQueries({ predicate: memoryQuery });
-      const affected = {
-        predicate: (query: Query) => affectedQuery(query, subject),
-      };
-      const snapshot = queries.getQueriesData(affected);
-      for (const query of queries.getQueryCache().findAll(affected))
-        removeCached(queries, query, subject);
-      return snapshot;
+      return forgetFromCache(queries, subject);
     },
     onError: async (error, subject, snapshot) => {
       if (error instanceof ApiError && error.ambiguous) return;
-      for (const [key, data] of snapshot ?? []) queries.setQueryData(key, data);
+      if (snapshot) restoreMemoryCache(queries, snapshot);
       if (error instanceof ApiError && error.tag === 'MemoryChanged')
         await refreshChanged(queries, subject.id).catch(() => {});
     },
     onSettled: (_data, _error, _subject, snapshot) => {
+      // Do not retain forgotten content in the settled mutation.
       if (snapshot) snapshot.length = 0;
       return queries.invalidateQueries({
         predicate: memoryQuery,

@@ -4,9 +4,11 @@ import { useNavigate, useRouter } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { ApiError } from './api-client';
 import {
+  invalidateMemoryLists,
   type MemorySearch,
   memoryOptions,
   memoryWriteGate,
+  writeMemory,
 } from './memory-api';
 import {
   type ForgetRequest,
@@ -178,18 +180,13 @@ export function useMemoryForget({
         const current = await readForgetOutcome(entry.subject.id);
         if (operation.current !== checkedOperation) return;
         if (current) {
-          queries.setQueryData(memoryOptions(current.id).queryKey, current);
+          writeMemory(queries, current);
           setEntry({
             ...entry,
             status:
               current.version === entry.subject.version ? 'failed' : 'changed',
           });
-          await queries.invalidateQueries({
-            predicate: (query) =>
-              ['memories', 'memory-counts', 'memory-search'].includes(
-                String(query.queryKey[0]),
-              ),
-          });
+          await invalidateMemoryLists(queries);
         } else {
           setEntry(null);
           setNotice({

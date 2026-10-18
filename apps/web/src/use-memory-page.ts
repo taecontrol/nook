@@ -205,11 +205,6 @@ export function useMemoryPage() {
   const results = useQuery({
     ...guarded(memorySearchOptions(bucket, scope, q)),
     enabled: () => searching && !busy && !memoryWriteGate.isWriting(queries),
-    placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === bucket &&
-      previousQuery?.queryKey[2] === scope
-        ? previous
-        : undefined,
   });
   const buckets = useBucketList();
   const countsQuery = useQuery(guarded(memoryCountsOptions));
