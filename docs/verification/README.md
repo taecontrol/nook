@@ -292,7 +292,7 @@ Fetch `origin/main` before verification: a migration present there cannot change
 
 ## Memory remember and reader
 
-Issue #10 runs against the migrated production Worker in workerd and real local D1, with synthetic Access assertions and machine tokens. MCP examples run on owner and machine endpoints under both observed protocol revisions. Browser tests use temporary Chromium contexts; the refocus case uses the genuine visibility fixture. The existing host-resource tripwire remains active. Memory writes create no Audit entry.
+Issue #10 runs against the migrated production Worker in workerd and real local D1, with synthetic Access assertions and machine tokens. MCP examples run on owner and machine endpoints under both observed protocol revisions; restricted-grant and revocation cases, which always use a machine token, run on the machine endpoint only. Browser tests use temporary Chromium contexts; the refocus case uses the genuine visibility fixture. The existing host-resource tripwire remains active. Memory writes create no Audit entry.
 
 | Example | Test or capture |
 | --- | --- |
@@ -340,7 +340,7 @@ The load-time stage uses the unchanged 9 Mbps down, 3 Mbps up, 85 ms latency pro
 
 ## Memory search
 
-Issue #11 uses the production Worker bundle, migrated D1, and its genuine scheduled handler under Miniflare. MCP tests cover both protocols and both owner and machine endpoints. Chromium uses the existing temporary-profile launcher and host-resource tripwire. `pnpm verify` needs no Cloudflare account or credential.
+Issue #11 uses the production Worker bundle, migrated D1, and its genuine scheduled handler under Miniflare. MCP tests cover both protocols and both owner and machine endpoints; the revoked-token case runs on the machine endpoint only. Chromium uses the existing temporary-profile launcher and host-resource tripwire. `pnpm verify` needs no Cloudflare account or credential.
 
 | Example | Evidence |
 | --- | --- |
@@ -393,7 +393,7 @@ tripwire remain mandatory under `pnpm verify`.
 
 | Examples | Tests or captures |
 | --- | --- |
-| E1–E8 | `memory-update-mcp.test.ts`: both protocols and both endpoints, immutable provenance, original creation time, exact tags, no-op retries, intervening writers, byte-checked duplicates, own earlier text, grant denials, private validation and exact UTF-8 limits. Simulated self/other hash collisions return only ServiceUnavailable and never write. Rejected writes compare all version/head/marker facts and run FTS integrity checks. |
+| E1–E8 | `memory-update-mcp.test.ts`: both protocols and both endpoints (grant denials on the machine endpoint), immutable provenance, original creation time, exact tags, no-op retries, intervening writers, byte-checked duplicates, own earlier text, grant denials, private validation and the 16385-byte UTF-8 rejection (remember E11 owns the shared 16 KiB acceptance). Simulated self/other hash collisions return only ServiceUnavailable and never write. Rejected writes compare all version/head/marker facts and run FTS integrity checks. |
 | E9–E10 | The same matrix: ten distinct or identical writers append exactly one row; all nine distinct losers receive the changed error. Update/remember in both serialized orders preserve current-content identity. |
 | E11–E14 | The same matrix: real aborting triggers in S1 and S2 prove rollback and retry; revoked tokens fail before the SDK; exact update annotations/descriptions. The tool inventory belongs to `mcp-worker.test.ts` and `reveal-worker.test.ts`; `memory-worker.test.ts` E15 owns the memory deletion guard, which reads heads that update keeps. |
 | E15 | `memory-history-worker.test.ts`: the existing D1 checkpoint decorator requires one bucket preflight and one three-statement batch for success, no-op, stale and duplicate outcomes. |
@@ -401,7 +401,7 @@ tripwire remain mandatory under `pnpm verify`.
 | E20–E21 | `memory-history-worker.test.ts`: owner history with exact content/provenance, existing version-one rows, invalid and valid paging boundaries, restricted-grant 404s before cursor validation and machine credential boundaries. The browser's thirty-version case traverses history pages. |
 | E22 | `memory-history-web.test.ts`: zero pre-intent history requests, local version count, hover and keyboard preload of both data and the sheet chunk, no diff chunk on intent, and zero extra requests on open. |
 | E23–E25 | The same browser suite: shadcn Item rows, ordering, summaries including tag reorder, absolute times, writers, fixed header/internal scrolling, Markdown, arrows, directional source/word diffs and gutters, exactly three lines of fold context, tags-only copy, added/removed tags and disabled version-one comparison. It also covers a fresh history with cached detail; `memory-history-cache-race.test.ts` covers older cached history and held old responses after a newer detail, using genuine tab visibility changes. |
-| E26–E27 | The same suite: deep links, reload, Back, every dismissal and restored focus; real delayed reads, row-height skeletons, retry, inherited and version-one memories, and 16 KiB Unicode with six maximum-length segments and long provenance at 390 px. `memory-history-cache-race.test.ts` also jumps between open histories through genuine browser history and proves that local reconciliation belongs to the selected memory. |
+| E26–E27 | The same suite: deep links, reload, Back, every dismissal (overlay at 1440 px, where it is reachable) and restored focus; real delayed reads, row-height skeletons, retry, inherited and version-one memories, and 16 KiB Unicode with six maximum-length segments and long provenance at 390 px. `memory-history-cache-race.test.ts` also jumps between open histories through genuine browser history and proves that local reconciliation belongs to the selected memory. |
 | E28 | `memory-history-web.test.ts` observes separate lazy sheet and diff script requests. Existing `memory-load-time.test.ts`, `load-time.test.ts` and `pnpm verify:load-time` retain the five-sample 4G budgets of 1000 ms cold and 100 ms after intent. |
 | E29 | `memory-history-captures.test.ts`: all seven chosen Sheet scenarios and reading/list/version/changes states at 1440×900 and 390×844 in both themes. Loading gates a genuine response; failure injects a service failure. |
 | E30 | `tests/journeys/owner.e2e.ts`: real MCP remember/update, current reading content, exactly two history versions with their writers, version-one text with disabled Show changes and "First version, nothing to compare", then the newer arrow to version two and its directional source diff. Deterministic locators run under `pnpm test:journey` after `pnpm test`, with mandatory strict cache replay and zero retries. |
