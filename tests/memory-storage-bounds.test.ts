@@ -54,7 +54,7 @@ it('51 keyword matches include the fiftieth candidate and exclude the fifty-firs
   }
 });
 
-it('owner history keeps its 26-version page and next boundary', async () => {
+it('owner history pages 25 versions and still accepts an earlier 26-version page boundary', async () => {
   const app = await memoryRuntime();
   try {
     const fixture = memories[1];
@@ -75,13 +75,21 @@ it('owner history keeps its 26-version page and next boundary', async () => {
     const page = await first.json();
     expect(
       page.versions.map((version: { version: number }) => version.version),
-    ).toEqual(Array.from({ length: 26 }, (_, index) => 27 - index));
-    expect(page.next).toBe(2);
+    ).toEqual(Array.from({ length: 25 }, (_, index) => 27 - index));
+    expect(page.next).toBe(3);
     const next = await fetch(
-      `${app.origin}/api/memories/${fixture.id}/versions?before=2`,
+      `${app.origin}/api/memories/${fixture.id}/versions?before=${page.next}`,
     );
     expect(next.status).toBe(200);
     expect(await next.json()).toMatchObject({
+      versions: [{ version: 2 }, { version: 1 }],
+      next: null,
+    });
+    const previousCursor = await fetch(
+      `${app.origin}/api/memories/${fixture.id}/versions?before=2`,
+    );
+    expect(previousCursor.status).toBe(200);
+    expect(await previousCursor.json()).toMatchObject({
       versions: [{ version: 1 }],
       next: null,
     });

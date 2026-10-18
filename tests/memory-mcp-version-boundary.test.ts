@@ -7,7 +7,7 @@ import {
   seedMemories,
 } from './support/memory.ts';
 
-it('Memory MCP preserves advertised version schemas and distinct missing-version messages', async () => {
+it('Memory MCP advertises the same positive integer version schema for update and forget', async () => {
   const app = await memoryRuntime();
   try {
     await seedMemories(app, [memoryFixture(1)]);
@@ -17,8 +17,18 @@ it('Memory MCP preserves advertised version schemas and distinct missing-version
       (name) => tools.find((tool) => tool.name === name)?.inputSchema,
     );
     expect(JSON.stringify(schemas)).toMatchInlineSnapshot(
-      `"[{"type":"object","properties":{"id":{"type":"string"},"expectedVersion":{"anyOf":[{"type":"number"},{"type":"string","enum":["Infinity","-Infinity","NaN"]}]},"content":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":"string"}},"required":["id","expectedVersion","content"],"additionalProperties":true},{"type":"object","properties":{"id":{"type":"string"},"expectedVersion":{"type":"number"}},"required":["id","expectedVersion"],"additionalProperties":true}]"`,
+      `"[{"type":"object","properties":{"id":{"type":"string"},"expectedVersion":{"type":"integer","minimum":1},"content":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":"string"}},"required":["id","expectedVersion","content"],"additionalProperties":true},{"type":"object","properties":{"id":{"type":"string"},"expectedVersion":{"type":"integer","minimum":1}},"required":["id","expectedVersion"],"additionalProperties":true}]"`,
     );
+  } finally {
+    await app.close();
+  }
+});
+
+it('Memory MCP returns the same missing-version message for update and forget', async () => {
+  const app = await memoryRuntime();
+  try {
+    await seedMemories(app, [memoryFixture(1)]);
+    const client = memoryClient(app, '2026-07-28');
     const update = await client.call('update', {
       id: memoryId(1),
       content: 'Synthetic replacement.',
@@ -30,7 +40,7 @@ it('Memory MCP preserves advertised version schemas and distinct missing-version
       [
         [
           {
-            "text": "Input validation error: Invalid arguments for tool update: expectedVersion: Missing key",
+            "text": "Use a positive integer for expectedVersion.",
             "type": "text",
           },
         ],

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { handlerForPrincipal } from '../apps/worker/src/index.ts';
+import { deferred } from './support/machines.ts';
 import {
   memoryClient,
   memoryFixture,
@@ -20,6 +21,55 @@ beforeAll(async () => {
   ]);
 });
 afterAll(() => app?.close());
+it('history returns not found when forget commits after its authorization preflight', async () => {
+  const arrived = deferred();
+  const gate = deferred();
+  let holding = false;
+  let held = false;
+  const raced = await vaultCheckpoints(
+    async (stage) => {
+      if (holding && !held && stage === '/after-statement') {
+        held = true;
+        arrived.resolve();
+        await gate.promise;
+      }
+      return true;
+    },
+    undefined,
+    false,
+    { observeStatements: true },
+  );
+  let read: Promise<Response> | undefined;
+  try {
+    await seedMemories(raced, [memoryFixture(1)]);
+    holding = true;
+    read = fetch(`${raced.origin}/api/memories/${memoryId(1)}/versions`);
+    await arrived.promise;
+    const forgotten = await memoryClient(raced, '2026-07-28').call('forget', {
+      id: memoryId(1),
+      expectedVersion: 1,
+    });
+    expect(forgotten.isError).not.toBe(true);
+    gate.resolve();
+    const response = await read;
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      _tag: 'MemoryNotFound',
+      message: 'Memory not found.',
+    });
+  } finally {
+    gate.resolve();
+    await read;
+    await raced.close();
+  }
+});
+it('history returns an empty terminal page for a live memory with no older versions', async () => {
+  const response = await fetch(
+    `${app.origin}/api/memories/${memoryId(1)}/versions?before=1`,
+  );
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ versions: [], next: null });
+});
 it('E20: history rejects malformed boundaries after authorization and accepts a positive integer version', async () => {
   for (const before of [
     '0',

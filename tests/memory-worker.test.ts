@@ -24,6 +24,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   const db = await app.mf.getD1Database('DB');
   await db.prepare('DELETE FROM memories').run();
+  await db.prepare('DELETE FROM memory_vector_removals').run();
 });
 afterAll(() => app?.close());
 const deleteBucket = (path: string) =>
@@ -210,7 +211,7 @@ it('E18: an issued cursor rejects a change to another existing ordering pair wit
   expect(response.status).toBe(400);
   expect(await response.json()).toMatchObject({ _tag: 'InvalidMemoryCursor' });
 });
-it('E18/E19: cursors reject mismatched scope, malformed encodings and fabricated native ordering pairs', async () => {
+it('E18/E19: cursors reject mismatched scope and malformed encodings, even without storage', async () => {
   const at = '2026-10-09T14:00:00.000Z';
   await seedMemories(app, [
     ...manyMemories.map((memory) => ({ ...memory, createdAt: at })),
@@ -242,9 +243,6 @@ it('E18/E19: cursors reject mismatched scope, malformed encodings and fabricated
       ),
     ).toString('base64url'),
     own.next as string,
-    encodedPair(randomUUID(), at),
-    encodedPair(memoryId(165), '2026-10-09T23:00:00.000Z'),
-    encodedPair(memoryId(1), at),
     encodedPair([memoryId(165)], at),
     encodedPair(memoryId(165), '2026-10-09T14:00:00Z'),
     encodedPair('malformed', at),
@@ -285,6 +283,45 @@ it('E18/E19: cursors reject mismatched scope, malformed encodings and fabricated
       .run();
   }
 });
+it.each(['inherited', 'bucket'])(
+  'E18/E19: an HTTP %s cursor keeps its position after its boundary memory is forgotten',
+  async (scope) => {
+    const seeds = manyMemories.map((memory, index) => ({
+      ...memory,
+      bucket: 'work/acme',
+      createdAt:
+        index < 40 ? '2026-10-09T14:00:00.000Z' : '2026-10-08T14:00:00.000Z',
+    }));
+    await seedMemories(app, seeds);
+    const query = `bucket=work/acme&scope=${scope}`;
+    const first = await listMemoryPage(app, query);
+    const boundary = first.memories.at(-1);
+    expect(first.next).toBeTypeOf('string');
+    const forgotten = await fetch(
+      `${app.origin}/api/memories/${boundary?.id}?expectedVersion=1`,
+      {
+        method: 'DELETE',
+      },
+    );
+    expect(forgotten.status).toBe(204);
+    const ids = first.memories.map((memory) => memory.id);
+    let cursor = first.next;
+    do {
+      const page = await listMemoryPage(
+        app,
+        `${query}&cursor=${encodeURIComponent(cursor ?? '')}`,
+      );
+      ids.push(...page.memories.map((memory) => memory.id));
+      cursor = page.next;
+    } while (cursor);
+    const expected = seeds.toSorted(
+      (a, b) =>
+        b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id),
+    );
+    expect(ids).toEqual(expected.map((memory) => memory.id));
+    expect(new Set(ids).size).toBe(seeds.length);
+  },
+);
 it('E20/E33: restricted handlers forbid sibling lists and mask detail; the owner routes reject Nook tokens', async () => {
   await seedMemories(app, [
     memoryFixture(1, {

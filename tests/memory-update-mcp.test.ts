@@ -297,14 +297,18 @@ describe.each(['owner', 'machine'] as const)('Update #12: %s', (endpoint) => {
           [randomUUID(), 'Memory not found.'],
           ['malformed', 'Memory not found.'],
         ]) {
-          const result = await restricted.call('update', {
-            id,
-            expectedVersion: 1,
-            content: next,
-          });
-          expectToolError(result, message);
-          expect(JSON.stringify(result)).not.toContain('private-sibling-text');
-          expect(await snapshot()).toEqual(before);
+          for (const expectedVersion of [1, undefined]) {
+            const result = await restricted.call('update', {
+              id,
+              expectedVersion,
+              content: next,
+            });
+            expectToolError(result, message);
+            expect(JSON.stringify(result)).not.toContain(
+              'private-sibling-text',
+            );
+            expect(await snapshot()).toEqual(before);
+          }
         }
         await integrity();
       });
@@ -327,6 +331,10 @@ describe.each(['owner', 'machine'] as const)('Update #12: %s', (endpoint) => {
         'Working directory must be an absolute path of 1 to 4096 bytes.',
       ],
       [{ expectedVersion: 0 }, 'Use a positive integer for expectedVersion.'],
+      [
+        { expectedVersion: undefined },
+        'Use a positive integer for expectedVersion.',
+      ],
       [{ expectedVersion: 1.5 }, 'Use a positive integer for expectedVersion.'],
       [{ expectedVersion: '1' }, 'Use a positive integer for expectedVersion.'],
     ])(
