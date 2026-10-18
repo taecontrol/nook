@@ -24,7 +24,6 @@ import {
   principalLabel,
   tagChanges,
 } from './memory-format';
-import { memorySearch } from './memory-location';
 import { MemoryMarkdown } from './memory-markdown';
 import { formatDateTime, timeAgo } from './time';
 import type { MemoryPageModel } from './use-memory-page';
@@ -57,11 +56,11 @@ function VersionRows({
             <Item asChild size="sm" className="w-full min-w-0 min-h-21">
               <Link
                 to="/memory"
-                search={memorySearch(model.search, {
+                search={{
                   ...model.search,
                   history: '1',
                   version: version.version,
-                })}
+                }}
                 data-version-row={version.version}
               >
                 <ItemContent className="min-w-0">

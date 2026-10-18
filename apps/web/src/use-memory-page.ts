@@ -78,13 +78,12 @@ function useAutoSelection(
     )
       void navigate({
         to: '/memory',
-        search: (previous: MemorySearch) =>
-          previous.memory
+        search: (previous: MemorySearch) => {
+          const { bucket, scope } = memoryLocation(previous);
+          return previous.memory
             ? previous
-            : memorySearch(memoryLocation(previous), {
-                ...previous,
-                memory: firstId,
-              }),
+            : { ...previous, bucket, scope, memory: firstId };
+        },
         replace: true,
       });
   }, [desktop, firstId, memory, navigate, router]);
@@ -128,8 +127,10 @@ function useHistoryNavigation(
   const historyNavigate = (patch: Partial<MemorySearch>, replace = false) =>
     void navigate({
       to: '/memory',
-      search: (previous: MemorySearch) =>
-        memorySearch(memoryLocation(previous), { ...previous, ...patch }),
+      search: (previous: MemorySearch) => {
+        const { bucket, scope } = memoryLocation(previous);
+        return { ...previous, bucket, scope, ...patch };
+      },
       replace,
     });
   return {
@@ -176,8 +177,10 @@ export function useMemoryPage() {
     q,
     (next) =>
       void navigate({
-        search: (previous: MemorySearch) =>
-          memorySearch(memoryLocation(previous), { ...previous, q: next }),
+        search: (previous: MemorySearch) => {
+          const { bucket, scope } = memoryLocation(previous);
+          return { ...previous, bucket, scope, q: next };
+        },
         replace: true,
       }),
   );

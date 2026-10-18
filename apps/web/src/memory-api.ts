@@ -83,7 +83,7 @@ export function memoryOptions(id: string) {
         (api) => api.memories.get({ params: { id } }),
         signal,
       );
-      return writeMemory(client, memory) ?? memory;
+      return newer(client.getQueryData<Memory>(memoryKeys.detail(id)), memory);
     },
     retry: false,
     staleTime: 30_000,
@@ -167,14 +167,16 @@ type CountsData = Cached<typeof memoryCountsOptions>;
 type SearchData = Cached<ReturnType<typeof memorySearchOptions>>;
 type HistoryData = Cached<ReturnType<typeof memoryHistoryOptions>>;
 
+function newer(current: Memory | undefined, next: Memory): Memory {
+  return current && current.version > next.version ? current : next;
+}
 export function writeMemory(
   queries: QueryClient,
   memory: Memory,
 ): Memory | undefined {
   return queries.setQueryData<MemoryData>(
     memoryKeys.detail(memory.id),
-    (current) =>
-      current && current.version > memory.version ? current : memory,
+    (current) => newer(current, memory),
   );
 }
 const listKinds = new Set<string>([
@@ -286,7 +288,8 @@ export function useMemoryHistory(detail: Memory) {
       ? { ...detail, ...head, updatedAt: head.provenance.at }
       : detail;
   useEffect(() => {
-    if (memory.version > detail.version) writeMemory(queries, memory);
+    if (memory.version > detail.version)
+      queries.setQueryData(memoryKeys.detail(memory.id), memory);
   }, [queries, detail, memory]);
   return {
     memory,
