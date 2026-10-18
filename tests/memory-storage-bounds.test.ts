@@ -1,7 +1,8 @@
 import { expect, it } from 'vitest';
 import { memories } from './fixtures/memory-history.ts';
-import { memoryRuntime } from './support/memory.ts';
+import { manyMemories, memoryRuntime, seedMemories } from './support/memory.ts';
 import { seedHistory } from './support/memory-history.ts';
+import { searchRuntime } from './support/search.ts';
 
 it('owner history keeps its 26-version page and next boundary', async () => {
   const app = await memoryRuntime();
@@ -34,6 +35,19 @@ it('owner history keeps its 26-version page and next boundary', async () => {
       versions: [{ version: 1 }],
       next: null,
     });
+  } finally {
+    await app.close();
+  }
+});
+
+it('scheduled repair keeps its 32-memory embedding chunks', async () => {
+  const app = await searchRuntime();
+  try {
+    await seedMemories(app, manyMemories.slice(0, 50));
+    await app.scheduled();
+    expect(app.services.embeddingCalls.map((call) => call.text.length)).toEqual(
+      [32, 18],
+    );
   } finally {
     await app.close();
   }
