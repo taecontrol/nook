@@ -360,8 +360,12 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
         'Memory content can be at most 16 KiB.',
       ],
       ['blank', { content: ' \n\t ' }],
-      ['NUL', { content: 'a\0b' }],
-      ['surrogate', { content: 'a\ud800b' }],
+      ['NUL', { content: 'a\0b' }, 'Memory content cannot contain NUL.'],
+      [
+        'surrogate',
+        { content: 'a\ud800b' },
+        'Use valid Unicode for the content.',
+      ],
       [
         'eleven tags',
         { tags: Array.from({ length: 11 }, (_, i) => `tag-${i}`) },

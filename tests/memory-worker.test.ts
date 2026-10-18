@@ -11,6 +11,7 @@ import {
   memoryId,
   memoryRuntime,
   seedMemories,
+  seedMemoryMachine,
   typicalMemories,
 } from './support/memory.ts';
 import type { TestRuntime } from './support/runtime.ts';
@@ -296,7 +297,8 @@ it('E20/E33: restricted handlers forbid sibling lists and mask detail; the owner
     new Request(`http://nook.test/api/memories/${memoryId(2)}`),
   );
   expect(allowed.status).toBe(200);
-  // Remove only the local owner bypass: a Nook bearer cannot stand in for Access.
+  // Remove only the local owner bypass: a valid Nook bearer cannot stand in for Access.
+  const machine = await seedMemoryMachine(app);
   await app.setBindings({});
   try {
     for (const path of [
@@ -304,10 +306,10 @@ it('E20/E33: restricted handlers forbid sibling lists and mask detail; the owner
       `/api/memories/${memoryId(2)}`,
     ]) {
       const rejected = await fetch(`${app.origin}${path}`, {
-        headers: { Authorization: 'Bearer synthetic-nook-credential' },
+        headers: { Authorization: `Bearer ${machine.token}` },
       });
       expect(rejected.status).toBe(401);
-      expect(await rejected.text()).not.toContain('synthetic-nook-credential');
+      expect(await rejected.text()).not.toContain(machine.token);
     }
   } finally {
     await app.setBindings({
