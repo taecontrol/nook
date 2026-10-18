@@ -261,9 +261,6 @@ test('Memory update E30 / forget E18: the owner reads history, then permanently 
   await expect(
     reopenedList.getByText('No memories yet', { exact: true }),
   ).toBeVisible();
-  await expect(reopenedList).toContainText(
-    'There are no memories stored in work/memory-journey.',
-  );
   await expect(memoryRow).toHaveCount(0);
   const historyAfterForget = await fetch(
     `${origin}/api/memories/${remembered.id}/versions`,

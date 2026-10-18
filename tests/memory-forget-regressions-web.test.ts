@@ -101,6 +101,7 @@ it.each([false, true])(
       vaultGate.resolve();
       await page.waitForLoadState('networkidle');
       expect(new URL(page.url()).pathname).toBe('/vault');
+      await page.getByRole('heading', { name: 'Vault', exact: true }).waitFor();
       expect(errors).toEqual([]);
     } finally {
       vaultGate.resolve();

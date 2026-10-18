@@ -384,6 +384,8 @@ it('E30: row hover and keyboard focus prefetch detail before selection', async (
   try {
     const { page } = visit;
     await expect.poll(() => memoryRows(page).count()).toBe(7);
+    // Desktop auto-selects the newest memory; observe only after it loads.
+    await page.getByRole('article', { name: 'Memory detail' }).waitFor();
     await page.evaluate(() => {
       const seen = document.documentElement;
       new MutationObserver(() => {
