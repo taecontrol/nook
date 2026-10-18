@@ -9,7 +9,6 @@ import { FetchHttpClient, type HttpClient, HttpClientError } from 'effect/http';
 import { HttpApiClient } from 'effect/http-api';
 
 export class ApiError extends Error {
-  ambiguous = false;
   /** The message is one the contract lets the owner read. */
   readonly hasPublicMessage: boolean;
   constructor(
@@ -18,10 +17,33 @@ export class ApiError extends Error {
     readonly tag = 'ServiceUnavailable',
     message?: string,
     readonly current?: BucketGrant,
+    readonly ambiguous = false,
   ) {
     super(message ?? `Request failed with ${status}`);
     this.hasPublicMessage = message !== undefined;
   }
+}
+
+export function writeOutcome(
+  error: unknown,
+): 'definitive' | 'unknown' | 'ambiguous' {
+  if (!(error instanceof ApiError)) return 'unknown';
+  if (error.ambiguous) return 'ambiguous';
+  return error.outcomeUnknown || error.tag === 'ServiceUnavailable'
+    ? 'unknown'
+    : 'definitive';
+}
+
+/** Preserve the original public reason after an earlier attempt lost its answer. */
+export function ambiguousWrite(error: ApiError) {
+  return new ApiError(
+    error.status,
+    error.outcomeUnknown,
+    error.tag,
+    error.hasPublicMessage ? error.message : undefined,
+    error.current,
+    true,
+  );
 }
 // Errors the contract declares carry their status; Cloudflare Access answers
 // 401 and 403 before the Worker does; anything else is unavailable.
@@ -47,12 +69,15 @@ function apiRunner<Client>(
         Effect.mapError((failure) => {
           const error = failure as { _tag?: string; current?: BucketGrant };
           const tag = error._tag ?? 'ServiceUnavailable';
+          const status = statusOf(error, tag);
           return new ApiError(
-            statusOf(error, tag),
+            status,
             // Failed delivery or decoding and storage errors can follow commit.
-            HttpClientError.isHttpClientError(error) ||
-              Schema.isSchemaError(error) ||
-              tag === 'ServiceUnavailable',
+            status !== 401 &&
+              status !== 403 &&
+              (HttpClientError.isHttpClientError(error) ||
+                Schema.isSchemaError(error) ||
+                tag === 'ServiceUnavailable'),
             tag,
             publicMessage(error),
             tag === 'MachineAccessChanged' ? error.current : undefined,
@@ -84,6 +109,8 @@ export function describeFailure(
     );
   if (status === 403)
     return joined(`Only this installation’s owner can ${action}.`, outcome);
+  if (error instanceof ApiError && error.hasPublicMessage)
+    return joined(error.message, outcome);
   return joined(
     'Nook is unavailable right now.',
     outcome ?? 'Try again in a moment.',

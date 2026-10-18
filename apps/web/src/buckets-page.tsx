@@ -26,7 +26,7 @@ import {
   InputGroupInput,
 } from '@/components/ui/input-group';
 import { Kbd } from '@/components/ui/kbd';
-import { ApiError, describeFailure } from './api-client';
+import { ApiError, describeFailure, writeOutcome } from './api-client';
 import { buildBucketTree, parentBuckets, useCollapsed } from './bucket-tree';
 import { useBuckets } from './buckets-api';
 import { DismissibleAlert, LoadFailure } from './failure';
@@ -68,14 +68,18 @@ function createdStatus(result: CreatedBucket) {
 function writeFailure(
   write: NonNullable<ReturnType<typeof useBuckets>['write']>,
 ): Failure {
-  const unknown = write.error instanceof ApiError && write.error.outcomeUnknown;
+  const unknown = writeOutcome(write.error) !== 'definitive';
   if (write.operation === 'create')
     return {
       title: unknown
         ? `Couldn't confirm creation of ${write.path}`
         : `Couldn't create ${write.path}`,
       description: unknown
-        ? "Nook couldn't confirm whether the bucket was created. The path is back in the field; press Enter to try again."
+        ? describeFailure(
+            write.error,
+            'change buckets',
+            "Nook couldn't confirm whether the bucket was created. The path is back in the field; press Enter to try again.",
+          )
         : describeFailure(
             write.error,
             'change buckets',
@@ -92,10 +96,14 @@ function writeFailure(
 
 function deleteFailure(error: Error | null) {
   if (error instanceof ApiError) {
-    if (error.outcomeUnknown)
-      return "Nook couldn't confirm whether the bucket was deleted. Check the outline before trying again.";
+    if (writeOutcome(error) !== 'definitive')
+      return describeFailure(
+        error,
+        'change buckets',
+        "Nook couldn't confirm whether the bucket was deleted. Check the outline before trying again.",
+      );
     if (['BucketHasSecrets', 'BucketHasMemories'].includes(error.tag ?? ''))
-      return error.message;
+      return describeFailure(error, 'change buckets');
     if (error.tag === 'BucketNotFound')
       return 'Nook reports that this bucket no longer exists. Check the outline before trying again.';
     if (error.status === 409)

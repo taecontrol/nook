@@ -46,7 +46,7 @@ import {
 } from '@/components/ui/item';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
-import { ApiError, describeFailure } from './api-client';
+import { describeFailure, writeOutcome } from './api-client';
 import { preloadBuckets } from './buckets-api';
 import { DismissibleAlert, LoadFailure } from './failure';
 import { MachineAccess } from './grant-summary';
@@ -242,7 +242,7 @@ function MachineGroups({
 }
 function revokeHeading(write: MachineRevoke) {
   if (write.status === 'success') return 'Revoked ';
-  if (write.error instanceof ApiError && write.error.outcomeUnknown)
+  if (writeOutcome(write.error) !== 'definitive')
     return "Couldn't confirm revocation of ";
   return "Couldn't revoke ";
 }
@@ -250,7 +250,7 @@ function revokeProblem(error: Error | null) {
   return describeFailure(
     error,
     'manage machines',
-    error instanceof ApiError && error.outcomeUnknown
+    writeOutcome(error) !== 'definitive'
       ? 'The machine may already be revoked. Try again to confirm it is revoked.'
       : 'Check the machine list before trying again.',
   );

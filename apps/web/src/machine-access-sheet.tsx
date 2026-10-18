@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
-import { ApiError, describeFailure } from './api-client';
+import { ApiError, describeFailure, writeOutcome } from './api-client';
 import { refreshBucketList, useBucketList } from './buckets-api';
 import { LoadFailure } from './failure';
 import { type GrantSelection, useGrantSelection } from './grant-selection';
@@ -36,8 +36,8 @@ type Outcome =
   | { kind: 'missing'; revision: number }
   | { kind: 'failed'; message: string };
 function saveOutcome(error: Error, revision: number): Outcome {
-  if (!(error instanceof ApiError) || error.outcomeUnknown)
-    return { kind: 'unconfirmed' };
+  if (writeOutcome(error) !== 'definitive') return { kind: 'unconfirmed' };
+  if (!(error instanceof ApiError)) return { kind: 'unconfirmed' };
   if (error.current) return { kind: 'changed', current: error.current };
   if (error.tag === 'GrantBucketNotFound') return { kind: 'missing', revision };
   if (error.tag === 'NotFound') return { kind: 'revoked' };

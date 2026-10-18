@@ -1,7 +1,7 @@
 import { CircleAlert, CircleCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
-import { ApiError, describeFailure } from './api-client';
+import { ApiError, describeFailure, writeOutcome } from './api-client';
 import { DismissibleAlert } from './failure';
 import { type ObservedWrite, unconfirmed } from './vault-api';
 import type { Feedback, WriteOp } from './vault-state';
@@ -40,19 +40,15 @@ function failureMessage(write: ObservedWrite) {
   const unchanged =
     op === 'create' ? 'Nothing was stored.' : 'Nothing changed.';
   if (!(error instanceof ApiError)) return uncertain(op, secret.path);
-  if (error.tag === 'SecretChanged') return error.message;
+  if (error.tag === 'SecretChanged')
+    return describeFailure(error, 'change secrets');
   if (error.tag === 'SecretExists')
-    return error.ambiguous
+    return writeOutcome(error) === 'ambiguous'
       ? `${secret.path} now exists. Review it before trying again.`
-      : `${error.message} ${unchanged}`;
+      : describeFailure(error, 'change secrets', unchanged);
   if (error.tag === 'SecretNotFound')
     return `${secret.path} is no longer stored.`;
-  return definitiveMessage(error, unchanged);
-}
-function definitiveMessage(error: ApiError, unchanged: string) {
-  return error.hasPublicMessage
-    ? `${error.message} ${unchanged}`
-    : describeFailure(error, 'change secrets', unchanged);
+  return describeFailure(error, 'change secrets', unchanged);
 }
 function successFeedback(write: ObservedWrite): Feedback {
   const { op, secret } = write.input;
@@ -76,7 +72,9 @@ export function feedbackFor(write: ObservedWrite | undefined): Feedback | null {
     kind: unknown ? 'unconfirmed' : 'failed',
     op,
     path,
-    message: unknown ? uncertain(op, path) : failureMessage(write),
+    message: unknown
+      ? describeFailure(write.error, 'change secrets', uncertain(op, path))
+      : failureMessage(write),
   };
 }
 function heading(feedback: Feedback) {

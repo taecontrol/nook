@@ -7,7 +7,7 @@ import {
 } from '@nook/contract';
 import { useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ApiError } from './api-client';
+import { ApiError, writeOutcome } from './api-client';
 import { parentBuckets } from './bucket-tree';
 import { useBucketList } from './buckets-api';
 import { useDesktop } from './hooks/use-desktop';
@@ -84,7 +84,7 @@ function duplicateHandler(
       input.op !== 'create' ||
       !(error instanceof ApiError) ||
       error.tag !== 'SecretExists' ||
-      error.ambiguous ||
+      writeOutcome(error) !== 'definitive' ||
       !draft
     )
       return;
