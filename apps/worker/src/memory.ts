@@ -125,6 +125,10 @@ const VersionRow = withProvenance({
   tags: TagsJson,
 });
 type VersionRow = typeof VersionRow.Type;
+const HistoryRow = Schema.Union([
+  VersionRow,
+  Schema.Struct({ version: Schema.Null }),
+]);
 const BucketRow = Schema.Struct({ bucket: Schema.String });
 const ForgetState = Schema.Struct({
   current_version: Schema.NullOr(Schema.Number),
@@ -190,7 +194,7 @@ function historyBoundary(before?: string) {
   return Effect.succeed(Number(before));
 }
 function historyPage(rows: readonly VersionRow[]) {
-  const page = rows.slice(0, memoryBounds.historyPage);
+  const page = rows.slice(0, memoryBounds.pageSize);
   return {
     versions: page.map(
       (row): MemoryVersion => ({
@@ -201,7 +205,7 @@ function historyPage(rows: readonly VersionRow[]) {
       }),
     ),
     next:
-      rows.length > memoryBounds.historyPage
+      rows.length > memoryBounds.pageSize
         ? (page.at(-1)?.version ?? null)
         : null,
   };
@@ -328,12 +332,12 @@ async function memoryPage(
   bucket: string,
   scope: MemoryScope,
 ) {
-  const page = rows.slice(0, memoryBounds.listPage);
+  const page = rows.slice(0, memoryBounds.pageSize);
   const last = page.at(-1);
   return {
     memories: page.map(summary),
     next:
-      rows.length > memoryBounds.listPage && last
+      rows.length > memoryBounds.pageSize && last
         ? await encodeCursor({
             bucket,
             scope,
@@ -660,7 +664,7 @@ export const memoryStore = (
             }),
             raw,
           );
-          yield* embedding(rows);
+          yield* embedding(rows).pipe(Effect.catchCause(() => Effect.void));
           yield* inspect(
             scheduledTime,
             rows.map((row) => row.id),
@@ -760,18 +764,20 @@ export const memoryStore = (
         }),
       history: (id: string, before?: string) =>
         Effect.gen(function* () {
-          yield* bucketFor(id);
+          const bucket = yield* bucketFor(id);
           const beforeVersion = yield* historyBoundary(before);
           const boundary =
             beforeVersion === undefined
               ? sql`1`
               : sql`v.version < ${beforeVersion}`;
           const raw =
-            yield* sql`SELECT v.version,v.content,v.tags,${provenanceSelect} FROM memory_versions v JOIN memories m ON m.id=v.memory_id WHERE m.id=${id} AND ${boundary} ORDER BY v.version DESC LIMIT ${memoryBounds.historyPage + 1}`.pipe(
+            yield* sql`SELECT v.version,v.content,v.tags,${provenanceSelect} FROM memories m LEFT JOIN memory_versions v ON v.memory_id=m.id AND ${boundary} WHERE m.id=${id} AND m.bucket=${bucket} ORDER BY v.version DESC LIMIT ${memoryBounds.pageSize + 1}`.pipe(
               unavailable,
             );
-          const rows = yield* decodedRows(VersionRow, raw);
-          return historyPage(rows);
+          if (!raw.length) return yield* Effect.fail(notFound());
+          // The left join distinguishes a live terminal page from a forgotten head.
+          const rows = yield* decodedRows(HistoryRow, raw);
+          return historyPage(rows.filter((row) => row.version !== null));
         }),
       list: (
         bucket: string,
@@ -785,22 +791,16 @@ export const memoryStore = (
           const boundary = after
             ? sql`(m.created_at < ${after.at} OR (m.created_at=${after.at} AND m.id < ${after.id}))`
             : sql`1`;
-          const validCursor = after
-            ? sql`EXISTS (SELECT 1 FROM memories WHERE id=${after.id} AND created_at=${after.at} AND ${sql.in('bucket', paths)})`
-            : sql`1`;
           const [exists, raw] = yield* sql
             .batch([
               sql<{
                 has_bucket: number;
-                has_cursor: number;
-              }>`SELECT ${bucketExists(sql, bucket)} AS has_bucket, ${validCursor} AS has_cursor`,
-              sql`SELECT ${columns} FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE ${sql.in('m.bucket', paths)} AND ${boundary} ORDER BY m.created_at DESC, m.id DESC LIMIT ${memoryBounds.listPage + 1}`,
+              }>`SELECT ${bucketExists(sql, bucket)} AS has_bucket`,
+              sql`SELECT ${columns} FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE ${sql.in('m.bucket', paths)} AND ${boundary} ORDER BY m.created_at DESC, m.id DESC LIMIT ${memoryBounds.pageSize + 1}`,
             ])
             .pipe(unavailable);
           if (!exists[0]?.has_bucket)
             return yield* Effect.fail(bucketNotFound());
-          if (!exists[0].has_cursor)
-            return yield* Effect.fail(new InvalidMemoryCursor());
           const rows = yield* decodedRows(Row, raw);
           return yield* Effect.tryPromise(() =>
             memoryPage(rows, bucket, scope),

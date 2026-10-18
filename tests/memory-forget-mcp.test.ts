@@ -387,7 +387,7 @@ describe.each(['owner', 'machine'] as const)('Forget #13: %s', (endpoint) => {
       );
       expect(tool?.description).not.toMatch(/confirm.*owner|owner.*confirm/i);
       expect(tool?.inputSchema).toMatchObject({
-        properties: { expectedVersion: { type: 'number' } },
+        properties: { expectedVersion: { type: 'integer', minimum: 1 } },
         required: ['id', 'expectedVersion'],
       });
     });

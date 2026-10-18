@@ -75,9 +75,14 @@ export const Remembered = Schema.Struct({
   createdAt: Schema.String,
 });
 export type Remembered = typeof Remembered.Type;
+export const ExpectedVersion = Schema.Number.check(
+  Schema.isFinite(),
+  Schema.isInt(),
+  Schema.isGreaterThanOrEqualTo(1),
+);
 export const UpdateMemory = Schema.Struct({
   id: Schema.String,
-  expectedVersion: Schema.Number,
+  expectedVersion: ExpectedVersion,
   content: Schema.String,
   tags: Schema.optionalKey(Schema.Array(Schema.String)),
   workingDirectory: Schema.optionalKey(Schema.String),
@@ -85,7 +90,7 @@ export const UpdateMemory = Schema.Struct({
 export type UpdateMemory = typeof UpdateMemory.Type;
 export const ForgetMemory = Schema.Struct({
   id: Schema.String,
-  expectedVersion: Schema.Number.check(Schema.isFinite()),
+  expectedVersion: ExpectedVersion,
 });
 export type ForgetMemory = typeof ForgetMemory.Type;
 export const Forgotten = Schema.Struct({
@@ -94,12 +99,9 @@ export const Forgotten = Schema.Struct({
   version: Schema.Number,
 });
 export type Forgotten = typeof Forgotten.Type;
+const isExpectedVersion = Schema.is(ExpectedVersion);
 export function validateExpectedVersion(version: unknown): string | undefined {
-  if (
-    typeof version !== 'number' ||
-    !Number.isSafeInteger(version) ||
-    version < 1
-  )
+  if (!isExpectedVersion(version))
     return 'Use a positive integer for expectedVersion.';
 }
 export const Updated = Remembered.mapFields(({ created: _, ...fields }) => ({

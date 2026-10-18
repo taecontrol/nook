@@ -54,20 +54,18 @@ type MemoryError = Effect.Error<
   >
 >;
 const unavailableMessage = 'Service unavailable. Try again later.';
-// Discovery advertises a number. The store owns invalid-version wording,
-// including wrong primitive types, rather than exposing an SDK parse error.
+// Discovery advertises a positive integer. The store owns invalid-version
+// wording, including missing keys and wrong primitive types.
 function versionInput<
   Fields extends Readonly<
     Record<string, Schema.ConstraintDecoder<unknown> & Schema.Top>
   >,
->(schema: Schema.Struct<Fields>, optional = false) {
+>(schema: Schema.Struct<Fields>) {
   const advertised = standard(schema);
   const boundary = standard(
     schema.mapFields((fields) => ({
       ...fields,
-      expectedVersion: optional
-        ? Schema.optionalKey(Schema.Unknown)
-        : Schema.Unknown,
+      expectedVersion: Schema.optionalKey(Schema.Unknown),
     })),
   );
   return {
@@ -200,7 +198,7 @@ export function mcpHandler(
       {
         description:
           'Permanently delete a memory and all versions, including its keyword and meaning search entries. Pass the version from get as expectedVersion. If it changed, get it again before forgetting. After a lost response, Memory not found on a retry means it is already gone.',
-        inputSchema: versionInput(ForgetMemory, true),
+        inputSchema: versionInput(ForgetMemory),
         outputSchema: standard(Forgotten),
         annotations: {
           readOnlyHint: false,

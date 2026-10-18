@@ -7,6 +7,5 @@ export const memoryBounds = {
   inspectionSettleMs: 10 * 60_000,
   // One rotation slot per */5 * * * * invocation in wrangler.jsonc.
   rotationSlotMs: 5 * 60_000,
-  listPage: 25,
-  historyPage: 26,
+  pageSize: 25,
 } as const;

@@ -90,7 +90,6 @@ export const Api = HttpApi.make('nook')
           error: [
             ...errors,
             InvalidBucketPath,
-            InvalidMemory,
             InvalidMemorySearch,
             BucketNotFound,
           ],
@@ -109,7 +108,6 @@ export const Api = HttpApi.make('nook')
           error: [
             ...errors,
             InvalidBucketPath,
-            InvalidMemory,
             InvalidMemoryCursor,
             BucketNotFound,
           ],
