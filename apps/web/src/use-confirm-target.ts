@@ -47,7 +47,8 @@ export function useConfirmTarget<T>(fallback: () => HTMLElement | null) {
       setTarget(value);
     },
     close: (next?: () => HTMLElement | null) => {
-      if (next) after.current = next;
+      // A no-argument UI callback can still forward its click event at runtime.
+      if (typeof next === 'function') after.current = next;
       setTarget(null);
     },
     restoreFocus: (event: Event) => {
