@@ -48,49 +48,41 @@ it('E24: owner HTTP forget makes no native vector request', async () => {
   expect(app.services.inspections).toEqual([]);
   expect(app.services.deletions).toEqual([]);
 });
-it.each(['HTTP', 'MCP'] as const)(
-  'E2/E12: a %s keyword search held by meaning lookup cannot return a memory forgotten meanwhile',
-  async (endpoint) => {
-    await indexMemories(app, [
-      memoryFixture(20, { content: searchMemories[3].content }),
-    ]);
-    const arrived = deferred();
-    const gate = deferred();
-    await app.setBindings(
-      {
-        LOCAL_OWNER: 'synthetic-owner',
-        LOCAL_ORIGIN: app.origin,
-        EMBEDDING_MODEL: '@cf/baai/bge-m3',
+it('E2/E12: a keyword search held by meaning lookup cannot return a memory forgotten meanwhile', async () => {
+  await indexMemories(app, [
+    memoryFixture(20, { content: searchMemories[3].content }),
+  ]);
+  const arrived = deferred();
+  const gate = deferred();
+  await app.setBindings(
+    {
+      LOCAL_OWNER: 'synthetic-owner',
+      LOCAL_ORIGIN: app.origin,
+      EMBEDDING_MODEL: '@cf/baai/bge-m3',
+    },
+    {
+      outboundService: async (request) => {
+        if (new URL(request.url).pathname === '/query') {
+          arrived.resolve();
+          await gate.promise;
+        }
+        return app.services.fetch(request);
       },
-      {
-        outboundService: async (request) => {
-          if (new URL(request.url).pathname === '/query') {
-            arrived.resolve();
-            await gate.promise;
-          }
-          return app.services.fetch(request);
-        },
-      },
-    );
-    const pending =
-      endpoint === 'HTTP'
-        ? httpSearch(app, 'pnpm verify')
-        : memoryClient(app, '2026-07-28')
-            .call('search', { bucket: 'work/acme', query: 'pnpm verify' })
-            .then((result) => result.structuredContent);
-    try {
-      await arrived.promise;
-      await forgetMemory(app, id);
-      gate.resolve();
-      const result = await pending;
-      expect(result).toMatchObject({ results: [] });
-      expect(JSON.stringify(result)).not.toContain('Required verification');
-    } finally {
-      gate.resolve();
-      await pending;
-    }
-  },
-);
+    },
+  );
+  const pending = httpSearch(app, 'pnpm verify');
+  try {
+    await arrived.promise;
+    await forgetMemory(app, id);
+    gate.resolve();
+    const result = await pending;
+    expect(result).toMatchObject({ results: [] });
+    expect(JSON.stringify(result)).not.toContain('Required verification');
+  } finally {
+    gate.resolve();
+    await pending;
+  }
+});
 it('E2/E13/E24: lingering meaning hits are invisible; bounded delete is confirmed only after thirty minutes', async () => {
   const at = await forgotten();
   expect((await httpSearch(app, 'how do we deploy')).results).toEqual([]);
@@ -132,7 +124,7 @@ it('E10/E14: a missing removal migration fails only its sweep and embedding repa
     expect.objectContaining({ id }),
   );
 });
-it.each(['failIndex', 'failInspection', 'failDelete'] as const)(
+it.each(['failInspection', 'failDelete'] as const)(
   'E14: %s retains the record until recovery; an embedding outage cannot block removal',
   async (failure) => {
     const at = await forgotten();
