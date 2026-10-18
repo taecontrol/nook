@@ -184,10 +184,9 @@ it('#62: forget detail cannot refocus between submission and the pending render'
     await openForget(page, memoryId(2));
     await page.locator('[aria-label="Loading version"]').waitFor();
     await expect
-      .poll(
-        () => nextReads,
-        'A new dialog can load uncached detail after settlement',
-      )
+      .poll(() => nextReads, {
+        message: 'A new dialog can load uncached detail after settlement',
+      })
       .toBe(1);
     nextDetailGate.resolve();
     await page

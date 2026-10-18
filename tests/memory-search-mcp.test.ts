@@ -339,10 +339,9 @@ describe.each(['owner', 'machine'] as const)(
             'Service unavailable. Try again later.',
           );
           await expect
-            .poll(
-              () => logs.length,
-              'The failing search emitted runtime diagnostics',
-            )
+            .poll(() => logs.length, {
+              message: 'The failing search emitted runtime diagnostics',
+            })
             .toBeGreaterThan(logsBefore);
         } finally {
           await db
