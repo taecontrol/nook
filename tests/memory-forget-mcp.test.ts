@@ -340,28 +340,37 @@ describe.each(['owner', 'machine'] as const)('Forget #13: %s', (endpoint) => {
             `CREATE TRIGGER synthetic_forget_abort BEFORE ${event} ON ${table} BEGIN SELECT RAISE(ABORT,'private content ${uniqueTerm}'); END`,
           )
           .run();
+        try {
+          const before = await forgetSnapshot(app);
+          expectToolError(
+            await forget(),
+            'Service unavailable. Try again later.',
+          );
+          expect(await forgetSnapshot(app)).toEqual(before);
+        } finally {
+          await db.prepare('DROP TRIGGER synthetic_forget_abort').run();
+        }
+      }
+      await db.prepare('DROP TABLE memory_vector_removals').run();
+      try {
         const before = await forgetSnapshot(app);
         expectToolError(
           await forget(),
           'Service unavailable. Try again later.',
         );
         expect(await forgetSnapshot(app)).toEqual(before);
-        await db.prepare('DROP TRIGGER synthetic_forget_abort').run();
+      } finally {
+        await db
+          .prepare(
+            'CREATE TABLE memory_vector_removals (id TEXT PRIMARY KEY CHECK (length(id)=36), forgotten_at TEXT NOT NULL)',
+          )
+          .run();
+        await db
+          .prepare(
+            'CREATE INDEX memory_vector_removals_age ON memory_vector_removals(forgotten_at,id)',
+          )
+          .run();
       }
-      await db.prepare('DROP TABLE memory_vector_removals').run();
-      const before = await forgetSnapshot(app);
-      expectToolError(await forget(), 'Service unavailable. Try again later.');
-      expect(await forgetSnapshot(app)).toEqual(before);
-      await db
-        .prepare(
-          'CREATE TABLE memory_vector_removals (id TEXT PRIMARY KEY CHECK (length(id)=36), forgotten_at TEXT NOT NULL)',
-        )
-        .run();
-      await db
-        .prepare(
-          'CREATE INDEX memory_vector_removals_age ON memory_vector_removals(forgotten_at,id)',
-        )
-        .run();
       expect(
         logs.some((message) => message.includes(uniqueTerm)),
         'Storage failures never log memory content',

@@ -294,6 +294,7 @@ describe.each(['owner', 'machine'] as const)(
       });
       it('E9: AI and vector failures degrade to keyword results; D1 failure and diagnostics never echo content or query', async () => {
         await seedMemories(app, [searchMemories[3]]);
+        logs.length = 0;
         class PrivateLog extends Log {
           override log(message: string) {
             logs.push(message);
@@ -344,6 +345,10 @@ describe.each(['owner', 'machine'] as const)(
             .run();
         }
         const audit = await db.prepare('SELECT * FROM audit_entries').all();
+        expect(
+          logs.length,
+          'Runtime diagnostics were actually captured',
+        ).toBeGreaterThan(0);
         for (const privateText of [
           'pnpm verify',
           searchMemories[3].content,
