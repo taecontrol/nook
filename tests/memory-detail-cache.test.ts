@@ -33,7 +33,9 @@ it('a detail fetch publishes only its completed result and retains a newer cache
     expect(states).toEqual(['pending/fetching', 'success/idle']);
     const newer = { ...memory, version: 2, content: 'Newer content' };
     writeMemory(queries, newer);
-    expect(await queries.fetchQuery({ ...options, staleTime: 0 })).toEqual(newer);
+    expect(await queries.fetchQuery({ ...options, staleTime: 0 })).toEqual(
+      newer,
+    );
   } finally {
     unsubscribe();
     queries.clear();

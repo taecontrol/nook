@@ -332,6 +332,20 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
           expect((await restricted.call('get', { id })).isError).not.toBe(true);
         expect(await memoryCounts(app)).toEqual(before);
       });
+    if (endpoint === 'machine')
+      it('E8: a child grant cannot remember into readable ancestors or me', async () => {
+        const machine = await seedMemoryMachine(app, ['work/acme']);
+        const restricted = memoryClient(app, version, {
+          machine: true,
+          headers: { Authorization: `Bearer ${machine.token}` },
+        });
+        for (const bucket of ['work', 'me'])
+          expectToolError(
+            await restricted.call('remember', { bucket, content }),
+            'Access to this bucket is forbidden.',
+          );
+        expect(await memoryCounts(app)).toEqual({ memories: 0, versions: 0 });
+      });
     it('E10: a valid absent bucket reports not found and writes nothing', async () => {
       expectToolError(
         await call('remember', { bucket: 'work/absent', content }),

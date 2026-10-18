@@ -172,6 +172,25 @@ describe.each(['owner', 'machine'] as const)(
         expect(app.services.embeddingCalls).toEqual([]);
         expect(app.services.queries).toEqual([]);
       });
+      if (endpoint === 'machine')
+        it('E5: a child grant can search the reserved me bucket', async () => {
+          const memory = { ...searchMemories[0], bucket: 'me' };
+          await indexMemories(app, [memory]);
+          const machine = await seedMemoryMachine(app, ['work/acme']);
+          const restricted = memoryClient(app, version, {
+            machine: true,
+            headers: { Authorization: `Bearer ${machine.token}` },
+          });
+          expect(
+            results(
+              await restricted.call('search', {
+                bucket: 'me',
+                scope: 'bucket',
+                query: 'how do we deploy',
+              }),
+            ).results.map((row) => row.id),
+          ).toContain(memory.id);
+        });
       it.each([false, true])(
         'E4/E5: D1 enforces lineage even when Vectorize ignores the filter=%s; a narrow grant denies siblings',
         async (ignoreFilter) => {

@@ -1,11 +1,7 @@
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
-import {
-  memoryFixture,
-  memoryId,
-  memoryPage,
-} from './support/memory.ts';
+import { memoryFixture, memoryId, memoryPage } from './support/memory.ts';
 import { historyPage, memories } from './support/memory-history.ts';
 
 let browser: Browser;
@@ -45,9 +41,11 @@ it('typing a search preserves the selected memory URL parameter order', async ()
     });
     await search.fill('release');
     await search.press('Enter');
-    await expect.poll(() => new URL(visit.page.url()).search).toBe(
-      `?bucket=work%2Facme&memory=${memoryId(1)}&scope=inherited&q=release`,
-    );
+    await expect
+      .poll(() => new URL(visit.page.url()).search)
+      .toBe(
+        `?bucket=work%2Facme&memory=${memoryId(1)}&scope=inherited&q=release`,
+      );
   } finally {
     await visit.close();
   }
@@ -60,9 +58,9 @@ it('automatic desktop selection appends defaults after the original query', asyn
   });
   try {
     await visit.page.locator('[data-search-result]').first().waitFor();
-    await expect.poll(() => new URL(visit.page.url()).search).toBe(
-      `?q=release&bucket=me&scope=inherited&memory=${memoryId(1)}`,
-    );
+    await expect
+      .poll(() => new URL(visit.page.url()).search)
+      .toBe(`?q=release&bucket=me&scope=inherited&memory=${memoryId(1)}`);
   } finally {
     await visit.close();
   }

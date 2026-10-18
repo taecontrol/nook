@@ -71,6 +71,23 @@ it('E17: the owner feed merges only the lineage newest first and never sends con
     'synthetic-private-personal-memory',
   );
 });
+it('E20: a restricted child grant can list a readable ancestor', async () => {
+  const memory = memoryFixture(4, { bucket: 'work' });
+  await seedMemories(app, [memory]);
+  const handler = handlerForPrincipal(
+    'owner@nook.test',
+    await app.mf.getD1Database('DB'),
+    ['work/acme'],
+  );
+  const response = await handler(
+    new Request('http://nook.test/api/memories?bucket=work&scope=bucket'),
+  );
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    memories: [{ id: memory.id, bucket: 'work' }],
+    next: null,
+  });
+});
 it('E22: tree counts are per bucket, include empty buckets and exclude paths outside the read grant', async () => {
   await seedMemories(app, [
     ...typicalMemories,
