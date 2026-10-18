@@ -1,7 +1,7 @@
 import { CircleAlert, CircleCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
-import { ApiError, describeFailure, writeOutcome } from './api-client';
+import { ApiError, describeFailure } from './api-client';
 import { DismissibleAlert } from './failure';
 import { type ObservedWrite, unconfirmed } from './vault-api';
 import type { Feedback, WriteOp } from './vault-state';
@@ -34,18 +34,12 @@ function uncertain(op: WriteOp, path: string) {
   };
   return `Nook could not confirm whether ${event[op]}.`;
 }
-function failureMessage(write: ObservedWrite) {
+function failureMessage(write: ObservedWrite, error: ApiError) {
   const { op, secret } = write.input;
-  const error = write.error;
   const unchanged =
     op === 'create' ? 'Nothing was stored.' : 'Nothing changed.';
-  if (!(error instanceof ApiError)) return uncertain(op, secret.path);
   if (error.tag === 'SecretChanged')
     return describeFailure(error, 'change secrets');
-  if (error.tag === 'SecretExists')
-    return writeOutcome(error) === 'ambiguous'
-      ? `${secret.path} now exists. Review it before trying again.`
-      : describeFailure(error, 'change secrets', unchanged);
   if (error.tag === 'SecretNotFound')
     return `${secret.path} is no longer stored.`;
   return describeFailure(error, 'change secrets', unchanged);
@@ -67,14 +61,15 @@ export function feedbackFor(write: ObservedWrite | undefined): Feedback | null {
   if (write.status === 'pending')
     return { kind: 'saving', op, path, message: path };
   if (write.status === 'success') return successFeedback(write);
-  const unknown = unconfirmed(write.error);
+  const error = write.error;
+  const unknown = !(error instanceof ApiError) || unconfirmed(error);
   return {
     kind: unknown ? 'unconfirmed' : 'failed',
     op,
     path,
     message: unknown
-      ? describeFailure(write.error, 'change secrets', uncertain(op, path))
-      : failureMessage(write),
+      ? describeFailure(error, 'change secrets', uncertain(op, path))
+      : failureMessage(write, error),
   };
 }
 function heading(feedback: Feedback) {

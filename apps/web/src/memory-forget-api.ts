@@ -3,7 +3,7 @@ import {
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query';
-import { ApiError, ambiguousWrite, runApi, writeOutcome } from './api-client';
+import { ApiError, runApi, writeOutcome } from './api-client';
 import {
   memoryHistoryOptions,
   memoryOptions,
@@ -69,11 +69,10 @@ async function forgetRequest(subject: ForgetRequest): Promise<ForgetResult> {
     if (error instanceof ApiError && error.tag === 'MemoryNotFound')
       return 'forgotten';
     if (writeOutcome(error) !== 'definitive') {
-      try {
-        if ((await readForgetOutcome(subject.id)) === null) return 'forgotten';
-      } catch {
-        throw ambiguousWrite(error);
-      }
+      const current = await readForgetOutcome(subject.id).catch(
+        () => undefined,
+      );
+      if (current === null) return 'forgotten';
     }
     throw error;
   }

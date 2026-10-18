@@ -17,34 +17,16 @@ export class ApiError extends Error {
     readonly tag = 'ServiceUnavailable',
     message?: string,
     readonly current?: BucketGrant,
-    readonly ambiguous = false,
   ) {
     super(message ?? `Request failed with ${status}`);
     this.hasPublicMessage = message !== undefined;
   }
 }
 
-export function writeOutcome(
-  error: unknown,
-): 'definitive' | 'unknown' | 'ambiguous' {
-  if (!(error instanceof ApiError)) return 'unknown';
-  if (error.ambiguous) return 'ambiguous';
-  return error.outcomeUnknown || error.tag === 'ServiceUnavailable'
-    ? 'unknown'
-    : 'definitive';
-}
-
-/** Preserve the original public reason after an earlier attempt lost its answer. */
-export function ambiguousWrite(failure: unknown) {
-  const error = failure instanceof ApiError ? failure : new ApiError(503, true);
-  return new ApiError(
-    error.status,
-    error.outcomeUnknown,
-    error.tag,
-    error.hasPublicMessage ? error.message : undefined,
-    error.current,
-    true,
-  );
+export function writeOutcome(error: unknown): 'definitive' | 'unconfirmed' {
+  return error instanceof ApiError && !error.outcomeUnknown
+    ? 'definitive'
+    : 'unconfirmed';
 }
 // Errors the contract declares carry their status; Cloudflare Access answers
 // 401 and 403 before the Worker does; anything else is unavailable.

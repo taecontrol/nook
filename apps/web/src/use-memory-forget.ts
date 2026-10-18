@@ -190,7 +190,7 @@ export function useMemoryForget({
       shownElement('[data-memory-list-heading]');
     confirmation.close(focusTarget);
     if (wasOpen) select(desktop ? neighbor : undefined);
-    const { result, token } = submit(subject, {
+    const { result } = submit(subject, {
       neighbor,
       before: order[order.indexOf(subject.id) + 1],
       viewBucket: bucket,
@@ -201,7 +201,7 @@ export function useMemoryForget({
     try {
       await result;
     } catch (error) {
-      if (!isLatest(token) || writeOutcome(error) !== 'definitive') return;
+      if (writeOutcome(error) !== 'definitive') return;
       const location = router.latestLocation;
       const current = (location.search as MemorySearch).memory;
       if (shouldRestore(location.pathname, wasOpen, desktop, current, neighbor))
@@ -257,7 +257,7 @@ export function useMemoryForget({
       }
     },
     keep: () => {
-      if (!write || !isLatest(write.id)) return;
+      if (!write) return;
       retireForgets(queries);
       extras.clear();
       restoreEntryFocus();
