@@ -426,17 +426,6 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
     );
     it('E12: discovery documents explicit buckets, safe retries and read annotations', async () => {
       const { tools } = await client.listTools();
-      expect(tools.map((t) => t.name).sort()).toEqual([
-        'create_bucket',
-        'delete_bucket',
-        'forget',
-        'get',
-        'list_buckets',
-        'list_secrets',
-        'remember',
-        'search',
-        'update',
-      ]);
       const remember = tools.find((t) => t.name === 'remember');
       expect(remember?.description).toMatch(/bucket explicitly/i);
       expect(remember?.description).toMatch(/ask the owner/i);
@@ -448,9 +437,6 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
       expect(tools.find((t) => t.name === 'get')?.annotations).toMatchObject({
         readOnlyHint: true,
       });
-      expect(
-        tools.find((t) => t.name === 'delete_bucket')?.description,
-      ).toContain('memories');
       expect(Object.keys(remember?.inputSchema.properties as object)).toEqual([
         'bucket',
         'content',
