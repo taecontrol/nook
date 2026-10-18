@@ -55,6 +55,36 @@ it('#60: an unconfirmed forget survives a visit to Vault and Check again resolve
   }
 });
 
+it('#60: dismissing an unconfirmed forget returns focus and survives navigation', async () => {
+  const visit = await forgetPage(browser);
+  try {
+    const { page } = visit;
+    await openForget(page);
+    await page.route('**/api/memories/*?expectedVersion=*', (route) =>
+      route.fulfill({ status: 503, json: { _tag: 'ServiceUnavailable' } }),
+    );
+    await confirmForget(page);
+    await unconfirmed(page).waitFor();
+    await page.getByRole('link', { name: 'Vault', exact: true }).click();
+    await page.getByRole('heading', { name: 'Vault', exact: true }).waitFor();
+    await page.goBack();
+    const row = page.locator(`[data-memory-row="${forgottenId}"]`);
+    await row.waitFor();
+    await unconfirmed(page).getByRole('button', { name: 'Dismiss' }).click();
+    await expect.poll(() => unconfirmed(page).count()).toBe(0);
+    await expect
+      .poll(() => row.evaluate((element) => document.activeElement === element))
+      .toBe(true);
+    await page.getByRole('link', { name: 'Vault', exact: true }).click();
+    await page.getByRole('heading', { name: 'Vault', exact: true }).waitFor();
+    await page.goBack();
+    await row.waitFor();
+    expect(await unconfirmed(page).count()).toBe(0);
+  } finally {
+    await visit.close();
+  }
+});
+
 it('#61: a 503 forget remains unconfirmed until an explicit outcome check', async () => {
   const visit = await forgetPage(browser);
   try {
