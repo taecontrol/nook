@@ -37,7 +37,7 @@ it('recordings are strict: an unrecorded text fails rather than inventing semant
   ).toThrow('Missing recorded embedding fixture.');
   expect(services.missing.size).toBe(1);
 });
-it('Vectorize evidence: visibility is delayed, filters require an index at write time, insert is inert, and upsert replaces metadata', () => {
+it('Vectorize evidence: visibility is delayed, filters require an index at write time, and upsert replaces metadata', () => {
   const services = new SearchStandIns();
   services.indexes.clear();
   services.upsert([
@@ -55,9 +55,6 @@ it('Vectorize evidence: visibility is delayed, filters require an index at write
   expect(services.query(values, options).matches).toMatchObject([
     { id: 'a', metadata: { contentHash: 'second' } },
   ]);
-  services.insert([{ id: 'a', values, metadata: { bucket: 'denied' } }]);
-  services.advance();
-  expect(services.query(values, options).matches).toHaveLength(1);
   services.upsert([{ id: 'a', values, metadata: { contentHash: 'third' } }]);
   services.advance();
   expect(services.query(values, options).matches).toEqual([]);

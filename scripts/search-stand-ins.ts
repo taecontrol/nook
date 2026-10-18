@@ -123,9 +123,6 @@ export class SearchStandIns {
     if (this.autoAdvance) this.advance();
     return { mutationId: 'synthetic-mutation' };
   }
-  insert(vectors: LocalVector[]) {
-    return this.upsert(vectors.filter((v) => !this.written.has(v.id)));
-  }
   getByIds(ids: string[]) {
     this.inspections.push(ids);
     if (this.failInspection || this.failIndex)
