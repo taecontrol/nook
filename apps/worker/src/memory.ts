@@ -172,11 +172,14 @@ function validInput(
       : validateWorkingDirectory(input.workingDirectory));
   return message ? Effect.fail(new InvalidMemory({ message })) : Effect.void;
 }
-function validUpdate(input: UpdateMemory) {
+type UpdateRequest = Omit<UpdateMemory, 'expectedVersion'> & {
+  expectedVersion?: unknown;
+};
+function validUpdate(input: UpdateRequest) {
   const message = validateExpectedVersion(input.expectedVersion);
   return message
     ? Effect.fail(new InvalidMemory({ message }))
-    : validInput(input);
+    : validInput(input).pipe(Effect.as(input.expectedVersion as number));
 }
 function machineFacts(principal: Principal) {
   return principal.kind === 'machine'
@@ -439,11 +442,11 @@ export const memoryStore = (
       update: (
         principal: Principal,
         client: MemoryClient,
-        input: UpdateMemory,
+        input: UpdateRequest,
       ) =>
         Effect.gen(function* () {
           const bucket = yield* bucketFor(input.id, true);
-          yield* validUpdate(input);
+          const expectedVersion = yield* validUpdate(input);
           const hash = yield* Effect.promise(() => sha256(input.content));
           const tags =
             input.tags === undefined ? null : JSON.stringify(input.tags);
@@ -456,14 +459,14 @@ export const memoryStore = (
           );
           // Each write guard also supplies the outcome read; only precedence is TypeScript.
           const equal = sql`cur.content=${input.content} AND json(cur.tags)=json(COALESCE(${tags},cur.tags))`;
-          const stale = sql`m.current_version <> ${input.expectedVersion}`;
+          const stale = sql`m.current_version <> ${expectedVersion}`;
           const other = sql`o.bucket=m.bucket AND o.id<>m.id AND o.content_hash=${hash}`;
           const duplicate = sql`EXISTS (SELECT 1 FROM memories o WHERE ${other})`;
           const collision = sql`m.content_hash=${hash} AND cur.content<>${input.content}`;
           const [inserted, , states] = yield* sql
             .batch([
               sql`INSERT INTO memory_versions(memory_id,version,content,tags,${provenanceColumns}) SELECT m.id,m.current_version+1,${input.content},COALESCE(${tags},cur.tags),${provenance} FROM memories m JOIN memory_versions cur ON cur.memory_id=m.id AND cur.version=m.current_version WHERE m.id=${input.id} AND m.bucket=${bucket} AND NOT (${stale}) AND NOT (${equal}) AND NOT (${duplicate}) AND NOT (${collision}) RETURNING version`,
-              sql`UPDATE memories SET current_version=current_version+1,content_hash=${hash},updated_at=${now} WHERE id=${input.id} AND bucket=${bucket} AND current_version=${input.expectedVersion} AND EXISTS (SELECT 1 FROM memory_versions v WHERE v.memory_id=memories.id AND v.version=memories.current_version+1)`,
+              sql`UPDATE memories SET current_version=current_version+1,content_hash=${hash},updated_at=${now} WHERE id=${input.id} AND bucket=${bucket} AND current_version=${expectedVersion} AND EXISTS (SELECT 1 FROM memory_versions v WHERE v.memory_id=memories.id AND v.version=memories.current_version+1)`,
               sql`SELECT m.id,m.bucket,m.current_version,m.created_at,m.updated_at,cur.tags,(${equal}) AS equals_request,(${stale}) AS stale, (SELECT o.id FROM memories o JOIN memory_versions ov ON ov.memory_id=o.id AND ov.version=o.current_version WHERE ${other} AND ov.content=${input.content}) AS duplicate_id, ((${collision}) OR (${duplicate} AND NOT EXISTS (SELECT 1 FROM memories o JOIN memory_versions ov ON ov.memory_id=o.id AND ov.version=o.current_version WHERE ${other} AND ov.content=${input.content}))) AS hash_collision, EXISTS (SELECT 1 FROM memory_versions previous WHERE previous.memory_id=m.id AND previous.version=m.current_version-1 AND previous.content<>cur.content) AS content_changed FROM (SELECT 1) LEFT JOIN memories m ON m.id=${input.id} AND m.bucket=${bucket} LEFT JOIN memory_versions cur ON cur.memory_id=m.id AND cur.version=m.current_version`,
             ])
             .pipe(unavailable);
@@ -471,7 +474,7 @@ export const memoryStore = (
           const state = decoded[0];
           const result = yield* updateOutcome(
             state,
-            input,
+            { ...input, expectedVersion },
             inserted.length > 0,
           );
           if (result.updated && state?.id && state.content_changed)
