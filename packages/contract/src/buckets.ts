@@ -42,10 +42,6 @@ export function bucketLineage(path: string): string[] {
     .split('/')
     .map((_, index, segments) => segments.slice(0, index + 1).join('/'));
 }
-export function readLineage(bucket: string) {
-  const paths = bucketLineage(bucket).reverse();
-  return paths.includes(RESERVED_BUCKET) ? paths : [...paths, RESERVED_BUCKET];
-}
 export class InvalidBucketPath extends Schema.Error<InvalidBucketPath>(
   'nook/InvalidBucketPath',
 )(

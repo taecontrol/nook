@@ -1,5 +1,5 @@
 import { Schema } from 'effect';
-import { readLineage } from './buckets.ts';
+import { readLineage } from './grants.ts';
 
 export const secretLimits = {
   name: 64,

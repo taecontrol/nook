@@ -15,15 +15,25 @@ import {
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
-import { SqlSchema } from 'effect/sql';
+import { type SqlClient, SqlSchema } from 'effect/sql';
 import { unavailable } from './http-errors.ts';
 
 const Row = Schema.Struct({ path: Schema.String, created_at: Schema.String });
-function writable(grant: BucketGrant, path: string) {
+export function authorizeBucket(
+  grant: BucketGrant,
+  path: string,
+  access: 'read' | 'write',
+) {
   const message = validateBucketPath(path);
   if (message) return Effect.fail(new InvalidBucketPath({ message }));
-  if (!canWrite(grant, path)) return Effect.fail(new HttpApiError.Forbidden());
+  if (!(access === 'write' ? canWrite(grant, path) : canRead(grant, path)))
+    return Effect.fail(new HttpApiError.Forbidden());
   return Effect.void;
+}
+export const bucketNotFound = () =>
+  new BucketNotFound({ message: 'Bucket not found.' });
+export function bucketExists(sql: SqlClient.SqlClient, path: string) {
+  return sql`EXISTS (SELECT 1 FROM buckets WHERE path=${path})`;
 }
 export const bucketOperations = Effect.gen(function* () {
   const sql = yield* D1Client.D1Client;
@@ -44,7 +54,7 @@ export const bucketOperations = Effect.gen(function* () {
       ),
     create: (grant: BucketGrant, path: string) =>
       Effect.gen(function* () {
-        yield* writable(grant, path);
+        yield* authorizeBucket(grant, path, 'write');
         const now = new Date().toISOString();
         const paths = bucketLineage(path);
         const results = yield* sql
@@ -67,7 +77,7 @@ export const bucketOperations = Effect.gen(function* () {
       }),
     delete: (grant: BucketGrant, path: string) =>
       Effect.gen(function* () {
-        yield* writable(grant, path);
+        yield* authorizeBucket(grant, path, 'write');
         if (path === RESERVED_BUCKET)
           return yield* Effect.fail(
             new ReservedBucket({ message: 'The me bucket cannot be deleted.' }),
@@ -98,9 +108,7 @@ export const bucketOperations = Effect.gen(function* () {
           return yield* Effect.fail(
             new BucketHasMemories({ message: 'Delete its memories first.' }),
           );
-        return yield* Effect.fail(
-          new BucketNotFound({ message: 'Bucket not found.' }),
-        );
+        return yield* Effect.fail(bucketNotFound());
       }),
   };
 });
