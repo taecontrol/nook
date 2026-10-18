@@ -332,7 +332,19 @@ Issue #10 runs against the migrated production Worker in workerd and real local 
 
 `tests/journeys/owner.e2e.ts` additionally remembers through MCP and opens the stored memory using deterministic locators under strict cache replay and zero retries. `memory-worker.test.ts` observes real D1 calls through the existing test checkpoint wrapper: one three-statement batch for remember and duplicate retries, one statement for get, one two-statement batch per list page without per-item reads, and one aggregate statement for counts. Observations contain labels and batch sizes, never SQL, bindings or rows.
 
-Paging cursors are versioned, checksummed Base64url JSON bound to the bucket, scope and existing ordering pair. The checksum classifies ordinary payload alterations as malformed; authorization remains the bucket grant on every request. Native D1 tests also prove schema constraints and current-version joins; forgetting proves that deleting a head cascades to its versions.
+Paging cursors are versioned, checksummed Base64url JSON bound to the bucket,
+scope and ordering position. The boundary memory may have been forgotten;
+HTTP tests forget the last row of page one and traverse the remaining pages
+without gaps or duplicates in both scopes. The checksum classifies ordinary
+payload alterations as malformed; authorization remains the bucket grant on
+every request. Native D1 tests also prove schema constraints and current-version
+joins; forgetting proves that deleting a head cascades to its versions.
+
+`memory-mcp-version-boundary.test.ts` pins the shared positive finite integer
+JSON Schema and identical missing-version wording for update and forget.
+`memory-contract.test.ts` rejects invalid version values and verifies that
+HTTP list/search declare no unreachable InvalidMemory error. Grant-denial
+tests also omit the update version to prove authorization still comes first.
 
 The 26 viewport PNGs and two full phone detail PNGs are `memory-*` files in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. The selected hybrid's three independent desktop columns, shared Vault bucket tree, phone push flow, scope toggle, and nonclickable image chip are the visual reference. Captures omit the prototype scenario selector. A plain first heading already shown in full by the detail title is omitted from the body; long, multiline and formatted headings are retained. Long row titles remain available through the link's title attribute.
 
@@ -410,8 +422,8 @@ tripwire remain mandatory under `pnpm verify`.
 The `memory-history-*.png` captures are in
 `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare
 them with the chosen Sheet reference. The scenario picker, stub and LCS
-implementation stay outside production. History reads pages of 25 versions
-plus the next older version; the contract client follows pages for the
+implementation stay outside production. Feed and history share a 25-item
+page size. History reads one extra row to detect another page; the contract client follows pages for the
 complete newest-first list. Sheet and jsdiff load separately on intent/use.
 Badge's added/removed variants and Sheet's stacked layout are authored
 components, with no generated-code exemption for the changes.
@@ -421,6 +433,14 @@ filtering current markers. Repair cannot shrink the sweep's ordering window.
 IDs repaired in that invocation are deferred until a later inspection to
 allow asynchronous propagation. The accepted schema and its drift snapshot
 remain unchanged.
+
+`memory-storage-bounds.test.ts` deliberately replaces the former 26-version
+history characterization with the owner-approved 25-version page, and also
+uses an old cursor to prove compatibility. The deterministic history/forget
+race in `memory-history-worker.test.ts` pauses after authorization, forgets
+through MCP, then requires HTTP 404. A live memory with no older versions
+still returns an empty terminal page. `memory-update-search.test.ts` requires
+inspection and marker invalidation even when pending embedding repair fails.
 
 The inspection acknowledgement case prepares the replacement-model marker in
 real D1; it tests conditional invalidation without claiming a two-deployment
