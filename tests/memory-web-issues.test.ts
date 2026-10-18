@@ -308,11 +308,12 @@ it('#63: a failed Refresh memory explains the failure and remains retryable', as
 });
 
 it('#63: changing scope before the debounce keeps the newly typed query', async () => {
-  const visit = await memoryPage(browser);
+  const visit = await memoryPage(browser, {
+    configure: (page) => page.clock.install(),
+  });
   try {
     const { page } = visit;
     await memoryRows(page).first().waitFor();
-    await page.clock.install();
     await page.clock.pauseAt(new Date(Date.now() + 1000));
     const field = page.getByRole('textbox', {
       name: 'Search memories visible in work/acme',
