@@ -1,7 +1,7 @@
 import { CircleAlert, CircleCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
-import { ApiError, describeFailure } from './api-client';
+import { type ApiError, describeFailure } from './api-client';
 import { DismissibleAlert } from './failure';
 import { type ObservedWrite, unconfirmed } from './vault-api';
 import type { Feedback, WriteOp } from './vault-state';
@@ -62,14 +62,14 @@ export function feedbackFor(write: ObservedWrite | undefined): Feedback | null {
     return { kind: 'saving', op, path, message: path };
   if (write.status === 'success') return successFeedback(write);
   const error = write.error;
-  const unknown = !(error instanceof ApiError) || unconfirmed(error);
+  const unknown = unconfirmed(error);
   return {
     kind: unknown ? 'unconfirmed' : 'failed',
     op,
     path,
     message: unknown
       ? describeFailure(error, 'change secrets', uncertain(op, path))
-      : failureMessage(write, error),
+      : failureMessage(write, error as ApiError),
   };
 }
 function heading(feedback: Feedback) {
