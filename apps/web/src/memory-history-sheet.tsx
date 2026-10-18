@@ -17,7 +17,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { describeFailure } from './api-client';
 import { LoadFailure } from './failure';
-import { useMemoryHistory } from './memory-api';
+import { useMemoryHistory } from './memory-cache';
 import {
   changeSummary,
   Provenance,

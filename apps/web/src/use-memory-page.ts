@@ -9,8 +9,8 @@ import {
   memoryHistoryOptions,
   memoryOptions,
   memoryWriteGate,
-  useMemoryQueries,
 } from './memory-api';
+import { useMemoryQueries } from './memory-cache';
 import {
   type MemorySearch,
   memoryLocation,

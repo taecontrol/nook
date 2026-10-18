@@ -5,13 +5,15 @@ import {
 } from '@tanstack/react-query';
 import { ApiError, runApi } from './api-client';
 import {
-  forgetFromCache,
   memoryHistoryOptions,
   memoryOptions,
-  memoryQuery,
   memoryWriteKey,
-  restoreMemoryCache,
 } from './memory-api';
+import {
+  forgetFromCache,
+  memoryQuery,
+  restoreMemoryCache,
+} from './memory-cache';
 
 export type ForgetSubject = {
   id: string;

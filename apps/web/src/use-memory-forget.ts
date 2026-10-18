@@ -3,12 +3,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useRouter } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { ApiError } from './api-client';
-import {
-  invalidateMemoryLists,
-  memoryOptions,
-  memoryWriteGate,
-  writeMemory,
-} from './memory-api';
+import { memoryOptions, memoryWriteGate, writeMemory } from './memory-api';
+import { invalidateMemoryLists } from './memory-cache';
 import {
   type ForgetRequest,
   type ForgetSubject,
