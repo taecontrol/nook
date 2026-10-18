@@ -10,6 +10,7 @@ import {
   type Query,
   type QueryClient,
   queryOptions,
+  useInfiniteQuery,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
@@ -36,6 +37,7 @@ export const memoryWriteKey = ['memory-write'] as const;
 export const memoryWriteGate = createWriteGate(memoryWriteKey, {
   disableWhileBusy: true,
 });
+// Other memories remain readable while this id is being forgotten.
 export function canLoadMemory(queries: QueryClient, id: string) {
   if (!id) return false;
   const writing = queries
@@ -153,15 +155,20 @@ export type MemorySearch = {
 };
 export function preloadMemory(queries: QueryClient, search: MemorySearch) {
   preloadBuckets(queries);
-  if (memoryWriteGate.isWriting(queries)) return;
-  void queries.prefetchQuery(memoryCountsOptions);
-  void queries.prefetchInfiniteQuery(
-    memoriesOptions(search.bucket ?? RESERVED_BUCKET, search.scope),
+  memoryWriteGate.preload(queries, memoryCountsOptions);
+  memoryWriteGate.start(
+    queries,
+    () =>
+      void queries.prefetchInfiniteQuery(
+        memoriesOptions(search.bucket ?? RESERVED_BUCKET, search.scope),
+      ),
   );
-  if (search.memory) void queries.prefetchQuery(memoryOptions(search.memory));
+  if (search.memory)
+    memoryWriteGate.preload(queries, memoryOptions(search.memory));
   preloadHistory(queries, search);
   if (search.q?.trim())
-    void queries.prefetchQuery(
+    memoryWriteGate.preload(
+      queries,
       memorySearchOptions(
         search.bucket ?? 'me',
         search.scope ?? 'inherited',
@@ -172,7 +179,7 @@ export function preloadMemory(queries: QueryClient, search: MemorySearch) {
 
 function preloadHistory(queries: QueryClient, search: MemorySearch) {
   if (search.memory && (search.history || search.version !== undefined))
-    void queries.prefetchQuery(memoryHistoryOptions(search.memory));
+    memoryWriteGate.preload(queries, memoryHistoryOptions(search.memory));
 }
 
 type Cached<Options extends { queryKey: readonly unknown[] }> =
@@ -311,4 +318,37 @@ export function useMemoryHistory(detail: Memory) {
       isPending: history.isPending || (!history.isError && behind),
     },
   };
+}
+
+export function useMemoryQueries(
+  bucket: string,
+  scope: MemoryScope,
+  q: string,
+  id: string,
+) {
+  const queries = useQueryClient();
+  const busy = memoryWriteGate.useBusy();
+  const results = useQuery(
+    memoryWriteGate.queryOptions(
+      memorySearchOptions(bucket, scope, q),
+      busy,
+      queries,
+    ),
+  );
+  const countsQuery = useQuery(
+    memoryWriteGate.queryOptions(memoryCountsOptions, busy, queries),
+  );
+  const list = useInfiniteQuery(
+    memoryWriteGate.queryOptions(memoriesOptions(bucket, scope), busy, queries),
+  );
+  const loadDetail = canLoadMemory(queries, id);
+  const detail = useQuery(
+    memoryWriteGate.queryOptions(
+      memoryOptions(id),
+      busy,
+      queries,
+      () => loadDetail && canLoadMemory(queries, id),
+    ),
+  );
+  return { busy, results, countsQuery, list, detail };
 }

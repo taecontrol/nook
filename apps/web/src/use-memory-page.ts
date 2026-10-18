@@ -1,23 +1,16 @@
 import { type Memory, RESERVED_BUCKET, readLineage } from '@nook/contract';
-import {
-  useInfiniteQuery,
-  useQuery,
-  useQueryClient,
-} from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useRouter, useSearch } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError } from './api-client';
 import { useBucketList } from './buckets-api';
 import { useDesktop } from './hooks/use-desktop';
 import {
-  canLoadMemory,
   type MemorySearch,
-  memoriesOptions,
-  memoryCountsOptions,
   memoryHistoryOptions,
   memoryOptions,
-  memorySearchOptions,
   memoryWriteGate,
+  useMemoryQueries,
 } from './memory-api';
 import { useMemoryForget } from './use-memory-forget';
 
@@ -63,14 +56,6 @@ function forgetOrder(
   records: readonly { id: string }[],
 ) {
   return (searching ? (results ?? []) : records).map((row) => row.id);
-}
-function idleRead(
-  queries: ReturnType<typeof useQueryClient>,
-  read: () => unknown,
-) {
-  return () => {
-    if (!memoryWriteGate.isWriting(queries)) void read();
-  };
 }
 // Updates derive from the latest location, never from the render that
 // scheduled them, so overlapping navigations cannot erase each other's keys.
@@ -152,8 +137,9 @@ function useHistoryNavigation(
     version: search.version,
     changes: search.changes === '1',
     prefetchHistory: () => {
-      if (search.memory && !memoryWriteGate.isWriting(queries))
-        void queries.prefetchQuery(
+      if (search.memory)
+        memoryWriteGate.preload(
+          queries,
           memoryHistoryOptions(
             search.memory,
             queries.getQueryData(memoryOptions(search.memory).queryKey)
@@ -183,12 +169,6 @@ export function useMemoryPage() {
   const search = useSearch({ from: '/owner/memory' });
   const navigate = useNavigate({ from: '/memory' });
   const queries = useQueryClient();
-  const busy = memoryWriteGate.useBusy();
-  const guarded = <
-    Options extends { staleTime?: unknown; refetchOnWindowFocus?: unknown },
-  >(
-    options: Options,
-  ) => memoryWriteGate.queryOptions(options, busy, queries);
   const desktop = useDesktop();
   const bucket = search.bucket ?? RESERVED_BUCKET;
   const scope = search.scope ?? 'inherited';
@@ -202,20 +182,14 @@ export function useMemoryPage() {
         replace: true,
       }),
   );
-  const results = useQuery({
-    ...guarded(memorySearchOptions(bucket, scope, q)),
-    enabled: () => searching && !busy && !memoryWriteGate.isWriting(queries),
-  });
   const buckets = useBucketList();
-  const countsQuery = useQuery(guarded(memoryCountsOptions));
-  const list = useInfiniteQuery(guarded(memoriesOptions(bucket, scope)));
+  const { busy, results, countsQuery, list, detail } = useMemoryQueries(
+    bucket,
+    scope,
+    q,
+    search.memory ?? '',
+  );
   const records = list.data?.pages.flatMap((page) => page.memories) ?? [];
-  const detailId = search.memory ?? '';
-  const loadDetail = canLoadMemory(queries, detailId);
-  const detail = useQuery({
-    ...guarded(memoryOptions(detailId)),
-    enabled: () => loadDetail && canLoadMemory(queries, detailId),
-  });
   const visible = visibleBuckets(bucket, scope);
   const selected = visibleMemory(detail.data, visible, detail.error);
   const { counts, total, firstRun } = countSummary(
@@ -258,17 +232,23 @@ export function useMemoryPage() {
     firstRun,
     busy,
     forget,
-    loadMore: idleRead(queries, () =>
-      list.fetchNextPage({ cancelRefetch: false }),
-    ),
-    retrySearch: idleRead(queries, () => results.refetch()),
-    retryCounts: idleRead(queries, () => countsQuery.refetch()),
-    retryDetail: idleRead(queries, () => detail.refetch()),
-    retryList: idleRead(queries, () => {
-      void list.refetch();
-      if (countsQuery.isError) void countsQuery.refetch();
-      if (detail.isError) void detail.refetch();
-    }),
+    loadMore: () =>
+      memoryWriteGate.start(
+        queries,
+        () => void list.fetchNextPage({ cancelRefetch: false }),
+      ),
+    retrySearch: () =>
+      memoryWriteGate.start(queries, () => void results.refetch()),
+    retryCounts: () =>
+      memoryWriteGate.start(queries, () => void countsQuery.refetch()),
+    retryDetail: () =>
+      memoryWriteGate.start(queries, () => void detail.refetch()),
+    retryList: () =>
+      memoryWriteGate.start(queries, () => {
+        void list.refetch();
+        if (countsQuery.isError) void countsQuery.refetch();
+        if (detail.isError) void detail.refetch();
+      }),
     ...history,
     browse: !desktop && !search.bucket,
     detailOpen: !desktop && Boolean(search.memory),

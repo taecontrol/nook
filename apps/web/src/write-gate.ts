@@ -3,8 +3,10 @@ import {
   type Mutation,
   type MutationKey,
   type MutationStatus,
+  type Query,
   type QueryClient,
   type QueryKey,
+  type QueryObserverOptions,
   useIsMutating,
   useMutationState,
 } from '@tanstack/react-query';
@@ -34,12 +36,16 @@ export function createWriteGate(
     ) {
       if (!isWriting(queries)) void queries.prefetchQuery(options);
     },
-    queryOptions<
-      Options extends {
-        staleTime?: unknown;
-        refetchOnWindowFocus?: unknown;
-      },
-    >(options: Options, busy: boolean, queries: QueryClient) {
+    queryOptions<Data, QueryData, Key extends QueryKey, Options>(
+      options: Options &
+        Pick<
+          QueryObserverOptions<Data, Error, Data, QueryData, Key>,
+          'enabled' | 'staleTime' | 'refetchOnWindowFocus'
+        >,
+      busy: boolean,
+      queries: QueryClient,
+      canRead = () => !busy && !isWriting(queries),
+    ) {
       return {
         ...options,
         // Query checks this before focus/remount reads, including the interval
@@ -47,7 +53,13 @@ export function createWriteGate(
         // Retain the previous disabled state after settlement so observers
         // resume queries first mounted during the write.
         ...(disableWhileBusy
-          ? { enabled: () => !busy && !isWriting(queries) }
+          ? {
+              enabled: (query: Query<Data, Error, QueryData, Key>) =>
+                canRead() &&
+                (typeof options.enabled === 'function'
+                  ? options.enabled(query)
+                  : options.enabled !== false),
+            }
           : {}),
         staleTime: busy ? Infinity : options.staleTime,
         refetchOnWindowFocus: busy
