@@ -1,4 +1,4 @@
-import { type Bucket, bucketLineage, type MemoryScope } from '@nook/contract';
+import { type Bucket, type BucketScope, bucketLineage } from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import { cn } from 'cn';
 import { ChevronRight, Dot } from 'lucide-react';
@@ -173,7 +173,7 @@ export function TreeBranches({
 type TreeState = {
   to: '/vault' | '/memory';
   noun: 'secret' | 'memory';
-  scope: MemoryScope;
+  scope: BucketScope;
   query?: string;
   /** The bucket shown on the right; null on a phone's bucket list. */
   selected: string | null;
@@ -273,7 +273,7 @@ export function BucketTree({
   loading: boolean;
   to?: '/vault' | '/memory';
   noun?: 'secret' | 'memory';
-  scope?: MemoryScope;
+  scope?: BucketScope;
   query?: string;
 }) {
   const nodes = useMemo(

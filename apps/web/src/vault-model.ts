@@ -1,10 +1,10 @@
 import type { OwnerSecret } from '@nook/contract';
-import { secretLimits, secretLineage } from '@nook/contract';
+import { readLineage, secretLimits } from '@nook/contract';
 
 export type Secret = OwnerSecret;
 export const DESCRIPTION_MAX = secretLimits.description;
 export function ancestorsOf(bucket: string) {
-  return secretLineage(bucket).slice(1);
+  return readLineage(bucket).slice(1);
 }
 function byName(a: Secret, b: Secret) {
   return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;

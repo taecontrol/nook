@@ -1,5 +1,6 @@
 import { Schema } from 'effect';
 import { validateBucketPath } from './buckets.ts';
+import { BucketScope } from './grants.ts';
 
 export const memoryLimits = {
   contentBytes: 16 * 1024,
@@ -141,7 +142,7 @@ export const MemoryPage = Schema.Struct({
   memories: Schema.Array(MemoryListItem),
   next: Schema.NullOr(Schema.String),
 });
-export const MemoryScope = Schema.Literals(['bucket', 'inherited']);
+export const MemoryScope = BucketScope;
 export type MemoryScope = typeof MemoryScope.Type;
 export const MemoryQuery = Schema.Struct({
   bucket: Schema.String,

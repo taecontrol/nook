@@ -1,6 +1,8 @@
 import { Schema } from 'effect';
 import { BucketPath, bucketLineage, RESERVED_BUCKET } from './buckets.ts';
-import type { MemoryScope } from './memory.ts';
+
+export const BucketScope = Schema.Literals(['bucket', 'inherited']);
+export type BucketScope = typeof BucketScope.Type;
 
 export const BucketGrant = Schema.Union([
   Schema.Literal('all'),
@@ -28,7 +30,7 @@ export function readLineage(bucket: string) {
 export function visiblePaths(
   grant: BucketGrant,
   bucket: string,
-  scope: MemoryScope,
+  scope: BucketScope,
 ) {
   return (scope === 'bucket' ? [bucket] : readLineage(bucket)).filter((path) =>
     canRead(grant, path),

@@ -1,5 +1,7 @@
 export const memoryBounds = {
   indexChunk: 50,
+  meaningTopK: 50,
+  keywordCandidates: 50,
   embeddingChunk: 32,
   removalSettleMs: 30 * 60_000,
   inspectionSettleMs: 10 * 60_000,

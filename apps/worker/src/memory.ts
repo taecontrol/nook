@@ -681,7 +681,7 @@ export const memoryStore = (
           const delimiter = `\u0001${crypto.randomUUID()}\u0002`;
           const tagged = sql`NOT EXISTS (SELECT 1 FROM json_each(${JSON.stringify(tags)}) wanted WHERE NOT EXISTS (SELECT 1 FROM json_each(v.tags) actual WHERE actual.value=wanted.value))`;
           const keywordQuery = expression
-            ? sql`SELECT ${columns}, snippet(memories_fts, 0, ${delimiter}, ${delimiter}, '…', 40) AS keyword_snippet FROM memories_fts JOIN memories m ON m.seq=memories_fts.rowid JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE memories_fts MATCH ${expression} AND ${sql.in('m.bucket', paths)} AND ${tagged} ORDER BY bm25(memories_fts), m.created_at DESC, m.id DESC LIMIT ${memoryBounds.indexChunk}`
+            ? sql`SELECT ${columns}, snippet(memories_fts, 0, ${delimiter}, ${delimiter}, '…', 40) AS keyword_snippet FROM memories_fts JOIN memories m ON m.seq=memories_fts.rowid JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE memories_fts MATCH ${expression} AND ${sql.in('m.bucket', paths)} AND ${tagged} ORDER BY bm25(memories_fts), m.created_at DESC, m.id DESC LIMIT ${memoryBounds.keywordCandidates}`
             : sql`SELECT ${columns} FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE 0`;
           const [exists, rawKeyword] = yield* sql
             .batch([

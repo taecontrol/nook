@@ -100,13 +100,13 @@ export function memoryIndex(env: SearchBindings = {}) {
           if (!env.MEMORY_INDEX)
             throw new Error('Meaning search is unavailable.');
           return env.MEMORY_INDEX.query([...values], {
-            topK: memoryBounds.indexChunk,
+            topK: memoryBounds.meaningTopK,
             returnMetadata: 'all',
             filter: { bucket: { $in: bucket } },
           });
         });
         const { matches } = yield* Schema.decodeUnknownEffect(Matches)(raw);
-        return matches.slice(0, memoryBounds.indexChunk).map(
+        return matches.slice(0, memoryBounds.meaningTopK).map(
           (hit, i): MeaningHit => ({
             id: hit.id,
             contentHash: hit.metadata?.contentHash ?? '',
