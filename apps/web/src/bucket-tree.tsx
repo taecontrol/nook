@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/collapsible';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
-import { memorySearch } from './memory-location';
+import { memorySearch } from './memory-navigation';
 import { nameOf, parentOf } from './paths';
 
 export type BucketNode = {

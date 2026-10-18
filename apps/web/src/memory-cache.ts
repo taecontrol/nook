@@ -1,4 +1,4 @@
-import type { MemoryScope } from '@nook/contract';
+import type { Memory, MemoryScope } from '@nook/contract';
 import {
   type InferDataFromTag,
   type Query,
@@ -16,7 +16,17 @@ import {
   memorySearchOptions,
   memoryWriteGate,
   memoryWriteKey,
+  newer,
 } from './memory-api';
+
+export function writeMemory(
+  queries: QueryClient,
+  memory: Memory,
+): Memory | undefined {
+  return queries.setQueryData<Memory>(memoryKeys.detail(memory.id), (current) =>
+    newer(current, memory),
+  );
+}
 
 // Other memories remain readable while this id is being forgotten.
 export function canLoadMemory(queries: QueryClient, id: string) {

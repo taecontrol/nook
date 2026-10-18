@@ -44,14 +44,3 @@ export function memoryLocation(input: Record<string, unknown>) {
     q,
   };
 }
-export function memorySearch(
-  location: Pick<MemorySearch, 'bucket' | 'scope' | 'q'>,
-  selection: MemorySearch = {},
-): MemorySearch {
-  return {
-    bucket: location.bucket,
-    scope: location.scope,
-    q: location.q || undefined,
-    ...selection,
-  };
-}

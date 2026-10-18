@@ -2,7 +2,8 @@ import type { Memory } from '@nook/contract';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { expect, it, vi } from 'vitest';
 import * as api from '../apps/web/src/api-client.ts';
-import { memoryOptions, writeMemory } from '../apps/web/src/memory-api.ts';
+import { memoryOptions } from '../apps/web/src/memory-api.ts';
+import { writeMemory } from '../apps/web/src/memory-cache.ts';
 
 it('a detail fetch publishes only its completed result and retains a newer cached version', async () => {
   const memory: Memory = {

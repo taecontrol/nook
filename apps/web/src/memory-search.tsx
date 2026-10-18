@@ -31,7 +31,7 @@ import {
   MemoryActions,
   pendingRows,
 } from './memory-forget';
-import { memorySearch } from './memory-location';
+import { memorySearch } from './memory-navigation';
 import { formatDateTime, recentTime } from './time';
 import type { MemoryPageModel } from './use-memory-page';
 

@@ -142,16 +142,8 @@ function preloadHistory(queries: QueryClient, search: MemorySearch) {
     memoryWriteGate.preload(queries, memoryHistoryOptions(search.memory));
 }
 
-function newer(current: Memory | undefined, next: Memory): Memory {
+export function newer(current: Memory | undefined, next: Memory): Memory {
   return current && current.version > next.version ? current : next;
-}
-export function writeMemory(
-  queries: QueryClient,
-  memory: Memory,
-): Memory | undefined {
-  return queries.setQueryData<Memory>(memoryKeys.detail(memory.id), (current) =>
-    newer(current, memory),
-  );
 }
 export function historyBehind(
   versions: readonly MemoryVersion[] | undefined,

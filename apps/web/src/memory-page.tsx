@@ -26,8 +26,8 @@ import {
   UnconfirmedForget,
 } from './memory-forget';
 import { Provenance, principalName } from './memory-format';
-import { memorySearch } from './memory-location';
 import { MemoryMarkdown } from './memory-markdown';
+import { memorySearch } from './memory-navigation';
 import { ColumnSummary, SearchBody, SearchField } from './memory-search';
 import { formatDateTime, recentTime } from './time';
 import { type MemoryPageModel, useMemoryPage } from './use-memory-page';

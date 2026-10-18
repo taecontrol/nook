@@ -15,8 +15,8 @@ import {
   type MemorySearch,
   memoryLocation,
   memoryQueryText,
-  memorySearch,
 } from './memory-location';
+import { memorySearch } from './memory-navigation';
 import { useMemoryForget } from './use-memory-forget';
 
 function countSummary(
