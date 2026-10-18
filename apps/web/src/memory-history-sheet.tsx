@@ -1,8 +1,8 @@
 import { type Memory, type MemoryVersion, memoryTitle } from '@nook/contract';
-import type { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ArrowLeft, ChevronLeft, ChevronRight, Diff } from 'lucide-react';
-import { lazy, type RefObject, Suspense } from 'react';
+import { lazy, type RefObject, Suspense, useEffect, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Item, ItemActions, ItemContent } from '@/components/ui/item';
@@ -17,16 +17,58 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { describeFailure } from './api-client';
 import { LoadFailure } from './failure';
-import { useMemoryHistory } from './memory-cache';
+import { historyBehind, memoryHistoryOptions, memoryKeys } from './memory-api';
+import { Provenance } from './memory-format';
 import {
   changeSummary,
-  Provenance,
   principalLabel,
   tagChanges,
-} from './memory-format';
+} from './memory-history-format';
 import { MemoryMarkdown } from './memory-markdown';
 import { formatDateTime, timeAgo } from './time';
 import type { MemoryPageModel } from './use-memory-page';
+
+function useMemoryHistory(detail: Memory) {
+  const queries = useQueryClient();
+  const history = useQuery(memoryHistoryOptions(detail.id, detail.version));
+  const reconciled = useRef(0);
+  const behind = historyBehind(history.data, detail.version);
+  useEffect(() => {
+    if (
+      !history.data?.[0] ||
+      !behind ||
+      history.isFetching ||
+      history.isError ||
+      reconciled.current === detail.version
+    )
+      return;
+    reconciled.current = detail.version;
+    void history.refetch();
+  }, [
+    history.data,
+    behind,
+    detail.version,
+    history.isFetching,
+    history.isError,
+    history.refetch,
+  ]);
+  const head = history.data?.[0];
+  const memory =
+    head && head.version > detail.version
+      ? { ...detail, ...head, updatedAt: head.provenance.at }
+      : detail;
+  useEffect(() => {
+    if (memory.version > detail.version)
+      queries.setQueryData(memoryKeys.detail(memory.id), memory);
+  }, [queries, detail, memory]);
+  return {
+    memory,
+    history: {
+      ...history,
+      isPending: history.isPending || (!history.isError && behind),
+    },
+  };
+}
 
 const ChangesView = lazy(() =>
   import('./memory-diff').then((module) => ({ default: module.ChangesView })),

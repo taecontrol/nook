@@ -1,4 +1,4 @@
-import type { Memory, MemoryScope } from '@nook/contract';
+import type { MemoryScope } from '@nook/contract';
 import {
   type InferDataFromTag,
   type Query,
@@ -7,12 +7,10 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
-import { useEffect, useRef } from 'react';
 import {
-  historyBehind,
   memoriesOptions,
   memoryCountsOptions,
-  memoryHistoryOptions,
+  type memoryHistoryOptions,
   memoryKeys,
   memoryOptions,
   memorySearchOptions,
@@ -112,48 +110,6 @@ export function restoreMemoryCache(
 ) {
   for (const [key, data] of snapshot) queries.setQueryData(key, data);
 }
-export function useMemoryHistory(detail: Memory) {
-  const queries = useQueryClient();
-  const history = useQuery(memoryHistoryOptions(detail.id, detail.version));
-  const reconciled = useRef(0);
-  const behind = historyBehind(history.data, detail.version);
-  useEffect(() => {
-    if (
-      !history.data?.[0] ||
-      !behind ||
-      history.isFetching ||
-      history.isError ||
-      reconciled.current === detail.version
-    )
-      return;
-    reconciled.current = detail.version;
-    void history.refetch();
-  }, [
-    history.data,
-    behind,
-    detail.version,
-    history.isFetching,
-    history.isError,
-    history.refetch,
-  ]);
-  const head = history.data?.[0];
-  const memory =
-    head && head.version > detail.version
-      ? { ...detail, ...head, updatedAt: head.provenance.at }
-      : detail;
-  useEffect(() => {
-    if (memory.version > detail.version)
-      queries.setQueryData(memoryKeys.detail(memory.id), memory);
-  }, [queries, detail, memory]);
-  return {
-    memory,
-    history: {
-      ...history,
-      isPending: history.isPending || (!history.isError && behind),
-    },
-  };
-}
-
 export function useMemoryQueries(
   bucket: string,
   scope: MemoryScope,
