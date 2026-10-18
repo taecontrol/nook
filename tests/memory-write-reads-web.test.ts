@@ -118,7 +118,7 @@ it('#62: forget detail cannot refocus between submission and the pending render'
           const button = document.querySelector<HTMLButtonElement>(
             '[role="alertdialog"] button:last-child',
           );
-          if (!button || button.textContent !== 'Forget memory')
+          if (button?.textContent !== 'Forget memory')
             throw new Error('Missing forget confirmation');
           button.click();
         },

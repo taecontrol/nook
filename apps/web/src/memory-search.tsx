@@ -1,7 +1,7 @@
 import type { OwnerMemorySearchResult } from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import { cn } from 'cn';
-import { Search, SearchX, ServerCrash, TriangleAlert, X } from 'lucide-react';
+import { Search, SearchX, TriangleAlert, X } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect } from 'react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +24,8 @@ import { Item, ItemContent, ItemTitle } from '@/components/ui/item';
 import { Kbd } from '@/components/ui/kbd';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
+import { describeFailure } from './api-client';
+import { LoadFailure } from './failure';
 import {
   ForgetNotice,
   ForgetProblem,
@@ -283,27 +285,18 @@ function SearchSkeleton() {
 function SearchError({ model }: { model: MemoryPageModel }) {
   return (
     <div className="px-5 py-12">
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <ServerCrash />
-          </EmptyMedia>
-          <EmptyTitle>Could not search memories</EmptyTitle>
-          <EmptyDescription>
-            Your query is still here. Try searching again.
-          </EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={model.busy}
-            onClick={model.retrySearch}
-          >
-            Try again
-          </Button>
-        </EmptyContent>
-      </Empty>
+      <LoadFailure
+        title="Could not search memories"
+        description={describeFailure(
+          model.results.error,
+          'search memories',
+          'Your query is still here. Try searching again.',
+        )}
+        cached={false}
+        retrying={model.results.isFetching}
+        disabled={model.busy}
+        onRetry={model.retrySearch}
+      />
     </div>
   );
 }

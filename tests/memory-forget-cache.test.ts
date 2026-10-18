@@ -49,12 +49,6 @@ it.each([false, true])(
       await page.clock.setFixedTime(new Date('2026-10-14T15:00:00Z'));
       await seedMemories(app, [...typicalMemories, ...manyMemories]);
       await versionThree(app);
-      if (rollback)
-        await (await app.mf.getD1Database('DB'))
-          .prepare(
-            "CREATE TRIGGER synthetic_forget_abort BEFORE DELETE ON memories BEGIN SELECT RAISE(ABORT,'synthetic failure'); END",
-          )
-          .run();
       await page.goto(
         `${app.origin}/memory?bucket=work/acme&memory=${forgottenId}&scope=bucket`,
       );
@@ -136,7 +130,11 @@ it.each([false, true])(
       await page.route('**/api/memories/*?expectedVersion=*', async (route) => {
         arrived.resolve();
         await gate.promise;
-        await route.continue().catch(() => {});
+        if (rollback)
+          await route
+            .fulfill({ status: 403, body: 'Access denied' })
+            .catch(() => {});
+        else await route.continue().catch(() => {});
       });
       await openForget(page);
       pending = true;

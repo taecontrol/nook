@@ -20,6 +20,7 @@ import { LoadFailure } from './failure';
 import {
   ForgetDialog,
   ForgetProblem,
+  ForgetReadFailure,
   ForgettingRow,
   MemoryActions,
   pendingRows,
@@ -49,13 +50,14 @@ function BucketNav({ model }: { model: MemoryPageModel }) {
         {model.buckets.isPending ? (
           <BucketTreeSkeleton />
         ) : model.buckets.isError ? (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void model.buckets.refetch()}
-          >
-            Retry buckets
-          </Button>
+          <LoadFailure
+            title="Could not load buckets"
+            description={describeFailure(model.buckets.error, 'read buckets')}
+            cached={Boolean(model.buckets.data)}
+            retrying={model.buckets.isFetching}
+            onRetry={() => void model.buckets.refetch()}
+            retryLabel="Retry buckets"
+          />
         ) : (
           <BucketTree
             buckets={model.buckets.data.map((row) => row.path)}
@@ -70,18 +72,19 @@ function BucketNav({ model }: { model: MemoryPageModel }) {
         )}
       </div>
       {model.countsQuery.isError && (
-        <div className="pb-3 text-xs text-muted-foreground">
-          <p>Could not load memory counts</p>
-          <Button
-            variant="outline"
-            size="sm"
-            className="mt-2"
-            disabled={model.busy}
-            onClick={model.retryCounts}
-          >
-            Retry counts
-          </Button>
-        </div>
+        <LoadFailure
+          title="Could not load memory counts"
+          className="mb-3"
+          description={describeFailure(
+            model.countsQuery.error,
+            'read memory counts',
+          )}
+          cached={Boolean(model.countsQuery.data)}
+          retrying={model.countsQuery.isFetching}
+          disabled={model.busy}
+          onRetry={model.retryCounts}
+          retryLabel="Retry counts"
+        />
       )}
       <p className="border-t py-3 text-xs leading-5 text-muted-foreground">
         Open a bucket to see what agents working there can remember.
@@ -283,6 +286,7 @@ function MemoryList({ model }: { model: MemoryPageModel }) {
       </div>
       <ColumnSummary model={model} />
       <UnconfirmedForget model={model} />
+      <ForgetReadFailure model={model} />
       {model.searching ? (
         <SearchBody model={model} />
       ) : (

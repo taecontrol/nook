@@ -1,19 +1,24 @@
 import type { MemoryScope } from '@nook/contract';
-import { useQueryClient } from '@tanstack/react-query';
+import {
+  type MutationStatus,
+  type QueryClient,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { useNavigate, useRouter } from '@tanstack/react-router';
-import { useRef, useState } from 'react';
-import { ApiError } from './api-client';
-import { memoryOptions, memoryWriteGate } from './memory-api';
-import { invalidateMemoryLists, writeMemory } from './memory-cache';
+import { useState } from 'react';
+import { ApiError, writeOutcome } from './api-client';
+import { memoryOptions, memoryWriteGate, memoryWriteKey } from './memory-api';
 import {
   type ForgetRequest,
+  type ForgetResult,
   type ForgetSubject,
-  readForgetOutcome,
+  type ForgetWrite,
+  latestForget,
   refreshChanged,
   useForgetMemory,
 } from './memory-forget-api';
 import type { MemorySearch } from './memory-location';
-import { useLastValue } from './use-confirm-target';
+import { focusSoon, useConfirmTarget } from './use-confirm-target';
 
 export const memoryRowSelector = (id: string) =>
   `[data-memory-row="${id}"], [data-search-result="${id}"]`;
@@ -24,15 +29,7 @@ function shownElement(selector: string) {
     ) ?? null
   );
 }
-function focusSoon(find: () => HTMLElement | null) {
-  requestAnimationFrame(() =>
-    requestAnimationFrame(() => find()?.focus({ preventScroll: true })),
-  );
-}
-type ForgetEntry = {
-  subject: ForgetRequest;
-  status: 'pending' | 'failed' | 'changed' | 'unconfirmed';
-  error?: unknown;
+type ForgetUi = {
   neighbor?: string;
   before?: string;
   viewBucket: string;
@@ -40,24 +37,79 @@ type ForgetEntry = {
   scope: MemoryScope;
   inRows: boolean;
 };
+// Only presentation context lives outside the native mutation lifecycle.
+const presentation = new WeakMap<QueryClient, Map<number, ForgetUi>>();
+function presentationFor(queries: QueryClient) {
+  let entries = presentation.get(queries);
+  if (!entries) {
+    entries = new Map();
+    presentation.set(queries, entries);
+  }
+  return entries;
+}
+type ObservedForget = {
+  id: number;
+  subject: ForgetWrite;
+  status: MutationStatus;
+  error: Error | null;
+  result?: ForgetResult;
+};
+function entryStatus(write: ObservedForget) {
+  if (write.subject.check && write.status !== 'success') return 'unconfirmed';
+  if (write.status === 'pending') return 'pending';
+  if (write.status === 'success') return write.result;
+  if (writeOutcome(write.error) !== 'definitive') return 'unconfirmed';
+  return write.error instanceof ApiError && write.error.tag === 'MemoryChanged'
+    ? 'changed'
+    : 'failed';
+}
 function adjacent(order: readonly string[], id: string) {
   const index = order.indexOf(id);
   return index < 0 ? undefined : (order[index + 1] ?? order[index - 1]);
 }
-function failureStatus(error: unknown) {
-  if (error instanceof ApiError && error.ambiguous)
-    return 'unconfirmed' as const;
-  return error instanceof ApiError && error.tag === 'MemoryChanged'
-    ? ('changed' as const)
-    : ('failed' as const);
+function forgetState(
+  write: ObservedForget | undefined,
+  extras: Map<number, ForgetUi>,
+) {
+  const ui = write && extras.get(write.id);
+  if (!write?.subject || !ui) return { entry: null, notice: null };
+  const status = entryStatus(write);
+  if (status === 'forgotten')
+    return {
+      entry: null,
+      notice: { title: write.subject.title, viewBucket: ui.viewBucket },
+    };
+  return {
+    entry: status
+      ? { ...ui, subject: write.subject, status, error: write.error }
+      : null,
+    notice: null,
+  };
+}
+function retireForgets(queries: QueryClient, keep?: number) {
+  for (const previous of queries
+    .getMutationCache()
+    .findAll({ mutationKey: memoryWriteKey }))
+    if (previous.mutationId !== keep)
+      queries.getMutationCache().remove(previous);
+}
+type ForgetRead = { id: number; pending: boolean; error?: unknown };
+function isChecking(
+  write: ObservedForget | undefined,
+  reading: ForgetRead | null,
+) {
+  if (!write) return false;
+  if (write.subject.check && write.status === 'pending') return true;
+  return Boolean(reading?.id === write.id && reading.pending);
 }
 function shouldRestore(
+  pathname: string,
   wasOpen: boolean,
   desktop: boolean,
   current: string | undefined,
   neighbor: string | undefined,
 ) {
-  return wasOpen && desktop && current === neighbor;
+  return pathname === '/memory' && wasOpen && desktop && current === neighbor;
 }
 export function useMemoryForget({
   order,
@@ -78,17 +130,20 @@ export function useMemoryForget({
   const navigate = useNavigate({ from: '/memory' });
   const router = useRouter();
   const mutation = useForgetMemory();
-  const [target, setTarget] = useState<ForgetSubject | null>(null);
-  const shown = useLastValue(target);
-  const [entry, setEntry] = useState<ForgetEntry | null>(null);
-  const operation = useRef(0);
-  const [checking, setChecking] = useState(false);
-  const [notice, setNotice] = useState<{
-    title: string;
-    viewBucket: string;
-  } | null>(null);
-  const trigger = useRef<HTMLElement | null>(null);
-  const after = useRef<(() => HTMLElement | null) | null>(null);
+  const confirmation = useConfirmTarget<ForgetSubject>(() =>
+    shownElement('[data-memory-list-heading]'),
+  );
+  const extras = presentationFor(queries);
+  const { write } = memoryWriteGate.useWrites<ObservedForget>((mutation) => ({
+    id: mutation.mutationId,
+    subject: mutation.state.variables as ForgetWrite,
+    status: mutation.state.status,
+    error: mutation.state.error,
+    result: mutation.state.data as ForgetResult | undefined,
+  }));
+  const { entry, notice } = forgetState(write, extras);
+  const [reading, setReading] = useState<ForgetRead | null>(null);
+  const isLatest = (id: number) => latestForget(queries)?.mutationId === id;
   const select = (id?: string) =>
     void navigate({
       to: '/memory',
@@ -101,24 +156,26 @@ export function useMemoryForget({
       }),
       replace: true,
     });
-  const open = (subject: ForgetSubject, from: HTMLElement | null) => {
-    if (memoryWriteGate.isWriting(queries)) return;
-    trigger.current = from;
-    after.current = null;
-    setTarget(subject);
+  const submit = (subject: ForgetRequest, ui: ForgetUi, check?: true) => {
+    const result = mutation.mutateAsync({ ...subject, check });
+    const token = latestForget(queries)?.mutationId;
+    if (token === undefined) throw new Error('Missing forget mutation');
+    extras.clear();
+    const { neighbor, before, viewBucket, query, scope, inRows } = ui;
+    extras.set(token, { neighbor, before, viewBucket, query, scope, inRows });
+    retireForgets(queries, token);
+    return { result, token };
   };
   const run = async (subject: ForgetRequest) => {
     if (memoryWriteGate.isWriting(queries)) return;
-    operation.current++;
     const neighbor = adjacent(order, subject.id);
     const wasOpen = memory === subject.id;
     const focusTarget = () =>
       (neighbor ? shownElement(memoryRowSelector(neighbor)) : null) ??
       shownElement('[data-memory-list-heading]');
-    setNotice(null);
-    setEntry({
-      subject,
-      status: 'pending',
+    confirmation.close(focusTarget);
+    if (wasOpen) select(desktop ? neighbor : undefined);
+    const { result, token } = submit(subject, {
       neighbor,
       before: order[order.indexOf(subject.id) + 1],
       viewBucket: bucket,
@@ -126,106 +183,71 @@ export function useMemoryForget({
       scope,
       inRows: order.includes(subject.id),
     });
-    after.current = focusTarget;
-    if (wasOpen) select(desktop ? neighbor : undefined);
     try {
-      await mutation.mutateAsync(subject);
-      setEntry(null);
-      setNotice({ title: subject.title, viewBucket: bucket });
+      await result;
     } catch (error) {
-      setEntry({
-        subject,
-        status: failureStatus(error),
-        error,
-        neighbor,
-        viewBucket: bucket,
-        query: q,
-        scope,
-        inRows: order.includes(subject.id),
-      });
-      const current = (router.latestLocation.search as MemorySearch).memory;
-      if (
-        failureStatus(error) !== 'unconfirmed' &&
-        router.latestLocation.pathname === '/memory' &&
-        shouldRestore(wasOpen, desktop, current, neighbor)
-      )
+      if (!isLatest(token) || writeOutcome(error) !== 'definitive') return;
+      const location = router.latestLocation;
+      const current = (location.search as MemorySearch).memory;
+      if (shouldRestore(location.pathname, wasOpen, desktop, current, neighbor))
         select(subject.id);
     }
   };
+  const checking = isChecking(write, reading);
   return {
-    target,
-    shown,
+    ...confirmation,
     entry,
     notice,
     checking,
+    readFailure: reading?.id === write?.id ? reading?.error : undefined,
+    dismissReadFailure: () => setReading(null),
     refreshCurrent: async () => {
-      if (!entry || checking) return;
-      setChecking(true);
+      if (!entry || !write || checking || memoryWriteGate.isWriting(queries))
+        return;
+      const token = write.id;
+      setReading({ id: token, pending: true });
       try {
         await refreshChanged(queries, entry.subject.id);
-      } catch {
-      } finally {
-        setChecking(false);
+        if (isLatest(token)) setReading(null);
+      } catch (error) {
+        if (isLatest(token)) setReading({ id: token, pending: false, error });
       }
     },
     check: async () => {
-      if (!entry || checking) return;
-      const checkedOperation = operation.current;
-      setChecking(true);
+      if (!entry || checking || memoryWriteGate.isWriting(queries)) return;
+      const { result, token } = submit(entry.subject, entry, true);
       try {
-        const current = await readForgetOutcome(entry.subject.id);
-        if (operation.current !== checkedOperation) return;
-        if (current) {
-          writeMemory(queries, current);
-          setEntry({
-            ...entry,
-            status:
-              current.version === entry.subject.version ? 'failed' : 'changed',
-          });
-          await invalidateMemoryLists(queries);
-        } else {
-          setEntry(null);
-          setNotice({
-            title: entry.subject.title,
-            viewBucket: entry.viewBucket,
-          });
-        }
-      } catch {
-      } finally {
-        setChecking(false);
+        await result;
+      } catch (error) {
+        if (isLatest(token)) setReading({ id: token, pending: false, error });
       }
     },
-    open,
-    cancel: () => setTarget(null),
+    open: (subject: ForgetSubject, from: HTMLElement | null) => {
+      if (!memoryWriteGate.isWriting(queries)) confirmation.open(subject, from);
+    },
+    cancel: () => confirmation.close(),
     confirm: (version: number) => {
-      if (target) {
-        setTarget(null);
-        void run({ ...target, version });
-      }
+      if (confirmation.target) void run({ ...confirmation.target, version });
     },
     retry: () => {
       if (entry) {
         void run(entry.subject);
-        if (after.current) focusSoon(after.current);
+        focusSoon(
+          () =>
+            shownElement(memoryRowSelector(entry.neighbor ?? '')) ??
+            shownElement('[data-memory-list-heading]'),
+        );
       }
     },
     keep: () => {
-      operation.current++;
-      const id = entry?.subject.id;
-      setEntry(null);
-      if (id) focusSoon(() => shownElement(memoryRowSelector(id)));
+      if (!write || !isLatest(write.id)) return;
+      retireForgets(queries);
+      extras.clear();
+      if (entry)
+        focusSoon(() => shownElement(memoryRowSelector(entry.subject.id)));
     },
     current: entry
       ? queries.getQueryData(memoryOptions(entry.subject.id).queryKey)
       : undefined,
-    restoreFocus: (event: Event) => {
-      event.preventDefault();
-      const next = after.current;
-      after.current = null;
-      if (next) focusSoon(next);
-      else if (trigger.current?.isConnected)
-        trigger.current.focus({ preventScroll: true });
-      else focusSoon(() => shownElement('[data-memory-list-heading]'));
-    },
   };
 }

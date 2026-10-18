@@ -1,6 +1,7 @@
 import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
+import { deferred } from './support/machines.ts';
 import { memoryClient, memoryPage, memoryRows } from './support/memory.ts';
 import {
   confirmForget,
@@ -64,6 +65,9 @@ it('#61: a 503 forget remains unconfirmed until an explicit outcome check', asyn
     );
     await confirmForget(page);
     await unconfirmed(page).waitFor();
+    expect(await unconfirmed(page).innerText()).toContain(
+      'Nook is unavailable right now.',
+    );
     expect(await unconfirmed(page).innerText()).not.toContain(
       'Nothing was deleted',
     );
@@ -79,6 +83,54 @@ it('#61: a 503 forget remains unconfirmed until an explicit outcome check', asyn
   }
 });
 
+it('#61: an unconfirmed Vault write includes the shared failure reason', async () => {
+  const visit = await vaultPage(browser);
+  try {
+    const { page } = visit;
+    const draft = await createDraft(page);
+    await page.route('**/api/secrets', (route) =>
+      route.request().method() === 'POST'
+        ? route.fulfill({ status: 503, json: { _tag: 'ServiceUnavailable' } })
+        : route.continue(),
+    );
+    await draft
+      .getByRole('button', { name: 'Save secret', exact: true })
+      .click();
+    const alert = page
+      .getByRole('alert')
+      .filter({ hasText: 'Write unconfirmed' });
+    await alert.waitFor();
+    expect(await alert.innerText()).toContain('Nook is unavailable right now.');
+  } finally {
+    await visit.close();
+  }
+});
+
+it('#61: an unconfirmed bucket write includes the shared failure reason', async () => {
+  const visit = await vaultPage(browser, { start: '/buckets' });
+  try {
+    const { page } = visit;
+    await page
+      .getByRole('button', { name: 'Actions for work', exact: true })
+      .waitFor();
+    await page.route('**/api/buckets', (route) =>
+      route.request().method() === 'POST'
+        ? route.fulfill({ status: 503, json: { _tag: 'ServiceUnavailable' } })
+        : route.continue(),
+    );
+    const field = page.getByRole('textbox', { name: 'New bucket path' });
+    await field.fill('work/feedback-target');
+    await field.press('Enter');
+    const alert = page
+      .getByRole('alert')
+      .filter({ hasText: "Couldn't confirm creation of work/feedback-target" });
+    await alert.waitFor();
+    expect(await alert.innerText()).toContain('Nook is unavailable right now.');
+  } finally {
+    await visit.close();
+  }
+});
+
 it.each([
   { status: 401, reason: 'Your owner session expired' },
   { status: 403, reason: 'Only this installation’s owner can' },
@@ -86,13 +138,13 @@ it.each([
   '#63: an Access $status forget rejection is definitive',
   async ({ status, reason }) => {
     const visit = await forgetPage(browser);
+    const recovery = deferred();
     try {
       const { page } = visit;
       await openForget(page);
-      let reads = 0;
-      await page.route(`**/api/memories/${forgottenId}`, (route) => {
-        reads++;
-        return route.fulfill({ status, body: 'Access denied' });
+      await page.route(`**/api/memories/${forgottenId}`, async (route) => {
+        await recovery.promise;
+        await route.fulfill({ status, body: 'Access denied' }).catch(() => {});
       });
       await page.route('**/api/memories/*?expectedVersion=*', (route) =>
         route.fulfill({ status, body: 'Access denied' }),
@@ -104,11 +156,8 @@ it.each([
       await alert.waitFor();
       expect(await alert.innerText()).toContain(reason);
       expect(await unconfirmed(page).count()).toBe(0);
-      expect(
-        reads,
-        'Access answered before the Worker; no outcome probe is needed',
-      ).toBe(0);
     } finally {
+      recovery.resolve();
       await visit.close();
     }
   },

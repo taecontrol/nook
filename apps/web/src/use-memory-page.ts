@@ -256,12 +256,14 @@ export function useMemoryPage() {
     detailOpen: !desktop && Boolean(search.memory),
     changeScope: (next: 'bucket' | 'inherited') =>
       void navigate({
-        search: memorySearch(
-          { bucket, scope: next, q },
-          {
-            memory: q ? search.memory : undefined,
-          },
-        ),
+        search: (previous: MemorySearch) => {
+          const latest = memoryLocation(previous);
+          const q = memoryQueryText(draft.draft);
+          return memorySearch(
+            { ...latest, scope: next, q },
+            { memory: q ? previous.memory : undefined },
+          );
+        },
         replace: true,
       }),
   };

@@ -17,7 +17,12 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { describeFailure } from './api-client';
 import { LoadFailure } from './failure';
-import { historyBehind, memoryHistoryOptions, memoryKeys } from './memory-api';
+import {
+  historyBehind,
+  memoryHistoryOptions,
+  memoryKeys,
+  memoryWriteGate,
+} from './memory-api';
 import { Provenance } from './memory-format';
 import {
   changeSummary,
@@ -30,12 +35,21 @@ import type { MemoryPageModel } from './use-memory-page';
 
 function useMemoryHistory(detail: Memory) {
   const queries = useQueryClient();
-  const history = useQuery(memoryHistoryOptions(detail.id, detail.version));
+  const busy = memoryWriteGate.useBusy();
+  const history = useQuery(
+    memoryWriteGate.queryOptions(
+      memoryHistoryOptions(detail.id, detail.version),
+      busy,
+      queries,
+    ),
+  );
   const reconciled = useRef(0);
   const behind = historyBehind(history.data, detail.version);
   useEffect(() => {
     if (
       !history.data?.[0] ||
+      busy ||
+      memoryWriteGate.isWriting(queries) ||
       !behind ||
       history.isFetching ||
       history.isError ||
@@ -51,6 +65,8 @@ function useMemoryHistory(detail: Memory) {
     history.isFetching,
     history.isError,
     history.refetch,
+    queries,
+    busy,
   ]);
   const head = history.data?.[0];
   const memory =
@@ -165,6 +181,7 @@ function RowsSkeleton() {
   );
 }
 function HistoryFailure({ model }: { model: HistoryModel }) {
+  const queries = useQueryClient();
   return (
     <div className="p-4">
       <LoadFailure
@@ -172,7 +189,10 @@ function HistoryFailure({ model }: { model: HistoryModel }) {
         description={describeFailure(model.history.error, 'read memories')}
         cached={false}
         retrying={model.history.isFetching}
-        onRetry={() => void model.history.refetch()}
+        disabled={model.busy}
+        onRetry={() =>
+          memoryWriteGate.start(queries, () => void model.history.refetch())
+        }
         retryLabel="Retry history"
       />
     </div>

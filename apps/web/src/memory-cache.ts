@@ -34,9 +34,10 @@ export function canLoadMemory(queries: QueryClient, id: string) {
   const writing = queries
     .getMutationCache()
     .findAll({ mutationKey: memoryWriteKey, status: 'pending' });
-  return !writing.some(
-    (write) => (write.state.variables as { id: string }).id === id,
-  );
+  return !writing.some((write) => {
+    const subject = write.state.variables as { id: string; check?: boolean };
+    return !subject.check && subject.id === id;
+  });
 }
 
 type Cached<Options extends { queryKey: readonly unknown[] }> =

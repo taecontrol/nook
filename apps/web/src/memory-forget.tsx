@@ -36,6 +36,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { describeFailure } from './api-client';
 import { agentsIn } from './bucket-format';
 import { parentBuckets } from './bucket-tree';
+import { DismissibleAlert, LoadFailure } from './failure';
 import { memoryOptions, memoryWriteGate } from './memory-api';
 import type { ForgetSubject } from './memory-forget-api';
 import { principalName } from './memory-format';
@@ -64,7 +65,6 @@ export function MemoryActions({
           disabled={model.busy}
           aria-label={pane ? 'More actions' : `Actions for ${subject.title}`}
           data-memory-actions={pane ? undefined : subject.id}
-          data-pane-actions={pane ? subject.id : undefined}
           onPointerEnter={prefetch}
           onFocus={prefetch}
         >
@@ -90,7 +90,14 @@ export function MemoryActions({
         )}
         <DropdownMenuItem
           variant="destructive"
-          onSelect={() => model.forget.open(subject, trigger.current)}
+          onSelect={() => {
+            const known = queries.getQueryData(
+              memoryOptions(subject.id).queryKey,
+            );
+            const version =
+              Math.max(subject.version ?? 0, known?.version ?? 0) || undefined;
+            model.forget.open({ ...subject, version }, trigger.current);
+          }}
         >
           <Eraser />
           Forget memory…
@@ -111,10 +118,17 @@ function useForgetDetail(
   target: ForgetSubject | null,
   busy: boolean,
 ) {
-  return useQuery({
-    ...memoryOptions(shown?.id ?? ''),
-    enabled: Boolean(target && shown?.version === undefined && !busy),
-  });
+  const queries = useQueryClient();
+  return useQuery(
+    memoryWriteGate.queryOptions(
+      {
+        ...memoryOptions(shown?.id ?? ''),
+        enabled: Boolean(target && shown?.version === undefined),
+      },
+      busy,
+      queries,
+    ),
+  );
 }
 function versions(version?: number) {
   if (version === undefined) return 'all its versions';
@@ -191,7 +205,8 @@ export function ForgetDialog({ model }: { model: MemoryPageModel }) {
         </ul>
         <VersionNote
           version={version}
-          error={detail.isError}
+          error={detail.error}
+          retrying={detail.isFetching}
           retry={() => void detail.refetch()}
         />
         <AlertDialogFooter>
@@ -213,29 +228,31 @@ export function ForgetDialog({ model }: { model: MemoryPageModel }) {
 function VersionNote({
   version,
   error,
+  retrying,
   retry,
 }: {
   version?: number;
-  error: boolean;
+  error: Error | null;
+  retrying: boolean;
   retry: () => void;
 }) {
   if (version !== undefined)
     return (
       <p className="text-xs text-muted-foreground">
-        You are forgetting version {version}, the one on screen. If it changes
-        before Nook deletes it, nothing is deleted.
+        You are forgetting version {version}, the newest version Nook has
+        loaded. If it changes before Nook deletes it, nothing is deleted.
       </p>
     );
   if (error)
     return (
-      <Alert>
-        <AlertTitle>Could not load this memory</AlertTitle>
-        <AlertDescription>
-          <Button variant="outline" size="sm" onClick={retry}>
-            Retry memory
-          </Button>
-        </AlertDescription>
-      </Alert>
+      <LoadFailure
+        title="Could not load this memory"
+        description={describeFailure(error, 'read memories')}
+        cached={true}
+        retrying={retrying}
+        onRetry={retry}
+        retryLabel="Retry memory"
+      />
     );
   return <Skeleton aria-label="Loading version" className="h-4 w-full" />;
 }
@@ -308,11 +325,15 @@ function problemCopy(
   current: MemoryPageModel['forget']['current'],
 ) {
   if (entry.status === 'failed')
-    return `${entry.subject.title} was not forgotten. ${describeFailure(
-      entry.error,
-      'forget memories',
-      'Nothing was deleted.',
-    )}`;
+    return `${entry.subject.title} was not forgotten. ${
+      entry.error
+        ? describeFailure(
+            entry.error,
+            'forget memories',
+            'Nothing was deleted.',
+          )
+        : 'It is still stored with the version you last saw. Nothing was deleted.'
+    }`;
   return `${current ? principalName(current) : 'Another writer'} saved version ${current?.version ?? 'a newer version'} while you were deciding, not ${entry.subject.version}. Nothing was deleted.`;
 }
 function ProblemAction({
@@ -362,24 +383,42 @@ export function UnconfirmedForget({ model }: { model: MemoryPageModel }) {
     return null;
   return (
     <div className="p-3">
-      <Alert role="alert">
-        <CircleAlert />
-        <AlertTitle>Forget not confirmed</AlertTitle>
-        <AlertDescription>
-          <p>
-            {entry.subject.title} may already be gone. Nook could not confirm
-            the result.
-          </p>
-          <Button
-            variant="outline"
-            size="xs"
-            disabled={model.forget.checking}
-            onClick={() => void model.forget.check()}
-          >
-            Check again
-          </Button>
-        </AlertDescription>
-      </Alert>
+      <DismissibleAlert
+        icon={<CircleAlert />}
+        title="Forget not confirmed"
+        onDismiss={model.forget.keep}
+      >
+        <p>
+          {describeFailure(
+            entry.error,
+            'forget memories',
+            `${entry.subject.title} may already be gone. Nook could not confirm the result.`,
+          )}
+        </p>
+        <Button
+          variant="outline"
+          size="xs"
+          disabled={model.forget.checking}
+          onClick={() => void model.forget.check()}
+        >
+          Check again
+        </Button>
+      </DismissibleAlert>
+    </div>
+  );
+}
+export function ForgetReadFailure({ model }: { model: MemoryPageModel }) {
+  if (!model.forget.readFailure) return null;
+  return (
+    <div className="p-3">
+      <DismissibleAlert
+        destructive
+        icon={<CircleAlert />}
+        title="Could not check this memory"
+        onDismiss={model.forget.dismissReadFailure}
+      >
+        {describeFailure(model.forget.readFailure, 'read memories')}
+      </DismissibleAlert>
     </div>
   );
 }

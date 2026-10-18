@@ -26,6 +26,9 @@ export const memoryKeys = {
 export const memoryWriteKey = ['memory-write'] as const;
 export const memoryWriteGate = createWriteGate(memoryWriteKey, {
   disableWhileBusy: true,
+  // Outcome reads share lifecycle IDs without blocking a newer forget.
+  isWrite: (mutation) =>
+    !(mutation.state.variables as { check?: boolean } | undefined)?.check,
 });
 export const memoryCountsOptions = queryOptions({
   queryKey: memoryKeys.counts(),

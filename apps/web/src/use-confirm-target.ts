@@ -47,7 +47,7 @@ export function useConfirmTarget<T>(fallback: () => HTMLElement | null) {
       setTarget(value);
     },
     close: (next?: () => HTMLElement | null) => {
-      after.current = next;
+      if (next) after.current = next;
       setTarget(null);
     },
     restoreFocus: (event: Event) => {
