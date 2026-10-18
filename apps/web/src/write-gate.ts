@@ -23,10 +23,16 @@ export function observedWrites<Write extends { status: MutationStatus }>(
 
 export function createWriteGate(
   mutationKey: MutationKey,
-  { disableWhileBusy }: { disableWhileBusy: boolean },
+  {
+    disableWhileBusy,
+    isWrite,
+  }: {
+    disableWhileBusy: boolean;
+    isWrite?: (mutation: Mutation) => boolean;
+  },
 ) {
   function isWriting(queries: QueryClient) {
-    return queries.isMutating({ mutationKey }) > 0;
+    return queries.isMutating({ mutationKey, predicate: isWrite }) > 0;
   }
   return {
     isWriting,
@@ -68,7 +74,7 @@ export function createWriteGate(
       };
     },
     useBusy() {
-      return useIsMutating({ mutationKey }) > 0;
+      return useIsMutating({ mutationKey, predicate: isWrite }) > 0;
     },
     useWrites<Write extends { status: MutationStatus }>(
       select: (mutation: Mutation) => Write,
