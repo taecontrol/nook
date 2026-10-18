@@ -35,7 +35,10 @@ const matrix = [
     [
       { name: 'desktop', width: 1440, height: 900 },
       { name: 'mobile', width: 390, height: 844 },
-    ].map((size) => ({ state, theme, size })),
+    ]
+      // On desktop, work-acme already auto-selects and shows memory 1.
+      .filter((size) => state !== 'detail' || size.name === 'mobile')
+      .map((size) => ({ state, theme, size })),
   ),
 );
 it.each(matrix)(

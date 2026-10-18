@@ -74,38 +74,40 @@ describe.each([
       await visit.close();
     }
   });
-  it('E2/E23: a tags-only reorder names the change instead of claiming nothing changed', async () => {
-    const visit = await historyPage(browser, {
-      viewport,
-      scenario: 'never-updated',
-    });
-    try {
-      const { page, app } = visit;
-      const client = memoryClient(app, '2026-07-28');
-      const content = memories[1].versions[0].content;
-      for (const [expectedVersion, tags] of [
-        [1, ['tooling', 'deploy']],
-        [2, ['deploy', 'tooling']],
-      ] as const)
+  // Change summaries and diff folding do not depend on the viewport.
+  if (viewport.width === 1440)
+    it('E2/E23: a tags-only reorder names the change instead of claiming nothing changed', async () => {
+      const visit = await historyPage(browser, {
+        viewport,
+        scenario: 'never-updated',
+      });
+      try {
+        const { page, app } = visit;
+        const client = memoryClient(app, '2026-07-28');
+        const content = memories[1].versions[0].content;
+        for (const [expectedVersion, tags] of [
+          [1, ['tooling', 'deploy']],
+          [2, ['deploy', 'tooling']],
+        ] as const)
+          expect(
+            (
+              await client.call('update', {
+                id: memories[1].id,
+                expectedVersion,
+                content,
+                tags,
+              })
+            ).structuredContent,
+          ).toMatchObject({ updated: true });
+        await history(page).click();
+        await page.locator('[data-version-row="3"]').waitFor();
         expect(
-          (
-            await client.call('update', {
-              id: memories[1].id,
-              expectedVersion,
-              content,
-              tags,
-            })
-          ).structuredContent,
-        ).toMatchObject({ updated: true });
-      await history(page).click();
-      await page.locator('[data-version-row="3"]').waitFor();
-      expect(
-        await page.locator('[data-version-row="3"]').textContent(),
-      ).toContain('Tags only: reordered');
-    } finally {
-      await visit.close();
-    }
-  });
+          await page.locator('[data-version-row="3"]').textContent(),
+        ).toContain('Tags only: reordered');
+      } finally {
+        await visit.close();
+      }
+    });
   it.each(['hover', 'focus'] as const)(
     'E22: History counts locally and %s preloads exactly once before opening',
     async (intent) => {
@@ -243,56 +245,62 @@ describe.each([
       await visit.close();
     }
   });
-  it('E25: long unchanged source runs fold with three lines of context and can be revealed', async () => {
-    const visit = await historyPage(browser, {
-      viewport,
-      scenario: 'long',
-      state: '&history=1&version=3&changes=1',
+  if (viewport.width === 1440)
+    it('E25: long unchanged source runs fold with three lines of context and can be revealed', async () => {
+      const visit = await historyPage(browser, {
+        viewport,
+        scenario: 'long',
+        state: '&history=1&version=3&changes=1',
+      });
+      try {
+        const { page } = visit;
+        const folds = sheet(page).getByRole('button', {
+          name: /Show \d+ unchanged lines/,
+        });
+        await folds.first().waitFor();
+        const context = await folds.nth(1).evaluate((button) => {
+          const wrapper = button.parentElement;
+          const count = (
+            start: Element | null | undefined,
+            direction: 'nextElementSibling' | 'previousElementSibling',
+          ) => {
+            let current = start;
+            let n = 0;
+            while (current?.getAttribute('data-diff-row') === 'same') {
+              n++;
+              current = current[direction];
+            }
+            return n;
+          };
+          return {
+            before: count(
+              wrapper?.previousElementSibling,
+              'previousElementSibling',
+            ),
+            after: count(wrapper?.nextElementSibling, 'nextElementSibling'),
+          };
+        });
+        expect(context).toEqual({ before: 3, after: 3 });
+        const before = await sheet(page)
+          .locator('[data-diff-row="same"]')
+          .count();
+        const text = await folds.first().textContent();
+        const n = Number(text?.match(/\d+/)?.[0]);
+        expect(n).toBeGreaterThanOrEqual(8);
+        await folds.first().click();
+        expect(
+          await sheet(page).locator('[data-diff-row="same"]').count(),
+        ).toBe(before + n);
+      } finally {
+        await visit.close();
+      }
     });
-    try {
-      const { page } = visit;
-      const folds = sheet(page).getByRole('button', {
-        name: /Show \d+ unchanged lines/,
-      });
-      await folds.first().waitFor();
-      const context = await folds.nth(1).evaluate((button) => {
-        const wrapper = button.parentElement;
-        const count = (
-          start: Element | null | undefined,
-          direction: 'nextElementSibling' | 'previousElementSibling',
-        ) => {
-          let current = start;
-          let n = 0;
-          while (current?.getAttribute('data-diff-row') === 'same') {
-            n++;
-            current = current[direction];
-          }
-          return n;
-        };
-        return {
-          before: count(
-            wrapper?.previousElementSibling,
-            'previousElementSibling',
-          ),
-          after: count(wrapper?.nextElementSibling, 'nextElementSibling'),
-        };
-      });
-      expect(context).toEqual({ before: 3, after: 3 });
-      const before = await sheet(page)
-        .locator('[data-diff-row="same"]')
-        .count();
-      const text = await folds.first().textContent();
-      const n = Number(text?.match(/\d+/)?.[0]);
-      expect(n).toBeGreaterThanOrEqual(8);
-      await folds.first().click();
-      expect(await sheet(page).locator('[data-diff-row="same"]').count()).toBe(
-        before + n,
-      );
-    } finally {
-      await visit.close();
-    }
-  });
-  it.each(['Escape', 'Close', 'overlay'] as const)(
+  // A phone sheet covers its overlay, so Escape is its outside dismissal.
+  it.each(
+    viewport.width === 1440
+      ? (['Escape', 'Close', 'overlay'] as const)
+      : (['Escape', 'Close'] as const),
+  )(
     'E26: reload/Back restore history; %s removes every param and returns focus even on a deep link',
     async (dismiss) => {
       const visit = await historyPage(browser, { viewport });
@@ -323,7 +331,6 @@ describe.each([
           await sheet(page)
             .getByRole('button', { name: 'Close', exact: true })
             .click();
-        else if (viewport.width === 390) await page.keyboard.press('Escape');
         else
           await page
             .locator('[data-slot="sheet-overlay"]')
