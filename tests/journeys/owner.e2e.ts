@@ -254,7 +254,16 @@ test('Memory update E30 / forget E18: the owner reads history, then permanently 
     screen.getByText('Forgot Owner journey memory', { exact: true }),
   ).toBeVisible();
   await expect(memoryRow).toHaveCount(0);
-  await app.open('/memory?bucket=work/memory-journey');
+  await app.open('/memory?bucket=work/memory-journey&scope=bucket');
+  const reopenedList = screen.getByRole('region', {
+    name: 'Memories visible in work/memory-journey',
+  });
+  await expect(
+    reopenedList.getByText('No memories yet', { exact: true }),
+  ).toBeVisible();
+  await expect(reopenedList).toContainText(
+    'There are no memories stored in work/memory-journey.',
+  );
   await expect(memoryRow).toHaveCount(0);
   const historyAfterForget = await fetch(
     `${origin}/api/memories/${remembered.id}/versions`,
