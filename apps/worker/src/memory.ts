@@ -33,10 +33,12 @@ import { HttpApiError } from 'effect/http-api';
 import { authorizeBucket, bucketExists, bucketNotFound } from './buckets.ts';
 import { sha256 } from './digest.ts';
 import { unavailable } from './http-errors.ts';
+import { memoryBounds } from './memory-bounds.ts';
 import {
   type EmbeddingMemory,
   type MemoryIndex,
   memoryIndex,
+  vectorBucket,
 } from './memory-index.ts';
 import {
   keywordExpression,
@@ -48,8 +50,6 @@ import {
 const uuid =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const notFound = () => new MemoryNotFound({ message: 'Memory not found.' });
-const vectorRemovalChunk = 50;
-const vectorRemovalSettleMs = 30 * 60_000;
 function forgetVersion(version: unknown, query: boolean) {
   if (query && typeof version === 'string' && /^[1-9]\d*$/.test(version))
     version = Number(version);
@@ -190,7 +190,7 @@ function historyBoundary(before?: string) {
   return Effect.succeed(Number(before));
 }
 function historyPage(rows: readonly VersionRow[]) {
-  const page = rows.slice(0, 26);
+  const page = rows.slice(0, memoryBounds.historyPage);
   return {
     versions: page.map(
       (row): MemoryVersion => ({
@@ -200,7 +200,10 @@ function historyPage(rows: readonly VersionRow[]) {
         provenance: provenanceOf(row),
       }),
     ),
-    next: rows.length > 26 ? (page.at(-1)?.version ?? null) : null,
+    next:
+      rows.length > memoryBounds.historyPage
+        ? (page.at(-1)?.version ?? null)
+        : null,
   };
 }
 const UpdateState = Schema.Union([
@@ -325,12 +328,12 @@ async function memoryPage(
   bucket: string,
   scope: MemoryScope,
 ) {
-  const page = rows.slice(0, 25);
+  const page = rows.slice(0, memoryBounds.listPage);
   const last = page.at(-1);
   return {
     memories: page.map(summary),
     next:
-      rows.length > 25 && last
+      rows.length > memoryBounds.listPage && last
         ? await encodeCursor({
             bucket,
             scope,
@@ -421,7 +424,7 @@ export const memoryStore = (
           .batch(
             written.map(
               (row) =>
-                sql`UPDATE memories SET embedding_marker=CASE WHEN content_hash=${row.content_hash} THEN ${`${index.model}:${row.content_hash}`} ELSE NULL END WHERE id=${row.id}`,
+                sql`UPDATE memories SET embedding_marker=CASE WHEN content_hash=${row.content_hash} THEN ${index.marker(row.content_hash)} ELSE NULL END WHERE id=${row.id}`,
             ),
           )
           .pipe(unavailable);
@@ -452,7 +455,7 @@ export const memoryStore = (
         const rows = yield* sql<{
           id: string;
           forgotten_at: string;
-        }>`SELECT r.id,r.forgotten_at FROM memory_vector_removals r WHERE NOT EXISTS (SELECT 1 FROM memories m WHERE m.id=r.id) ORDER BY r.forgotten_at,r.id LIMIT ${vectorRemovalChunk}`.pipe(
+        }>`SELECT r.id,r.forgotten_at FROM memory_vector_removals r WHERE NOT EXISTS (SELECT 1 FROM memories m WHERE m.id=r.id) ORDER BY r.forgotten_at,r.id LIMIT ${memoryBounds.indexChunk}`.pipe(
           unavailable,
         );
         if (!rows.length) return;
@@ -469,7 +472,7 @@ export const memoryStore = (
             (row) =>
               !present.has(row.id) &&
               scheduledTime >=
-                Date.parse(row.forgotten_at) + vectorRemovalSettleMs,
+                Date.parse(row.forgotten_at) + memoryBounds.removalSettleMs,
           )
           .map((row) => row.id);
         if (settled.length)
@@ -479,7 +482,9 @@ export const memoryStore = (
       });
     const inspect = (scheduledTime: number, repaired: readonly string[]) =>
       Effect.gen(function* () {
-        const cutoff = new Date(scheduledTime - 10 * 60_000).toISOString();
+        const cutoff = new Date(
+          scheduledTime - memoryBounds.inspectionSettleMs,
+        ).toISOString();
         // The window rotates over stable seq order, including pending markers,
         // so invalidation and repair cannot shrink the sweep under its cursor.
         const slots = yield* sql<{
@@ -487,14 +492,16 @@ export const memoryStore = (
         }>`SELECT count(*) AS n FROM memories WHERE updated_at < ${cutoff}`.pipe(
           unavailable,
         );
-        const pages = Math.ceil((slots[0]?.n ?? 0) / 50);
+        const pages = Math.ceil((slots[0]?.n ?? 0) / memoryBounds.indexChunk);
         if (!pages) return;
-        const offset = (Math.floor(scheduledTime / (5 * 60_000)) % pages) * 50;
+        const offset =
+          (Math.floor(scheduledTime / memoryBounds.rotationSlotMs) % pages) *
+          memoryBounds.indexChunk;
         const rows = yield* sql<{
           id: string;
           bucket: string;
           content_hash: string;
-        }>`SELECT id,bucket,content_hash FROM (SELECT * FROM memories WHERE updated_at < ${cutoff} ORDER BY seq LIMIT 50 OFFSET ${offset}) WHERE embedding_marker=${index.model} || ':' || content_hash AND NOT ${sql.in('id', repaired)}`.pipe(
+        }>`SELECT id,bucket,content_hash FROM (SELECT * FROM memories WHERE updated_at < ${cutoff} ORDER BY seq LIMIT ${memoryBounds.indexChunk} OFFSET ${offset}) WHERE embedding_marker=${index.markerSql(sql, sql`content_hash`)} AND NOT ${sql.in('id', repaired)}`.pipe(
           unavailable,
         );
         if (!rows.length) return;
@@ -507,7 +514,7 @@ export const memoryStore = (
               const vector = vectors.find((v) => v.id === row.id);
               return !vector ||
                 vector.contentHash !== row.content_hash ||
-                vector.bucket !== (await sha256(row.bucket)).slice(0, 32)
+                vector.bucket !== (await vectorBucket(row.bucket))
                 ? row
                 : undefined;
             }),
@@ -519,7 +526,7 @@ export const memoryStore = (
             .batch(
               wrong.map(
                 (row) =>
-                  sql`UPDATE memories SET embedding_marker=NULL WHERE id=${row.id} AND content_hash=${row.content_hash} AND updated_at < ${cutoff} AND embedding_marker=${index.model} || ':' || content_hash`,
+                  sql`UPDATE memories SET embedding_marker=NULL WHERE id=${row.id} AND content_hash=${row.content_hash} AND updated_at < ${cutoff} AND embedding_marker=${index.markerSql(sql, sql`content_hash`)}`,
               ),
             )
             .pipe(unavailable);
@@ -624,19 +631,15 @@ export const memoryStore = (
             input,
             inserted.length > 0,
           );
-          if (result.created && waitUntil)
-            waitUntil(
-              Effect.runPromise(
-                embedding([
-                  {
-                    id,
-                    bucket: input.bucket,
-                    content: input.content,
-                    content_hash: hash,
-                  },
-                ]).pipe(Effect.catchCause(() => Effect.void)),
-              ),
-            );
+          if (result.created)
+            scheduleEmbedding([
+              {
+                id,
+                bucket: input.bucket,
+                content: input.content,
+                content_hash: hash,
+              },
+            ]);
           return result;
         }),
       sync: (scheduledTime = Date.now()) =>
@@ -645,7 +648,7 @@ export const memoryStore = (
             Effect.catchCause(() => Effect.void),
           );
           const raw =
-            yield* sql`SELECT m.id, m.bucket, m.content_hash, v.content FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE embedding_marker IS NULL OR embedding_marker <> ${index.model} || ':' || m.content_hash ORDER BY m.seq LIMIT 50`.pipe(
+            yield* sql`SELECT m.id, m.bucket, m.content_hash, v.content FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE embedding_marker IS NULL OR embedding_marker <> ${index.markerSql(sql, sql`m.content_hash`)} ORDER BY m.seq LIMIT ${memoryBounds.indexChunk}`.pipe(
               unavailable,
             );
           const rows = yield* decodedRows(
@@ -678,7 +681,7 @@ export const memoryStore = (
           const delimiter = `\u0001${crypto.randomUUID()}\u0002`;
           const tagged = sql`NOT EXISTS (SELECT 1 FROM json_each(${JSON.stringify(tags)}) wanted WHERE NOT EXISTS (SELECT 1 FROM json_each(v.tags) actual WHERE actual.value=wanted.value))`;
           const keywordQuery = expression
-            ? sql`SELECT ${columns}, snippet(memories_fts, 0, ${delimiter}, ${delimiter}, '…', 40) AS keyword_snippet FROM memories_fts JOIN memories m ON m.seq=memories_fts.rowid JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE memories_fts MATCH ${expression} AND ${sql.in('m.bucket', paths)} AND ${tagged} ORDER BY bm25(memories_fts), m.created_at DESC, m.id DESC LIMIT 50`
+            ? sql`SELECT ${columns}, snippet(memories_fts, 0, ${delimiter}, ${delimiter}, '…', 40) AS keyword_snippet FROM memories_fts JOIN memories m ON m.seq=memories_fts.rowid JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE memories_fts MATCH ${expression} AND ${sql.in('m.bucket', paths)} AND ${tagged} ORDER BY bm25(memories_fts), m.created_at DESC, m.id DESC LIMIT ${memoryBounds.indexChunk}`
             : sql`SELECT ${columns} FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE 0`;
           const [exists, rawKeyword] = yield* sql
             .batch([
@@ -764,7 +767,7 @@ export const memoryStore = (
               ? sql`1`
               : sql`v.version < ${beforeVersion}`;
           const raw =
-            yield* sql`SELECT v.version,v.content,v.tags,${provenanceSelect} FROM memory_versions v JOIN memories m ON m.id=v.memory_id WHERE m.id=${id} AND ${boundary} ORDER BY v.version DESC LIMIT 27`.pipe(
+            yield* sql`SELECT v.version,v.content,v.tags,${provenanceSelect} FROM memory_versions v JOIN memories m ON m.id=v.memory_id WHERE m.id=${id} AND ${boundary} ORDER BY v.version DESC LIMIT ${memoryBounds.historyPage + 1}`.pipe(
               unavailable,
             );
           const rows = yield* decodedRows(VersionRow, raw);
@@ -791,7 +794,7 @@ export const memoryStore = (
                 has_bucket: number;
                 has_cursor: number;
               }>`SELECT ${bucketExists(sql, bucket)} AS has_bucket, ${validCursor} AS has_cursor`,
-              sql`SELECT ${columns} FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE ${sql.in('m.bucket', paths)} AND ${boundary} ORDER BY m.created_at DESC, m.id DESC LIMIT 26`,
+              sql`SELECT ${columns} FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE ${sql.in('m.bucket', paths)} AND ${boundary} ORDER BY m.created_at DESC, m.id DESC LIMIT ${memoryBounds.listPage + 1}`,
             ])
             .pipe(unavailable);
           if (!exists[0]?.has_bucket)
