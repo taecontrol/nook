@@ -87,6 +87,7 @@ it('E18/E24: a Load more activation during native refocus preserves cursor recov
     await expect.poll(() => memoryRows(page).count()).toBe(recovered + 25);
   } finally {
     recoveryGate.resolve();
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
     await other?.close();
     try {
       await observeBrowserPage(page);

@@ -239,6 +239,7 @@ it.each([false, true])(
       gate.resolve();
       oldRead.resolve();
       recovery.resolve();
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
       await observeBrowserPage(page);
       await visible.close();
       await app.close();
