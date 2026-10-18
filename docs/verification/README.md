@@ -365,8 +365,8 @@ a vector query and malformed Vectorize responses with keyword fallback.
 Owner HTTP also preserves all three query-validation messages before any AI
 or vector call. The shared contract error registry includes
 `InvalidMemorySearch` with its annotated 400 status.
-Synchronization cases require the native external-content FTS integrity check
-to pass after deleting a canonical row. They hold a real embedding
+Forgetting requires the native external-content FTS integrity check to pass
+after deleting a canonical row. Synchronization cases hold a real embedding
 request to require creation and keyword search before indexing completes;
 they also inspect workerd's scheduled outcome after a failed upsert.
 `memory-search-snippet.test.ts`

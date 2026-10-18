@@ -116,22 +116,13 @@ describe.each(['owner', 'machine'] as const)(
           expect(app.services.missing.size).toBe(0);
         },
       );
-      it('E2/E3: exact verification ranks first; diacritics, case and prefixes match through real FTS5', async () => {
+      it('E2: exact verification ranks first through real FTS5', async () => {
         await indexMemories(app, searchMemories);
         const exact = results(await search('pnpm verify'));
         expect(exact.results[0]).toMatchObject({ id: memoryId(23) });
         expect(['keyword', 'both']).toContain(exact.results[0].match);
         expect(exact.results[0].snippet).toContain('pnpm');
         expect(exact.results[0].snippet).toContain('verify');
-        app.services.failEmbedding = true;
-        const accents = results(await search('despliegue'));
-        expect(accents.results.map((r) => r.id)).toEqual(
-          expect.arrayContaining([memoryId(22), memoryId(24)]),
-        );
-        const prefix = results(await search('deploy'));
-        expect(prefix.results.map((r) => r.id)).toEqual(
-          expect.arrayContaining([memoryId(21), memoryId(25)]),
-        );
       });
       it('E3: accents, case and prefixes match content independently of tags and alternate spellings', async () => {
         await seedMemories(app, [
