@@ -121,6 +121,7 @@ describe.each(['owner', 'machine'] as const)('%s Memory MCP', (endpoint) => {
       expect(result.isError).not.toBe(true);
       expect(result.structuredContent).toEqual({
         id: m.id,
+        files: [],
         bucket: 'work/acme',
         content,
         tags: ['deploy'],

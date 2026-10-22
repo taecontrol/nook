@@ -37,6 +37,7 @@ it('derives the owner gate and the machine token check from the contract', () =>
     'GET /api/memories/counts',
     'GET /api/memories',
     'GET /api/memories/:id',
+    'GET /api/memories/:id/files/:name',
     'GET /api/audit',
     'GET /api/whoami',
     'GET /api/buckets',
@@ -56,6 +57,8 @@ it('derives the owner gate and the machine token check from the contract', () =>
     'GET /api/machine/secrets',
     'POST /api/machine/secrets',
     'POST /api/machine/secrets/values',
+    'PUT /api/machine/memories/:id/files/:name',
+    'GET /api/machine/memories/:id/files/:name',
     'DELETE /api/machine/token',
   ]);
   const machineRoutes = listed(

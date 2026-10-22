@@ -65,6 +65,8 @@ export async function runtime(
     directory?: string;
     outboundService?: (request: Request) => Promise<Response>;
     configPath?: string;
+    r2Buckets?: string[];
+    coverageEndpoint?: boolean;
   } = {},
 ) {
   const lease = await reservePort();
@@ -77,7 +79,9 @@ export async function runtime(
       configPath: options.configPath,
       bindings: options.bindings,
       outboundService: options.outboundService,
-      coverage: Boolean(process.env.COVERAGE_RUN),
+      r2Buckets: options.r2Buckets,
+      coverage:
+        Boolean(process.env.COVERAGE_RUN) || options.coverageEndpoint === true,
     });
   } catch (error) {
     await lease.release();

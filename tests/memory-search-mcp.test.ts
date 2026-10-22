@@ -100,6 +100,8 @@ describe.each(['owner', 'machine'] as const)(
           for (const hit of result.results)
             expect(Object.keys(hit).sort()).toEqual([
               'bucket',
+              'fileCount',
+              'files',
               'id',
               'match',
               'snippet',

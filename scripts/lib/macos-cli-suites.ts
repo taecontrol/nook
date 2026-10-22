@@ -15,4 +15,5 @@ export const macosCliSuites = [
   'tests/agent-create-cli.test.ts',
   'tests/run-cli.test.ts',
   'tests/nook-json-cli.test.ts',
+  'tests/memory-files-cli.test.ts',
 ];

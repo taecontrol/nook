@@ -42,6 +42,11 @@ const contractStatuses = {
   SecretsForbidden: 403,
   SecretKeyUnavailable: 503,
   InvalidAuditFilter: 400,
+  InvalidFile: 400,
+  FileNotFound: 404,
+  FileChanged: 409,
+  FileTooLarge: 413,
+  FileQuotaExceeded: 409,
 };
 
 function annotatedStatuses() {
@@ -88,6 +93,7 @@ it('passes through exactly the annotated 400 domain errors', () => {
       'InvalidMemorySearch',
       'InvalidBucketPath',
       'ReservedBucket',
+      'InvalidFile',
     ].sort(),
   );
 });
@@ -104,6 +110,7 @@ const publicTags = new Set([
   'BucketHasSecrets',
   'BucketHasMemories',
   'MemoryChanged',
+  'FileNotFound',
 ]);
 it.each(Object.entries(webStatuses))(
   'the web client preserves %s as %s and exposes only allowlisted messages',
