@@ -108,7 +108,10 @@ function useQueryDraft(q: string, navigate: (q: string | undefined) => void) {
   latest.current = commit;
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (router.latestLocation.pathname === '/memory') latest.current(draft);
+      const pathname = router.latestLocation.pathname
+        .toLowerCase()
+        .replace(/\/+$/, '');
+      if (pathname === '/memory') latest.current(draft);
     }, 250);
     return () => clearTimeout(timer);
   }, [draft, router]);
