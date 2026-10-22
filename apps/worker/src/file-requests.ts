@@ -1,6 +1,7 @@
-import { fileLimits } from '@nook/contract';
+import { fileLimits, validateFileName } from '@nook/contract';
 import type { FileActor } from './audit.ts';
 import { clientFrom } from './client-provenance.ts';
+import { fileRoutes, matches } from './routes.ts';
 
 export function fileActor(request: Request): FileActor {
   const source = request as Request & { cf?: { country?: string } };
@@ -26,10 +27,13 @@ function lengthGate(request: Request) {
       { status: 413 },
     );
 }
-function unicodeGate(path: string) {
+function nameGate(path: string) {
   // URL decoding can otherwise fail before domain validation (invalid UTF-8).
   try {
-    decodeURIComponent(path.split('/').at(-1) ?? '');
+    const name = decodeURIComponent(path.split('/').at(-1) ?? '');
+    const message = validateFileName(name);
+    if (message)
+      return Response.json({ _tag: 'InvalidFile', message }, { status: 400 });
   } catch {
     return Response.json(
       { _tag: 'InvalidFile', message: 'Use valid Unicode for the file name.' },
@@ -39,15 +43,14 @@ function unicodeGate(path: string) {
 }
 
 export function fileRequestGate(request: Request, path: string) {
-  if (!/^\/api\/(?:machine\/)?memories\/[^/]+\/files\/[^/]+$/.test(path))
-    return;
+  if (!matches(fileRoutes, request.method, path)) return;
   if (request.method === 'HEAD')
     return new Response(null, {
       status: 405,
-      headers: { Allow: path.startsWith('/api/machine/') ? 'GET, PUT' : 'GET' },
+      headers: { Allow: matches(fileRoutes, 'PUT', path) ? 'GET, PUT' : 'GET' },
     });
   return (
     (request.method === 'PUT' ? lengthGate(request) : undefined) ??
-    unicodeGate(path)
+    nameGate(path)
   );
 }

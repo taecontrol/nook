@@ -23,7 +23,7 @@ async function clock() {
 }
 // Only the test wrapper substitutes SQLite wall time. Real SQL still executes
 // against D1, including all guards, transactions, constraints and RETURNING.
-function clockDatabase(db: D1Database): D1Database {
+function clockDatabase(db: D1Database, batchClockStepMs: number): D1Database {
   const statements = new WeakMap<
     D1PreparedStatement,
     { query: string; values: unknown[] }
@@ -59,9 +59,15 @@ function clockDatabase(db: D1Database): D1Database {
     async batch<T>(input: D1PreparedStatement[]) {
       const now = await clock();
       return db.batch<T>(
-        input.map((statement) => {
+        input.map((statement, index) => {
           const source = statements.get(statement);
-          return source ? native(source.query, source.values, now) : statement;
+          return source
+            ? native(
+                source.query,
+                source.values,
+                now + index * batchClockStepMs,
+              )
+            : statement;
         }),
       );
     },
@@ -79,6 +85,28 @@ function objects(bucket: R2Bucket): R2Bucket {
           const result = await target.put(...args);
           await checkpoint('/r2/after-put');
           return result;
+        };
+      if (property === 'get')
+        return async (...args: Parameters<R2Bucket['get']>) => {
+          const object = await target.get(...args);
+          await checkpoint('/r2/after-get');
+          if (!object || !('body' in object)) return object;
+          const body = new Proxy(object.body, {
+            get(stream, key) {
+              if (key === 'cancel')
+                return async () => {
+                  await checkpoint('/r2/cancel');
+                  await stream.cancel();
+                };
+              const value = Reflect.get(stream, key);
+              return typeof value === 'function' ? value.bind(stream) : value;
+            },
+          });
+          return new Proxy(object, {
+            get(value, key) {
+              return key === 'body' ? body : Reflect.get(value, key);
+            },
+          });
         };
       if (property === 'list')
         return async (options?: Parameters<R2Bucket['list']>[0]) => {
@@ -99,21 +127,24 @@ function objects(bucket: R2Bucket): R2Bucket {
     },
   });
 }
-async function environment(env: Env) {
+async function environment(env: Env, batchClockStepMs: number) {
   const now = await clock();
   return {
     ...env,
-    DB: checkpointDatabase(clockDatabase(env.DB), true, true),
+    DB: checkpointDatabase(clockDatabase(env.DB, batchClockStepMs), true, true),
     FILES: objects(env.FILES),
     // Expected production seam: a synchronous clock, supplied only by tests.
     // Production defaults to Date.now; the seam must also reach Cron's sweep.
     FILE_CLOCK: { now: () => now },
   };
 }
-export function memoryFilesWorker(worker: Worker) {
+export function memoryFilesWorker(
+  worker: Worker,
+  options: { batchClockStepMs?: number } = {},
+) {
   return {
     async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-      const wrapped = await environment(env);
+      const wrapped = await environment(env, options.batchClockStepMs ?? 0);
       if (new URL(request.url).pathname === '/api/__test/files-probe') {
         if (request.method === 'PUT')
           await wrapped.FILES.put(

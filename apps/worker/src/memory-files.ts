@@ -272,6 +272,11 @@ export const memoryFiles = (grant: BucketGrant, bindings: FileBindings = {}) =>
           // D1's clock decides whether this never-reused key can still publish.
           const publishable = sql`m.id=${input.id} AND m.bucket=${bucket} AND COALESCE(f.sha256,'')<>${hash} AND ${usage}+${file.size}<=${fileLimits.bucketBytes} AND unixepoch('subsec')*1000-${startedAt}<${publishWindowMs}`;
           const from = sql`FROM memories m LEFT JOIN memory_files f ON f.memory_id=m.id AND f.name=${input.name} WHERE ${publishable}`;
+          // The guarded audit INSERT is a batch-local receipt of all four
+          // predicates. Decide once using D1's clock: a tick between statements
+          // must not leave an audit entry without its file. No file state can
+          // change between these two statements in the atomic batch.
+          const publication = sql`FROM memories m WHERE m.id=${input.id} AND m.bucket=${bucket} AND changes()=1`;
           const [before, , published, after] = yield* sql
             .batch([
               state(input.id, bucket, input.name),
@@ -280,7 +285,7 @@ export const memoryFiles = (grant: BucketGrant, bindings: FileBindings = {}) =>
                 actor,
                 sql`SELECT CASE WHEN f.object_key IS NULL THEN 'file_attached' ELSE 'file_replaced' END AS outcome, m.bucket, m.id AS memory_id, ${input.name} AS name, ${file.size} AS size, ${hash} AS sha256, f.sha256 AS replaced_sha256 ${from}`,
               ),
-              sql`INSERT INTO memory_files(memory_id,name,object_key,media_type,size,sha256,principal,machine_id,machine_name,client_name,client_version,attached_at) SELECT m.id,${input.name},${key},${input.mediaType},${file.size},${hash},${actor.principal.kind},${machine?.id ?? null},${machine?.name ?? null},${actor.client.name},${actor.client.version},${new Date().toISOString()} ${from} ON CONFLICT(memory_id,name) DO UPDATE SET object_key=excluded.object_key,media_type=excluded.media_type,size=excluded.size,sha256=excluded.sha256,principal=excluded.principal,machine_id=excluded.machine_id,machine_name=excluded.machine_name,client_name=excluded.client_name,client_version=excluded.client_version,attached_at=excluded.attached_at RETURNING object_key`,
+              sql`INSERT INTO memory_files(memory_id,name,object_key,media_type,size,sha256,principal,machine_id,machine_name,client_name,client_version,attached_at) SELECT m.id,${input.name},${key},${input.mediaType},${file.size},${hash},${actor.principal.kind},${machine?.id ?? null},${machine?.name ?? null},${actor.client.name},${actor.client.version},${new Date().toISOString()} ${publication} ON CONFLICT(memory_id,name) DO UPDATE SET object_key=excluded.object_key,media_type=excluded.media_type,size=excluded.size,sha256=excluded.sha256,principal=excluded.principal,machine_id=excluded.machine_id,machine_name=excluded.machine_name,client_name=excluded.client_name,client_version=excluded.client_version,attached_at=excluded.attached_at RETURNING object_key`,
               state(input.id, bucket, input.name),
             ])
             .pipe(unavailable);

@@ -13,6 +13,7 @@ import {
   fileRows,
   fileSnapshot,
   maximumBucket,
+  pdfName,
   putFile,
   seedFileMemory,
   seedUsage,
@@ -429,4 +430,162 @@ it('E22: an aborting file-forgotten audit insert rolls back memory, versions and
         .all()
     ).results,
   ).toHaveLength(1);
+});
+
+it('publication remains atomic with its audit when D1 time crosses the window between statements', async () => {
+  const start = Date.now();
+  app = await filesRuntime({
+    now: start,
+    batchClockStepMs: 1,
+    checkpoint: async (label) => {
+      if (label === '/r2/after-put') app.setTime(start + 599_998);
+      return true;
+    },
+  });
+  const machine = await seedFileMemory(app);
+  const response = await putFile(app, machine.token);
+  expect([200, 503]).toContain(response.status);
+  const committed = response.status === 200 ? 1 : 0;
+  expect(await fileRows(app)).toHaveLength(committed);
+  expect(await auditRows(app)).toHaveLength(committed);
+  expect(await fileObjects(app)).toHaveLength(committed);
+});
+
+async function downloadAtGet(missingObject = false) {
+  const arrived = deferred();
+  const release = deferred();
+  let held = false;
+  app = await filesRuntime({
+    checkpoint: async (label) => {
+      if (!held && label === '/r2/after-get') {
+        held = true;
+        arrived.resolve();
+        await release.promise;
+      }
+      return true;
+    },
+  });
+  const machine = await seedFileMemory(app);
+  const original = await attachFile(app, machine.token);
+  if (missingObject)
+    await (await app.mf.getR2Bucket('FILES')).delete(
+      (await fileRows(app))[0].object_key,
+    );
+  const pending = downloadFile(app, machine.token);
+  await Promise.race([
+    arrived.promise,
+    pending.then(() => {
+      throw new Error('Download did not reach the R2 checkpoint.');
+    }),
+  ]);
+  return { machine, original, release, pending };
+}
+
+it.each([false, true])(
+  'a file replaced after R2 get is re-read once and only the current download is audited (missing old object: %s)',
+  async (missingObject) => {
+    const { machine, original, release, pending } =
+      await downloadAtGet(missingObject);
+    try {
+      const bytes = Buffer.from('current replacement download');
+      const replacement = await attachFile(app, machine.token, { bytes });
+      expect(replacement.replacedSha256).toBe(original.sha256);
+      release.resolve();
+      const response = await pending;
+      expect(response.status).toBe(200);
+      expect(response.headers.get('X-Nook-Sha256')).toBe(digest(bytes));
+      expect(digest(new Uint8Array(await response.arrayBuffer()))).toBe(
+        digest(bytes),
+      );
+      const downloads = (await auditRows(app)).filter(
+        (row) => row.outcome === 'file_downloaded',
+      );
+      expect(downloads).toHaveLength(1);
+      expect(downloads[0].file_sha256).toBe(replacement.sha256);
+      if (!missingObject) expect(app.labels).toContain('/r2/cancel');
+    } finally {
+      release.resolve();
+      await pending;
+    }
+  },
+);
+
+it.each(['detach', 'forget'] as const)(
+  'a %s between R2 get and the audit cancels the body and returns the current not-found outcome',
+  async (operation) => {
+    const { original, release, pending } = await downloadAtGet();
+    try {
+      const client = memoryClient(app, '2026-07-28');
+      const result =
+        operation === 'detach'
+          ? await client.call('detach', {
+              id: fileMemory,
+              name: pdfName,
+              sha256: original.sha256,
+            })
+          : await forget();
+      expect(result.isError).not.toBe(true);
+      release.resolve();
+      await expectHttpError(
+        await pending,
+        404,
+        operation === 'detach' ? 'FileNotFound' : 'MemoryNotFound',
+      );
+      expect(app.labels).toContain('/r2/cancel');
+      expect(
+        (await auditRows(app)).some((row) => row.outcome === 'file_downloaded'),
+      ).toBe(false);
+      expect(await fileObjects(app)).toEqual([]);
+    } finally {
+      release.resolve();
+      await pending;
+    }
+  },
+);
+
+it('repeated replacements exhaust the bounded download retry without auditing or serving stale bytes', async () => {
+  let token = '';
+  let gets = 0;
+  app = await filesRuntime({
+    checkpoint: async (label) => {
+      if (label === '/r2/after-get') {
+        gets++;
+        await attachFile(app, token, {
+          bytes: Buffer.from(`replacement ${gets}`),
+        });
+      }
+      return true;
+    },
+  });
+  const machine = await seedFileMemory(app);
+  token = machine.token;
+  await attachFile(app, token);
+  await expectHttpError(
+    await downloadFile(app, token),
+    503,
+    'ServiceUnavailable',
+  );
+  expect(gets).toBe(2);
+  expect(app.labels.filter((label) => label === '/r2/cancel')).toHaveLength(2);
+  expect(
+    (await auditRows(app)).some((row) => row.outcome === 'file_downloaded'),
+  ).toBe(false);
+  expect(await fileObjects(app)).toHaveLength(1);
+});
+
+it('a failed download audit cancels the real R2 body, keeps the reference and exposes only 503', async () => {
+  app = await filesRuntime();
+  const machine = await seedFileMemory(app);
+  await attachFile(app, machine.token);
+  const before = await fileSnapshot(app);
+  await (await app.mf.getD1Database('DB'))
+    .prepare(
+      "CREATE TRIGGER fail_file_download BEFORE INSERT ON audit_entries WHEN NEW.outcome='file_downloaded' BEGIN SELECT RAISE(ABORT,'synthetic attachment audit failure'); END",
+    )
+    .run();
+  const response = await downloadFile(app, machine.token);
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ _tag: 'ServiceUnavailable' });
+  expect(app.labels).toContain('/r2/cancel');
+  expect(await fileSnapshot(app)).toEqual(before);
 });

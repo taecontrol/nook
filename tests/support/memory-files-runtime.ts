@@ -12,6 +12,7 @@ export async function filesRuntime(
   options: {
     checkpoint?: (label: string) => Promise<boolean | undefined>;
     now?: number;
+    batchClockStepMs?: number;
     owner?: {
       bindings: Record<string, string>;
       outboundService: (request: Request) => Promise<Response>;
@@ -33,7 +34,7 @@ export async function filesRuntime(
     });
     await build({
       stdin: {
-        contents: `import worker${options.principalGrant ? ', { handlerForPrincipal }' : ''} from ${JSON.stringify(resolve(testBuild, 'worker.js'))}; import { memoryFilesWorker } from ${JSON.stringify(resolve('tests/support/memory-files-worker.ts'))}; ${services ? `import { searchWorker } from ${JSON.stringify(resolve('tests/support/search-worker.ts'))};` : ''} const target = ${options.principalGrant ? `{ ...worker, fetch(request, env, ctx) { const path = new URL(request.url).pathname; if (path.startsWith('/api/machine/') || path === '/__test/coverage') return worker.fetch(request, env, ctx); return handlerForPrincipal('owner@nook.test', env.DB, ${JSON.stringify(options.principalGrant)}, env.VAULT_KEY, env)(request, ctx); } }` : 'worker'}; export default ${services ? 'searchWorker(memoryFilesWorker(target))' : 'memoryFilesWorker(target)'};`,
+        contents: `import worker${options.principalGrant ? ', { handlerForPrincipal }' : ''} from ${JSON.stringify(resolve(testBuild, 'worker.js'))}; import { memoryFilesWorker } from ${JSON.stringify(resolve('tests/support/memory-files-worker.ts'))}; ${services ? `import { searchWorker } from ${JSON.stringify(resolve('tests/support/search-worker.ts'))};` : ''} const target = ${options.principalGrant ? `{ ...worker, fetch(request, env, ctx) { const path = new URL(request.url).pathname; if (path.startsWith('/api/machine/') || path === '/__test/coverage') return worker.fetch(request, env, ctx); return handlerForPrincipal('owner@nook.test', env.DB, ${JSON.stringify(options.principalGrant)}, env.VAULT_KEY, env)(request, ctx); } }` : 'worker'}; export default ${services ? `searchWorker(memoryFilesWorker(target, { batchClockStepMs: ${options.batchClockStepMs ?? 0} }))` : `memoryFilesWorker(target, { batchClockStepMs: ${options.batchClockStepMs ?? 0} })`};`,
         resolveDir: process.cwd(),
       },
       outfile: resolve(directory, 'worker.js'),

@@ -173,6 +173,20 @@ it('E4: the Worker rejects an oversized declared body before reading it and requ
   expect(await fileObjects(app)).toEqual([]);
   expect(await auditRows(app)).toEqual([]);
 });
+it('E4: the production Worker round-trips exactly 25 MiB with its declared length and digest', async () => {
+  const bytes = Buffer.alloc(maximumFile, 113);
+  const stored = await attachFile(app, machine.token, { bytes });
+  expect(stored.size).toBe(maximumFile);
+  expect(stored.sha256).toBe(digest(bytes));
+  const response = await downloadFile(app, machine.token);
+  expect(response.status).toBe(200);
+  expect(response.headers.get('Content-Length')).toBe(String(maximumFile));
+  expect(response.headers.get('X-Nook-Sha256')).toBe(stored.sha256);
+  const downloaded = new Uint8Array(await response.arrayBuffer());
+  expect(downloaded.byteLength).toBe(maximumFile);
+  expect(digest(downloaded)).toBe(stored.sha256);
+  expect(await fileObjects(app)).toHaveLength(1);
+});
 it('E5: metadata-only quota counts the replaced size once and leaves failed uploads unstored', async () => {
   await seedUsage(app, maximumBucket - 100);
   const before = await fileSnapshot(app);
@@ -227,6 +241,8 @@ it('E6: 255 UTF-8 bytes, byte-exact Unicode names and empty files round trip', a
 });
 it.each([
   `${'a'.repeat(252)}.pdf`,
+  `${'界'.repeat(90)}.pdf`,
+  `${'a'.repeat(1000)}.pdf`,
   'a/b.pdf',
   'a\\b.pdf',
   'nul\0.pdf',

@@ -38,6 +38,11 @@ export const tokenRoutes = endpoints(MachineApi)
   .filter(requiresToken)
   .map(route);
 export const revealRoute = route(Api.groups.vault.endpoints.reveal);
+export const fileRoutes = [
+  route(Api.groups.memories.endpoints.downloadFile),
+  route(MachineApi.groups.machine.endpoints.attachFile),
+  route(MachineApi.groups.machine.endpoints.downloadFile),
+];
 
 // Compares the raw pathname segment by segment, so a parameter is one
 // non-empty encoded segment. HEAD reaches GET routes, as in the router.
