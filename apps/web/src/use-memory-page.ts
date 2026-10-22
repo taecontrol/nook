@@ -89,6 +89,7 @@ function useAutoSelection(
   }, [desktop, firstId, memory, navigate, router]);
 }
 function useQueryDraft(q: string, navigate: (q: string | undefined) => void) {
+  const router = useRouter();
   const [draft, setDraft] = useState(q);
   const sent = useRef(q);
   useEffect(() => {
@@ -106,9 +107,11 @@ function useQueryDraft(q: string, navigate: (q: string | undefined) => void) {
   const latest = useRef(commit);
   latest.current = commit;
   useEffect(() => {
-    const timer = setTimeout(() => latest.current(draft), 250);
+    const timer = setTimeout(() => {
+      if (router.latestLocation.pathname === '/memory') latest.current(draft);
+    }, 250);
     return () => clearTimeout(timer);
-  }, [draft]);
+  }, [draft, router]);
   return {
     draft,
     setDraft,
