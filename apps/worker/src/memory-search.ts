@@ -49,13 +49,13 @@ export function keywordSnippet(marked: string, delimiter: string): Snippet {
   }
   return clipped(snippet, highlights);
 }
-type Candidate = OwnerMemorySearchResult & { score: number };
-export function rankedSearch(
-  keyword: readonly OwnerMemorySearchResult[],
-  meaning: readonly { result: OwnerMemorySearchResult; rank: number }[],
+type Candidate<Result> = Result & { score: number };
+export function rankedSearch<Result extends OwnerMemorySearchResult>(
+  keyword: readonly Result[],
+  meaning: readonly { result: Result; rank: number }[],
   limit: number,
 ) {
-  const candidates = new Map<string, Candidate>();
+  const candidates = new Map<string, Candidate<Result>>();
   for (const [i, result] of keyword.entries())
     candidates.set(result.id, { ...result, score: 1 / (60 + i + 1) });
   for (const { result, rank } of meaning) {

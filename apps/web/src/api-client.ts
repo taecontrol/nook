@@ -114,6 +114,7 @@ function publicMessage(error: unknown) {
     'BucketHasSecrets',
     'BucketHasMemories',
     'MemoryChanged',
+    'FileNotFound',
   ].includes(typed._tag ?? '')
     ? typed.message
     : undefined;

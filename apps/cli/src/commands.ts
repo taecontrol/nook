@@ -20,6 +20,10 @@ const usage: Usage = {
     list: 'nook vault list <bucket>',
     create: createGrammar.usage,
   },
+  memory: {
+    attach: 'nook memory attach <id> <path>',
+    download: 'nook memory download <id> <name> [--output <path>]',
+  },
   login: 'nook login <url>',
   whoami: 'nook whoami',
   logout: 'nook logout',

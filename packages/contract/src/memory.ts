@@ -161,18 +161,22 @@ export const MemorySearchResult = Schema.Struct({
   tags: Schema.Array(Schema.String),
   snippet: Schema.String,
   match: MemoryMatch,
+});
+export type MemorySearchResult = typeof MemorySearchResult.Type;
+export const McpMemorySearchResult = MemorySearchResult.mapFields((fields) => ({
+  ...fields,
   files: Schema.Array(
     Schema.Struct({ name: Schema.String, size: Schema.Number }),
   ),
   fileCount: Schema.Number,
-});
-export type MemorySearchResult = typeof MemorySearchResult.Type;
+}));
+export type McpMemorySearchResult = typeof McpMemorySearchResult.Type;
 export const MeaningAvailability = Schema.Literals([
   'available',
   'unavailable',
 ]);
 export const MemorySearchResults = Schema.Struct({
-  results: Schema.Array(MemorySearchResult),
+  results: Schema.Array(McpMemorySearchResult),
   meaning: MeaningAvailability,
 });
 export const OwnerMemorySearchResult = MemorySearchResult.mapFields(

@@ -2,21 +2,21 @@ import { D1Client } from '@effect/sql-d1';
 import {
   type BucketGrant,
   canRead,
-  canWrite,
   DuplicateMemory,
   type ForgetMemory,
   type Forgotten,
   InvalidMemory,
   InvalidMemoryCursor,
   InvalidMemorySearch,
+  McpMemorySearchResult,
   type Memory,
   MemoryChanged,
   type MemoryClient,
   type MemoryListItem,
-  MemoryNotFound,
   type MemoryScope,
   type MemoryVersion,
   memoryTitle,
+  OwnerMemoryFile,
   type OwnerMemorySearchResult,
   type Principal,
   type Remember,
@@ -30,10 +30,23 @@ import {
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
+import { type FileActor, ownerFileActor } from './audit.ts';
 import { authorizeBucket, bucketExists, bucketNotFound } from './buckets.ts';
 import { sha256 } from './digest.ts';
+import type { FileBindings } from './file-objects.ts';
 import { unavailable } from './http-errors.ts';
+import {
+  bucketFor as memoryBucketFor,
+  memoryNotFound as notFound,
+  memoryUuid as uuid,
+} from './memory-access.ts';
 import { memoryBounds } from './memory-bounds.ts';
+import {
+  filesFor,
+  forgetFileStatements,
+  memoryFiles,
+  searchFilesFor,
+} from './memory-files.ts';
 import { type MemoryIndex, memoryIndex } from './memory-index.ts';
 import {
   keywordExpression,
@@ -43,9 +56,6 @@ import {
 } from './memory-search.ts';
 import { memorySync } from './memory-sync.ts';
 
-const uuid =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const notFound = () => new MemoryNotFound({ message: 'Memory not found.' });
 function forgetVersion(version: unknown, query: boolean) {
   if (query && typeof version === 'string' && /^[1-9]\d*$/.test(version))
     version = Number(version);
@@ -114,7 +124,20 @@ const facts = {
 };
 const Row = withProvenance(facts);
 type Row = typeof Row.Type;
-const MeaningRow = withProvenance({ ...facts, meaning_rank: Schema.Number });
+const DetailRow = withProvenance({
+  ...facts,
+  files: Schema.fromJsonString(Schema.Array(OwnerMemoryFile)),
+});
+const searchFacts = {
+  ...facts,
+  files: Schema.fromJsonString(McpMemorySearchResult.fields.files),
+  fileCount: Schema.Number,
+};
+const SearchRow = withProvenance(searchFacts);
+const MeaningRow = withProvenance({
+  ...searchFacts,
+  meaning_rank: Schema.Number,
+});
 const VersionRow = withProvenance({
   version: Schema.Number,
   content: Schema.String,
@@ -271,10 +294,11 @@ function validSearch(query: string, tags: readonly string[]) {
     : Effect.void;
 }
 function searchResult(
-  row: Row,
+  row: typeof SearchRow.Type,
   match: 'keyword' | 'meaning',
   delimiter: string,
-): OwnerMemorySearchResult {
+): OwnerMemorySearchResult &
+  Pick<typeof McpMemorySearchResult.Type, 'files' | 'fileCount'> {
   return {
     id: row.id,
     bucket: row.bucket,
@@ -283,6 +307,8 @@ function searchResult(
     createdAt: row.created_at,
     provenance: provenanceOf(row),
     match,
+    files: row.files,
+    fileCount: row.fileCount,
     ...(row.keyword_snippet === undefined
       ? openingSnippet(row.content)
       : keywordSnippet(row.keyword_snippet, delimiter)),
@@ -385,12 +411,15 @@ export const memoryStore = (
   grant: BucketGrant,
   index: MemoryIndex = memoryIndex(),
   waitUntil?: (promise: Promise<unknown>) => void,
+  fileBindings: FileBindings = {},
 ) =>
   Effect.gen(function* () {
     const sql = yield* D1Client.D1Client;
+    const files = yield* memoryFiles(grant, fileBindings);
     const { scheduleEmbedding } = yield* memorySync(index, waitUntil);
     const provenanceSelect = sql`v.client_name, v.client_version, v.principal, v.machine_id, v.machine_name, v.working_directory, v.created_at AS version_at`;
     const columns = sql`m.id, m.bucket, m.current_version, m.content_hash, m.created_at, m.updated_at, v.content, v.tags, ${provenanceSelect}`;
+    const searchColumns = sql`${columns}, ${searchFilesFor(sql, sql`m.id`)}`;
     const provenanceColumns = sql`client_name,client_version,principal,machine_id,machine_name,working_directory,created_at`;
     const provenanceValues = (
       principal: Principal,
@@ -402,42 +431,37 @@ export const memoryStore = (
       return sql`${client.name},${client.version},${principal.kind},${author.id},${author.name},${directory ?? null},${at}`;
     };
     const bucketFor = (id: string, write = false) =>
-      Effect.gen(function* () {
-        if (!uuid.test(id)) return yield* Effect.fail(notFound());
-        const heads = yield* sql<{
-          bucket: string;
-        }>`SELECT bucket FROM memories WHERE id=${id}`.pipe(unavailable);
-        const bucket = heads[0]?.bucket;
-        if (!bucket || !canRead(grant, bucket))
-          return yield* Effect.fail(notFound());
-        if (write && !canWrite(grant, bucket))
-          return yield* Effect.fail(new HttpApiError.Forbidden());
-        return bucket;
-      });
+      memoryBucketFor(grant, id, write).pipe(
+        Effect.provideService(D1Client.D1Client, sql),
+      );
     return {
       forget: (
         input: { id: string; expectedVersion?: unknown },
         query = false,
+        actor: FileActor = ownerFileActor,
       ) =>
         Effect.gen(function* () {
           const bucket = yield* bucketFor(input.id, true);
           const version = yield* forgetVersion(input.expectedVersion, query);
           const guard = sql`id=${input.id} AND bucket=${bucket} AND current_version=${version}`;
-          const [, deleted, , states] = yield* sql
+          const [, , deletedFiles, deleted, , states] = yield* sql
             .batch([
               sql`INSERT INTO memory_vector_removals(id,forgotten_at) SELECT id,${new Date().toISOString()} FROM memories WHERE ${guard}`,
+              ...forgetFileStatements(sql, guard, actor),
               sql`DELETE FROM memories WHERE ${guard} AND EXISTS (SELECT 1 FROM memory_vector_removals r WHERE r.id=memories.id) RETURNING seq`,
               sql`INSERT INTO memories_fts(memories_fts) VALUES('optimize')`,
               sql`SELECT m.current_version FROM (SELECT 1) LEFT JOIN memories m ON m.id=${input.id} AND m.bucket=${bucket}`,
             ])
             .pipe(unavailable);
           const current = yield* decodedRows(ForgetState, states);
-          return yield* forgetOutcome(
+          const result = yield* forgetOutcome(
             deleted.length > 0,
             current[0]?.current_version,
             { id: input.id, expectedVersion: version },
             bucket,
           );
+          yield* files.remove(deletedFiles.map((row) => row.object_key));
+          return result;
         }),
       update: (
         principal: Principal,
@@ -540,8 +564,8 @@ export const memoryStore = (
           const delimiter = `\u0001${crypto.randomUUID()}\u0002`;
           const tagged = sql`NOT EXISTS (SELECT 1 FROM json_each(${JSON.stringify(tags)}) wanted WHERE NOT EXISTS (SELECT 1 FROM json_each(v.tags) actual WHERE actual.value=wanted.value))`;
           const keywordQuery = expression
-            ? sql`SELECT ${columns}, snippet(memories_fts, 0, ${delimiter}, ${delimiter}, '…', 40) AS keyword_snippet FROM memories_fts JOIN memories m ON m.seq=memories_fts.rowid JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE memories_fts MATCH ${expression} AND ${sql.in('m.bucket', paths)} AND ${tagged} ORDER BY bm25(memories_fts), m.created_at DESC, m.id DESC LIMIT ${memoryBounds.keywordCandidates}`
-            : sql`SELECT ${columns} FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE 0`;
+            ? sql`SELECT ${searchColumns}, snippet(memories_fts, 0, ${delimiter}, ${delimiter}, '…', 40) AS keyword_snippet FROM memories_fts JOIN memories m ON m.seq=memories_fts.rowid JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE memories_fts MATCH ${expression} AND ${sql.in('m.bucket', paths)} AND ${tagged} ORDER BY bm25(memories_fts), m.created_at DESC, m.id DESC LIMIT ${memoryBounds.keywordCandidates}`
+            : sql`SELECT ${searchColumns} FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE 0`;
           const [exists, rawKeyword] = yield* sql
             .batch([
               sql<{
@@ -552,7 +576,7 @@ export const memoryStore = (
             .pipe(unavailable);
           if (!exists[0]?.has_bucket)
             return yield* Effect.fail(bucketNotFound());
-          const keyword = yield* decodedRows(Row, rawKeyword);
+          const keyword = yield* decodedRows(SearchRow, rawKeyword);
           const meaning = yield* index.query(query, paths).pipe(
             Effect.map((hits) => ({
               hits,
@@ -576,7 +600,7 @@ export const memoryStore = (
           // Vectorize filtering is an optimization. Only current, scoped D1 rows reach the caller.
           const [rawMeaning, currentKeyword] = yield* sql
             .batch([
-              sql`SELECT ${columns}, json_extract(hit.value, '$.rank') AS meaning_rank FROM json_each(${hits}) hit JOIN memories m ON m.id=json_extract(hit.value, '$.id') JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE m.content_hash=json_extract(hit.value, '$.contentHash') AND ${sql.in('m.bucket', paths)} AND ${tagged}`,
+              sql`SELECT ${searchColumns}, json_extract(hit.value, '$.rank') AS meaning_rank FROM json_each(${hits}) hit JOIN memories m ON m.id=json_extract(hit.value, '$.id') JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE m.content_hash=json_extract(hit.value, '$.contentHash') AND ${sql.in('m.bucket', paths)} AND ${tagged}`,
               sql<{
                 id: string;
               }>`SELECT m.id FROM json_each(${keywordHeads}) hit JOIN memories m ON m.id=json_extract(hit.value,'$.id') WHERE m.current_version=json_extract(hit.value,'$.version') AND m.content_hash=json_extract(hit.value,'$.hash') AND ${sql.in('m.bucket', paths)}`,
@@ -603,7 +627,7 @@ export const memoryStore = (
         Effect.gen(function* () {
           if (!uuid.test(id)) return yield* Effect.fail(notFound());
           const rows =
-            yield* sql`SELECT ${columns} FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE m.id=${id}`.pipe(
+            yield* sql`SELECT ${columns}, ${filesFor(sql, sql`m.id`)} AS files FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE m.id=${id}`.pipe(
               unavailable,
             );
           if (!rows[0]) return yield* Effect.fail(notFound());
@@ -612,10 +636,10 @@ export const memoryStore = (
           ).pipe(unavailable);
           if (!canRead(grant, head.bucket))
             return yield* Effect.fail(notFound());
-          const row = yield* Schema.decodeUnknownEffect(Row)(rows[0]).pipe(
-            unavailable,
-          );
-          return memory(row);
+          const row = yield* Schema.decodeUnknownEffect(DetailRow)(
+            rows[0],
+          ).pipe(unavailable);
+          return { ...memory(row), files: row.files };
         }),
       history: (id: string, before?: string) =>
         Effect.gen(function* () {

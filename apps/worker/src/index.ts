@@ -16,6 +16,10 @@ import { HttpApiBuilder } from 'effect/http-api';
 import { auditStore } from './audit.ts';
 import { type AuthBindings, authenticate } from './auth.ts';
 import { bucketOperations } from './buckets.ts';
+import { type FileBindings, sameFileBindings } from './file-objects.ts';
+import { fileActor, fileRequestGate } from './file-requests.ts';
+import { fileResponse } from './file-response.ts';
+import { fileSweep } from './file-sweep.ts';
 import {
   authorizationHandler,
   machineHandler,
@@ -24,6 +28,7 @@ import {
 import { machineOperations } from './machines.ts';
 import { mcpHandler } from './mcp.ts';
 import { memoryStore } from './memory.ts';
+import { memoryFiles } from './memory-files.ts';
 import { memoryIndex, type SearchBindings } from './memory-index.ts';
 import { memorySync } from './memory-sync.ts';
 import { matches, ownerRoutes, revealRoute, tokenRoutes } from './routes.ts';
@@ -34,7 +39,7 @@ export function handlerForPrincipal(
   db: D1Database,
   grant: BucketGrant = 'all',
   vaultKey = '',
-  searchBindings: SearchBindings = {},
+  searchBindings: SearchBindings & FileBindings = {},
 ) {
   const index = memoryIndex(searchBindings);
   const session = HttpApiBuilder.group(Api, 'session', (handlers) =>
@@ -42,15 +47,27 @@ export function handlerForPrincipal(
   );
   const memories = HttpApiBuilder.group(Api, 'memories', (handlers) =>
     Effect.gen(function* () {
-      const store = yield* memoryStore(grant, index);
+      const store = yield* memoryStore(grant, index, undefined, searchBindings);
+      const files = yield* memoryFiles(grant, searchBindings);
       return handlers
+        .handleRaw('downloadFile', ({ params, request }) =>
+          files
+            .download(
+              fileActor(request.source as Request),
+              params.id,
+              params.name,
+            )
+            .pipe(Effect.map(fileResponse)),
+        )
         .handle('forget', ({ params, query }) =>
-          store
-            .forget(
+          Effect.gen(function* () {
+            const request = yield* HttpServerRequest.HttpServerRequest;
+            return yield* store.forget(
               { id: params.id, expectedVersion: query.expectedVersion },
               true,
-            )
-            .pipe(Effect.asVoid),
+              fileActor(request.source as Request),
+            );
+          }).pipe(Effect.asVoid),
         )
         .handle('history', ({ params, query }) =>
           store.history(params.id, query.before),
@@ -124,14 +141,16 @@ export function handlerForPrincipal(
   const apiHandler = HttpRouter.toWebHandler(routes, {
     disableLogger: true,
     // The router checks decoded params: six 32-character segments plus the name.
-    routerConfig: { maxParamLength: 6 * (32 + 1) + secretLimits.name },
+    routerConfig: {
+      maxParamLength: Math.max(800, 6 * (32 + 1) + secretLimits.name),
+    },
   }).handler;
   return (request: Request, ctx?: Pick<ExecutionContext, 'waitUntil'>) =>
     new URL(request.url).pathname === '/mcp'
       ? mcpHandler(
           db,
           { grant, principal: { kind: 'owner' } },
-          { index, waitUntil: ctx?.waitUntil.bind(ctx) },
+          { index, waitUntil: ctx?.waitUntil.bind(ctx), files: searchBindings },
         ).fetch(request)
       : apiHandler(request);
 }
@@ -141,25 +160,34 @@ let cached:
       db: D1Database;
       grant: BucketGrant;
       vaultKey: string;
-      searchBindings: SearchBindings;
+      searchBindings: SearchBindings & FileBindings;
       handler: ReturnType<typeof handlerForPrincipal>;
     }
   | undefined;
+function sameBindings(
+  left: SearchBindings & FileBindings,
+  right: SearchBindings & FileBindings,
+) {
+  return (
+    left.AI === right.AI &&
+    left.MEMORY_INDEX === right.MEMORY_INDEX &&
+    left.EMBEDDING_MODEL === right.EMBEDDING_MODEL &&
+    sameFileBindings(left, right)
+  );
+}
 function handlerFor(
   email: string,
   db: D1Database,
   grant: BucketGrant,
   vaultKey = '',
-  searchBindings: SearchBindings = {},
+  searchBindings: SearchBindings & FileBindings = {},
 ) {
   if (
     cached?.email !== email ||
     cached.db !== db ||
     cached.grant !== grant ||
     cached.vaultKey !== vaultKey ||
-    cached.searchBindings.AI !== searchBindings.AI ||
-    cached.searchBindings.MEMORY_INDEX !== searchBindings.MEMORY_INDEX ||
-    cached.searchBindings.EMBEDDING_MODEL !== searchBindings.EMBEDDING_MODEL
+    !sameBindings(cached.searchBindings, searchBindings)
   )
     cached = {
       email,
@@ -188,21 +216,29 @@ let machineRoutes:
       db: D1Database;
       origin: string;
       vaultKey: string;
+      files: FileBindings;
       machine: ReturnType<typeof machineHandler>;
       owner: ReturnType<typeof authorizationHandler>;
     }
   | undefined;
-function routesFor(db: D1Database, origin: string, vaultKey = '') {
+function routesFor(
+  db: D1Database,
+  origin: string,
+  vaultKey = '',
+  files: FileBindings = {},
+) {
   if (
     machineRoutes?.db !== db ||
     machineRoutes.origin !== origin ||
-    machineRoutes.vaultKey !== vaultKey
+    machineRoutes.vaultKey !== vaultKey ||
+    !sameFileBindings(machineRoutes.files, files)
   )
     machineRoutes = {
       db,
       origin,
       vaultKey,
-      machine: machineHandler(db, origin, vaultKey),
+      files,
+      machine: machineHandler(db, origin, vaultKey, files),
       owner: authorizationHandler(db),
     };
   return machineRoutes;
@@ -238,13 +274,14 @@ async function machineApiResponse(
   url: URL,
   db: D1Database,
   vaultKey: string,
+  files: FileBindings,
 ) {
   const creation =
     url.pathname === '/api/machine/secrets' && request.method === 'POST';
   const checked = creation ? await checkedCreation(request) : request;
   if (checked instanceof Response) return checked;
   return sanitized(
-    routesFor(db, url.origin, vaultKey).machine(checked),
+    routesFor(db, url.origin, vaultKey, files).machine(checked),
     creation,
   );
 }
@@ -253,7 +290,7 @@ async function machineRequest(
   url: URL,
   db: D1Database,
   vaultKey = '',
-  searchBindings: SearchBindings = {},
+  searchBindings: SearchBindings & FileBindings = {},
   ctx?: Pick<ExecutionContext, 'waitUntil'>,
 ) {
   if (url.pathname === '/api/machine/mcp') {
@@ -262,6 +299,7 @@ async function machineRequest(
     return machineMcpHandler(db, request, {
       index: memoryIndex(searchBindings),
       waitUntil: ctx?.waitUntil.bind(ctx),
+      files: searchBindings,
     });
   }
   if (
@@ -271,56 +309,78 @@ async function machineRequest(
     return Response.json({ _tag: 'Unauthorized' }, { status: 401 });
   if (foreignOrigin(request, url))
     return Response.json({ _tag: 'Forbidden' }, { status: 403 });
-  const response = await machineApiResponse(request, url, db, vaultKey);
+  const response = await machineApiResponse(
+    request,
+    url,
+    db,
+    vaultKey,
+    searchBindings,
+  );
   if (url.pathname === '/api/machine/secrets/values')
+    response.headers.set('Cache-Control', 'no-store');
+  return response;
+}
+type WorkerBindings = AuthBindings &
+  SearchBindings &
+  FileBindings & { DB: D1Database; VAULT_KEY?: string };
+async function ownerRequest(
+  request: Request,
+  url: URL,
+  env: WorkerBindings,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
+): Promise<Response> {
+  const identity = await authenticate(request, env);
+  if ('status' in identity)
+    return Response.json(
+      { _tag: identity.status === 401 ? 'Unauthorized' : 'Forbidden' },
+      { status: identity.status },
+    );
+  if (foreignOrigin(request, url))
+    return Response.json({ _tag: 'Forbidden' }, { status: 403 });
+  if (url.pathname.startsWith('/api/authorizations/'))
+    return sanitized(routesFor(env.DB, url.origin).owner(request));
+  if (!knownRoute(url.pathname, request.method))
+    return Response.json({ error: 'Not found' }, { status: 404 });
+  const response = await sanitized(
+    handlerFor(
+      identity.email,
+      env.DB,
+      identity.grant,
+      env.VAULT_KEY,
+      env,
+    )(request, ctx),
+  );
+  if (matches([revealRoute], request.method, url.pathname))
     response.headers.set('Cache-Control', 'no-store');
   return response;
 }
 export default {
   async fetch(
     request: Request,
-    env: AuthBindings & SearchBindings & { DB: D1Database; VAULT_KEY?: string },
+    env: AuthBindings &
+      SearchBindings &
+      FileBindings & { DB: D1Database; VAULT_KEY?: string },
     ctx?: Pick<ExecutionContext, 'waitUntil'>,
   ): Promise<Response> {
     const url = new URL(request.url);
+    const rejected = fileRequestGate(request, url.pathname);
+    if (rejected) return rejected;
     if (url.pathname.startsWith('/api/machine/'))
       return machineRequest(request, url, env.DB, env.VAULT_KEY, env, ctx);
-    const identity = await authenticate(request, env);
-    if ('status' in identity)
-      return Response.json(
-        { _tag: identity.status === 401 ? 'Unauthorized' : 'Forbidden' },
-        { status: identity.status },
-      );
-    if (foreignOrigin(request, url))
-      return Response.json({ _tag: 'Forbidden' }, { status: 403 });
-    if (url.pathname.startsWith('/api/authorizations/'))
-      return sanitized(routesFor(env.DB, url.origin).owner(request));
-    if (!knownRoute(url.pathname, request.method))
-      return Response.json({ error: 'Not found' }, { status: 404 });
-    const response = await sanitized(
-      handlerFor(
-        identity.email,
-        env.DB,
-        identity.grant,
-        env.VAULT_KEY,
-        env,
-      )(request, ctx),
-    );
-    if (matches([revealRoute], request.method, url.pathname))
-      response.headers.set('Cache-Control', 'no-store');
-    return response;
+    return ownerRequest(request, url, env, ctx);
   },
   scheduled(
     controller: ScheduledController,
-    env: SearchBindings & { DB: D1Database },
+    env: SearchBindings & FileBindings & { DB: D1Database },
   ) {
     return Effect.runPromise(
-      memorySync(memoryIndex(env)).pipe(
-        Effect.flatMap((store) => store.sync(controller.scheduledTime)),
-        Effect.provide(D1Client.layer({ db: env.DB })),
-        // Failed writes leave their markers pending for the next scheduled run.
-        Effect.catchCause(() => Effect.void),
-      ),
+      Effect.all([
+        memorySync(memoryIndex(env)).pipe(
+          Effect.flatMap((store) => store.sync(controller.scheduledTime)),
+          Effect.catchCause(() => Effect.void),
+        ),
+        fileSweep(env).pipe(Effect.catchCause(() => Effect.void)),
+      ]).pipe(Effect.asVoid, Effect.provide(D1Client.layer({ db: env.DB }))),
     );
   },
 };

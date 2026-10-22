@@ -1,4 +1,4 @@
-import type { AuditEntry } from '@nook/contract';
+import type { AuditEntry, FileAuditEntry } from '@nook/contract';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { cn } from 'cn';
@@ -92,7 +92,7 @@ function Filters({
   );
   const secretPaths = filterPaths(
     secrets,
-    entries.map((entry) => entry.path),
+    entries.flatMap((entry) => ('path' in entry ? [entry.path] : [])),
     filters.secret,
   ).filter((path) => path === filters.secret || inBucket(path, filters.bucket));
   const changeBucket = (value: string): AuditFilters => {
@@ -198,6 +198,17 @@ function Filters({
   );
 }
 
+const outcomeLabels = {
+  delivered: 'Delivered',
+  denied: 'Denied',
+  revealed: 'Revealed',
+  created: 'Created',
+  file_attached: 'File attached',
+  file_replaced: 'File replaced',
+  file_downloaded: 'File downloaded',
+  file_detached: 'File detached',
+  file_forgotten: 'File forgotten',
+};
 function Outcome({ entry }: { entry: AuditEntry }) {
   return entry.outcome === 'denied' ? (
     <Badge variant="destructive">
@@ -211,11 +222,7 @@ function Outcome({ entry }: { entry: AuditEntry }) {
       ) : (
         <CircleCheck className="size-3" aria-hidden />
       )}
-      {entry.outcome === 'revealed'
-        ? 'Revealed'
-        : entry.outcome === 'created'
-          ? 'Created'
-          : 'Delivered'}
+      {outcomeLabels[entry.outcome]}
     </span>
   );
 }
@@ -234,6 +241,13 @@ function Fact({
   );
 }
 function entrySource(entry: AuditEntry) {
+  if ('memoryId' in entry)
+    return {
+      name: entry.principal.kind === 'machine' ? entry.principal.name : 'Owner',
+      detail: [entry.client.name, entry.client.version]
+        .filter(Boolean)
+        .join(' '),
+    };
   if (entry.outcome === 'revealed')
     return {
       name: 'Web app',
@@ -255,6 +269,11 @@ function Entry({
 }) {
   const [open, setOpen] = useState(false);
   const { name: machineName, detail: executable } = entrySource(entry);
+  const summary =
+    'purpose' in entry
+      ? entry.purpose
+      : `${entry.size.toLocaleString('en-US')} bytes`;
+  const path = 'path' in entry ? entry.path : `${entry.memoryId}/${entry.name}`;
   return (
     <li
       data-entry={entry.id}
@@ -298,8 +317,8 @@ function Entry({
               </div>
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm" title={entry.purpose}>
-                {entry.purpose}
+              <p className="truncate text-sm" title={summary}>
+                {summary}
               </p>
               <p className="mt-1 truncate text-xs text-muted-foreground lg:hidden">
                 {machineName}
@@ -322,7 +341,7 @@ function Entry({
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label={`${open ? 'Hide' : 'Show'} details for ${entry.path}, ${recentTime(entry.at)}`}
+              aria-label={`${open ? 'Hide' : 'Show'} details for ${path}, ${recentTime(entry.at)}`}
             >
               <ChevronRight
                 className={cn('transition-transform', open && 'rotate-90')}
@@ -358,6 +377,8 @@ function EntryDetails({
   revoked: boolean;
   deleted: boolean;
 }) {
+  if ('memoryId' in entry)
+    return <FileEntryDetails entry={entry} revoked={revoked} />;
   return (
     <div className="border-t bg-muted/30 px-4 py-4 lg:px-6">
       {entry.outcome === 'denied' && (
@@ -435,6 +456,69 @@ function EntryDetails({
     </div>
   );
 }
+function FileEntryDetails({
+  entry,
+  revoked,
+}: {
+  entry: FileAuditEntry;
+  revoked: boolean;
+}) {
+  return (
+    <div className="border-t bg-muted/30 px-4 py-4 lg:px-6">
+      <dl className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Fact label="File">
+          <span className="font-mono">{entry.name}</span>
+        </Fact>
+        <Fact label="Memory">
+          <span className="font-mono">{entry.memoryId}</span>
+        </Fact>
+        <Fact label="Recorded">
+          <time dateTime={entry.at}>{formatDateTime(entry.at)}</time>
+        </Fact>
+        <Fact label="Size">{entry.size.toLocaleString('en-US')} bytes</Fact>
+        <Fact label="SHA-256">
+          <span className="font-mono break-all">{entry.sha256}</span>
+        </Fact>
+        {entry.replacedSha256 && (
+          <Fact label="Replaced SHA-256">
+            <span className="font-mono break-all">{entry.replacedSha256}</span>
+          </Fact>
+        )}
+        <Fact label="Source">
+          {entry.principal.kind === 'machine' ? entry.principal.name : 'Owner'}
+          {revoked && <Badge variant="outline">Revoked</Badge>}
+        </Fact>
+        <Fact label="Client (as reported)">
+          {[entry.client.name, entry.client.version].filter(Boolean).join(' ')}
+        </Fact>
+        {entry.principal.kind === 'owner' && (
+          <>
+            <Fact label="IP address">{entry.ip ?? 'Unknown'}</Fact>
+            <Fact label="Country">{countryName(entry.country)}</Fact>
+          </>
+        )}
+      </dl>
+      <Button size="sm" variant="ghost" asChild className="mt-4">
+        <Link to="/audit" search={{ bucket: entry.bucket }}>
+          Activity in this bucket
+        </Link>
+      </Button>
+    </div>
+  );
+}
+function revokedEntry(entry: AuditEntry, machines?: readonly { id: string }[]) {
+  if ('memoryId' in entry) {
+    const principal = entry.principal;
+    return (
+      principal.kind === 'machine' &&
+      missingFrom(machines, (machine) => machine.id === principal.id)
+    );
+  }
+  return (
+    entry.outcome !== 'revealed' &&
+    missingFrom(machines, (machine) => machine.id === entry.machine.id)
+  );
+}
 function Loading() {
   return (
     <div
@@ -507,7 +591,8 @@ export function AuditPage() {
       </h1>
       <p className="max-w-2xl text-sm text-muted-foreground">
         Every secret use, creation, and reveal, newest first. Review what
-        happened, why, and by which machine.
+        happened, why, and by which machine. File attachments, replacements,
+        downloads, detaches and forgetting appear here too.
       </p>
       <Filters
         filters={filters}
@@ -604,17 +689,11 @@ function AuditResults({
               <Entry
                 key={entry.id}
                 entry={entry}
-                revoked={
-                  entry.outcome !== 'revealed' &&
-                  missingFrom(
-                    machines,
-                    (machine) => machine.id === entry.machine.id,
-                  )
+                revoked={revokedEntry(entry, machines)}
+                deleted={
+                  'path' in entry &&
+                  missingFrom(secrets, (secret) => secret.path === entry.path)
                 }
-                deleted={missingFrom(
-                  secrets,
-                  (secret) => secret.path === entry.path,
-                )}
               />
             ))}
           </ul>

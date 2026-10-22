@@ -73,13 +73,6 @@ export const Api = HttpApi.make('nook')
   .add(
     HttpApiGroup.make('memories')
       .add(
-        HttpApiEndpoint.get('downloadFile', '/api/memories/:id/files/:name', {
-          params: FileParams,
-          success: FileStream,
-          error: [...errors, MemoryNotFound, FileNotFound, InvalidFile],
-        }),
-      )
-      .add(
         HttpApiEndpoint.delete('forget', '/api/memories/:id', {
           params: Schema.Struct({ id: Schema.String }),
           query: Schema.Struct({
@@ -132,6 +125,13 @@ export const Api = HttpApi.make('nook')
           params: Schema.Struct({ id: Schema.String }),
           success: OwnerMemory,
           error: [...errors, MemoryNotFound],
+        }),
+      )
+      .add(
+        HttpApiEndpoint.get('downloadFile', '/api/memories/:id/files/:name', {
+          params: FileParams,
+          success: FileStream,
+          error: [...errors, MemoryNotFound, FileNotFound, InvalidFile],
         }),
       ),
   )
