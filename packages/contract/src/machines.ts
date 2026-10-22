@@ -11,6 +11,17 @@ import {
   GrantBucketNotFound,
   InvalidBucketGrant,
 } from './grants.ts';
+import { MemoryNotFound } from './memory.ts';
+import {
+  FileAttached,
+  FileBytes,
+  FileNotFound,
+  FileParams,
+  FileQuotaExceeded,
+  FileStream,
+  FileTooLarge,
+  InvalidFile,
+} from './memory-files.ts';
 import {
   CreateMachineSecret,
   DeliveredSecrets,
@@ -151,6 +162,47 @@ export const AuthorizationsApi = HttpApi.make('owner-authorizations').add(
 );
 export const MachineApi = HttpApi.make('machine').add(
   HttpApiGroup.make('machine')
+    .add(
+      HttpApiEndpoint.put(
+        'attachFile',
+        '/api/machine/memories/:id/files/:name',
+        {
+          headers: Schema.Struct({
+            authorization: Schema.String,
+            'content-type': Schema.String,
+          }),
+          params: FileParams,
+          payload: FileBytes,
+          success: FileAttached,
+          error: [
+            ...machineErrors,
+            HttpApiError.Forbidden,
+            MemoryNotFound,
+            InvalidFile,
+            FileTooLarge,
+            FileQuotaExceeded,
+          ],
+        },
+      ),
+    )
+    .add(
+      HttpApiEndpoint.get(
+        'downloadFile',
+        '/api/machine/memories/:id/files/:name',
+        {
+          headers: Schema.Struct({ authorization: Schema.String }),
+          params: FileParams,
+          success: FileStream,
+          error: [
+            ...machineErrors,
+            HttpApiError.Forbidden,
+            MemoryNotFound,
+            FileNotFound,
+            InvalidFile,
+          ],
+        },
+      ),
+    )
     .add(
       HttpApiEndpoint.post('authorize', '/api/machine/authorizations', {
         payload: Schema.Struct({

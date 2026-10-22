@@ -21,7 +21,6 @@ import {
   InvalidMemory,
   InvalidMemoryCursor,
   InvalidMemorySearch,
-  Memory,
   MemoryChanged,
   MemoryCounts,
   MemoryHistory,
@@ -30,8 +29,15 @@ import {
   MemoryPage,
   MemoryQuery,
   MemorySearchQuery,
+  OwnerMemory,
   OwnerMemorySearchResults,
 } from './memory.ts';
+import {
+  FileNotFound,
+  FileParams,
+  FileStream,
+  InvalidFile,
+} from './memory-files.ts';
 import { SecretKeyUnavailable } from './run.ts';
 import {
   BucketHasSecrets,
@@ -53,6 +59,7 @@ export * from './error-status.ts';
 export * from './grants.ts';
 export * from './machines.ts';
 export * from './memory.ts';
+export * from './memory-files.ts';
 export * from './run.ts';
 export * from './vault.ts';
 export const Owner = Schema.Struct({ email: Schema.String });
@@ -65,6 +72,13 @@ const errors = [
 export const Api = HttpApi.make('nook')
   .add(
     HttpApiGroup.make('memories')
+      .add(
+        HttpApiEndpoint.get('downloadFile', '/api/memories/:id/files/:name', {
+          params: FileParams,
+          success: FileStream,
+          error: [...errors, MemoryNotFound, FileNotFound, InvalidFile],
+        }),
+      )
       .add(
         HttpApiEndpoint.delete('forget', '/api/memories/:id', {
           params: Schema.Struct({ id: Schema.String }),
@@ -116,7 +130,7 @@ export const Api = HttpApi.make('nook')
       .add(
         HttpApiEndpoint.get('get', '/api/memories/:id', {
           params: Schema.Struct({ id: Schema.String }),
-          success: Memory,
+          success: OwnerMemory,
           error: [...errors, MemoryNotFound],
         }),
       ),

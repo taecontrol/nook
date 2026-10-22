@@ -1,4 +1,5 @@
 import { Schema } from 'effect';
+import { MemoryClient, Principal } from './provenance.ts';
 
 const EntryFacts = Schema.Struct({
   id: Schema.String,
@@ -13,7 +14,7 @@ const MachineFacts = EntryFacts.mapFields((fields) => ({
   machine: Schema.Struct({ id: Schema.String, name: Schema.String }),
   workingDirectory: Schema.String,
 }));
-export const AuditEntry = Schema.Union([
+export const VaultAuditEntry = Schema.Union([
   MachineFacts.mapFields((fields) => ({
     ...fields,
     outcome: Schema.Literals(['delivered', 'denied']),
@@ -31,6 +32,32 @@ export const AuditEntry = Schema.Union([
     country: Schema.NullOr(Schema.String),
   })),
 ]);
+export type VaultAuditEntry = typeof VaultAuditEntry.Type;
+export const FileAuditOutcome = Schema.Literals([
+  'file_attached',
+  'file_replaced',
+  'file_downloaded',
+  'file_detached',
+  'file_forgotten',
+]);
+export type FileAuditOutcome = typeof FileAuditOutcome.Type;
+export const FileAuditEntry = Schema.Struct({
+  id: Schema.String,
+  at: Schema.String,
+  outcome: FileAuditOutcome,
+  bucket: Schema.String,
+  memoryId: Schema.String,
+  name: Schema.String,
+  size: Schema.Number,
+  sha256: Schema.String,
+  replacedSha256: Schema.NullOr(Schema.String),
+  principal: Principal,
+  client: MemoryClient,
+  ip: Schema.NullOr(Schema.String),
+  country: Schema.NullOr(Schema.String),
+});
+export type FileAuditEntry = typeof FileAuditEntry.Type;
+export const AuditEntry = Schema.Union([VaultAuditEntry, FileAuditEntry]);
 export type AuditEntry = typeof AuditEntry.Type;
 export const AuditFilters = Schema.Struct({
   bucket: Schema.optionalKey(Schema.String),

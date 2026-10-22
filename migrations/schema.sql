@@ -1,3 +1,4 @@
+CREATE INDEX audit_entries_bucket ON audit_entries(bucket, at DESC, id DESC);
 CREATE INDEX audit_entries_chronology ON audit_entries(at DESC, id DESC);
 CREATE INDEX audit_entries_secret ON audit_entries(path, at DESC, id DESC);
 CREATE UNIQUE INDEX machine_tokens_id ON machine_tokens(id);
@@ -7,9 +8,9 @@ CREATE INDEX memory_vector_removals_age ON memory_vector_removals(forgotten_at, 
 CREATE TABLE "audit_entries" (
   id TEXT PRIMARY KEY NOT NULL,
   at TEXT NOT NULL,
-  outcome TEXT NOT NULL CHECK (outcome IN ('delivered', 'denied', 'created', 'revealed')),
-  path TEXT NOT NULL,
-  purpose TEXT NOT NULL,
+  outcome TEXT NOT NULL CHECK (outcome IN ('delivered', 'denied', 'created', 'revealed', 'file_attached', 'file_replaced', 'file_downloaded', 'file_detached', 'file_forgotten')),
+  path TEXT,
+  purpose TEXT,
   machine_id TEXT,
   machine_name TEXT,
   working_directory TEXT,
@@ -17,10 +18,39 @@ CREATE TABLE "audit_entries" (
   run_id TEXT,
   ip TEXT,
   country TEXT,
+  bucket TEXT,
+  memory_id TEXT,
+  file_name TEXT,
+  file_size INTEGER,
+  file_sha256 TEXT,
+  replaced_sha256 TEXT,
+  client_name TEXT,
+  client_version TEXT,
   CHECK (
-    (outcome = 'revealed' AND machine_id IS NULL AND machine_name IS NULL AND working_directory IS NULL AND executable IS NULL AND run_id IS NULL)
-    OR (outcome = 'created' AND machine_id IS NOT NULL AND machine_name IS NOT NULL AND working_directory IS NOT NULL AND executable IS NULL AND run_id IS NULL AND ip IS NULL AND country IS NULL)
-    OR (outcome IN ('delivered', 'denied') AND machine_id IS NOT NULL AND machine_name IS NOT NULL AND working_directory IS NOT NULL AND executable IS NOT NULL AND run_id IS NOT NULL AND ip IS NULL AND country IS NULL)
+    (path IS NOT NULL AND purpose IS NOT NULL
+      AND memory_id IS NULL AND file_name IS NULL AND file_size IS NULL
+      AND file_sha256 IS NULL AND replaced_sha256 IS NULL
+      AND client_name IS NULL AND client_version IS NULL
+      AND (
+        (outcome = 'revealed' AND machine_id IS NULL AND machine_name IS NULL AND working_directory IS NULL AND executable IS NULL AND run_id IS NULL)
+        OR (outcome = 'created' AND machine_id IS NOT NULL AND machine_name IS NOT NULL AND working_directory IS NOT NULL AND executable IS NULL AND run_id IS NULL AND ip IS NULL AND country IS NULL)
+        OR (outcome IN ('delivered', 'denied') AND machine_id IS NOT NULL AND machine_name IS NOT NULL AND working_directory IS NOT NULL AND executable IS NOT NULL AND run_id IS NOT NULL AND ip IS NULL AND country IS NULL)
+      ))
+    OR (outcome IN ('file_attached', 'file_replaced', 'file_downloaded', 'file_detached', 'file_forgotten')
+      AND path IS NULL AND purpose IS NULL
+      AND bucket IS NOT NULL AND length(bucket)>0
+      AND memory_id IS NOT NULL AND length(memory_id)=36
+      AND file_name IS NOT NULL AND length(CAST(file_name AS BLOB)) BETWEEN 1 AND 255
+      AND instr(file_name,'/')=0 AND instr(file_name,'\')=0 AND file_name NOT IN ('.','..')
+      AND file_size IS NOT NULL AND file_size BETWEEN 0 AND 26214400
+      AND file_sha256 IS NOT NULL AND length(file_sha256)=64 AND file_sha256 NOT GLOB '*[^0-9a-f]*'
+      AND ((outcome='file_replaced' AND replaced_sha256 IS NOT NULL AND length(replaced_sha256)=64 AND replaced_sha256 NOT GLOB '*[^0-9a-f]*')
+        OR (outcome<>'file_replaced' AND replaced_sha256 IS NULL))
+      AND client_name IS NOT NULL AND length(client_name) BETWEEN 1 AND 128
+      AND (client_version IS NULL OR length(client_version) BETWEEN 1 AND 64)
+      AND working_directory IS NULL AND executable IS NULL AND run_id IS NULL
+      AND ((machine_id IS NOT NULL AND machine_name IS NOT NULL AND ip IS NULL AND country IS NULL)
+        OR (machine_id IS NULL AND machine_name IS NULL)))
   )
 );
 CREATE TABLE authorizations (
@@ -35,6 +65,7 @@ CREATE TABLE authorizations (
   expires_at INTEGER NOT NULL
 );
 CREATE TABLE buckets (path TEXT PRIMARY KEY NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE file_sweep (id INTEGER PRIMARY KEY CHECK (id=1), cursor TEXT, swept_at TEXT);
 CREATE TABLE machine_tokens (
   token_hash TEXT PRIMARY KEY NOT NULL,
   machine_name TEXT NOT NULL,
@@ -55,6 +86,24 @@ CREATE TABLE 'memories_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID;
 CREATE TABLE 'memories_fts_data'(id INTEGER PRIMARY KEY, block BLOB);
 CREATE TABLE 'memories_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB);
 CREATE TABLE 'memories_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID;
+CREATE TABLE memory_files (
+  memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE RESTRICT,
+  name TEXT NOT NULL CHECK (length(CAST(name AS BLOB)) BETWEEN 1 AND 255
+    AND instr(name,'/')=0 AND instr(name,'\')=0 AND name NOT IN ('.','..')),
+  object_key TEXT NOT NULL UNIQUE,
+  media_type TEXT NOT NULL,
+  size INTEGER NOT NULL CHECK (size BETWEEN 0 AND 26214400),
+  sha256 TEXT NOT NULL CHECK (length(sha256)=64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
+  principal TEXT NOT NULL CHECK (principal IN ('machine','owner')),
+  machine_id TEXT,
+  machine_name TEXT,
+  client_name TEXT NOT NULL CHECK (length(client_name) BETWEEN 1 AND 128),
+  client_version TEXT CHECK (client_version IS NULL OR length(client_version) BETWEEN 1 AND 64),
+  attached_at TEXT NOT NULL,
+  CHECK ((principal='machine' AND machine_id IS NOT NULL AND machine_name IS NOT NULL)
+      OR (principal='owner' AND machine_id IS NULL AND machine_name IS NULL)),
+  PRIMARY KEY (memory_id, name)
+) WITHOUT ROWID;
 CREATE TABLE memory_vector_removals (
   id TEXT PRIMARY KEY CHECK (length(id) = 36),
   forgotten_at TEXT NOT NULL
@@ -87,6 +136,9 @@ CREATE TABLE secrets (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (bucket, name)
 ) WITHOUT ROWID;
+CREATE TRIGGER audit_entries_assign_bucket AFTER INSERT ON audit_entries WHEN NEW.bucket IS NULL AND NEW.path IS NOT NULL BEGIN
+  UPDATE audit_entries SET bucket=substr(NEW.path,1,length(NEW.path)-length(json_extract('["' || replace(NEW.path,'/','","') || '"]','$[#-1]'))-1) WHERE id=NEW.id;
+END;
 CREATE TRIGGER buckets_reserve_me BEFORE DELETE ON buckets WHEN OLD.path = 'me' BEGIN SELECT RAISE(ABORT, 'The me bucket cannot be deleted.'); END;
 CREATE TRIGGER machine_tokens_assign_id AFTER INSERT ON machine_tokens WHEN NEW.id IS NULL BEGIN UPDATE machine_tokens SET id = lower(hex(randomblob(16))) WHERE token_hash = NEW.token_hash; END;
 CREATE TRIGGER memories_fts_current_update AFTER UPDATE OF current_version ON memories BEGIN INSERT INTO memories_fts(memories_fts, rowid, content, tags) SELECT 'delete', OLD.seq, content, tags FROM memory_versions WHERE memory_id = OLD.id AND version = OLD.current_version; INSERT INTO memories_fts(rowid, content, tags) SELECT NEW.seq, content, tags FROM memory_versions WHERE memory_id = NEW.id AND version = NEW.current_version; END;

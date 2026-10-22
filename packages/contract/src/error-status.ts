@@ -29,6 +29,13 @@ import {
   MemoryChanged,
   MemoryNotFound,
 } from './memory.ts';
+import {
+  FileChanged,
+  FileNotFound,
+  FileQuotaExceeded,
+  FileTooLarge,
+  InvalidFile,
+} from './memory-files.ts';
 import { InvalidRun, SecretKeyUnavailable, SecretsForbidden } from './run.ts';
 import {
   BucketHasSecrets,
@@ -55,6 +62,11 @@ const errors = [
   BucketHasSecrets,
   VaultNotConfigured,
   InvalidMemory,
+  InvalidFile,
+  FileNotFound,
+  FileChanged,
+  FileTooLarge,
+  FileQuotaExceeded,
   DuplicateMemory,
   MemoryChanged,
   MemoryNotFound,
