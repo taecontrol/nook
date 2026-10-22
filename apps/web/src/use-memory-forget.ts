@@ -17,7 +17,7 @@ import {
   refreshChanged,
   useForgetMemory,
 } from './memory-forget-api';
-import type { MemorySearch } from './memory-location';
+import { type MemorySearch, memoryLocation } from './memory-location';
 import { focusSoon, useConfirmTarget } from './use-confirm-target';
 
 export const memoryRowSelector = (id: string) =>
@@ -112,10 +112,20 @@ function shouldRestore(
   pathname: string,
   wasOpen: boolean,
   desktop: boolean,
-  current: string | undefined,
-  neighbor: string | undefined,
+  currentSearch: MemorySearch,
+  expectedSearch: MemorySearch,
 ) {
-  return pathname === '/memory' && wasOpen && desktop && current === neighbor;
+  const current = memoryLocation(currentSearch);
+  const expected = memoryLocation(expectedSearch);
+  return (
+    pathname === '/memory' &&
+    wasOpen &&
+    desktop &&
+    current.search.memory === expected.search.memory &&
+    current.bucket === expected.bucket &&
+    current.scope === expected.scope &&
+    current.q === expected.q
+  );
 }
 export function useMemoryForget({
   order,
@@ -203,8 +213,15 @@ export function useMemoryForget({
     } catch (error) {
       if (writeOutcome(error) !== 'definitive') return;
       const location = router.latestLocation;
-      const current = (location.search as MemorySearch).memory;
-      if (shouldRestore(location.pathname, wasOpen, desktop, current, neighbor))
+      if (
+        shouldRestore(
+          location.pathname,
+          wasOpen,
+          desktop,
+          location.search as MemorySearch,
+          { bucket, scope, q, memory: neighbor },
+        )
+      )
         select(subject.id);
     }
   };
