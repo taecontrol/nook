@@ -1,8 +1,18 @@
-import { type MemoryListItem, memoryTitle } from '@nook/contract';
+import {
+  type MemoryListItem,
+  memoryTitle,
+  type OwnerMemory,
+} from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import { cn } from 'cn';
-import { ArrowLeft, BookOpen, ChevronRight, History } from 'lucide-react';
-import { lazy, Suspense, useRef } from 'react';
+import {
+  ArrowLeft,
+  BookOpen,
+  ChevronRight,
+  History,
+  Paperclip,
+} from 'lucide-react';
+import { lazy, type RefObject, Suspense, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,6 +24,11 @@ import {
 } from '@/components/ui/empty';
 import { Item, ItemContent, ItemTitle } from '@/components/ui/item';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { ApiError, describeFailure } from './api-client';
 import { BucketTree, BucketTreeSkeleton } from './bucket-tree';
 import { LoadFailure } from './failure';
@@ -37,6 +52,11 @@ import './memory.css';
 const loadHistory = () => import('./memory-history-sheet');
 const HistorySheet = lazy(() =>
   loadHistory().then((module) => ({ default: module.HistorySheet })),
+);
+
+const loadFiles = () => import('./memory-files-sheet');
+const FilesSheet = lazy(() =>
+  loadFiles().then((module) => ({ default: module.FilesSheet })),
 );
 
 function BucketNav({ model }: { model: MemoryPageModel }) {
@@ -370,8 +390,88 @@ function MemoryBack({ model }: { model: MemoryPageModel }) {
     </div>
   );
 }
+function ReadingActions({
+  model,
+  memory,
+  filesFocus,
+  historyFocus,
+}: {
+  model: MemoryPageModel;
+  memory: OwnerMemory;
+  filesFocus: RefObject<HTMLButtonElement | null>;
+  historyFocus: RefObject<HTMLButtonElement | null>;
+}) {
+  return (
+    <>
+      {memory.files.length > 0 && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              ref={filesFocus}
+              variant="outline"
+              size="sm"
+              className="ml-auto"
+              data-memory-files
+              aria-label={`Files, ${memory.files.length}`}
+              onMouseEnter={() => {
+                model.prefetchFiles();
+                void loadFiles();
+              }}
+              onFocus={() => {
+                model.prefetchFiles();
+                void loadFiles();
+              }}
+              onClick={model.openFiles}
+            >
+              <Paperclip />
+              <span aria-hidden className="lg:hidden">
+                Files
+              </span>
+              <span aria-hidden className="tabular-nums">
+                {memory.files.length}
+              </span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Files</TooltipContent>
+        </Tooltip>
+      )}
+      <Button
+        ref={historyFocus}
+        variant="outline"
+        size="sm"
+        className={memory.files.length > 0 ? undefined : 'ml-auto'}
+        data-memory-history
+        onMouseEnter={() => {
+          model.prefetchHistory();
+          void loadHistory();
+        }}
+        onFocus={() => {
+          model.prefetchHistory();
+          void loadHistory();
+        }}
+        onClick={model.openHistory}
+      >
+        <History /> History{' '}
+        <span>
+          {memory.version} {memory.version === 1 ? 'version' : 'versions'}
+        </span>
+      </Button>
+      <MemoryActions
+        pane
+        subject={{
+          id: memory.id,
+          bucket: memory.bucket,
+          title: memoryTitle(memory.content),
+          version: memory.version,
+        }}
+        model={model}
+      />
+    </>
+  );
+}
 function ReadingPane({ model }: { model: MemoryPageModel }) {
   const returnFocus = useRef<HTMLButtonElement>(null);
+  const filesFocus = useRef<HTMLButtonElement>(null);
   const memory = model.selected;
   if (!memory)
     return (
@@ -396,36 +496,11 @@ function ReadingPane({ model }: { model: MemoryPageModel }) {
               ? 'Stored here'
               : 'Inherited memory'}
           </span>
-          <Button
-            ref={returnFocus}
-            variant="outline"
-            size="sm"
-            className="ml-auto"
-            data-memory-history
-            onMouseEnter={() => {
-              model.prefetchHistory();
-              void loadHistory();
-            }}
-            onFocus={() => {
-              model.prefetchHistory();
-              void loadHistory();
-            }}
-            onClick={model.openHistory}
-          >
-            <History /> History{' '}
-            <span>
-              {memory.version} {memory.version === 1 ? 'version' : 'versions'}
-            </span>
-          </Button>
-          <MemoryActions
-            pane
-            subject={{
-              id: memory.id,
-              bucket: memory.bucket,
-              title: memoryTitle(memory.content),
-              version: memory.version,
-            }}
+          <ReadingActions
             model={model}
+            memory={memory}
+            filesFocus={filesFocus}
+            historyFocus={returnFocus}
           />
         </div>
         <h2 className="max-w-3xl text-2xl font-semibold tracking-tight wrap-anywhere">
@@ -448,6 +523,16 @@ function ReadingPane({ model }: { model: MemoryPageModel }) {
           <MemoryMarkdown content={memory.content} />
         </div>
       </div>
+      {model.filesOpen && (
+        <Suspense fallback={null}>
+          <FilesSheet
+            key={memory.id}
+            model={model}
+            memory={memory}
+            returnFocus={filesFocus}
+          />
+        </Suspense>
+      )}
       {model.historyOpen && (
         <Suspense fallback={null}>
           <HistorySheet

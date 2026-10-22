@@ -1,4 +1,4 @@
-import type { Memory, MemoryScope } from '@nook/contract';
+import type { MemoryScope, OwnerMemory } from '@nook/contract';
 import {
   type InferDataFromTag,
   type Query,
@@ -21,10 +21,11 @@ import {
 
 export function writeMemory(
   queries: QueryClient,
-  memory: Memory,
-): Memory | undefined {
-  return queries.setQueryData<Memory>(memoryKeys.detail(memory.id), (current) =>
-    newer(current, memory),
+  memory: OwnerMemory,
+): OwnerMemory | undefined {
+  return queries.setQueryData<OwnerMemory>(
+    memoryKeys.detail(memory.id),
+    (current) => newer(current, memory),
   );
 }
 
