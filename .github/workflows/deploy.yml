@@ -67,7 +67,7 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           test -n "$CLOUDFLARE_API_TOKEN"
           files=$(node --input-type=module -e 'import fs from "node:fs"; const config=JSON.parse(fs.readFileSync("wrangler.jsonc", "utf8")); console.log(config.r2_buckets.find(binding => binding.binding === "FILES").bucket_name)')
-          buckets=$(NO_COLOR=1 pnpm exec wrangler r2 bucket list)
+          buckets=$(FORCE_COLOR=0 NO_COLOR=1 pnpm exec wrangler r2 bucket list)
           if ! printf '%s' "$buckets" | node --input-type=module -e 'let input=""; for await (const part of process.stdin) input+=part; process.exit([...input.matchAll(/^name:\s+(\S+)\s*$/gm)].some(match => match[1] === process.argv[1]) ? 0 : 1)' "$files"; then
             pnpm exec wrangler r2 bucket create "$files"
           fi
