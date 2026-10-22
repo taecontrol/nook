@@ -131,6 +131,7 @@ it.each(['restored row', 'cached history', 'already absent'] as const)(
       await unknown.waitFor();
       await page.waitForLoadState('networkidle');
       const row = page.locator(`[data-memory-row="${forgottenId}"]`);
+      if (state !== 'already absent') await row.waitFor();
       expect(await row.count()).toBe(state === 'already absent' ? 0 : 1);
       expect(
         await page.locator('[data-path="work/acme"]').innerText(),
