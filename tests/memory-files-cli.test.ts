@@ -457,3 +457,100 @@ it('E16: EEXIST during publication preserves a competing destination and cleans 
     [...before, pdfName].sort(),
   );
 });
+
+it.each([
+  { name: 'EMPTY.unknown', bytes: 0, mediaType: 'application/octet-stream' },
+  { name: 'GUIDE.PDF', bytes: 21, mediaType: 'application/pdf' },
+])(
+  'CLI infers $mediaType for $name and round-trips $bytes bytes',
+  async ({ name, bytes: size, mediaType }) => {
+    const path = resolve(keyring.home, name);
+    const bytes = Buffer.alloc(size, 149);
+    await writeFile(path, bytes);
+    const uploaded = await attach(path);
+    expect(uploaded.status).toBe(0);
+    expect(uploaded.stderr).toBe('');
+    expect(JSON.parse(uploaded.stdout)).toEqual({
+      id: fileMemory,
+      bucket: fileBucket,
+      name,
+      mediaType,
+      size,
+      sha256: digest(bytes),
+      outcome: 'created',
+      replacedSha256: null,
+    });
+    const destination = resolve(keyring.home, 'downloaded');
+    const received = await download(name, ['--output', destination]);
+    expect(received.status).toBe(0);
+    expect(received.stderr).toBe('');
+    expect(JSON.parse(received.stdout)).toEqual({
+      path: destination,
+      size,
+      sha256: digest(bytes),
+    });
+    expect(digest(await readFile(destination))).toBe(digest(bytes));
+  },
+);
+it('CLI rejects an upload response whose digest differs from the local digest without exposing bytes', async () => {
+  const bytes = Buffer.from(`upload-canary-${crypto.randomUUID()}`);
+  const path = resolve(keyring.home, 'upload.bin');
+  await writeFile(path, bytes);
+  const transport = await proxy({
+    after: async (response) => {
+      if (response.status !== 200) return response;
+      return Response.json({
+        ...(await response.json()),
+        sha256: '0'.repeat(64),
+      });
+    },
+  });
+  const result = await attach(path);
+  publicFailure(result, 'Could not verify the uploaded file. Attach it again.');
+  expectNoValue(result.stdout + result.stderr, [bytes.toString()]);
+  expect(transport.requests).toHaveLength(1);
+});
+it.each(['missing digest', 'invalid digest', 'missing size'] as const)(
+  'CLI refuses download metadata with %s and removes its temporary file',
+  async (fault) => {
+    await attachFile(app, machine.token);
+    await proxy({
+      after: async (response) => {
+        const headers = new Headers(response.headers);
+        if (fault === 'missing digest') headers.delete('x-nook-sha256');
+        if (fault === 'invalid digest') headers.set('x-nook-sha256', 'invalid');
+        if (fault === 'missing size') headers.delete('content-length');
+        return new Response(response.body, {
+          status: response.status,
+          headers,
+        });
+      },
+    });
+    const directory = resolve(keyring.home, 'downloads');
+    await mkdir(directory);
+    publicFailure(
+      await download(pdfName, [], directory),
+      'The file changed while downloading; nothing was written. Download it again.',
+    );
+    expect(await readdir(directory)).toEqual([]);
+  },
+);
+it.each(['missing.bin', 'directory'])(
+  'CLI refuses unreadable source %s before a request',
+  async (name) => {
+    const transport = await proxy();
+    const path = resolve(keyring.home, name);
+    if (name === 'directory') await mkdir(path);
+    publicFailure(await attach(path), `Could not read ${path}.`);
+    expect(transport.requests).toEqual([]);
+  },
+);
+it('CLI refuses an unwritable download location before a request', async () => {
+  const transport = await proxy();
+  const path = resolve(keyring.home, 'absent', 'download.bin');
+  publicFailure(
+    await download(pdfName, ['--output', path]),
+    `Could not write ${path}.`,
+  );
+  expect(transport.requests).toEqual([]);
+});

@@ -45,6 +45,9 @@ export async function fileTransport(
         )
           headers.set(name, Array.isArray(value) ? value.join(', ') : value);
       }
+      // Fetch decodes compression but retains its headers. Forward identity
+      // bytes so the downstream fetch cannot decompress the same body twice.
+      headers.set('accept-encoding', 'identity');
       const upstream =
         injected ??
         (await fetch(app.origin + path, {
