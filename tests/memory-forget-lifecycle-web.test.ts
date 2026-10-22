@@ -5,6 +5,7 @@ import { deferred } from './support/machines.ts';
 import { memoryId } from './support/memory.ts';
 import {
   confirmForget,
+  forgetMemory,
   forgetPage,
   forgottenId,
   memoryQueries,
@@ -103,6 +104,121 @@ it('an unconfirmed forget keeps its optimistic removal until an authoritative li
     await visit.close();
   }
 });
+
+it.each(['restored row', 'cached history', 'already absent'] as const)(
+  'an authoritative Check again removes forgotten content without decrementing counts twice; %s',
+  async (state) => {
+    const visit = await forgetPage(browser);
+    const oldRead = deferred();
+    const oldArrived = deferred();
+    const oldDelivered = deferred();
+    let checking = false;
+    try {
+      const { page, app } = visit;
+      await openForget(page);
+      await page.route('**/api/memories/*?expectedVersion=*', async (route) => {
+        if (state === 'already absent')
+          expect((await route.fetch()).status()).toBe(204);
+        await route.abort();
+      });
+      await page.route(`**/api/memories/${forgottenId}`, (route) =>
+        checking ? route.continue() : route.abort(),
+      );
+      await confirmForget(page);
+      const unknown = page
+        .getByRole('alert')
+        .filter({ hasText: 'Forget not confirmed' });
+      await unknown.waitFor();
+      await page.waitForLoadState('networkidle');
+      const row = page.locator(`[data-memory-row="${forgottenId}"]`);
+      expect(await row.count()).toBe(state === 'already absent' ? 0 : 1);
+      expect(
+        await page.locator('[data-path="work/acme"]').innerText(),
+      ).toContain(state === 'already absent' ? '2 memories' : '3 memories');
+      checking = true;
+      if (state === 'cached history') {
+        await row.click();
+        const history = page.getByRole('button', {
+          name: /History.*3 versions/,
+        });
+        await history.click();
+        await page.locator('[data-version-row="1"]').waitFor();
+        await page
+          .getByRole('dialog')
+          .getByRole('button', { name: 'Close', exact: true })
+          .click();
+        await page.route(
+          `**/api/memories/${forgottenId}/versions*`,
+          async (route) => {
+            const response = await route.fetch();
+            expect(response.status()).toBe(200);
+            oldArrived.resolve();
+            await oldRead.promise;
+            await route.fulfill({ response }).catch(() => {});
+            oldDelivered.resolve();
+          },
+        );
+        await page.clock.setFixedTime(new Date('2030-01-01T00:00:00Z'));
+        await history.hover();
+        await oldArrived.promise;
+      }
+      if (state !== 'already absent') await forgetMemory(app, forgottenId, 3);
+      const checked = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === `/api/memories/${forgottenId}` &&
+          response.status() === 404,
+      );
+      await unknown.getByRole('button', { name: 'Check again' }).click();
+      await (await checked).finished();
+      await page.getByText('Forgot Release process', { exact: true }).waitFor();
+      oldRead.resolve();
+      if (state === 'cached history') await oldDelivered.promise;
+      await page.waitForLoadState('networkidle');
+      expect
+        .soft(await row.count(), 'Authoritative absence removes cached rows')
+        .toBe(0);
+      expect
+        .soft(
+          await page
+            .getByRole('article', { name: 'Memory detail' })
+            .getByRole('heading', { name: 'Release process', exact: true })
+            .count(),
+          'Authoritative absence removes the cached reading pane',
+        )
+        .toBe(0);
+      if (state === 'cached history') {
+        expect
+          .soft(
+            await page
+              .getByRole('button', { name: /History.*versions?/ })
+              .count(),
+          )
+          .toBe(0);
+        const queries = await memoryQueries(page);
+        try {
+          expect
+            .soft(
+              await queries.evaluate(
+                (client, id) =>
+                  client.getQueryData(['memory-history', id]) !== undefined,
+                forgottenId,
+              ),
+              'A late history read cannot restore forgotten content',
+            )
+            .toBe(false);
+        } finally {
+          await queries.dispose();
+        }
+      }
+      expect(
+        await page.locator('[data-path="work/acme"]').innerText(),
+      ).toContain('2 memories');
+    } finally {
+      oldRead.resolve();
+      await visit.close();
+    }
+  },
+);
 
 it('an older Check again cannot repopulate the detail of a newer forget of the same memory', async () => {
   const visit = await forgetPage(browser);
