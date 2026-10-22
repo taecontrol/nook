@@ -24,7 +24,7 @@ async function probe(port: number) {
   });
 }
 
-async function reservePort() {
+async function reservePort<A>(start: (port: number) => Promise<A>) {
   const ephemeral =
     process.platform === 'linux'
       ? (await readFile('/proc/sys/net/ipv4/ip_local_port_range', 'utf8'))
@@ -50,10 +50,16 @@ async function reservePort() {
     }
     try {
       await probe(port);
-      return { port, release: () => rmdir(path) };
+      const started = await start(port);
+      return { port, started, release: () => rmdir(path) };
     } catch (error) {
       await rmdir(path);
-      if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;
+      if (
+        !['EADDRINUSE', 'ERR_ADDRESS_IN_USE'].includes(
+          (error as NodeJS.ErrnoException).code ?? '',
+        )
+      )
+        throw error;
     }
   }
   throw new Error('No test port available outside the ephemeral range.');
@@ -69,12 +75,11 @@ export async function runtime(
     coverageEndpoint?: boolean;
   } = {},
 ) {
-  const lease = await reservePort();
-  const origin = `http://127.0.0.1:${lease.port}`;
-  let started: Awaited<ReturnType<typeof startRuntime>>;
-  try {
-    started = await startRuntime({
-      port: lease.port,
+  // The probe cannot reserve an OS socket through asynchronous workerd startup.
+  // Allocation succeeds only once workerd owns it; requests execute afterward.
+  const lease = await reservePort((port) =>
+    startRuntime({
+      port,
       directory: options.directory ?? testBuild,
       configPath: options.configPath,
       bindings: options.bindings,
@@ -82,12 +87,10 @@ export async function runtime(
       r2Buckets: options.r2Buckets,
       coverage:
         Boolean(process.env.COVERAGE_RUN) || options.coverageEndpoint === true,
-    });
-  } catch (error) {
-    await lease.release();
-    throw error;
-  }
-  const { runtime: mf, settings: mfOptions } = started;
+    }),
+  );
+  const origin = `http://127.0.0.1:${lease.port}`;
+  const { runtime: mf, settings: mfOptions } = lease.started;
   let currentOptions = mfOptions;
   return {
     origin,
