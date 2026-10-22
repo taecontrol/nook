@@ -189,8 +189,8 @@ it('E13: migration rebuilds populated current versions and Cron backfills at mos
     app.services.embeddingCalls.reduce((n, c) => n + c.text.length, 0),
   ).toBe(50);
   expect(app.services.upserts).toHaveLength(1);
-  // The empty removal sweep adds one read to the existing five-trip backfill.
-  expect(app.services.d1Trips).toBe(6);
+  // Six memory-index trips plus the independent file cursor read/persist.
+  expect(app.services.d1Trips).toBe(8);
   expect(
     (
       await db
