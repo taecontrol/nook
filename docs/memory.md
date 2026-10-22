@@ -64,6 +64,16 @@ downloads are audited before streaming and carry attachment-only, no-store,
 nosniff and sandbox headers. See [deployment](deployment.md) for R2 provisioning,
 the reconciliation grace and the hosted acceptance risks.
 
+The CLI's `memory-files.ts` owns local file handling through the derived
+machine client and the existing keyring session. Attach validates the base
+name and bounds reads before requesting, infers the media type from its
+extension and verifies the returned SHA-256. Download checks the destination
+with `lstat` before requesting, writes to a private `wx` temporary file in the
+same directory, verifies Content-Length and X-Nook-Sha256, then publishes with
+a hard link that refuses an existing destination. Scope cleanup closes and
+unlinks the temporary file on success or failure. Only JSON metadata reaches
+stdout; raw filesystem, transport and decoding errors never expose file bytes.
+
 Feed pages use descending creation time and id so updating a memory cannot
 move it between pages. A cursor carries that position, bucket and scope with
 a versioned checksum. It remains usable after its boundary memory is

@@ -1,13 +1,33 @@
 import { MachineApi } from '@nook/contract';
 import { Effect, Schema } from 'effect';
-import { FetchHttpClient, HttpClientError } from 'effect/http';
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientError,
+  HttpClientRequest,
+} from 'effect/http';
 import { HttpApiClient } from 'effect/http-api';
+import cliPackage from '../package.json' with { type: 'json' };
 import { ServerFailure } from './errors.ts';
 
 export type MachineClient = HttpApiClient.ForApi<typeof MachineApi>;
 
 export function machineApi(url: string) {
-  const client = HttpApiClient.make(MachineApi, { baseUrl: url });
+  const client = HttpApiClient.make(MachineApi, {
+    baseUrl: url,
+    transformClient: (http) =>
+      http.pipe(
+        HttpClient.mapRequest(
+          HttpClientRequest.setHeader(
+            'user-agent',
+            `nook/${cliPackage.version}`,
+          ),
+        ),
+        // Keep route-level 404s distinguishable from declared domain errors,
+        // even when an older Worker returns a body outside the current schema.
+        HttpClient.filterStatus((status) => status !== 404),
+      ),
+  });
   return function request<A, E>(
     operation: (api: Effect.Success<typeof client>) => Effect.Effect<A, E>,
   ) {
@@ -31,16 +51,17 @@ const PublicError = Schema.Struct({
   message: Schema.optionalKey(Schema.String),
 });
 function publicFailure(text: string, status: number) {
+  const fallback = status === 404 ? 'NotFound' : 'Unavailable';
   try {
     const body = Schema.decodeUnknownSync(PublicError)(JSON.parse(text));
     return new ServerFailure(
-      body._tag ?? 'Unavailable',
+      body._tag ?? fallback,
       body.message,
       [],
       status >= 500 && body._tag !== 'VaultNotConfigured',
     );
   } catch {
-    return new ServerFailure('Unavailable', undefined, [], status >= 500);
+    return new ServerFailure(fallback, undefined, [], status >= 500);
   }
 }
 function responseFailure(error: HttpClientError.HttpClientError) {

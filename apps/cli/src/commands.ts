@@ -1,10 +1,11 @@
 import { NodeServices } from '@effect/platform-node';
-import { Effect } from 'effect';
-import { Argument, CliError, Command } from 'effect/cli';
+import { Effect, Option } from 'effect';
+import { Argument, CliError, Command, Flag } from 'effect/cli';
 import cliPackage from '../package.json' with { type: 'json' };
 import { declaration } from './arguments.ts';
 import { CliFailure } from './errors.ts';
 import { hostFor } from './host.ts';
+import { memoryAttach, memoryDownload } from './memory-files.ts';
 import { run } from './run.ts';
 import { runGrammar } from './run-arguments.ts';
 import { login, logout, mcpHeader, whoami } from './session.ts';
@@ -99,6 +100,31 @@ export async function execute(
             Command.withDescription(
               'Store a new secret from stdin without overwriting.',
             ),
+          ),
+        ]),
+      ),
+      Command.make('memory').pipe(
+        Command.withSubcommands([
+          Command.make(
+            'attach',
+            { id: Argument.String('id'), path: Argument.String('path') },
+            ({ id, path }) => memoryAttach(host, id, path, write),
+          ),
+          Command.make(
+            'download',
+            {
+              id: Argument.String('id'),
+              name: Argument.String('name'),
+              output: Flag.optional(Flag.String('output')),
+            },
+            ({ id, name, output }) =>
+              memoryDownload(
+                host,
+                id,
+                name,
+                Option.getOrUndefined(output),
+                write,
+              ),
           ),
         ]),
       ),
