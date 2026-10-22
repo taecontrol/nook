@@ -13,6 +13,27 @@ time substituted only by the test wrapper. CLI and Files drawer acceptance
 run through the same isolated process/browser fixtures; the hosted E31 capture
 is documented in [deployment](../deployment.md).
 
+The owner Files drawer is exercised by `memory-files-web.test.ts` and
+`memory-files-recovery-web.test.ts`: intent-only script loading, cached detail,
+newest-first metadata, Unicode browser downloads, pending peer locks across
+closing/reopening, missing-file refresh and refresh failure, unavailable-object
+retry, keyboard focus, URL reload/Back and non-executing HTML downloads. Audit
+uses its existing rows and disclosures for all five file outcomes; the file
+Audit suite covers those alongside Vault pagination and descendant filtering.
+
+`memory-files-owner-captures.test.ts` produces sixty production PNGs under
+`.local/verification/screenshots/memory-files-*.png`: reader and Files sheet
+for one-pdf, many-files, long-name, download-pending, download-missing and
+download-unavailable, at 1440×900 and 390×844 in light and dark. Many-files and
+long-name also capture Details; many-files captures the end of the independently
+scrolling list. Every capture checks horizontal overflow. D1/R2 hold real
+synthetic files with matching sizes and digests. Pending gates a real request,
+missing detaches through MCP, and unavailable removes only the R2 object.
+Compare against selected prototype C in `.work/design/attachments/selected-c/`;
+its scenario selector never enters production. The descriptive owner-capture
+filename places this suite in shard 1 with the current native sequencer,
+distributing its cost without changing checks, shards or timeouts.
+
 Run `pnpm verify` from the repository root with the pinned Node and pnpm versions. It stops on the first failure, in this order:
 
 | Command | What it proves |

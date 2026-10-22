@@ -134,7 +134,9 @@ function useHistoryNavigation(
       replace,
     });
   return {
-    historyOpen: search.history === '1' || search.version !== undefined,
+    historyOpen:
+      search.files !== '1' &&
+      (search.history === '1' || search.version !== undefined),
     version: search.version,
     changes: search.changes === '1',
     prefetchHistory: () => {

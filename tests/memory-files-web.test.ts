@@ -333,6 +333,7 @@ it.each(['memory', 'memoryNavigation'] as const)(
       await seedMemories(app, manyMemories);
       await seedFile(app, { id: memoryId(100) });
       const milliseconds = await measureScreen(page, app.origin, '', kind);
+      console.info(`Memory files E29 ${kind}: ${milliseconds.toFixed(1)} ms`);
       expect(milliseconds).toBeLessThanOrEqual(
         kind === 'memory'
           ? loadTimeBudgets.coldOpenMs

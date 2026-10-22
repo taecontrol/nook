@@ -136,37 +136,40 @@ function FileRow({
             <Icon />
           </ItemMedia>
           <ItemContent className="min-w-0">
-            <ItemTitle className="block min-w-0 max-w-full">
-              <span className="line-clamp-3 wrap-anywhere" title={file.name}>
-                {file.name}
-              </span>
-            </ItemTitle>
-            <p className="text-xs text-muted-foreground wrap-anywhere">
-              <span className="tabular-nums">{formatBytes(file.size)}</span>
-              <span aria-hidden> · </span>
-              <span className="font-mono">{file.mediaType}</span>
-            </p>
-            <p className="text-xs text-muted-foreground wrap-anywhere">
-              Attached{' '}
-              <time
-                dateTime={file.attachedAt}
-                title={timeAgo(file.attachedAt)}
-                className="tabular-nums"
-              >
-                {formatDateTime(file.attachedAt)}
-              </time>{' '}
-              by {principalName({ provenance: { principal: file.principal } })}
-            </p>
-            <CollapsibleTrigger asChild>
-              <Button
-                variant="ghost"
-                size="xs"
-                className="-ml-2 mt-1 w-fit [&[data-state=open]>svg]:rotate-180"
-              >
-                Details
-                <ChevronDown />
-              </Button>
-            </CollapsibleTrigger>
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <ItemTitle className="block min-w-0 max-w-full">
+                <span className="line-clamp-3 wrap-anywhere" title={file.name}>
+                  {file.name}
+                </span>
+              </ItemTitle>
+              <p className="text-xs text-muted-foreground wrap-anywhere">
+                <span className="tabular-nums">{formatBytes(file.size)}</span>
+                <span aria-hidden> · </span>
+                <span className="font-mono">{file.mediaType}</span>
+              </p>
+              <p className="text-xs text-muted-foreground wrap-anywhere">
+                Attached{' '}
+                <time
+                  dateTime={file.attachedAt}
+                  title={timeAgo(file.attachedAt)}
+                  className="tabular-nums"
+                >
+                  {formatDateTime(file.attachedAt)}
+                </time>{' '}
+                by{' '}
+                {principalName({ provenance: { principal: file.principal } })}
+              </p>
+              <CollapsibleTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="-ml-2 mt-1 w-fit [&[data-state=open]>svg]:rotate-180"
+                >
+                  Details
+                  <ChevronDown />
+                </Button>
+              </CollapsibleTrigger>
+            </div>
           </ItemContent>
           <ItemActions className="shrink-0">
             <DownloadButton

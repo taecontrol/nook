@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import type { MemoryClient, Principal } from '@nook/contract';
 import { expect } from 'vitest';
 import { auditRows } from './audit.ts';
 import { seedGrantTree } from './grants.ts';
@@ -46,7 +47,13 @@ export const digest = (bytes: Uint8Array) =>
   createHash('sha256').update(bytes).digest('hex');
 export const filePath = (id = fileMemory, name = pdfName, machine = true) =>
   `/api/${machine ? 'machine/' : ''}memories/${id}/files/${encodeURIComponent(name)}`;
-export async function seedFileMemory(app: TestRuntime) {
+export async function seedFileMemory(
+  app: TestRuntime,
+  memory = memoryFixture(601, {
+    bucket: fileBucket,
+    content: '# File guide\nAttachment acceptance fixture.',
+  }),
+) {
   await seedGrantTree(app, [
     'me',
     'personal',
@@ -56,12 +63,7 @@ export async function seedFileMemory(app: TestRuntime) {
     `${fileBucket}/api`,
     'work/mamasan-old',
   ]);
-  await seedMemories(app, [
-    memoryFixture(601, {
-      bucket: fileBucket,
-      content: '# File guide\nAttachment acceptance fixture.',
-    }),
-  ]);
+  await seedMemories(app, [memory]);
   return fileMachine(app);
 }
 export async function fileMachine(
@@ -179,21 +181,30 @@ export async function seedFile(
     bytes?: Uint8Array;
     attachedAt?: string;
     object?: boolean;
+    mediaType?: string;
+    principal?: Principal;
+    client?: MemoryClient;
   } = {},
 ) {
   const bytes = options.bytes ?? Buffer.from('seeded attachment');
+  const principal = options.principal ?? {
+    kind: 'machine',
+    id: 'synthetic-lg16',
+    name: 'LG16',
+  };
+  const client = options.client ?? { name: 'nook-acceptance', version: '1.0' };
   const row: FileRow = {
     memory_id: options.id ?? fileMemory,
     name: options.name ?? pdfName,
     object_key: `files/${randomUUID()}`,
-    media_type: 'application/pdf',
+    media_type: options.mediaType ?? 'application/pdf',
     size: options.size ?? bytes.byteLength,
     sha256: digest(bytes),
-    principal: 'machine',
-    machine_id: 'synthetic-lg16',
-    machine_name: 'LG16',
-    client_name: 'nook-acceptance',
-    client_version: '1.0',
+    principal: principal.kind,
+    machine_id: principal.kind === 'machine' ? principal.id : null,
+    machine_name: principal.kind === 'machine' ? principal.name : null,
+    client_name: client.name,
+    client_version: client.version,
     attached_at: options.attachedAt ?? '2026-10-22T14:00:00.000Z',
   };
   // Missing schema is an intended red, never silently install feature tables here.

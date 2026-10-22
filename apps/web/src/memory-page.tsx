@@ -12,7 +12,7 @@ import {
   History,
   Paperclip,
 } from 'lucide-react';
-import { lazy, type RefObject, Suspense, useRef } from 'react';
+import { lazy, type RefObject, Suspense, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -469,6 +469,25 @@ function ReadingActions({
     </>
   );
 }
+function MemoryFiles({
+  model,
+  memory,
+  returnFocus,
+}: {
+  model: MemoryPageModel;
+  memory: OwnerMemory;
+  returnFocus: RefObject<HTMLButtonElement | null>;
+}) {
+  // Keep an active download alive across dismissal; load the sheet only once used.
+  const [opened, setOpened] = useState(model.filesOpen);
+  if (model.filesOpen && !opened) setOpened(true);
+  if (!opened) return null;
+  return (
+    <Suspense fallback={null}>
+      <FilesSheet model={model} memory={memory} returnFocus={returnFocus} />
+    </Suspense>
+  );
+}
 function ReadingPane({ model }: { model: MemoryPageModel }) {
   const returnFocus = useRef<HTMLButtonElement>(null);
   const filesFocus = useRef<HTMLButtonElement>(null);
@@ -523,16 +542,12 @@ function ReadingPane({ model }: { model: MemoryPageModel }) {
           <MemoryMarkdown content={memory.content} />
         </div>
       </div>
-      {model.filesOpen && (
-        <Suspense fallback={null}>
-          <FilesSheet
-            key={memory.id}
-            model={model}
-            memory={memory}
-            returnFocus={filesFocus}
-          />
-        </Suspense>
-      )}
+      <MemoryFiles
+        key={memory.id}
+        model={model}
+        memory={memory}
+        returnFocus={filesFocus}
+      />
       {model.historyOpen && (
         <Suspense fallback={null}>
           <HistorySheet

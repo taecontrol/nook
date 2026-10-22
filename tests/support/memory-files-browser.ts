@@ -1,5 +1,6 @@
 import type { Browser, Page } from 'playwright';
 import { expect } from 'vitest';
+import type { MemoryFixture } from './memory.ts';
 import {
   fileMemory,
   pdfName,
@@ -18,6 +19,8 @@ export async function filesPage(
   browser: Browser,
   options: {
     names?: string[];
+    memory?: MemoryFixture;
+    files?: Parameters<typeof seedFile>[1][];
     viewport?: { width: number; height: number };
     colorScheme?: 'light' | 'dark';
     configure?: (page: Page, app: FilesRuntime) => Promise<void>;
@@ -34,21 +37,21 @@ export async function filesPage(
   const page = await context.newPage();
   page.setDefaultTimeout(5000);
   try {
-    await seedFileMemory(app);
+    await seedFileMemory(app, options.memory);
     const files = [];
     const names = options.names ?? [
       pdfName,
       'diagrama de flujo débito inmediato.pdf',
       `${'é'.repeat(125)}a.pdf`,
     ];
-    for (const [index, name] of names.entries())
-      files.push(
-        await seedFile(app, {
-          name,
-          bytes: Buffer.alloc(index === 0 ? 2_418_734 : 4096, index + 30),
-          attachedAt: new Date(Date.UTC(2026, 9, 22, 14, index)).toISOString(),
-        }),
-      );
+    const seeds =
+      options.files ??
+      names.map((name, index) => ({
+        name,
+        bytes: Buffer.alloc(index === 0 ? 2_418_734 : 4096, index + 30),
+        attachedAt: new Date(Date.UTC(2026, 9, 22, 14, index)).toISOString(),
+      }));
+    for (const seed of seeds) files.push(await seedFile(app, seed));
     await app.setBindings(app.bindings, { cf: { country: 'AR' } });
     await options.configure?.(page, app);
     await page.goto(
