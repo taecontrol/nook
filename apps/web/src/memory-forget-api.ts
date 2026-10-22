@@ -13,6 +13,7 @@ import {
   forgetFromCache,
   invalidateMemoryLists,
   memoryQuery,
+  reconcileForgottenMemory,
   restoreMemoryCache,
   writeMemory,
 } from './memory-cache';
@@ -85,7 +86,10 @@ async function checkRequest(
   const token = latestForget(queries)?.mutationId;
   const current = await readForgetOutcome(subject.id);
   if (latestForget(queries)?.mutationId !== token) return 'forgotten';
-  if (!current) return 'forgotten';
+  if (!current) {
+    await reconcileForgottenMemory(queries, subject.id);
+    return 'forgotten';
+  }
   writeMemory(queries, current);
   await invalidateMemoryLists(queries);
   return current.version === subject.version ? 'failed' : 'changed';
