@@ -11,6 +11,36 @@ beforeAll(async () => {
 });
 afterAll(() => closeBrowser?.());
 
+it.each([
+  {
+    route: 'a case-insensitive deep link',
+    start: `/MEMORY?bucket=work/acme&memory=${memoryId(1)}`,
+  },
+  { route: 'a trailing slash without a query', start: '/memory/' },
+])('a search debounce commits from $route', async ({ start }) => {
+  const visit = await memoryPage(browser, {
+    start,
+    configure: async (page) => {
+      await page.clock.install({ time: new Date('2026-10-22T15:00:00Z') });
+    },
+  });
+  try {
+    const { page } = visit;
+    await page.locator('[data-memory-row]').first().waitFor();
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+    await page
+      .getByRole('textbox', { name: /Search memories/ })
+      .fill('release');
+    await page.clock.runFor(251);
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get('q'))
+      .toBe('release');
+    await page.clock.resume();
+  } finally {
+    await visit.close();
+  }
+});
+
 it('a pending search debounce preserves a later navigation while Vault loads', async () => {
   const vaultGate = deferred();
   const visit = await memoryPage(browser, {
