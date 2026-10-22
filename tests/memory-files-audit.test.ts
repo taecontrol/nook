@@ -133,7 +133,9 @@ it('E27: Chromium renders the five file outcomes with expandable facts, descenda
       expect(await row.locator('time').count()).toBeGreaterThan(0);
       await row.getByRole('button', { name: /Show details/ }).click();
       expect(await row.innerText()).toContain(String(entry.file_sha256));
-      expect(await row.innerText()).toContain('LG16');
+      const owner = outcome === 'file_detached' || outcome === 'file_forgotten';
+      expect(entry.machine_name).toBe(owner ? null : machine.name);
+      expect(await row.innerText()).toContain(owner ? 'Owner' : machine.name);
     }
     await selectAudit(page, 'Bucket', fileBucket);
     expect(new URL(page.url()).searchParams.get('bucket')).toBe(fileBucket);

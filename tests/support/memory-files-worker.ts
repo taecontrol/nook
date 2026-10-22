@@ -80,6 +80,14 @@ function objects(bucket: R2Bucket): R2Bucket {
           await checkpoint('/r2/after-put');
           return result;
         };
+      if (property === 'list')
+        return async (options?: Parameters<R2Bucket['list']>[0]) => {
+          const result = await fetch(
+            `https://nook-files-checkpoints.invalid/r2/list${options?.cursor ? '-cursor' : ''}`,
+          );
+          if (!result.ok) throw new Error('Invalid R2 cursor (synthetic)');
+          return target.list(options);
+        };
       if (property === 'delete')
         return async (keys: string | string[]) => {
           await checkpoint('/r2/before-delete');

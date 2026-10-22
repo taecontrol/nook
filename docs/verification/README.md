@@ -1,5 +1,18 @@
 # Verification
 
+Memory file storage is exercised against the built Worker, real local D1 and
+R2, and both owner/machine MCP endpoints by `memory-files-worker`,
+`memory-files-mcp`, `memory-files-faults`, `memory-files-audit`,
+`memory-files-migrations`, `memory-files-harness` and `memory-files-sweep`.
+The sweep suite walks more than 1000 real objects across Cron invocations and
+recovers a rejected persisted cursor. `memory-files-deploy` drives the actual
+provisioning shell with synthetic command responses. Checkpoints observe
+labels only. The test clock supplies request start and sweep time; publication
+still evaluates the clock predicate in the real D1 batch, with SQLite wall
+time substituted only by the test wrapper. CLI and Files drawer acceptance
+run through the same isolated process/browser fixtures; the hosted E31 capture
+is documented in [deployment](../deployment.md).
+
 Run `pnpm verify` from the repository root with the pinned Node and pnpm versions. It stops on the first failure, in this order:
 
 | Command | What it proves |
