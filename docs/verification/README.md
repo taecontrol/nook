@@ -77,7 +77,7 @@ Istanbul instruments original sources before Node execution, CLI child-process b
 
 CRAP rejects a missing baseline or seam, empty or unexecuted seam observations, stale source, unknown modules, incompatible counter maps or shapes, and altered artifacts. Coverage is the fraction of the function's own statements executed, excluding nested functions. A statement-free function uses its function counter. Classic complexity counts decisions independently for each function. The score is `complexity² × (1 − coverage)³ + complexity`.
 
-CI runs the five static commands, six `pnpm test:coverage --shard=I/6` jobs, a macOS CLI coverage job, and a final job. Each platform job uploads its manifest and artifacts; the final job requires the distinct indexes `1/6`, `2/6`, `3/6`, `4/6`, `5/6`, `6/6`, and `macos`, identical source identities and baselines, and intact artifact hashes before CRAP, build, and the load-time check. Every coverage job retains its fifteen-minute timeout. The timing stage runs alone after test jobs finish. It needs no Cloudflare secrets.
+CI runs the five static commands, ten `pnpm test:coverage --shard=I/10` jobs, a macOS CLI coverage job, and a final job. Each platform job uploads its manifest and artifacts; the final job requires the distinct indexes `1/10` through `10/10` and `macos`, identical source identities and baselines, and intact artifact hashes before CRAP, build, and the load-time check. Every coverage job retains its fifteen-minute timeout. The timing stage runs alone after test jobs finish. It needs no Cloudflare secrets.
 
 ## Browser evidence and budget
 
@@ -613,10 +613,17 @@ missing detaches through MCP, and unavailable removes only the R2 object.
 Compare each state, viewport and theme with the matching reader, files,
 Details or result screen in `.work/design/attachments/selected-c/screens/`.
 The prototype's scenario selector never enters production. The descriptive
-owner-capture filename places this suite in shard 1 with the current native
-sequencer. CI now distributes the complete corpus across six Linux shards;
-the four-shard run exhausted its fifteen-minute budget after adding the file
-examples. All checks and timeouts remain in force.
+owner-capture filename places this suite in shard 2 with the current native
+sequencer. CI distributes the complete corpus across ten Linux shards, using
+Vitest's native filename-hash partition and three workers per runner. The
+six-shard run reached 918 s in shard 2, dominated by existing CLI and capture
+suites. Observed file durations predict a maximum of 457 s of ideal
+three-worker work with ten shards, versus 849 s with six and 669 s with eight;
+file-size scheduling estimates 502 s before setup, imports and journey work.
+Ten uses four additional Linux runners to leave margin inside the unchanged
+fifteen-minute limit without a custom sequencer or maintained duration table.
+Coverage merging requires all ten Linux manifests plus macOS, with distinct
+indexes and the same source. All checks and timeouts remain in force.
 
 The compatible file CLI suites share one Worker per file, and MCP shares one
 per endpoint/protocol combination. Before every example the fixtures clear
@@ -624,8 +631,15 @@ file, memory, machine-token, audit and removal rows, R2 keys and search state.
 CLI cases and distinct synthetic machines keep separate private HOME/keyrings;
 E13 downloads from a genuinely separate fixture. Fault-configured runtimes
 remain independent. The complete C0/C1 HTTP oracle still checks every byte
-and the encoded slash, with immediate per-code diagnostics on failure. No
-acceptance assertion, transfer deadline or protocol combination is removed.
+and the encoded slash, with immediate per-code diagnostics on failure.
+Path/header-only rejection examples send zero-length uploads: Miniflare/workerd
+closes connections with unread request bodies, which can reset a subsequent
+keep-alive request. E4's 411/413 probes instead leave the upload unfinished and
+destroy each owned socket after reading its response, preserving proof that
+the Worker rejects before reading. Bucket-grant denial examples keep their
+nonempty inputs because that path consumes the body before authorization.
+Production validation and body limits are unchanged. No acceptance assertion,
+transfer deadline or protocol combination is removed.
 
 Refine added 21 regressions with red-before/green-after evidence, then one
 additional stale-preload regression. `memory-files-transfer-cli.test.ts` runs
