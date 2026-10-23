@@ -31,7 +31,8 @@ existing file CLI suite retains overwrite, truncation, authorization and
 The owner Files drawer is exercised by `memory-files-web.test.ts` and
 `memory-files-recovery-web.test.ts`: intent-only script loading, cached detail,
 newest-first metadata, Unicode browser downloads, pending peer locks across
-closing/reopening and A→B→A navigation, missing-file refresh of the original
+closing/reopening and A→B→A navigation, delivery of late 404/503 results to a
+remounted drawer, missing-file refresh of the original
 memory after navigation, refresh coordination with pending forget, refresh
 failure, unavailable-object retry, keyboard focus, URL reload/Back and
 non-executing HTML downloads. The sweep suite holds a genuine embedding call

@@ -377,3 +377,80 @@ it('a late missing-file response does not read or repopulate a memory while forg
     await visit.close();
   }
 });
+
+it.each(['missing', 'unavailable'] as const)(
+  'delivers a late %s result to the reopened drawer after A to B to A navigation',
+  async (outcome) => {
+    const gate = deferred();
+    const arrived = deferred();
+    const otherId = memoryId(602);
+    const visit = await filesPage(browser, {
+      configure: async (page, app) => {
+        await seedMemories(app, [
+          memoryFixture(602, {
+            bucket: fileBucket,
+            content: '# Another memory',
+          }),
+        ]);
+        await page.route('**/api/memories/*/files/*', async (route) => {
+          arrived.resolve();
+          await gate.promise;
+          await route.continue().catch(() => {});
+        });
+      },
+    });
+    try {
+      const { page, app, files } = visit;
+      await openFiles(page);
+      const button = filesSheet(page).getByRole('button', {
+        name: `Download ${files[0].name}`,
+        exact: true,
+      });
+      await button.click();
+      await arrived.promise;
+      await page.keyboard.press('Escape');
+      await page.locator(`[data-memory-row="${otherId}"]`).click();
+      await page
+        .getByRole('heading', { name: 'Another memory', exact: true })
+        .waitFor();
+      await page.locator(`[data-memory-row="${fileMemory}"]`).click();
+      await page
+        .getByRole('heading', { name: 'File guide', exact: true })
+        .waitFor();
+      await openFiles(page);
+      expect(await button.getAttribute('aria-busy')).toBe('true');
+      if (outcome === 'missing') {
+        expect(
+          (
+            await memoryClient(app, '2026-07-28').call('detach', {
+              id: fileMemory,
+              name: files[0].name,
+              sha256: files[0].sha256,
+            })
+          ).isError,
+        ).not.toBe(true);
+      } else {
+        await (await app.mf.getR2Bucket('FILES')).delete(files[0].object_key);
+      }
+      gate.resolve();
+      if (outcome === 'missing') await waitFileRows(page, 2);
+      else await expect.poll(() => button.isEnabled()).toBe(true);
+      const alert = filesSheet(page).getByRole('alert');
+      expect(await alert.count()).toBe(1);
+      expect(await alert.innerText()).toContain(
+        outcome === 'missing'
+          ? 'File not found.'
+          : 'Could not download the file',
+      );
+      if (outcome === 'unavailable')
+        expect(
+          await alert
+            .getByRole('button', { name: 'Try again', exact: true })
+            .isEnabled(),
+        ).toBe(true);
+    } finally {
+      gate.resolve();
+      await visit.close();
+    }
+  },
+);

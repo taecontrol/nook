@@ -1,6 +1,6 @@
 import { type QueryClient, useQueryClient } from '@tanstack/react-query';
 import { Effect } from 'effect';
-import { useState, useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import { ApiError, runApi } from './api-client';
 import { memoryKeys, memoryOptions } from './memory-api';
 import { canLoadMemory } from './memory-cache';
@@ -32,34 +32,47 @@ async function saveFile(id: string, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-// Only pending filenames survive drawer/route unmounts. Bytes stay in saveFile,
-// and settled operations leave this QueryClient-scoped registry immediately.
-function pendingRegistry() {
-  const pending = new Map<string, string>();
-  const listeners = new Set<() => void>();
+type DownloadState = {
+  pending: string | null;
+  failure: DownloadFailure | null;
+};
+const idle: DownloadState = { pending: null, failure: null };
+// Only operation metadata lives here; bytes stay in saveFile. A remounted
+// drawer observes pending work and its result. Unobserved idle entries retire.
+function downloadRegistry() {
+  const states = new Map<string, DownloadState>();
+  const listeners = new Map<string, Set<() => void>>();
+  const state = (id: string) => states.get(id) ?? idle;
+  const retire = (id: string) => {
+    if (!listeners.has(id) && state(id).pending === null) states.delete(id);
+  };
   return {
-    pending,
-    subscribe(listener: () => void) {
-      listeners.add(listener);
+    state,
+    subscribe(id: string, listener: () => void) {
+      const observers = listeners.get(id) ?? new Set();
+      listeners.set(id, observers);
+      observers.add(listener);
       return () => {
-        listeners.delete(listener);
+        observers.delete(listener);
+        if (!observers.size) listeners.delete(id);
+        retire(id);
       };
     },
-    update(id: string, name: string | null) {
-      if (name === null) pending.delete(id);
-      else pending.set(id, name);
-      for (const listener of listeners) listener();
+    update(id: string, patch: Partial<DownloadState>) {
+      states.set(id, { ...state(id), ...patch });
+      for (const listener of listeners.get(id) ?? []) listener();
+      retire(id);
     },
   };
 }
 const registries = new WeakMap<
   QueryClient,
-  ReturnType<typeof pendingRegistry>
+  ReturnType<typeof downloadRegistry>
 >();
 function registryFor(queries: QueryClient) {
   let registry = registries.get(queries);
   if (!registry) {
-    registry = pendingRegistry();
+    registry = downloadRegistry();
     registries.set(queries, registry);
   }
   return registry;
@@ -80,15 +93,16 @@ async function refreshFiles(queries: QueryClient, id: string) {
 export function useFileDownload(id: string) {
   const queries = useQueryClient();
   const registry = registryFor(queries);
-  const pending = useSyncExternalStore(
-    registry.subscribe,
-    () => registry.pending.get(id) ?? null,
+  const subscribe = useCallback(
+    (listener: () => void) => registry.subscribe(id, listener),
+    [registry, id],
   );
-  const [failure, setFailure] = useState<DownloadFailure | null>(null);
+  const { pending, failure } = useSyncExternalStore(subscribe, () =>
+    registry.state(id),
+  );
   const download = async (name: string) => {
-    if (registry.pending.has(id)) return;
-    registry.update(id, name);
-    setFailure(null);
+    if (registry.state(id).pending !== null) return;
+    registry.update(id, { pending: name, failure: null });
     try {
       await saveFile(id, name);
     } catch (error) {
@@ -98,14 +112,14 @@ export function useFileDownload(id: string) {
         name,
         error,
       };
-      setFailure(failure);
+      registry.update(id, { failure });
       if (missing) {
         await refreshFiles(queries, id).catch(() => {
-          setFailure({ ...failure, refreshFailed: true });
+          registry.update(id, { failure: { ...failure, refreshFailed: true } });
         });
       }
     } finally {
-      registry.update(id, null);
+      registry.update(id, { pending: null });
     }
   };
   return {
