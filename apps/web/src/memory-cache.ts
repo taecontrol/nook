@@ -82,17 +82,7 @@ export function forgetFromCache(
     ...queries.getQueriesData<MemoryData>(detail),
     ...queries.getQueriesData<HistoryData>(history),
   ];
-  queries.setQueriesData<MemoriesData>(
-    lists,
-    (data) =>
-      data && {
-        ...data,
-        pages: data.pages.map((page) => ({
-          ...page,
-          memories: page.memories.filter((memory) => memory.id !== subject.id),
-        })),
-      },
-  );
+  evictMemoryContent(queries, subject.id);
   queries.setQueriesData<CountsData>(
     counts,
     (data) =>
@@ -104,17 +94,41 @@ export function forgetFromCache(
         ),
       },
   );
-  queries.setQueriesData<SearchData>(
-    searches,
+  return snapshot;
+}
+function evictMemoryContent(queries: QueryClient, id: string) {
+  queries.setQueriesData<MemoriesData>(
+    { queryKey: memoryKeys.lists() },
     (data) =>
       data && {
         ...data,
-        results: data.results.filter((row) => row.id !== subject.id),
+        pages: data.pages.map((page) => ({
+          ...page,
+          memories: page.memories.filter((memory) => memory.id !== id),
+        })),
       },
   );
-  queries.removeQueries(detail);
-  queries.removeQueries(history);
-  return snapshot;
+  queries.setQueriesData<SearchData>(
+    { queryKey: memoryKeys.searches() },
+    (data) =>
+      data && {
+        ...data,
+        results: data.results.filter((row) => row.id !== id),
+      },
+  );
+  queries.removeQueries({ queryKey: memoryKeys.detail(id), exact: true });
+  queries.removeQueries({ queryKey: memoryKeys.history(id), exact: true });
+}
+export async function reconcileForgottenMemory(
+  queries: QueryClient,
+  id: string,
+) {
+  // Cancel and evict together before a newer write can snapshot this content.
+  const canceled = queries.cancelQueries({ predicate: memoryQuery });
+  evictMemoryContent(queries, id);
+  await canceled;
+  // The optimistic removal may already have adjusted counts.
+  return invalidateMemoryLists(queries);
 }
 export function restoreMemoryCache(
   queries: QueryClient,
