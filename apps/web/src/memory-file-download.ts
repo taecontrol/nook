@@ -79,13 +79,17 @@ function registryFor(queries: QueryClient) {
 }
 async function refreshFiles(queries: QueryClient, id: string) {
   const queryKey = memoryKeys.detail(id);
+  // An intent preload may have read the file before it was detached. Cancel
+  // that read so fetchQuery cannot reuse it as the post-404 refresh.
+  await queries.cancelQueries({ queryKey, exact: true });
+  if (!canLoadMemory(queries, id) || !queries.getQueryState(queryKey)) return;
   await queries.invalidateQueries({
     queryKey,
     exact: true,
     refetchType: 'none',
   });
-  // Forget cancels reads and removes this detail. Do not recreate it or read
-  // across its pending write; the ordinary detail query resumes when safe.
+  // Recheck after each await: forget cancels reads and removes this detail.
+  // fetchQuery's signal keeps the fresh read cancellable by a later forget.
   if (canLoadMemory(queries, id) && queries.getQueryState(queryKey))
     await queries.fetchQuery({ ...memoryOptions(id), staleTime: 0 });
 }

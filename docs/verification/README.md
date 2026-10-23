@@ -33,14 +33,21 @@ The owner Files drawer is exercised by `memory-files-web.test.ts` and
 newest-first metadata, Unicode browser downloads, pending peer locks across
 closing/reopening and A→B→A navigation, delivery of late 404/503 results to a
 remounted drawer, missing-file refresh of the original
-memory after navigation, refresh coordination with pending forget, refresh
-failure, unavailable-object retry, keyboard focus, URL reload/Back and
-non-executing HTML downloads. The sweep suite holds a genuine embedding call
-while Cron independently lists R2 and deletes old garbage. Audit
+memory after navigation, cancellation of a preload read before detach with a
+fresh detail request after the download's 404, refresh coordination with
+pending forget, refresh failure, unavailable-object retry, keyboard focus,
+URL reload/Back and non-executing HTML downloads. The sweep suite holds a
+genuine embedding call while Cron independently lists R2 and deletes old garbage. Audit
 uses its existing rows and disclosures for all five file outcomes; the file
 Audit suite covers those alongside Vault pagination and descendant filtering,
 plus file-only and mixed activity column/region labels. Vault-only labels and
 captures remain unchanged.
+
+The preload regression holds a genuine detail response after D1 has read the
+file, detaches it through MCP, and releases that old response only after the
+download returns 404. It requires a subsequent detail read and removal of the
+last row and Files control. Chromium's existing fixed-clock seam advances
+staleness by 30,001 ms without a real thirty-second wait.
 
 `memory-files-owner-captures.test.ts` produces sixty production PNGs under
 `.local/verification/screenshots/memory-files-*.png`: reader and Files sheet
