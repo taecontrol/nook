@@ -104,26 +104,36 @@ it('E17: the owner route rejects machine credentials, foreign Origin and outside
   ).toBe(401);
   expect(await forgetSnapshot(app)).toEqual(before);
 });
-it.each([2, 3])(
+it.each([4, 5])(
   'E10: a D1 error at batch statement %s, after the removal record and head deletion, rolls back every memory/index/removal write',
   async (failBatchStatement) => {
-    app = await vaultCheckpoints(async () => true, undefined, false, {
-      failBatchStatement,
-    });
+    const labels: string[] = [];
+    app = await vaultCheckpoints(
+      async (label) => {
+        labels.push(label);
+        return true;
+      },
+      undefined,
+      false,
+      {
+        failBatchStatement,
+        failBatchSize: 6,
+        observeBatchSize: true,
+      },
+    );
     await seedMemories(app, [memoryFixture(1)]);
     await versionThree(app);
     const before = await forgetSnapshot(app);
-    expectToolError(
-      await memoryClient(app, '2026-07-28').call('forget', {
-        id: forgottenId,
-        expectedVersion: 3,
-      }),
-      'Service unavailable. Try again later.',
-    );
+    const result = await memoryClient(app, '2026-07-28').call('forget', {
+      id: forgottenId,
+      expectedVersion: 3,
+    });
+    expect(labels).toContain('/batch-6');
+    expectToolError(result, 'Service unavailable. Try again later.');
     expect(await forgetSnapshot(app)).toEqual(before);
   },
 );
-it('E4/E24: malformed IDs cost no D1 call and every authorized outcome uses one preflight plus one four-statement batch', async () => {
+it('E4/E24: malformed IDs cost no D1 call and every authorized outcome uses one preflight plus one six-statement file-aware batch', async () => {
   const labels: string[] = [];
   app = await vaultCheckpoints(
     async (label) => {
@@ -152,7 +162,7 @@ it('E4/E24: malformed IDs cost no D1 call and every authorized outcome uses one 
     expect(labels).toEqual([
       '/statement',
       '/before-batch',
-      '/batch-4',
+      '/batch-6',
       '/after-batch',
     ]);
   }

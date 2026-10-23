@@ -1,4 +1,4 @@
-import type { Memory } from '@nook/contract';
+import type { OwnerMemory } from '@nook/contract';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { expect, it, vi } from 'vitest';
 import * as api from '../apps/web/src/api-client.ts';
@@ -7,11 +7,12 @@ import { canLoadMemory, writeMemory } from '../apps/web/src/memory-cache.ts';
 import { deferred } from './support/machines.ts';
 
 it('a detail fetch publishes only its completed result and retains a newer cached version', async () => {
-  const memory: Memory = {
+  const memory: OwnerMemory = {
     id: '00000000-0000-4000-8000-000000000001',
     bucket: 'me',
     content: 'Synthetic memory',
     tags: [],
+    files: [],
     version: 1,
     createdAt: '2026-10-13T15:00:00Z',
     updatedAt: '2026-10-13T15:00:00Z',

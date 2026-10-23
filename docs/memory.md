@@ -30,7 +30,9 @@ Remember, update and forget classify their outcomes from atomic D1 batches.
 Guard fragments are shared between writes and their outcome reads; a later
 read outside the batch cannot reconstruct the state that committed. Version
 insertion precedes publication of the new head, so the FTS triggers replace
-immutable postings. History is owner-only. Memory writes add no audit entry.
+immutable postings. History is owner-only. Memory text writes add no audit
+entry. File operations add events to the shared Audit ledger, as recorded in
+[ADR-0016](adrs/0016-d1-references-decide-file-liveness-and-r2-keys-are-never-reused.md).
 
 ## Implementation owners
 
@@ -43,6 +45,34 @@ the Cron handler calls sync directly. `memory-index.ts` owns the AI and
 Vectorize protocols and shared marker SQL. `buckets.ts` owns deletion blockers,
 including its memory-head check. MCP and HTTP adapters call these owners
 without duplicating their policy.
+
+`memory-files.ts` owns attaching, detaching and downloading current files,
+including the publication batch, live quota and guarded audit events.
+`file-objects.ts` alone accesses the R2 binding. `file-sweep.ts` reconciles
+unreferenced objects independently of memory-index repair on each Cron run.
+Shared `bucketFor` authorization lives in `memory-access.ts`: unreadable ids
+remain not found, readable ancestors cannot be written, and downloads use the
+read grant. Forget embeds the file statements in its existing atomic batch,
+then removes the keys returned by the committed deletion.
+
+Files belong to the memory, not to a version, and attaching does not update
+the text head's version or dates. D1 alone decides existence and current byte
+usage within the memory's direct bucket. Detail and MCP search projections
+stay inside their existing SQL calls; the owner feed and version history do
+not carry files. MCP exposes metadata and guarded detach, never bytes. File
+downloads are audited before streaming and carry attachment-only, no-store,
+nosniff and sandbox headers. See [deployment](deployment.md) for R2 provisioning,
+the reconciliation grace and the hosted acceptance risks.
+
+The CLI's `memory-files.ts` owns local file handling through the derived
+machine client and the existing keyring session. Attach validates the base
+name and bounds reads before requesting, infers the media type from its
+extension and verifies the returned SHA-256. Download checks the destination
+with `lstat` before requesting, writes to a private `wx` temporary file in the
+same directory, verifies Content-Length and X-Nook-Sha256, then publishes with
+a hard link that refuses an existing destination. Scope cleanup closes and
+unlinks the temporary file on success or failure. Only JSON metadata reaches
+stdout; raw filesystem, transport and decoding errors never expose file bytes.
 
 Feed pages use descending creation time and id so updating a memory cannot
 move it between pages. A cursor carries that position, bucket and scope with

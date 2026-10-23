@@ -8,19 +8,20 @@ export type MemorySearch = {
   history?: '1';
   version?: number;
   changes?: '1';
+  files?: '1';
 };
-function historySearch(search: Record<string, unknown>) {
+function enabledFlag(value: unknown) {
+  return value === '1' || value === 1;
+}
+function readerSearch(search: Record<string, unknown>) {
   return {
-    ...(search.history === '1' || search.history === 1
-      ? { history: '1' as const }
-      : {}),
+    ...(enabledFlag(search.history) ? { history: '1' as const } : {}),
     ...(Number.isSafeInteger(Number(search.version)) &&
     Number(search.version) > 0
       ? { version: Number(search.version) }
       : {}),
-    ...(search.changes === '1' || search.changes === 1
-      ? { changes: '1' as const }
-      : {}),
+    ...(enabledFlag(search.files) ? { files: '1' as const } : {}),
+    ...(enabledFlag(search.changes) ? { changes: '1' as const } : {}),
   };
 }
 export function memoryQueryText(value: unknown) {
@@ -35,7 +36,7 @@ export function memoryLocation(input: Record<string, unknown>) {
       ? { scope: input.scope }
       : {}),
     ...(q ? { q: String(input.q) } : {}),
-    ...historySearch(input),
+    ...readerSearch(input),
   };
   return {
     search,

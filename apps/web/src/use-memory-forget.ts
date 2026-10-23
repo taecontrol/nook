@@ -175,6 +175,7 @@ export function useMemoryForget({
       search: (previous: MemorySearch) => ({
         ...previous,
         memory: id,
+        files: undefined,
         history: undefined,
         version: undefined,
         changes: undefined,

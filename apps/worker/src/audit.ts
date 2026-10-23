@@ -3,7 +3,11 @@ import {
   type AuditEntry,
   type AuditFilters,
   type BucketGrant,
+  type FileAuditEntry,
+  FileAuditOutcome,
   InvalidAuditFilter,
+  type MemoryClient,
+  type Principal,
   type RunSecrets,
   splitSecretPath,
   validateBucketPath,
@@ -11,6 +15,7 @@ import {
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
+import type { Fragment } from 'effect/sql/Statement';
 import { unavailable } from './http-errors.ts';
 
 export type AuditMachine = { id: string; machine: string; grant: BucketGrant };
@@ -52,6 +57,73 @@ const Row = Schema.Union([
   })),
 ]);
 type Row = typeof Row.Type;
+const FileRow = Schema.Struct({
+  id: Schema.String,
+  at: Schema.String,
+  outcome: FileAuditOutcome,
+  bucket: Schema.String,
+  memory_id: Schema.String,
+  file_name: Schema.String,
+  file_size: Schema.Number,
+  file_sha256: Schema.String,
+  replaced_sha256: Schema.NullOr(Schema.String),
+  client_name: Schema.String,
+  client_version: Schema.NullOr(Schema.String),
+  machine_id: Schema.NullOr(Schema.String),
+  machine_name: Schema.NullOr(Schema.String),
+  ip: Schema.NullOr(Schema.String),
+  country: Schema.NullOr(Schema.String),
+});
+function fileEntry(row: typeof FileRow.Type): FileAuditEntry {
+  return {
+    id: row.id,
+    at: row.at,
+    outcome: row.outcome,
+    bucket: row.bucket,
+    memoryId: row.memory_id,
+    name: row.file_name,
+    size: row.file_size,
+    sha256: row.file_sha256,
+    replacedSha256: row.replaced_sha256,
+    principal:
+      row.machine_id !== null && row.machine_name !== null
+        ? { kind: 'machine', id: row.machine_id, name: row.machine_name }
+        : { kind: 'owner' },
+    client: { name: row.client_name, version: row.client_version },
+    ip: row.ip,
+    country: row.country,
+  };
+}
+const AnyRow = Schema.Union([Row, FileRow]);
+function anyEntry(row: typeof AnyRow.Type): AuditEntry {
+  return 'file_name' in row ? fileEntry(row) : entry(row);
+}
+
+export type FileActor = {
+  principal: Principal;
+  client: MemoryClient;
+  ip?: string | null;
+  country?: string | null;
+};
+export const ownerFileActor: FileActor = {
+  principal: { kind: 'owner' },
+  client: { name: 'unknown', version: null },
+};
+// A selection can contain many forgotten files. Generate an independent v4 id
+// per selected row inside D1, keeping every audit write in the caller's batch.
+export function fileAuditInsert(
+  sql: D1Client.D1Client,
+  actor: FileActor,
+  selection: Fragment,
+) {
+  const machine = actor.principal.kind === 'machine' ? actor.principal : null;
+  const ip = machine ? null : (actor.ip ?? null);
+  const country = machine ? null : (actor.country ?? null);
+  const id = sql`lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab',abs(random())%4+1,1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6)))`;
+  return sql<{
+    id: string;
+  }>`INSERT INTO audit_entries(id,at,outcome,bucket,memory_id,file_name,file_size,file_sha256,replaced_sha256,machine_id,machine_name,client_name,client_version,ip,country) SELECT ${id},${new Date().toISOString()},f.outcome,f.bucket,f.memory_id,f.name,f.size,f.sha256,f.replaced_sha256,${machine?.id ?? null},${machine?.name ?? null},${actor.client.name},${actor.client.version},${ip},${country} FROM (${selection}) f RETURNING id`;
+}
 function entry(row: Row): AuditEntry {
   const facts = {
     id: row.id,
@@ -121,7 +193,7 @@ export const auditStore = Effect.gen(function* () {
       path: string,
       facts: { ip: string | null; country: string | null },
     ) =>
-      sql`INSERT INTO audit_entries(id, at, outcome, path, purpose, ip, country) VALUES (${crypto.randomUUID()}, ${new Date().toISOString()}, 'revealed', ${path}, 'Revealed in web app', ${facts.ip}, ${facts.country})`.pipe(
+      sql`INSERT INTO audit_entries(id, at, outcome, path, bucket, purpose, ip, country) VALUES (${crypto.randomUUID()}, ${new Date().toISOString()}, 'revealed', ${path}, ${splitSecretPath(path).bucket}, 'Revealed in web app', ${facts.ip}, ${facts.country})`.pipe(
         unavailable,
         Effect.asVoid,
       ),
@@ -137,7 +209,7 @@ export const auditStore = Effect.gen(function* () {
         .batch(
           paths.map(
             (path) =>
-              sql`INSERT INTO audit_entries(id, at, outcome, path, purpose, machine_id, machine_name, working_directory, executable, run_id) VALUES (${crypto.randomUUID()}, ${at}, ${outcome}, ${path}, ${input.purpose}, ${machine.id}, ${machine.machine}, ${input.workingDirectory}, ${input.executable}, ${run})`,
+              sql`INSERT INTO audit_entries(id, at, outcome, path, bucket, purpose, machine_id, machine_name, working_directory, executable, run_id) VALUES (${crypto.randomUUID()}, ${at}, ${outcome}, ${path}, ${splitSecretPath(path).bucket}, ${input.purpose}, ${machine.id}, ${machine.machine}, ${input.workingDirectory}, ${input.executable}, ${run})`,
           ),
         )
         .pipe(unavailable, Effect.asVoid);
@@ -151,15 +223,15 @@ export const auditStore = Effect.gen(function* () {
           ? sql`(at < ${cursor.at} OR (at = ${cursor.at} AND id < ${cursor.id}))`
           : sql`1`;
         const rows =
-          yield* sql<Row>`SELECT * FROM audit_entries WHERE (${bucket} = '' OR path LIKE ${`${bucket}/%`}) AND (${secret} = '' OR path = ${secret}) AND ${boundary} ORDER BY at DESC, id DESC LIMIT 26`.pipe(
+          yield* sql`SELECT * FROM audit_entries WHERE (${bucket} = '' OR bucket=${bucket} OR bucket LIKE ${`${bucket}/%`}) AND (${secret} = '' OR path = ${secret}) AND ${boundary} ORDER BY at DESC, id DESC LIMIT 26`.pipe(
             unavailable,
           );
-        const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(
+        const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(AnyRow))(
           rows,
         ).pipe(unavailable);
         const page = decoded.slice(0, 25);
         return {
-          entries: page.map(entry),
+          entries: page.map(anyEntry),
           next: decoded.length > 25 ? encodeCursor(page[24]) : null,
         };
       }),

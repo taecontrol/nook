@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { cp, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import type { Readable } from 'node:stream';
@@ -281,6 +282,48 @@ it('a runtime lease supports real HTTP when randomness prefers a Fetch-blocked p
   } finally {
     portSelection.preferBlocked = false;
     await app?.close();
+  }
+});
+
+it('runtime allocation handles a listener taking the probed port before workerd starts without disturbing that listener', async () => {
+  const actual = await vi.importActual<typeof import('../scripts/runtime.ts')>(
+    '../scripts/runtime.ts',
+  );
+  const competitor = createServer((_request, response) =>
+    response.end('synthetic competing listener'),
+  );
+  let claimed = 0;
+  let app: Awaited<ReturnType<typeof runtime>> | undefined;
+  vi.mocked(startRuntime).mockImplementationOnce(async (options) => {
+    claimed = options.port;
+    await new Promise<void>((accept, reject) => {
+      competitor.once('error', reject);
+      competitor.listen(claimed, '127.0.0.1', accept);
+    });
+    return actual.startRuntime(options);
+  });
+  try {
+    app = await runtime();
+    expect(Number(new URL(app.origin).port)).not.toBe(claimed);
+    expect((await fetch(`${app.origin}/`)).status).toBe(200);
+    await expect(stat(leasePath(claimed))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await stat(leasePath(new URL(app.origin).port));
+    await app.close();
+    app = undefined;
+    expect(await (await fetch(`http://127.0.0.1:${claimed}`)).text()).toBe(
+      'synthetic competing listener',
+    );
+  } finally {
+    try {
+      await app?.close();
+    } finally {
+      if (competitor.listening)
+        await new Promise<void>((accept, reject) =>
+          competitor.close((error) => (error ? reject(error) : accept())),
+        );
+    }
   }
 });
 

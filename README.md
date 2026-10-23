@@ -59,6 +59,29 @@ Retrying identical content and resulting tags returns `updated: false` when
 they already match; another writer can make a retry stale. Updates preserve
 the id, bucket, original creation time and earlier versions.
 
+## Attach and download memory files
+
+Use the id from MCP `get` or `search` with the logged-in CLI:
+
+```sh
+nook memory attach <id> ./guide.pdf
+nook memory download <id> guide.pdf --output ./downloads/guide.pdf
+```
+
+Files may be up to 25 MiB each, with a 1 GiB quota per bucket. Attach uses the
+path's base name: identical bytes leave the file unchanged, and different
+bytes under the same name replace it. Files belong to the memory across text
+versions. Both commands print one JSON metadata object. Download verifies the
+size and SHA-256 before saving, refuses existing files, directories and
+symlinks, and never writes file bytes to stdout. Without `--output`, it saves
+under the file's name in the current directory; `--output -` is refused.
+
+MCP `get` lists names, media types, sizes and digests; `search` includes file
+counts and up to ten names and sizes. MCP carries no file bytes. Remove a file
+with `detach({id, name, sha256})`, using the digest from `get`. Forgetting the
+memory also removes its files. Audit records successful attaches, replacements,
+downloads, detaches and forget deletions; an unchanged attach adds no entry.
+
 ## Run a command with secrets
 
 Commit a `nook.json` with environment names and full secret paths:

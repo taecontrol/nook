@@ -8,7 +8,7 @@ The installation owner supplies the following settings:
 | --- | --- | --- |
 | `CLOUDFLARE_ACCOUNT_ID` | GitHub repository **Settings → Secrets and variables → Actions → Variables** | Cloudflare **Workers & Pages → Account Details → Account ID**, or dashboard search **Copy account ID**. |
 | `NOOK_HOSTNAME` | The same GitHub repository variables | The installation's hostname, without scheme or path. Its DNS zone must be active in the chosen Cloudflare account. |
-| `CLOUDFLARE_API_TOKEN` | GitHub repository **Settings → Secrets and variables → Actions → Secrets** | Create an account API token from the **Edit Cloudflare Workers** permission template, scoped to this account and the hostname's zone. Include **Account → D1 → Edit**, **Account → Vectorize → Edit**, and **Account → Workers AI → Read and Edit** for database migrations, search provisioning, and the AI binding. Initial creation requires the Workers product **Admin** role; an **Editor** can maintain an existing Worker. Changing a custom domain also needs **Zone → Workers Routes → Write** for that zone. |
+| `CLOUDFLARE_API_TOKEN` | GitHub repository **Settings → Secrets and variables → Actions → Secrets** | Create an account API token from the **Edit Cloudflare Workers** permission template, scoped to this account and the hostname's zone. Include **Account → D1 → Edit**, **Account → Workers R2 Storage → Edit**, **Account → Vectorize → Edit**, and **Account → Workers AI → Read and Edit** for database migrations, search provisioning, and the AI binding. Initial creation requires the Workers product **Admin** role; an **Editor** can maintain an existing Worker. Changing a custom domain also needs **Zone → Workers Routes → Write** for that zone. |
 | `ACCESS_ISSUER` | Worker **nook → Settings → Variables and Secrets**, type **Secret** | `https://<team-name>.cloudflareaccess.com`, with no trailing slash. Find the team name under **Zero Trust → Settings**. |
 | `ACCESS_AUDIENCE` | The same Worker secrets | **Zero Trust → Access controls → Applications → the Nook application → Configure → Additional settings → Application Audience (AUD) Tag**. |
 | `OWNER_EMAIL` | The same Worker secrets | The exact email the owner's identity provider supplies to Access; use the same identity in the application's Allow policy. |
@@ -20,7 +20,7 @@ Before the first deployment, create a self-hosted Access application with a publ
 
 Every push to `main` deploys itself. When **Verify** succeeds on a `main` push, the Deploy workflow starts for that exact commit. It deploys only while `main` still points to that commit; when a later merge has moved `main`, it skips, because the later commit's own run deploys it. It checks the commit's successful Verify run, builds the product from that commit, and only then deploys using the repository settings. An installation without the `NOOK_HOSTNAME` variable, such as a fork that is not configured yet, skips automatic deployment. To redeploy by hand, use **Actions → Deploy → Run workflow** and select **main**; dispatches on other branches skip the deployment job.
 
-The workflow creates the `nook` D1 database when missing, applies its migrations, provisions the configured Vectorize index and its indexed `bucket` metadata when missing, and then deploys the Worker and custom domain. Provisioning finishes before any embedding writes. The index name lives in `wrangler.jsonc`; D1 resolves by database name, without a committed database ID. If the Worker did not already exist, add its three Access secrets and `VAULT_KEY` through the Worker settings afterwards and apply the secret changes there. Until all three Access secrets exist, owner-authenticated Worker requests return 401. Machine API requests use their separate credential boundary. Later workflow deployments preserve those secrets. The owner can also provision the Worker secrets beforehand through their own Cloudflare administration.
+The workflow creates the R2 bucket configured by `r2_buckets[].bucket_name` for binding `FILES` when missing, creates the `nook` D1 database when missing, applies its migrations, provisions the configured Vectorize index and its indexed `bucket` metadata when missing, and then deploys the Worker and custom domain. Provisioning finishes before any embedding writes. The index name lives in `wrangler.jsonc`; D1 resolves by database name, without a committed database ID. If the Worker did not already exist, add its three Access secrets and `VAULT_KEY` through the Worker settings afterwards and apply the secret changes there. Until all three Access secrets exist, owner-authenticated Worker requests return 401. Machine API requests use their separate credential boundary. Later workflow deployments preserve those secrets. The owner can also provision the Worker secrets beforehand through their own Cloudflare administration.
 
 Complete production acceptance by recording a successful main deployment. In a fresh signed-out browser, confirm that `/`, a real hashed JavaScript asset, `/api/whoami`, and `/mcp` redirect to Access or are denied; none may serve the app or asset. Then sign in as the owner and capture the shell showing that identity. Retain outcomes and screenshots without cookies, JWTs, or secret values.
 
@@ -41,6 +41,19 @@ postings in one atomic write. D1 can still keep deleted bytes in free pages;
 Nook cannot purge either. Meaning vectors are removed and their absence
 confirmed after a 30-minute settle window on healthy scheduled runs. A vector
 absent from Vectorize does not prove erasure from provider storage.
+
+Attached files use R2 encryption at rest, without application-level encryption.
+D1 file rows decide availability and the bucket's 1 GiB usage; each file is
+limited to 25 MiB. Forget and detach remove those rows and add audit entries
+atomically, so subsequent downloads cannot fetch the file. Inline object
+removal follows a successful commit. If it fails or the Worker stops, the
+five-minute Cron walks one R2 page per invocation and removes unreferenced
+objects older than 60 minutes. Physical R2 removal can therefore take the
+60-minute grace plus a complete successful sweep walk. Publication uses a
+strict ten-minute D1 clock window and keys are never reused, keeping cleanup
+safe against delayed writers. Provider retention remains outside Nook's
+erasure guarantee.
+
 
 After merging and the green-main deployment, the owner performs these checks. Local workerd tests prove the same behavior, but production foreign-key enforcement and an approximately 85 KiB ciphertext bound parameter still need this observation.
 
@@ -91,9 +104,25 @@ outside the machine Bypass. It needs no new Access configuration. A missing
 value. The owner's accepted level-1 scope also admits Access Managed OAuth
 assertions; the origin cannot distinguish them from browser sessions.
 
+## Memory file E31: owner acceptance after deployment (pending)
+
+After the complete file feature merges and green main deploys, confirm that
+the workflow created the configured R2 bucket. The deployment token needs
+[R2 account permissions](https://developers.cloudflare.com/r2/api/tokens/) to list and create R2 buckets. CLI publishing remains a separate
+dispatch of the release workflow from green main.
+
+Using a CLI version that includes file commands, privately attach a synthetic
+25 MiB file from one machine and download it on another machine with the same
+bucket grant. Require equal local SHA-256 digests. Then download it through
+the owner's Files drawer and confirm the owner principal, IP and country in
+Audit. Record statuses, digest and deployment evidence without credentials or
+file bytes. This capture checks hosted isolate headroom, real R2 behavior and
+the owner authentication path; local Miniflare cannot establish them.
+
+
 ## Remote MCP and Access Managed OAuth
 
-Nook serves `list_buckets`, `create_bucket`, `delete_bucket`, `list_secrets`, `remember`, `update`, `get`, and `search` at `https://<hostname>/mcp`. The owner authenticates through the existing Access application with access to the whole bucket tree. The Worker verifies the forwarded Access assertion before MCP. Nook machine tokens use the separate `/api/machine/mcp` endpoint described below.
+Nook serves ten tools at `https://<hostname>/mcp`: `list_buckets`, `create_bucket`, `delete_bucket`, `list_secrets`, `remember`, `update`, `get`, `search`, `detach`, and `forget`. The owner authenticates through the existing Access application with access to the whole bucket tree. The Worker verifies the forwarded Access assertion before MCP. Nook machine tokens use the separate `/api/machine/mcp` endpoint described below.
 
 In **Zero Trust → Access controls → Applications**, edit the existing self-hosted Nook application. Under **Advanced settings**, enable **Managed OAuth**, then save. Keep its whole-hostname protection and owner Allow policy. Access supplies the OAuth flow and forwards the user's JWT in `Cf-Access-Jwt-Assertion`; Nook does not implement an OAuth server. See [Cloudflare Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/).
 

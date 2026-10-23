@@ -4,8 +4,13 @@ import { AuthorizationsApi, MachineApi } from '@nook/contract';
 import { Effect, Layer } from 'effect';
 import { HttpRouter, HttpServer } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
+import { clientFrom } from './client-provenance.ts';
+import type { FileBindings } from './file-objects.ts';
+import { fileResponse } from './file-response.ts';
+import { unavailable as storageUnavailable } from './http-errors.ts';
 import { machineOperations } from './machines.ts';
 import { mcpHandler } from './mcp.ts';
+import { memoryFiles } from './memory-files.ts';
 import { runSecrets } from './run-secrets.ts';
 import { machineVault } from './vault.ts';
 
@@ -46,12 +51,63 @@ export function machineMcpHandler(
   );
 }
 
-export function machineHandler(db: D1Database, origin: string, vaultKey = '') {
+export function machineHandler(
+  db: D1Database,
+  origin: string,
+  vaultKey = '',
+  files: FileBindings = {},
+) {
   const handlers = HttpApiBuilder.group(MachineApi, 'machine', (handlers) =>
     Effect.gen(function* () {
       const store = yield* machineOperations;
       const sql = yield* D1Client.D1Client;
       return handlers
+        .handleRaw('attachFile', ({ params, headers, request }) =>
+          Effect.gen(function* () {
+            const machine = yield* store.forAudit(headers.authorization);
+            const attachments = yield* memoryFiles(machine.grant, files);
+            const bytes = new Uint8Array(
+              yield* request.arrayBuffer.pipe(storageUnavailable),
+            );
+            return yield* attachments.attach(
+              {
+                principal: {
+                  kind: 'machine',
+                  id: machine.id,
+                  name: machine.machine,
+                },
+                client: clientFrom(
+                  undefined,
+                  request.headers['user-agent'] ?? null,
+                ),
+              },
+              { ...params, bytes, mediaType: headers['content-type'] },
+            );
+          }).pipe(Effect.provideService(D1Client.D1Client, sql)),
+        )
+        .handleRaw('downloadFile', ({ params, headers, request }) =>
+          Effect.gen(function* () {
+            const machine = yield* store.forAudit(headers.authorization);
+            const attachments = yield* memoryFiles(machine.grant, files);
+            return fileResponse(
+              yield* attachments.download(
+                {
+                  principal: {
+                    kind: 'machine',
+                    id: machine.id,
+                    name: machine.machine,
+                  },
+                  client: clientFrom(
+                    undefined,
+                    request.headers['user-agent'] ?? null,
+                  ),
+                },
+                params.id,
+                params.name,
+              ),
+            );
+          }).pipe(Effect.provideService(D1Client.D1Client, sql)),
+        )
         .handle('authorize', ({ payload }) =>
           store.create(origin, payload.suggestedName, payload.client),
         )
@@ -84,7 +140,10 @@ export function machineHandler(db: D1Database, origin: string, vaultKey = '') {
     Layer.provide(handlers),
     Layer.provide(HttpServer.layerServices),
   );
-  return HttpRouter.toWebHandler(routes, { disableLogger: true }).handler;
+  return HttpRouter.toWebHandler(routes, {
+    disableLogger: true,
+    routerConfig: { maxParamLength: 800 },
+  }).handler;
 }
 export function authorizationHandler(db: D1Database) {
   const handlers = HttpApiBuilder.group(

@@ -1,7 +1,9 @@
 import type { Provenance as ProvenanceRecord } from '@nook/contract';
 import { formatDateTime } from './time';
 
-export function principalName(memory: { provenance: ProvenanceRecord }) {
+export function principalName(memory: {
+  provenance: Pick<ProvenanceRecord, 'principal'>;
+}) {
   return memory.provenance.principal.kind === 'owner'
     ? 'Owner'
     : memory.provenance.principal.name;

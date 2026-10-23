@@ -14,6 +14,7 @@ export function runtimeOptions(options: {
   strictEmbeddings?: boolean;
   coverage?: boolean;
   outboundService?: (request: Request) => Promise<Response>;
+  r2Buckets?: string[];
 }) {
   const config = unstable_readConfig({
     config: options.configPath ?? 'wrangler.jsonc',
@@ -41,6 +42,12 @@ export function runtimeOptions(options: {
       (database: { binding: string }) => database.binding,
     ),
     d1Persist: false,
+    r2Buckets:
+      options.r2Buckets ??
+      (config.r2_buckets ?? []).map(
+        (bucket: { binding: string }) => bucket.binding,
+      ),
+    r2Persist: false,
     outboundService: options.outboundService,
     assets: {
       directory: resolve(options.directory, 'assets'),

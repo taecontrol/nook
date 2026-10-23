@@ -60,7 +60,17 @@ export async function auditPageData(
 ) {
   const response = await fetch(`${app.origin}/api/audit${query}`, { headers });
   expect(response.status, 'The owner audit page is available').toBe(200);
-  return (await response.json()) as typeof AuditPage.Type;
+  const page = (await response.json()) as typeof AuditPage.Type;
+  return {
+    ...page,
+    entries: page.entries.map((entry) => {
+      if (!('path' in entry))
+        throw new Error(
+          'This Vault fixture expects only secret audit entries.',
+        );
+      return entry;
+    }),
+  };
 }
 export async function runFixture(
   grant: BucketGrant = ['work/acme'],

@@ -53,6 +53,7 @@ it('E1: discovery preserves the three bucket tools alongside Vault discovery', a
   expect(tools.map((tool) => tool.name).sort()).toEqual([
     'create_bucket',
     'delete_bucket',
+    'detach',
     'forget',
     'get',
     'list_buckets',

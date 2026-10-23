@@ -1,4 +1,4 @@
-import { type Memory, readLineage } from '@nook/contract';
+import { type OwnerMemory, readLineage } from '@nook/contract';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useRouter, useSearch } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
@@ -36,7 +36,7 @@ function countSummary(
   };
 }
 function visibleMemory(
-  detail: Memory | undefined,
+  detail: OwnerMemory | undefined,
   visible: readonly string[],
   error: Error | null,
 ) {
@@ -140,7 +140,9 @@ function useHistoryNavigation(
       replace,
     });
   return {
-    historyOpen: search.history === '1' || search.version !== undefined,
+    historyOpen:
+      search.files !== '1' &&
+      (search.history === '1' || search.version !== undefined),
     version: search.version,
     changes: search.changes === '1',
     prefetchHistory: () => {
@@ -154,7 +156,20 @@ function useHistoryNavigation(
           ),
         );
     },
-    openHistory: () => historyNavigate({ history: '1' }),
+    filesOpen: search.files === '1',
+    prefetchFiles: () => {
+      if (search.memory)
+        memoryWriteGate.preload(queries, memoryOptions(search.memory));
+    },
+    openFiles: () =>
+      historyNavigate({
+        files: '1',
+        history: undefined,
+        version: undefined,
+        changes: undefined,
+      }),
+    closeFiles: () => historyNavigate({ files: undefined }),
+    openHistory: () => historyNavigate({ history: '1', files: undefined }),
     closeHistory: () =>
       historyNavigate({
         history: undefined,

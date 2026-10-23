@@ -3,7 +3,7 @@ import { limitedAccessText, readOnlyText } from '@nook/contract';
 import { Effect } from 'effect';
 import { ChildProcess, ChildProcessSpawner } from 'effect/process';
 import cliPackage from '../package.json' with { type: 'json' };
-import { type MachineClient, machineApi } from './api.ts';
+import { type MachineClient, machineApi, type RequestOptions } from './api.ts';
 import { installationOrigin, readConfig, writeConfig } from './config.ts';
 import {
   CliFailure,
@@ -21,8 +21,12 @@ function notLoggedIn(url?: string) {
     `Not logged in. Run: nook login ${url ?? '<your Nook URL>'}`,
   );
 }
-function authenticatedRequest(url: string, token: string) {
-  const request = machineApi(url);
+function authenticatedRequest(
+  url: string,
+  token: string,
+  options?: RequestOptions,
+) {
+  const request = machineApi(url, options);
   const headers = { authorization: `Bearer ${token}` };
   return function authenticated<A, E>(
     operation: (
@@ -43,14 +47,14 @@ function authenticatedRequest(url: string, token: string) {
     );
   };
 }
-export function session({ keyring }: Host) {
+export function session({ keyring }: Host, options?: RequestOptions) {
   return Effect.gen(function* () {
     yield* keyring.checkKeyring;
     const url = yield* readConfig;
     if (!url) return yield* Effect.fail(notLoggedIn());
     const token = yield* keyring.readToken(url);
     if (!token) return yield* Effect.fail(notLoggedIn(url));
-    return { url, request: authenticatedRequest(url, token) };
+    return { url, request: authenticatedRequest(url, token, options) };
   });
 }
 function openBrowser({ browser }: Host, url: string) {

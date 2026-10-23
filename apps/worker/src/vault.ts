@@ -162,7 +162,7 @@ function createStore(binding: string, grant: BucketGrant) {
         // The state SELECT below preserves changes() from the secret INSERT.
         const audit = creation
           ? [
-              sql`INSERT INTO audit_entries(id, at, outcome, path, purpose, machine_id, machine_name, working_directory) SELECT ${crypto.randomUUID()}, ${now}, 'created', ${path}, ${creation.input.purpose}, ${creation.machine.id}, ${creation.machine.machine}, ${creation.input.workingDirectory} WHERE changes() = 1`,
+              sql`INSERT INTO audit_entries(id, at, outcome, path, bucket, purpose, machine_id, machine_name, working_directory) SELECT ${crypto.randomUUID()}, ${now}, 'created', ${path}, ${input.bucket}, ${creation.input.purpose}, ${creation.machine.id}, ${creation.machine.machine}, ${creation.input.workingDirectory} WHERE changes() = 1`,
             ]
           : [];
         const [inserted, states] = yield* sql

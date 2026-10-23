@@ -6,10 +6,11 @@ import {
   type BucketGrant,
   BucketPath,
   CreatedBucket,
+  Detached,
+  DetachFile,
   ForgetMemory,
   Forgotten,
-  Memory,
-  type MemoryClient,
+  McpMemory,
   MemorySearchResults,
   type Principal,
   Remember,
@@ -21,7 +22,10 @@ import {
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
 import { bucketOperations } from './buckets.ts';
+import { clientFrom } from './client-provenance.ts';
+import type { FileBindings } from './file-objects.ts';
 import { memoryStore } from './memory.ts';
+import { memoryFiles } from './memory-files.ts';
 import type { MemoryIndex } from './memory-index.ts';
 import { machineVault } from './vault.ts';
 
@@ -44,6 +48,8 @@ type BucketError = Effect.Error<ReturnType<Store['create'] | Store['delete']>>;
 type VaultStore = Effect.Success<ReturnType<typeof machineVault>>;
 type VaultError = Effect.Error<ReturnType<VaultStore['list']>>;
 type MemoryStore = Effect.Success<ReturnType<typeof memoryStore>>;
+type FileStore = Effect.Success<ReturnType<typeof memoryFiles>>;
+type FileError = Effect.Error<ReturnType<FileStore['detach']>>;
 type MemoryError = Effect.Error<
   ReturnType<
     | MemoryStore['remember']
@@ -79,7 +85,7 @@ function versionInput<
 function errorResult(message: string) {
   return { isError: true, content: [{ type: 'text' as const, text: message }] };
 }
-function failure(error: BucketError | VaultError | MemoryError) {
+function failure(error: BucketError | VaultError | MemoryError | FileError) {
   if (error._tag === 'Forbidden')
     return errorResult('Access to this bucket is forbidden.');
   if (error._tag === 'ServiceUnavailable')
@@ -93,58 +99,20 @@ function success(body: Record<string, unknown>) {
   };
 }
 
-function clientString(value: unknown, limit: number): value is string {
-  return (
-    typeof value === 'string' &&
-    value.trim().length > 0 &&
-    value.length <= limit &&
-    !/[\uD800-\uDFFF]/u.test(value) &&
-    !/\p{Cc}/u.test(value)
-  );
-}
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object';
-}
-function envelopeClient(envelope: unknown): MemoryClient | undefined {
-  if (!isRecord(envelope)) return;
-  const value = envelope['io.modelcontextprotocol/clientInfo'];
-  if (!isRecord(value)) return;
-  const { name, version } = value;
-  if (!clientString(name, 128)) return;
-  if (version !== undefined && !clientString(version, 64)) return;
-  return { name, version: version === undefined ? null : (version as string) };
-}
-function userAgentClient(userAgent: string | null): MemoryClient | undefined {
-  if (!userAgent || /\p{Cc}/u.test(userAgent)) return;
-  const first = userAgent.split(' ')[0];
-  const match =
-    /^([!#$%&'*+.^_`|~0-9a-z-]+)(?:\/([!#$%&'*+.^_`|~0-9a-z-]+))?$/i.exec(
-      first,
-    );
-  if (!match || !clientString(match[1], 128)) return;
-  if (match[2] !== undefined && !clientString(match[2], 64)) return;
-  return { name: match[1], version: match[2] ?? null };
-}
-function clientFrom(envelope: unknown, userAgent: string | null): MemoryClient {
-  return (
-    envelopeClient(envelope) ??
-    userAgentClient(userAgent) ?? { name: 'unknown', version: null }
-  );
-}
-
 export function mcpHandler(
   db: D1Database,
   caller: { grant: BucketGrant; principal: Principal },
   options: {
     index?: MemoryIndex;
     waitUntil?: (promise: Promise<unknown>) => void;
+    files?: FileBindings;
   } = {},
 ) {
   const { grant, principal } = caller;
   function execute<A extends Record<string, unknown>>(
     operation: Effect.Effect<
       A,
-      BucketError | VaultError | MemoryError,
+      BucketError | VaultError | MemoryError | FileError,
       D1Client.D1Client
     >,
   ) {
@@ -166,7 +134,12 @@ export function mcpHandler(
   return createMcpHandler(({ requestInfo }) => {
     const server = new McpServer({ name: 'nook', version: '1.0.0' });
     const userAgent = requestInfo?.headers.get('User-Agent') ?? null;
-    const memories = memoryStore(grant, options.index, options.waitUntil);
+    const memories = memoryStore(
+      grant,
+      options.index,
+      options.waitUntil,
+      options.files,
+    );
     server.registerTool(
       'remember',
       {
@@ -197,7 +170,7 @@ export function mcpHandler(
       'forget',
       {
         description:
-          'Permanently delete a memory and all versions, including its keyword and meaning search entries. Pass the version from get as expectedVersion. If it changed, get it again before forgetting. After a lost response, Memory not found on a retry means it is already gone.',
+          'Permanently delete a memory, all versions and attached files, including its keyword and meaning search entries. Pass the version from get as expectedVersion. If it changed, get it again before forgetting. After a lost response, Memory not found on a retry means it is already gone.',
         inputSchema: versionInput(ForgetMemory),
         outputSchema: standard(Forgotten),
         annotations: {
@@ -206,8 +179,17 @@ export function mcpHandler(
           idempotentHint: false,
         },
       },
-      (input) =>
-        execute(memories.pipe(Effect.flatMap((store) => store.forget(input)))),
+      (input, ctx) =>
+        execute(
+          memories.pipe(
+            Effect.flatMap((store) =>
+              store.forget(input, false, {
+                principal,
+                client: clientFrom(ctx.mcpReq.envelope, userAgent),
+              }),
+            ),
+          ),
+        ),
     );
     server.registerTool(
       'update',
@@ -252,13 +234,24 @@ export function mcpHandler(
             ),
             Effect.map(({ results, meaning }) => ({
               results: results.map(
-                ({ id, bucket, title, tags, snippet, match }) => ({
+                ({
                   id,
                   bucket,
                   title,
                   tags,
                   snippet,
                   match,
+                  files,
+                  fileCount,
+                }) => ({
+                  id,
+                  bucket,
+                  title,
+                  tags,
+                  snippet,
+                  match,
+                  files,
+                  fileCount,
                 }),
               ),
               meaning,
@@ -280,13 +273,54 @@ export function mcpHandler(
       'get',
       {
         description:
-          'Read a memory by its id, including exact Markdown content, tags, and provenance. The id determines its bucket and the caller must have read access. When storing memories, name the bucket explicitly and ask the owner when unsure; retrying remember with identical content is safe.',
+          'Read a memory by its id, including exact Markdown content, tags, and provenance. The id determines its bucket and the caller must have read access. When storing memories, name the bucket explicitly and ask the owner when unsure; retrying remember with identical content is safe. Attach files with nook memory attach <id> <path>; download bytes with nook memory download <id> <name> [--output <path>]. To remove a file, call detach with its name and sha256 from get.',
         inputSchema: standard(Schema.Struct({ id: Schema.String })),
-        outputSchema: standard(Memory),
+        outputSchema: standard(McpMemory),
         annotations: { readOnlyHint: true },
       },
       ({ id }) =>
-        execute(memories.pipe(Effect.flatMap((store) => store.get(id)))),
+        execute(
+          memories.pipe(
+            Effect.flatMap((store) => store.get(id)),
+            Effect.map(({ files, ...memory }) => ({
+              ...memory,
+              files: files.map(({ name, mediaType, size, sha256 }) => ({
+                name,
+                mediaType,
+                size,
+                sha256,
+              })),
+            })),
+          ),
+        ),
+    );
+    server.registerTool(
+      'detach',
+      {
+        description:
+          'Permanently remove a file from a memory. Pass its name and sha256 from get. If it changed, get the memory again before choosing to detach it. A retry after success answers File not found.',
+        inputSchema: standard(DetachFile),
+        outputSchema: standard(Detached),
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: false,
+        },
+      },
+      (input, ctx) =>
+        execute(
+          memoryFiles(grant, options.files).pipe(
+            Effect.flatMap((store) =>
+              store.detach(
+                {
+                  principal,
+                  client: clientFrom(ctx.mcpReq.envelope, userAgent),
+                },
+                input,
+              ),
+            ),
+          ),
+        ),
     );
     server.registerTool(
       'list_secrets',

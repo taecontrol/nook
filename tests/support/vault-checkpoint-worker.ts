@@ -7,11 +7,12 @@ async function checkpoint(stage: string) {
   const result = await fetch(`https://nook-vault-checkpoints.invalid/${stage}`);
   if (!result.ok) throw new Error('Synthetic D1 failure');
 }
-function decorate(
+export function checkpointDatabase(
   db: D1Database,
   observeStatements: boolean,
   observeBatchSize: boolean,
   failBatchStatement?: number,
+  failBatchSize = 4,
 ): D1Database {
   const originals = new WeakMap<D1PreparedStatement, D1PreparedStatement>();
   function wrap(statement: D1PreparedStatement): D1PreparedStatement {
@@ -38,7 +39,7 @@ function decorate(
       const native = statements.map(
         (statement) => originals.get(statement) ?? statement,
       );
-      if (failBatchStatement !== undefined && native.length === 4)
+      if (failBatchStatement !== undefined && native.length === failBatchSize)
         native[failBatchStatement] = db.prepare(
           'SELECT * FROM synthetic_unavailable',
         );
@@ -60,6 +61,7 @@ export function vaultCheckpointWorker(
     observeStatements?: boolean;
     observeBatchSize?: boolean;
     failBatchStatement?: number;
+    failBatchSize?: number;
     omitIp?: boolean;
   } = {},
 ) {
@@ -93,11 +95,12 @@ export function vaultCheckpointWorker(
       }
       return worker.fetch(request, {
         ...env,
-        DB: decorate(
+        DB: checkpointDatabase(
           env.DB,
           options.observeStatements ?? false,
           options.observeBatchSize ?? false,
           options.failBatchStatement,
+          options.failBatchSize,
         ),
       });
     },

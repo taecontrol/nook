@@ -136,7 +136,7 @@ function requiredSeams(baseline: Baseline) {
   return required;
 }
 // CI splits Linux coverage into this many shards; macOS adds one more source.
-export const linuxShards = 4;
+export const linuxShards = 10;
 export const coverageShards = [
   ...Array.from({ length: linuxShards }, (_, i) => `${i + 1}/${linuxShards}`),
   'macos',

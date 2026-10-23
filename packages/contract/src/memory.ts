@@ -1,6 +1,10 @@
 import { Schema } from 'effect';
 import { validateBucketPath } from './buckets.ts';
 import { BucketScope } from './grants.ts';
+import { MemoryFile, OwnerMemoryFile } from './memory-files.ts';
+import { Provenance } from './provenance.ts';
+
+export { MemoryClient, Principal, Provenance } from './provenance.ts';
 
 export const memoryLimits = {
   contentBytes: 16 * 1024,
@@ -38,27 +42,6 @@ export function memoryTitle(content: string) {
     .join('');
 }
 export const MemoryId = Schema.String.check(Schema.isUUID(4));
-export const Principal = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal('owner') }),
-  Schema.Struct({
-    kind: Schema.Literal('machine'),
-    id: Schema.String,
-    name: Schema.String,
-  }),
-]);
-export type Principal = typeof Principal.Type;
-export const MemoryClient = Schema.Struct({
-  name: Schema.String,
-  version: Schema.NullOr(Schema.String),
-});
-export type MemoryClient = typeof MemoryClient.Type;
-export const Provenance = Schema.Struct({
-  client: MemoryClient,
-  principal: Principal,
-  workingDirectory: Schema.NullOr(Schema.String),
-  at: Schema.String,
-});
-export type Provenance = typeof Provenance.Type;
 export const Remember = Schema.Struct({
   bucket: Schema.String,
   content: Schema.String,
@@ -135,6 +118,15 @@ export const Memory = Schema.Struct({
   provenance: Provenance,
 });
 export type Memory = typeof Memory.Type;
+export const OwnerMemory = Memory.mapFields((fields) => ({
+  ...fields,
+  files: Schema.Array(OwnerMemoryFile),
+}));
+export type OwnerMemory = typeof OwnerMemory.Type;
+export const McpMemory = Memory.mapFields((fields) => ({
+  ...fields,
+  files: Schema.Array(MemoryFile),
+}));
 export const MemoryListItem = Memory.mapFields(({ content: _, ...fields }) => ({
   ...fields,
   title: Schema.String,
@@ -171,12 +163,20 @@ export const MemorySearchResult = Schema.Struct({
   match: MemoryMatch,
 });
 export type MemorySearchResult = typeof MemorySearchResult.Type;
+export const McpMemorySearchResult = MemorySearchResult.mapFields((fields) => ({
+  ...fields,
+  files: Schema.Array(
+    Schema.Struct({ name: Schema.String, size: Schema.Number }),
+  ),
+  fileCount: Schema.Number,
+}));
+export type McpMemorySearchResult = typeof McpMemorySearchResult.Type;
 export const MeaningAvailability = Schema.Literals([
   'available',
   'unavailable',
 ]);
 export const MemorySearchResults = Schema.Struct({
-  results: Schema.Array(MemorySearchResult),
+  results: Schema.Array(McpMemorySearchResult),
   meaning: MeaningAvailability,
 });
 export const OwnerMemorySearchResult = MemorySearchResult.mapFields(

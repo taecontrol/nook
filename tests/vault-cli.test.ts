@@ -76,13 +76,15 @@ it('E18: real CLI denial, missing bucket and usage each emit one line and exit o
 });
 const vaultUsage =
   'nook vault check | nook vault list <bucket> | nook vault create <bucket>/<NAME> --purpose "…" [--description "…"]';
+const memoryUsage =
+  'nook memory attach <id> <path> | nook memory download <id> <name> [--output <path>]';
 it.each([
   [['vault', 'check', 'extra'], 'Usage: nook vault check'],
   [['vault', 'list', 'work/acme', 'extra'], 'Usage: nook vault list <bucket>'],
   [['vault', 'unknown'], `Usage: ${vaultUsage}`],
   [
     ['unknown'],
-    `Usage: nook run --secret ENV=bucket/NAME --purpose "…" -- <command> | ${vaultUsage} | nook login <url> | nook whoami | nook logout | nook mcp-header | nook version`,
+    `Usage: nook run --secret ENV=bucket/NAME --purpose "…" -- <command> | ${vaultUsage} | ${memoryUsage} | nook login <url> | nook whoami | nook logout | nook mcp-header | nook version`,
   ],
 ])(
   'Parser failure %j ends with the usage of the command that failed',

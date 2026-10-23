@@ -1,4 +1,9 @@
-import { type Memory, type MemoryVersion, memoryTitle } from '@nook/contract';
+import {
+  type Memory,
+  type MemoryVersion,
+  memoryTitle,
+  type OwnerMemory,
+} from '@nook/contract';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ArrowLeft, ChevronLeft, ChevronRight, Diff } from 'lucide-react';
@@ -33,7 +38,7 @@ import { MemoryMarkdown } from './memory-markdown';
 import { formatDateTime, timeAgo } from './time';
 import type { MemoryPageModel } from './use-memory-page';
 
-function useMemoryHistory(detail: Memory) {
+function useMemoryHistory(detail: OwnerMemory) {
   const queries = useQueryClient();
   const busy = memoryWriteGate.useBusy();
   const history = useQuery(
@@ -428,7 +433,7 @@ export function HistorySheet({
   returnFocus,
 }: {
   model: MemoryPageModel;
-  memory: Memory;
+  memory: OwnerMemory;
   /** The History button that opened the sheet; focus goes back to it on close. */
   returnFocus: RefObject<HTMLElement | null>;
 }) {

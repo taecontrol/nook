@@ -374,7 +374,7 @@ it('Migration preserves populated use rows and chronology/path indexes while all
     db.prepare('DROP TABLE audit_entries'),
     ...old.map((sql) => db.prepare(sql)),
     db.prepare(
-      "DELETE FROM d1_migrations WHERE name IN ('0007_secret_creations.sql', '0008_secret_reveals.sql')",
+      "DELETE FROM d1_migrations WHERE name IN ('0007_secret_creations.sql', '0008_secret_reveals.sql', '0013_audit_file_entries.sql')",
     ),
   ]);
   const id = randomUUID();
@@ -394,10 +394,11 @@ it('Migration preserves populated use rows and chronology/path indexes while all
     )
     .run();
   const before = await auditRows(app);
-  expect(await applyMigrations(db)).toEqual([
-    '0007_secret_creations.sql',
-    '0008_secret_reveals.sql',
-  ]);
+  expect(
+    await applyMigrations(db, 'migrations', {
+      only: ['0007_secret_creations.sql', '0008_secret_reveals.sql'],
+    }),
+  ).toEqual(['0007_secret_creations.sql', '0008_secret_reveals.sql']);
   const after = await auditRows(app);
   expect(
     after.map(({ ip: _ip, country: _country, ...facts }) => facts),
@@ -418,6 +419,7 @@ it('Migration preserves populated use rows and chronology/path indexes while all
     'audit_entries_secret',
     'sqlite_autoindex_audit_entries_1',
   ]);
+  expect(await applyMigrations(db)).toEqual(['0013_audit_file_entries.sql']);
   const { token } = await issueGrant(app, ['work/acme']);
   expect((await machineCreate(app, token)).status).toBe(201);
   expect(
@@ -433,7 +435,7 @@ it('Migration preserves denied use history with all recorded facts', async () =>
     db.prepare('DROP TABLE audit_entries'),
     ...old.map((sql) => db.prepare(sql)),
     db.prepare(
-      "DELETE FROM d1_migrations WHERE name IN ('0007_secret_creations.sql', '0008_secret_reveals.sql')",
+      "DELETE FROM d1_migrations WHERE name IN ('0007_secret_creations.sql', '0008_secret_reveals.sql', '0013_audit_file_entries.sql')",
     ),
   ]);
   await db
@@ -453,10 +455,11 @@ it('Migration preserves denied use history with all recorded facts', async () =>
     .run();
   const before = await auditRows(app);
   expect(before).toHaveLength(1);
-  expect(await applyMigrations(db)).toEqual([
-    '0007_secret_creations.sql',
-    '0008_secret_reveals.sql',
-  ]);
+  expect(
+    await applyMigrations(db, 'migrations', {
+      only: ['0007_secret_creations.sql', '0008_secret_reveals.sql'],
+    }),
+  ).toEqual(['0007_secret_creations.sql', '0008_secret_reveals.sql']);
   const after = await auditRows(app);
   expect(
     after.map(({ ip: _ip, country: _country, ...facts }) => facts),
@@ -464,6 +467,7 @@ it('Migration preserves denied use history with all recorded facts', async () =>
   expect(after.every((row) => row.ip === null && row.country === null)).toBe(
     true,
   );
+  expect(await applyMigrations(db)).toEqual(['0013_audit_file_entries.sql']);
   expect(
     (await auditPageData(app)).entries.map((entry) => entry.outcome),
   ).toEqual(['denied']);

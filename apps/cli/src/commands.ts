@@ -1,10 +1,11 @@
 import { NodeServices } from '@effect/platform-node';
-import { Effect } from 'effect';
-import { Argument, CliError, Command } from 'effect/cli';
+import { Effect, Option } from 'effect';
+import { Argument, CliError, Command, Flag } from 'effect/cli';
 import cliPackage from '../package.json' with { type: 'json' };
 import { declaration } from './arguments.ts';
 import { CliFailure } from './errors.ts';
 import { hostFor } from './host.ts';
+import { memoryAttach, memoryDownload } from './memory-files.ts';
 import { run } from './run.ts';
 import { runGrammar } from './run-arguments.ts';
 import { login, logout, mcpHeader, whoami } from './session.ts';
@@ -19,6 +20,10 @@ const usage: Usage = {
     check: 'nook vault check',
     list: 'nook vault list <bucket>',
     create: createGrammar.usage,
+  },
+  memory: {
+    attach: 'nook memory attach <id> <path>',
+    download: 'nook memory download <id> <name> [--output <path>]',
   },
   login: 'nook login <url>',
   whoami: 'nook whoami',
@@ -50,6 +55,30 @@ function missingVaultBucket(args: readonly string[]) {
 }
 function creatingVault(args: readonly string[]) {
   return args[0] === 'vault' && args[1] === 'create' && args[2] !== '--help';
+}
+
+async function runInterruptible(effect: Effect.Effect<number>) {
+  const controller = new AbortController();
+  let interrupted = 0;
+  const interrupt = () => {
+    interrupted = 130;
+    controller.abort();
+  };
+  const terminate = () => {
+    interrupted = 143;
+    controller.abort();
+  };
+  process.on('SIGINT', interrupt);
+  process.on('SIGTERM', terminate);
+  try {
+    return await Effect.runPromise(effect, { signal: controller.signal });
+  } catch (error) {
+    if (interrupted) return interrupted;
+    throw error;
+  } finally {
+    process.off('SIGINT', interrupt);
+    process.off('SIGTERM', terminate);
+  }
 }
 
 export async function execute(
@@ -98,6 +127,31 @@ export async function execute(
           ),
         ]),
       ),
+      Command.make('memory').pipe(
+        Command.withSubcommands([
+          Command.make(
+            'attach',
+            { id: Argument.String('id'), path: Argument.String('path') },
+            ({ id, path }) => memoryAttach(host, id, path, write),
+          ),
+          Command.make(
+            'download',
+            {
+              id: Argument.String('id'),
+              name: Argument.String('name'),
+              output: Flag.optional(Flag.String('output')),
+            },
+            ({ id, name, output }) =>
+              memoryDownload(
+                host,
+                id,
+                name,
+                Option.getOrUndefined(output),
+                write,
+              ),
+          ),
+        ]),
+      ),
       Command.make('login', { url: Argument.String('url') }, ({ url }) =>
         login(host, url, write),
       ),
@@ -111,7 +165,7 @@ export async function execute(
       ),
     ]),
   );
-  return Effect.runPromise(
+  return runInterruptible(
     (creatingVault(args)
       ? vaultCreate(host, args.slice(2), write)
       : Command.runWith(command, {

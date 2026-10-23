@@ -1,4 +1,4 @@
-import type { Memory, MemoryScope, MemoryVersion } from '@nook/contract';
+import type { MemoryScope, MemoryVersion, OwnerMemory } from '@nook/contract';
 import {
   infiniteQueryOptions,
   type QueryClient,
@@ -64,12 +64,15 @@ export function memoriesOptions(bucket: string, scope?: MemoryScope) {
 export function memoryOptions(id: string) {
   return queryOptions({
     queryKey: memoryKeys.detail(id),
-    queryFn: async ({ signal, client }): Promise<Memory> => {
+    queryFn: async ({ signal, client }): Promise<OwnerMemory> => {
       const memory = await runApi(
         (api) => api.memories.get({ params: { id } }),
         signal,
       );
-      return newer(client.getQueryData<Memory>(memoryKeys.detail(id)), memory);
+      return newer(
+        client.getQueryData<OwnerMemory>(memoryKeys.detail(id)),
+        memory,
+      );
     },
     retry: false,
     staleTime: 30_000,
@@ -145,7 +148,10 @@ function preloadHistory(queries: QueryClient, search: MemorySearch) {
     memoryWriteGate.preload(queries, memoryHistoryOptions(search.memory));
 }
 
-export function newer(current: Memory | undefined, next: Memory): Memory {
+export function newer(
+  current: OwnerMemory | undefined,
+  next: OwnerMemory,
+): OwnerMemory {
   return current && current.version > next.version ? current : next;
 }
 export function historyBehind(
