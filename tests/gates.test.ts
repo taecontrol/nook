@@ -139,18 +139,18 @@ it('E19: accepts complete coverage and fails closed on each missing execution se
   }
 });
 
-it('#33 E21: merged coverage requires eleven platform sources, including macOS', () => {
+it('#33 E21: merged coverage requires twelve platform sources, including both macOS shards', () => {
   const input = evidence();
   expect(() =>
     validateCoverage(
-      { ...input.manifest, shards: 11 },
+      { ...input.manifest, shards: 12 },
       input.artifacts,
       source,
     ),
   ).not.toThrow();
   expect(() =>
     validateCoverage(
-      { ...input.manifest, shards: 10 },
+      { ...input.manifest, shards: 11 },
       input.artifacts,
       source,
     ),
@@ -214,10 +214,23 @@ it('E19: empty files and zero counters cannot stand in for an execution seam', (
   }
 });
 
-it('E19/#33 E21: requires all ten Linux shards and macOS, with distinct indexes and the same source', () => {
-  const manifests = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 'macos'].map((index) => ({
+it('E19/#33 E21: requires all ten Linux shards and both macOS shards, with distinct indexes and the same source', () => {
+  const manifests = [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    'macos-1/2',
+    'macos-2/2',
+  ].map((index) => ({
     ...evidence().manifest,
-    shard: index === 'macos' ? 'macos' : `${index}/10`,
+    shard: typeof index === 'string' ? index : `${index}/10`,
   }));
   expect(() => validateShards(manifests, source)).not.toThrow();
   expect(() => validateShards(manifests.slice(0, 2), source)).toThrow(/shard/i);
@@ -243,7 +256,7 @@ it('E19/#33 E21: requires all ten Linux shards and macOS, with distinct indexes 
       manifests.map((manifest) => ({
         ...manifest,
         source:
-          manifest.shard === 'macos'
+          manifest.shard === 'macos-1/2'
             ? { ...source, digest: hash('different') }
             : source,
       })),

@@ -4,7 +4,10 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { delimiter, resolve } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
-import { macosCliSuites } from '../scripts/lib/macos-cli-suites.ts';
+import {
+  macosCliGroups,
+  macosCliSuites,
+} from '../scripts/lib/macos-cli-suites.ts';
 import { testEnvironment } from '../scripts/lib/test-environment.ts';
 
 const expression = (value: string) => ['$', '{{ ', value, ' }}'].join('');
@@ -78,12 +81,18 @@ it('E17/#33 E21: PR CI requires static checks, ten Linux shards, macOS CLI and t
   const macos = ci.jobs['macos-cli'];
   expect(macos['runs-on']).toBe('macos-latest');
   expect(macos['timeout-minutes']).toBe(15);
+  expect(macos.strategy.matrix.shard).toEqual([1, 2]);
   expect(macos.env.NOOK_TEST_MACOS_KEYCHAIN_BOOTSTRAP).toBe('github-hosted');
   expect(
     macos.steps.some(
-      (step: { run?: string }) => step.run === 'pnpm test:coverage --macos-cli',
+      (step: { run?: string }) =>
+        step.run ===
+        `pnpm test:coverage --macos-cli=${expression('matrix.shard')}/2`,
     ),
   ).toBe(true);
+  // Each suite runs in exactly one macOS shard.
+  expect(new Set(macosCliSuites).size).toBe(macosCliSuites.length);
+  expect(macosCliGroups.every((group) => group.length > 0)).toBe(true);
   expect(macosCliSuites).toEqual(
     expect.arrayContaining([
       'tests/vault-cli.test.ts',
@@ -94,7 +103,7 @@ it('E17/#33 E21: PR CI requires static checks, ten Linux shards, macOS CLI and t
   expect(
     macos.steps.some(
       (step: { with?: { name?: string } }) =>
-        step.with?.name === 'coverage-macos',
+        step.with?.name === `coverage-macos-${expression('matrix.shard')}`,
     ),
   ).toBe(true);
   expect(ci.env?.NOOK_TEST_MACOS_KEYCHAIN_BOOTSTRAP).toBeUndefined();

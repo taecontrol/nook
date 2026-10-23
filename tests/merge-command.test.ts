@@ -31,8 +31,22 @@ it.each(['complete', 'baseline', 'duplicate', 'artifact'] as const)(
         await writeFile(target, await readFile(path));
       }
       const directories = [];
-      for (const index of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 'macos']) {
-        const shard = resolve(directory, 'shards', String(index));
+      for (const index of [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        'macos-1/2',
+        'macos-2/2',
+      ]) {
+        const label = String(index).replace('/', '-');
+        const shard = resolve(directory, 'shards', label);
         directories.push(shard);
         await mkdir(shard, { recursive: true });
         const different = structuredClone(baseline);
@@ -44,7 +58,7 @@ it.each(['complete', 'baseline', 'duplicate', 'artifact'] as const)(
               : originalBaseline,
         };
         for (const seam of ['node', 'worker', 'browser']) {
-          const name = `${seam}-fixture-${variant === 'duplicate' ? 1 : index}.json`;
+          const name = `${seam}-fixture-${variant === 'duplicate' ? 1 : label}.json`;
           artifacts[name] = JSON.stringify({
             seam,
             loaded: { [file]: baseline[file].hash },
@@ -63,7 +77,7 @@ it.each(['complete', 'baseline', 'duplicate', 'artifact'] as const)(
           JSON.stringify({
             schema: 1,
             source,
-            shard: index === 'macos' ? 'macos' : `${index}/10`,
+            shard: typeof index === 'string' ? index : `${index}/10`,
             outputs,
           }),
         );
@@ -82,8 +96,8 @@ it.each(['complete', 'baseline', 'duplicate', 'artifact'] as const)(
         const merged = JSON.parse(
           await readFile(resolve(output, 'manifest.json'), 'utf8'),
         );
-        expect(merged).toMatchObject({ schema: 1, source, shards: 11 });
-        expect(Object.keys(merged.outputs).length).toBe(34);
+        expect(merged).toMatchObject({ schema: 1, source, shards: 12 });
+        expect(Object.keys(merged.outputs).length).toBe(37);
         expect(await readFile(resolve(output, 'baseline.json'), 'utf8')).toBe(
           originalBaseline,
         );

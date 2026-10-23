@@ -6,23 +6,34 @@ import { coverageShards, linuxShards } from './lib/coverage-evidence.ts';
 import { startHostIsolation } from './lib/host-isolation.ts';
 import { digest, files, sourceIdentity } from './lib/identity.ts';
 import { evidenceRoot, prepare } from './lib/instrument.ts';
-import { macosCliSuites } from './lib/macos-cli-suites.ts';
+import { macosCliGroups, macosShards } from './lib/macos-cli-suites.ts';
 import { testEnvironment } from './lib/test-environment.ts';
 import { buildTest } from './test-build.ts';
 
-const shard = process.argv
-  .find((arg) => arg.startsWith('--shard='))
-  ?.slice('--shard='.length);
+const option = (name: string) =>
+  process.argv
+    .find((arg) => arg.startsWith(`--${name}=`))
+    ?.slice(name.length + 3);
+const shard = option('shard');
 if (
   shard !== undefined &&
-  (shard === 'macos' || !coverageShards.includes(shard))
+  !coverageShards.slice(0, linuxShards).includes(shard)
 )
   throw new Error(
     `Expected --shard=I/${linuxShards} with I between 1 and ${linuxShards}.`,
   );
-const macos = process.argv.includes('--macos-cli');
-if (macos && (process.platform !== 'darwin' || shard !== undefined))
-  throw new Error('--macos-cli requires macOS without a Linux shard.');
+const macos = option('macos-cli');
+if (process.argv.includes('--macos-cli'))
+  throw new Error(`Expected --macos-cli=I/${macosShards}.`);
+if (
+  macos !== undefined &&
+  (process.platform !== 'darwin' ||
+    shard !== undefined ||
+    !coverageShards.includes(`macos-${macos}`))
+)
+  throw new Error(
+    `--macos-cli=I/${macosShards} requires macOS without a Linux shard.`,
+  );
 const isolation = await startHostIsolation();
 try {
   await rm(evidenceRoot, { recursive: true, force: true });
@@ -31,7 +42,14 @@ try {
   await buildProduct();
   await buildTest();
   for (const args of macos
-    ? [['exec', 'vitest', 'run', ...macosCliSuites]]
+    ? [
+        [
+          'exec',
+          'vitest',
+          'run',
+          ...macosCliGroups[Number(macos.split('/')[0]) - 1],
+        ],
+      ]
     : [
         ['exec', 'vitest', 'run', ...(shard ? [`--shard=${shard}`] : [])],
         [
@@ -63,7 +81,7 @@ try {
       {
         schema: 1,
         source: before,
-        ...(macos ? { shard: 'macos' } : shard ? { shard } : {}),
+        ...(macos ? { shard: `macos-${macos}` } : shard ? { shard } : {}),
         outputs,
       },
       null,
