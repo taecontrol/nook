@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { auditRows } from './support/audit.ts';
 import { auditEntries, selectAudit } from './support/audit-browser.ts';
+import { closeBrowserPage } from './support/buckets-browser.ts';
 import { memoryFixture, memoryId, seedMemories } from './support/memory.ts';
 import { attachFile, fileBucket, fileMachine } from './support/memory-files.ts';
 import {
@@ -141,6 +142,6 @@ it('E27: Chromium renders the five file outcomes with expandable facts, descenda
     expect(new URL(page.url()).searchParams.get('bucket')).toBe(fileBucket);
     expect(await auditEntries(page).count()).toBeGreaterThan(0);
   } finally {
-    await context.close();
+    await closeBrowserPage(page, context);
   }
 });

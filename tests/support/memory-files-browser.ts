@@ -1,5 +1,6 @@
 import type { Browser, Page } from 'playwright';
 import { expect } from 'vitest';
+import { closeBrowserPage } from './buckets-browser.ts';
 import type { MemoryFixture } from './memory.ts';
 import {
   fileMemory,
@@ -65,7 +66,7 @@ export async function filesPage(
       files,
       close: async () => {
         try {
-          await context.close();
+          await closeBrowserPage(page, context);
         } finally {
           await app.close();
         }

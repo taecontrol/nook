@@ -280,6 +280,51 @@ it.each(['forget-first', 'attach-first'] as const)(
     }
   },
 );
+it('E9: forgetting after attach authorization but before its pre-read refuses the upload before R2', async () => {
+  const authorized = deferred();
+  const resume = deferred();
+  let armed = false;
+  let reads = 0;
+  app = await filesRuntime({
+    checkpoint: async (label) => {
+      // Authentication and bucket authorization each complete one statement.
+      if (armed && label === '/after-statement' && ++reads === 2) {
+        authorized.resolve();
+        await resume.promise;
+      }
+      return true;
+    },
+  });
+  const machine = await seedFileMemory(app);
+  armed = true;
+  const pending = putFile(app, machine.token);
+  try {
+    await Promise.race([
+      authorized.promise,
+      pending.then(() => {
+        throw new Error(
+          'Attach did not reach its authorized pre-read boundary.',
+        );
+      }),
+    ]);
+    expect((await forget()).isError).not.toBe(true);
+    resume.resolve();
+    await expectHttpError(
+      await pending,
+      404,
+      'MemoryNotFound',
+      'Memory not found.',
+    );
+    expect(app.labels).not.toContain('/r2/before-put');
+    expect(await fileRows(app)).toEqual([]);
+    expect(await fileObjects(app)).toEqual([]);
+    expect(await auditRows(app)).toEqual([]);
+    await noDanglingRows();
+  } finally {
+    resume.resolve();
+    await pending;
+  }
+});
 it('E10: interruption after put leaves no row; Cron keeps the orphan before 60 minutes and sweeps it after the grace', async () => {
   let stop = true;
   app = await filesRuntime({
