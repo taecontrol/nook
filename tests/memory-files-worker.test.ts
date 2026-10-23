@@ -309,13 +309,22 @@ it('E6: every C0/C1 control byte in a name, including an encoded slash, is Inval
     ...Array.from({ length: 32 }, (_, i) => i),
     ...Array.from({ length: 33 }, (_, i) => i + 127),
   ]) {
-    await expectHttpError(
-      await putFile(app, machine.token, {
-        name: `control-${String.fromCharCode(code)}.pdf`,
-      }),
-      400,
-      'InvalidFile',
-    );
+    try {
+      await expectHttpError(
+        await putFile(app, machine.token, {
+          name: `control-${String.fromCharCode(code)}.pdf`,
+        }),
+        400,
+        'InvalidFile',
+      );
+    } catch (error) {
+      // CI diagnostic: print before the shard can exhaust its job deadline.
+      console.error(
+        `E6 control U+${code.toString(16).padStart(4, '0')}`,
+        error,
+      );
+      throw error;
+    }
   }
   await expectHttpError(
     await putFile(app, machine.token, { name: 'encoded/slash.pdf' }),
