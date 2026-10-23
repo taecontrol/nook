@@ -9,7 +9,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';
 import { auditRows } from './support/audit.ts';
 import { type PrivateKeyring, privateKeyring } from './support/cli.ts';
 import {
@@ -20,6 +20,7 @@ import {
 } from './support/memory.ts';
 import {
   attachFile,
+  clearFileState,
   digest,
   fileBucket,
   fileMachine,
@@ -46,20 +47,29 @@ import { expectNoValue } from './support/vault.ts';
 
 let app: FilesRuntime;
 let keyring: PrivateKeyring;
+let keyrings: PrivateKeyring[];
 let machine: Awaited<ReturnType<typeof fileMachine>>;
 let transports: Awaited<ReturnType<typeof fileTransport>>[];
+beforeAll(async () => {
+  app = await filesRuntime();
+});
+afterAll(() => app?.close());
 beforeEach(async () => {
   transports = [];
-  app = await filesRuntime();
+  keyrings = [];
+  await clearFileState(app);
   machine = await seedFileMemory(app);
-  keyring = await privateKeyring();
-  await configureFilesCli(keyring, app.origin, machine.token);
+  await useMachine(machine.token);
 });
 afterEach(async () => {
   for (const transport of transports) await transport.close();
-  await keyring?.close();
-  await app?.close();
+  for (const fixture of keyrings) await fixture.close();
 });
+async function useMachine(token: string) {
+  keyring = await privateKeyring();
+  keyrings.push(keyring);
+  await configureFilesCli(keyring, app.origin, token);
+}
 const attach = (path: string, id = fileMemory) =>
   keyring.start(['memory', 'attach', id, path]).done;
 const download = (
@@ -236,9 +246,12 @@ it('E11: CLI reports readable-but-unwritable, unreadable and revoked credentials
     'Access to this bucket is forbidden.',
   );
   const other = await fileMachine(app, ['personal'], 'other');
-  await configureFilesCli(keyring, app.origin, other.token);
-  publicFailure(await attach(path), 'Memory not found.');
-  await configureFilesCli(keyring, app.origin, machine.token);
+  const originalMachine = keyring;
+  await useMachine(other.token);
+  const otherPath = resolve(keyring.home, 'guide.pdf');
+  await writeFile(otherPath, await readFile(path));
+  publicFailure(await attach(otherPath), 'Memory not found.');
+  keyring = originalMachine;
   await (await app.mf.getD1Database('DB'))
     .prepare('DELETE FROM machine_tokens WHERE id=?')
     .bind(machine.id)
@@ -287,7 +300,7 @@ it('E13: another real CLI machine downloads into another directory and emits onl
   const bytes = Buffer.alloc(2_418_734, 79);
   const stored = await attachFile(app, machine.token, { bytes });
   const other = await fileMachine(app, [fileBucket], 'second-machine');
-  await configureFilesCli(keyring, app.origin, other.token);
+  await useMachine(other.token);
   const directory = resolve(keyring.home, 'second-machine');
   await mkdir(directory);
   const result = await download(pdfName, [], directory);
@@ -342,7 +355,7 @@ it('E14/E17: real CLI downloads readable ancestors and me, masks unreadable ids,
   const before = await fileSnapshot(app);
   publicFailure(await download('missing.pdf'), 'File not found.');
   const other = await fileMachine(app, ['personal'], 'other');
-  await configureFilesCli(keyring, app.origin, other.token);
+  await useMachine(other.token);
   for (const id of [fileMemory, memoryId(999999)])
     publicFailure(
       await download(pdfName, [], keyring.home, id),

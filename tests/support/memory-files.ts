@@ -142,6 +142,22 @@ export async function fileObjects(app: TestRuntime) {
   } while (cursor);
   return objects;
 }
+// Reuse a running Worker only in suites without schema or checkpoint changes.
+// Every example starts with fresh file/memory state and new machine tokens.
+export async function clearFileState(app: TestRuntime) {
+  const db = await app.mf.getD1Database('DB');
+  await db.batch(
+    [
+      'memory_files',
+      'memories',
+      'machine_tokens',
+      'audit_entries',
+      'memory_vector_removals',
+    ].map((table) => db.prepare(`DELETE FROM ${table}`)),
+  );
+  const keys = (await fileObjects(app)).map((object) => object.key);
+  if (keys.length) await (await app.mf.getR2Bucket('FILES')).delete(keys);
+}
 export async function fileSnapshot(
   app: TestRuntime,
   headers: HeadersInit = {},

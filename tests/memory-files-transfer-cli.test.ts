@@ -10,11 +10,12 @@ import {
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';
 import { type PrivateKeyring, privateKeyring } from './support/cli.ts';
 import { deferred } from './support/machines.ts';
 import {
   attachFile,
+  clearFileState,
   digest,
   fileMemory,
   maximumFile,
@@ -36,9 +37,13 @@ let keyring: PrivateKeyring;
 let machine: Awaited<ReturnType<typeof seedFileMemory>>;
 let transport: Awaited<ReturnType<typeof fileTransport>> | undefined;
 let directory: string;
+beforeAll(async () => {
+  app = await filesRuntime();
+});
+afterAll(() => app?.close());
 beforeEach(async () => {
   transport = undefined;
-  app = await filesRuntime();
+  await clearFileState(app);
   machine = await seedFileMemory(app);
   keyring = await privateKeyring();
   directory = resolve(keyring.home, 'downloads');
@@ -47,7 +52,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await transport?.close();
   await keyring?.close();
-  await app?.close();
 });
 async function proxy(options: Parameters<typeof fileTransport>[1] = {}) {
   transport = await fileTransport(app, options);

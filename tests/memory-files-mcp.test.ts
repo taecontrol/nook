@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { Log, LogLevel } from 'miniflare';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { access, accessFixture } from './support/access.ts';
 import { auditRows } from './support/audit.ts';
 import { privateKeyring } from './support/cli.ts';
@@ -17,6 +17,7 @@ import {
 import {
   type AttachedFile,
   attachFile,
+  clearFileState,
   downloadFile,
   fileBucket,
   fileMachine,
@@ -53,17 +54,23 @@ describe.each(['owner', 'machine'] as const)(
       let machine: Awaited<ReturnType<typeof fileMachine>>;
       let assertion: string;
       let client: ReturnType<typeof memoryClient>;
-      beforeEach(async () => {
-        const issuer = await accessFixture();
+      let issuer: Awaited<ReturnType<typeof accessFixture>>;
+      beforeAll(async () => {
+        issuer = await accessFixture();
         app = await filesRuntime({
           owner: { bindings: access, outboundService: issuer.outboundService },
           search: true,
         });
+      });
+      beforeEach(async () => {
+        await clearFileState(app);
         machine = await seedFileMemory(app);
         assertion = await issuer.assertion();
         if (!app.services)
           throw new Error('The search stand-ins must be installed.');
+        app.services.clear();
         app.services.failEmbedding = true;
+        app.labels.length = 0;
         client = memoryClient(app, protocol, {
           machine: endpoint === 'machine',
           headers:
@@ -72,7 +79,7 @@ describe.each(['owner', 'machine'] as const)(
               : { 'Cf-Access-Jwt-Assertion': assertion },
         });
       });
-      afterEach(() => app?.close());
+      afterAll(() => app?.close());
       const ownerHeaders = () => ({ 'Cf-Access-Jwt-Assertion': assertion });
       const get = () => client.call('get', { id: fileMemory });
       const search = () =>
