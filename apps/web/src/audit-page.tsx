@@ -659,6 +659,7 @@ function AuditResults({
   machines?: readonly { id: string }[];
   secrets?: readonly { path: string }[];
 }) {
+  const labels = activityLabels(entries);
   return query.isPending ? (
     <Loading />
   ) : !query.data ? (
@@ -669,7 +670,7 @@ function AuditResults({
       {entries.length === 0 ? (
         <NoEntries filtered={filtered} />
       ) : (
-        <section aria-label="Secret activity">
+        <section aria-label={labels.region}>
           <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
             <span>{entries.length} entries loaded</span>
             <span>Newest first</span>
@@ -678,9 +679,9 @@ function AuditResults({
             <span className="w-28 shrink-0">When</span>
             <span className="w-24 shrink-0">Outcome</span>
             <div className="flex flex-1 gap-4">
-              <span className="flex-1">Secret / bucket</span>
-              <span className="flex-1">Purpose</span>
-              <span className="w-40 shrink-0">Machine / executable</span>
+              <span className="flex-1">{labels.item}</span>
+              <span className="flex-1">{labels.summary}</span>
+              <span className="w-40 shrink-0">{labels.source}</span>
             </div>
             <span className="w-8" />
           </div>
@@ -718,4 +719,27 @@ function AuditResults({
       )}
     </>
   );
+}
+
+function activityLabels(entries: readonly AuditEntry[]) {
+  if (!entries.some((entry) => 'memoryId' in entry))
+    return {
+      region: 'Secret activity',
+      item: 'Secret / bucket',
+      summary: 'Purpose',
+      source: 'Machine / executable',
+    };
+  if (entries.some((entry) => 'path' in entry))
+    return {
+      region: 'Secret and file activity',
+      item: 'Secret or file / bucket',
+      summary: 'Purpose or size',
+      source: 'Source',
+    };
+  return {
+    region: 'File activity',
+    item: 'File / bucket',
+    summary: 'Size',
+    source: 'Source / client',
+  };
 }

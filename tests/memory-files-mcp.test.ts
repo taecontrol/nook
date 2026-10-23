@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { Log, LogLevel } from 'miniflare';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -228,6 +228,17 @@ describe.each(['owner', 'machine'] as const)(
         ).toEqual(['id', 'name', 'sha256']);
         expect(tool?.inputSchema.required).toEqual(
           expect.arrayContaining(['id', 'name', 'sha256']),
+        );
+      });
+      it('E19: the deployment MCP inventory matches the real tools/list response', async () => {
+        const { tools } = await client.listTools();
+        const documentation = await readFile('docs/deployment.md', 'utf8');
+        const inventory = /Nook serves[^\n]+/.exec(documentation)?.[0] ?? '';
+        const documented = [...inventory.matchAll(/`([a-z_]+)`/g)].map(
+          (match) => match[1],
+        );
+        expect(documented.sort()).toEqual(
+          tools.map((tool) => tool.name).sort(),
         );
       });
       it('E20: stale detach preserves all state, current detach removes and audits, and retry is File not found', async () => {

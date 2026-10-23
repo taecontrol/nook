@@ -278,10 +278,7 @@ export function FilesSheet({
   returnFocus: RefObject<HTMLElement | null>;
 }) {
   const { files } = memory;
-  const { pending, failure, refreshing, download } = useFileDownload(
-    memory.id,
-    model.detail,
-  );
+  const { pending, failure, refreshing, download } = useFileDownload(memory.id);
   const rows = newestFirst(files);
   return (
     <Sheet

@@ -122,7 +122,7 @@ the owner authentication path; local Miniflare cannot establish them.
 
 ## Remote MCP and Access Managed OAuth
 
-Nook serves `list_buckets`, `create_bucket`, `delete_bucket`, `list_secrets`, `remember`, `update`, `get`, and `search` at `https://<hostname>/mcp`. The owner authenticates through the existing Access application with access to the whole bucket tree. The Worker verifies the forwarded Access assertion before MCP. Nook machine tokens use the separate `/api/machine/mcp` endpoint described below.
+Nook serves ten tools at `https://<hostname>/mcp`: `list_buckets`, `create_bucket`, `delete_bucket`, `list_secrets`, `remember`, `update`, `get`, `search`, `detach`, and `forget`. The owner authenticates through the existing Access application with access to the whole bucket tree. The Worker verifies the forwarded Access assertion before MCP. Nook machine tokens use the separate `/api/machine/mcp` endpoint described below.
 
 In **Zero Trust → Access controls → Applications**, edit the existing self-hosted Nook application. Under **Advanced settings**, enable **Managed OAuth**, then save. Keep its whole-hostname protection and owner Allow policy. Access supplies the OAuth flow and forwards the user's JWT in `Cf-Access-Jwt-Assertion`; Nook does not implement an OAuth server. See [Cloudflare Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/).
 

@@ -1,7 +1,9 @@
+import { type QueryClient, useQueryClient } from '@tanstack/react-query';
 import { Effect } from 'effect';
-import { useRef, useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { ApiError, runApi } from './api-client';
-import type { MemoryPageModel } from './use-memory-page';
+import { memoryKeys, memoryOptions } from './memory-api';
+import { canLoadMemory } from './memory-cache';
 
 export type DownloadFailure = {
   kind: 'missing' | 'unavailable';
@@ -30,14 +32,62 @@ async function saveFile(id: string, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-export function useFileDownload(id: string, detail: MemoryPageModel['detail']) {
-  const active = useRef(false);
-  const [pending, setPending] = useState<string | null>(null);
+// Only pending filenames survive drawer/route unmounts. Bytes stay in saveFile,
+// and settled operations leave this QueryClient-scoped registry immediately.
+function pendingRegistry() {
+  const pending = new Map<string, string>();
+  const listeners = new Set<() => void>();
+  return {
+    pending,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    update(id: string, name: string | null) {
+      if (name === null) pending.delete(id);
+      else pending.set(id, name);
+      for (const listener of listeners) listener();
+    },
+  };
+}
+const registries = new WeakMap<
+  QueryClient,
+  ReturnType<typeof pendingRegistry>
+>();
+function registryFor(queries: QueryClient) {
+  let registry = registries.get(queries);
+  if (!registry) {
+    registry = pendingRegistry();
+    registries.set(queries, registry);
+  }
+  return registry;
+}
+async function refreshFiles(queries: QueryClient, id: string) {
+  const queryKey = memoryKeys.detail(id);
+  await queries.invalidateQueries({
+    queryKey,
+    exact: true,
+    refetchType: 'none',
+  });
+  // Forget cancels reads and removes this detail. Do not recreate it or read
+  // across its pending write; the ordinary detail query resumes when safe.
+  if (canLoadMemory(queries, id) && queries.getQueryState(queryKey))
+    await queries.fetchQuery({ ...memoryOptions(id), staleTime: 0 });
+}
+
+export function useFileDownload(id: string) {
+  const queries = useQueryClient();
+  const registry = registryFor(queries);
+  const pending = useSyncExternalStore(
+    registry.subscribe,
+    () => registry.pending.get(id) ?? null,
+  );
   const [failure, setFailure] = useState<DownloadFailure | null>(null);
   const download = async (name: string) => {
-    if (active.current) return;
-    active.current = true;
-    setPending(name);
+    if (registry.pending.has(id)) return;
+    registry.update(id, name);
     setFailure(null);
     try {
       await saveFile(id, name);
@@ -50,12 +100,12 @@ export function useFileDownload(id: string, detail: MemoryPageModel['detail']) {
       };
       setFailure(failure);
       if (missing) {
-        const result = await detail.refetch();
-        if (result.isError) setFailure({ ...failure, refreshFailed: true });
+        await refreshFiles(queries, id).catch(() => {
+          setFailure({ ...failure, refreshFailed: true });
+        });
       }
     } finally {
-      active.current = false;
-      setPending(null);
+      registry.update(id, null);
     }
   };
   return {

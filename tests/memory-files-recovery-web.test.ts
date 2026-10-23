@@ -16,6 +16,11 @@ import {
   openFiles,
   waitFileRows,
 } from './support/memory-files-browser.ts';
+import {
+  confirmForget,
+  memoryQueries,
+  openForget,
+} from './support/memory-forget.ts';
 
 let browser: Browser;
 let closeBrowser: (() => Promise<void>) | undefined;
@@ -279,6 +284,96 @@ it('keeps a pending download and all peer locks across A to B to A navigation', 
     await expect.poll(() => button.isEnabled()).toBe(true);
   } finally {
     gate.resolve();
+    await visit.close();
+  }
+});
+
+it('a late missing-file response does not read or repopulate a memory while forget is pending', async () => {
+  const downloadGate = deferred();
+  const downloadArrived = deferred();
+  const forgetGate = deferred();
+  const forgetArrived = deferred();
+  const reads: string[] = [];
+  const visit = await filesPage(browser, {
+    names: [pdfName],
+    configure: async (page, app) => {
+      await seedMemories(app, [
+        memoryFixture(602, { bucket: fileBucket, content: '# Another memory' }),
+      ]);
+      page.on('request', (request) => {
+        if (
+          request.method() === 'GET' &&
+          /^\/api\/memories\/[^/]+$/.test(new URL(request.url()).pathname)
+        )
+          reads.push(request.url());
+      });
+      await page.route('**/api/memories/*/files/*', async (route) => {
+        downloadArrived.resolve();
+        await downloadGate.promise;
+        await route.continue().catch(() => {});
+      });
+      await page.route('**/api/memories/*?expectedVersion=*', async (route) => {
+        forgetArrived.resolve();
+        await forgetGate.promise;
+        await route.continue().catch(() => {});
+      });
+    },
+  });
+  try {
+    const { page, app, files } = visit;
+    await openFiles(page);
+    await filesSheet(page)
+      .getByRole('button', { name: `Download ${pdfName}`, exact: true })
+      .click();
+    await downloadArrived.promise;
+    expect(
+      (
+        await memoryClient(app, '2026-07-28').call('detach', {
+          id: fileMemory,
+          name: pdfName,
+          sha256: files[0].sha256,
+        })
+      ).isError,
+    ).not.toBe(true);
+    await page.keyboard.press('Escape');
+    await openForget(page);
+    await confirmForget(page);
+    await forgetArrived.promise;
+    await page
+      .getByRole('heading', { name: 'Another memory', exact: true })
+      .waitFor();
+    const before = reads.length;
+    const response = page.waitForResponse((response) =>
+      new URL(response.url()).pathname.includes('/files/'),
+    );
+    downloadGate.resolve();
+    await (await response).finished();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    expect(reads.slice(before)).toEqual([]);
+    const queries = await memoryQueries(page);
+    try {
+      expect(
+        await queries.evaluate(
+          (client, id) => client.getQueryData(['memory', id]) ?? null,
+          fileMemory,
+        ),
+      ).toBeNull();
+    } finally {
+      await queries.dispose();
+    }
+    forgetGate.resolve();
+    await page.getByText('Forgot File guide', { exact: true }).waitFor();
+    expect(
+      await page.locator(`[data-memory-row="${fileMemory}"]`).count(),
+    ).toBe(0);
+  } finally {
+    downloadGate.resolve();
+    forgetGate.resolve();
     await visit.close();
   }
 });

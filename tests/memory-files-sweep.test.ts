@@ -81,7 +81,8 @@ it('Cron collects old file garbage while memory-index embedding is held', async 
   app.setTime((await fileObjects(app))[0].uploaded.getTime() + 3_600_001);
   const gate = deferred();
   const arrived = deferred();
-  const services = app.services!;
+  const services = app.services;
+  if (!services) throw new Error('The search stand-ins must be installed.');
   const respond = services.fetch.bind(services);
   services.fetch = async (request) => {
     if (new URL(request.url).pathname === '/run') {

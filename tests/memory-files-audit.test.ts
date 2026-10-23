@@ -145,6 +145,7 @@ it('E27: Chromium renders the five file outcomes with expandable facts, descenda
     }
     await selectAudit(page, 'Bucket', fileBucket);
     expect(new URL(page.url()).searchParams.get('bucket')).toBe(fileBucket);
+    await auditEntries(page).first().waitFor();
     expect(await auditEntries(page).count()).toBeGreaterThan(0);
   } finally {
     await closeBrowserPage(page, context);

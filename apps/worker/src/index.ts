@@ -374,13 +374,16 @@ export default {
     env: SearchBindings & FileBindings & { DB: D1Database },
   ) {
     return Effect.runPromise(
-      Effect.all([
-        memorySync(memoryIndex(env)).pipe(
-          Effect.flatMap((store) => store.sync(controller.scheduledTime)),
-          Effect.catchCause(() => Effect.void),
-        ),
-        fileSweep(env).pipe(Effect.catchCause(() => Effect.void)),
-      ]).pipe(Effect.asVoid, Effect.provide(D1Client.layer({ db: env.DB }))),
+      Effect.all(
+        [
+          memorySync(memoryIndex(env)).pipe(
+            Effect.flatMap((store) => store.sync(controller.scheduledTime)),
+            Effect.catchCause(() => Effect.void),
+          ),
+          fileSweep(env).pipe(Effect.catchCause(() => Effect.void)),
+        ],
+        { concurrency: 'unbounded' },
+      ).pipe(Effect.asVoid, Effect.provide(D1Client.layer({ db: env.DB }))),
     );
   },
 };
