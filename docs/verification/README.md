@@ -77,7 +77,7 @@ Istanbul instruments original sources before Node execution, CLI child-process b
 
 CRAP rejects a missing baseline or seam, empty or unexecuted seam observations, stale source, unknown modules, incompatible counter maps or shapes, and altered artifacts. Coverage is the fraction of the function's own statements executed, excluding nested functions. A statement-free function uses its function counter. Classic complexity counts decisions independently for each function. The score is `complexity² × (1 − coverage)³ + complexity`.
 
-CI runs the five static commands, four `pnpm test:coverage --shard=I/4` jobs, a macOS CLI coverage job, and a final job. Each platform job uploads its manifest and artifacts; the final job requires the distinct indexes `1/4`, `2/4`, `3/4`, `4/4`, and `macos`, identical source identities and baselines, and intact artifact hashes before CRAP, build, and the load-time check. The timing stage runs alone after test jobs finish. It needs no Cloudflare secrets.
+CI runs the five static commands, six `pnpm test:coverage --shard=I/6` jobs, a macOS CLI coverage job, and a final job. Each platform job uploads its manifest and artifacts; the final job requires the distinct indexes `1/6`, `2/6`, `3/6`, `4/6`, `5/6`, `6/6`, and `macos`, identical source identities and baselines, and intact artifact hashes before CRAP, build, and the load-time check. Every coverage job retains its fifteen-minute timeout. The timing stage runs alone after test jobs finish. It needs no Cloudflare secrets.
 
 ## Browser evidence and budget
 
@@ -614,7 +614,18 @@ Compare each state, viewport and theme with the matching reader, files,
 Details or result screen in `.work/design/attachments/selected-c/screens/`.
 The prototype's scenario selector never enters production. The descriptive
 owner-capture filename places this suite in shard 1 with the current native
-sequencer, distributing its cost without changing checks, shards or timeouts.
+sequencer. CI now distributes the complete corpus across six Linux shards;
+the four-shard run exhausted its fifteen-minute budget after adding the file
+examples. All checks and timeouts remain in force.
+
+The compatible file CLI suites share one Worker per file, and MCP shares one
+per endpoint/protocol combination. Before every example the fixtures clear
+file, memory, machine-token, audit and removal rows, R2 keys and search state.
+CLI cases and distinct synthetic machines keep separate private HOME/keyrings;
+E13 downloads from a genuinely separate fixture. Fault-configured runtimes
+remain independent. The complete C0/C1 HTTP oracle still checks every byte
+and the encoded slash, with immediate per-code diagnostics on failure. No
+acceptance assertion, transfer deadline or protocol combination is removed.
 
 Refine added 21 regressions with red-before/green-after evidence, then one
 additional stale-preload regression. `memory-files-transfer-cli.test.ts` runs
