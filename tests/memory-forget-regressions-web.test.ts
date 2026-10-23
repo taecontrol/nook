@@ -14,6 +14,7 @@ import {
   confirmForget,
   forgetPage,
   forgottenId,
+  memoryQueries,
   openForget,
 } from './support/memory-forget.ts';
 
@@ -34,22 +35,31 @@ const rendered = (page: Page) =>
       ),
   );
 
-it.each([false, true])(
-  'E20/E21: late failure of the only memory forget preserves a later navigation to Vault; held route=%s',
-  async (holdRoute) => {
+it.each([
+  { destination: 'Vault', holdRoute: false },
+  { destination: 'Vault', holdRoute: true },
+  { destination: 'me', holdRoute: false },
+])(
+  'E20/E21: late forget failure preserves a later navigation to $destination; held route=$holdRoute',
+  async ({ destination, holdRoute }) => {
     const vaultGate = deferred();
     const vaultArrived = deferred();
     const gate = deferred();
     const arrived = deferred();
     const errors: string[] = [];
+    const anotherBucket = destination === 'me';
     const visit = await forgetPage(browser, {
-      seeds: [
-        memoryFixture(1, {
-          bucket: 'work/acme/api',
-          content: '# Release process\nOnly memory.',
-        }),
-      ],
-      start: `/memory?bucket=work/acme/api&scope=bucket&memory=${forgottenId}`,
+      seeds: anotherBucket
+        ? [typicalMemories[0], typicalMemories[5]]
+        : [
+            memoryFixture(1, {
+              bucket: 'work/acme/api',
+              content: '# Release process\nOnly memory.',
+            }),
+          ],
+      start: anotherBucket
+        ? '/memory?bucket=me'
+        : `/memory?bucket=work/acme/api&scope=bucket&memory=${forgottenId}`,
       configure: async (page) => {
         if (holdRoute)
           await page.route('**/vault-page-*.js', async (route) => {
@@ -72,16 +82,32 @@ it.each([false, true])(
     });
     try {
       const { page } = visit;
-      await detail(page).waitFor();
+      if (anotherBucket) {
+        // Prime the destination so navigating there during the write needs no read.
+        await detail(page)
+          .getByRole('heading', { name: 'Prefer pnpm', exact: true })
+          .waitFor();
+        await page.locator('[data-path="work/acme"]').getByRole('link').click();
+      }
+      await detail(page)
+        .getByRole('heading', { name: 'Release process', exact: true })
+        .waitFor();
       await openForget(page);
       await confirmForget(page);
       await arrived.promise;
       await page
         .getByText('Forgetting Release process…', { exact: true })
         .waitFor();
-      expect(await memoryRows(page).count()).toBe(0);
-      await page.getByRole('link', { name: 'Vault', exact: true }).click();
-      await expect.poll(() => new URL(page.url()).pathname).toBe('/vault');
+      expect(await memoryRows(page).count()).toBe(anotherBucket ? 1 : 0);
+      if (anotherBucket) {
+        await page.locator('[data-path="me"]').getByRole('link').click();
+        await detail(page)
+          .getByRole('heading', { name: 'Prefer pnpm', exact: true })
+          .waitFor();
+      } else {
+        await page.getByRole('link', { name: 'Vault', exact: true }).click();
+        await expect.poll(() => new URL(page.url()).pathname).toBe('/vault');
+      }
       if (holdRoute) await vaultArrived.promise;
       const rejection = page.waitForResponse(
         (response) => response.request().method() === 'DELETE',
@@ -90,11 +116,41 @@ it.each([false, true])(
       const response = await rejection;
       expect(response.status()).toBe(403);
       await response.finished();
+      if (anotherBucket) {
+        const queries = await memoryQueries(page);
+        try {
+          await expect
+            .poll(() =>
+              queries.evaluate(
+                (client) =>
+                  client
+                    .getMutationCache()
+                    .findAll({ mutationKey: ['memory-write'] })
+                    .at(-1)?.state.status,
+              ),
+            )
+            .toBe('error');
+        } finally {
+          await queries.dispose();
+        }
+      }
       await rendered(page);
       vaultGate.resolve();
-      await page.waitForLoadState('networkidle');
-      expect(new URL(page.url()).pathname).toBe('/vault');
-      await page.getByRole('heading', { name: 'Vault', exact: true }).waitFor();
+      if (anotherBucket) {
+        const location = new URL(page.url());
+        expect(location.pathname).toBe('/memory');
+        expect(location.searchParams.get('bucket')).toBe('me');
+        expect(location.searchParams.get('memory')).toBe(memoryId(6));
+        await detail(page)
+          .getByRole('heading', { name: 'Prefer pnpm', exact: true })
+          .waitFor();
+      } else {
+        await page.waitForLoadState('networkidle');
+        expect(new URL(page.url()).pathname).toBe('/vault');
+        await page
+          .getByRole('heading', { name: 'Vault', exact: true })
+          .waitFor();
+      }
       expect(errors).toEqual([]);
     } finally {
       vaultGate.resolve();
@@ -267,6 +323,96 @@ it.each([
       expect(copy).toContain(expected);
       expect(copy).not.toContain('(503)');
     } finally {
+      await visit.close();
+    }
+  },
+);
+
+it.each(['scope', 'query'] as const)(
+  'E20/E21: a late forget rejection preserves a later %s navigation with the same neighbor',
+  async (destination) => {
+    const gate = deferred();
+    const arrived = deferred();
+    const visit = await forgetPage(browser, {
+      seeds: [typicalMemories[0], typicalMemories[1]],
+      start: `/memory?bucket=work/acme&scope=bucket&memory=${forgottenId}${destination === 'query' ? '&q=staging' : ''}`,
+    });
+    try {
+      const { page } = visit;
+      await detail(page)
+        .getByRole('heading', { name: 'Release process', exact: true })
+        .waitFor();
+      if (destination === 'scope') {
+        await page.locator(`[data-memory-row="${memoryId(2)}"]`).waitFor();
+        await page
+          .getByRole('button', { name: 'Include inherited', exact: true })
+          .click();
+        await expect
+          .poll(() => new URL(page.url()).searchParams.get('scope'))
+          .toBe('inherited');
+        await page.locator(`[data-memory-row="${memoryId(2)}"]`).waitFor();
+      } else {
+        await page.locator(`[data-search-result="${memoryId(2)}"]`).waitFor();
+        await page
+          .getByRole('button', { name: 'Clear search', exact: true })
+          .click();
+        await page.locator(`[data-memory-row="${forgottenId}"]`).waitFor();
+      }
+      await page.route('**/api/memories/*?expectedVersion=*', async (route) => {
+        arrived.resolve();
+        await gate.promise;
+        await route
+          .fulfill({ status: 403, body: 'Access denied' })
+          .catch(() => {});
+      });
+      await openForget(page);
+      await confirmForget(page);
+      await arrived.promise;
+      await expect
+        .poll(() => new URL(page.url()).searchParams.get('memory'))
+        .toBe(memoryId(2));
+      if (destination === 'scope')
+        await page
+          .getByRole('button', { name: 'Only this bucket', exact: true })
+          .click();
+      else {
+        const field = page.getByRole('textbox', { name: /Search memories/ });
+        await field.fill('staging');
+        await field.press('Enter');
+        await page.locator(`[data-search-result="${memoryId(2)}"]`).waitFor();
+      }
+      await expect
+        .poll(() => new URL(page.url()).searchParams.get('memory'))
+        .toBe(memoryId(2));
+      gate.resolve();
+      const queries = await memoryQueries(page);
+      try {
+        await expect
+          .poll(() =>
+            queries.evaluate(
+              (client) =>
+                client
+                  .getMutationCache()
+                  .findAll({ mutationKey: ['memory-write'] })
+                  .at(-1)?.state.status,
+            ),
+          )
+          .toBe('error');
+      } finally {
+        await queries.dispose();
+      }
+      await rendered(page);
+      expect(new URL(page.url()).searchParams.get('memory')).toBe(memoryId(2));
+      expect(
+        new URL(page.url()).searchParams.get(
+          destination === 'scope' ? 'scope' : 'q',
+        ),
+      ).toBe(destination === 'scope' ? 'bucket' : 'staging');
+      await detail(page)
+        .getByRole('heading', { name: 'Acme API deployment', exact: true })
+        .waitFor();
+    } finally {
+      gate.resolve();
       await visit.close();
     }
   },
