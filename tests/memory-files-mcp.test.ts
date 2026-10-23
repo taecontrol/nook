@@ -2,7 +2,17 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { Log, LogLevel } from 'miniflare';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
+import type { Observation } from '../scripts/lib/coverage-evidence.ts';
+import * as observation from '../scripts/observation.ts';
 import { access, accessFixture } from './support/access.ts';
 import { auditRows } from './support/audit.ts';
 import { privateKeyring } from './support/cli.ts';
@@ -55,11 +65,26 @@ describe.each(['owner', 'machine'] as const)(
       let assertion: string;
       let client: ReturnType<typeof memoryClient>;
       let issuer: Awaited<ReturnType<typeof accessFixture>>;
+      let beforeCanary: Record<string, number> | undefined;
+      const logs: string[] = [];
       beforeAll(async () => {
         issuer = await accessFixture();
         app = await filesRuntime({
           owner: { bindings: access, outboundService: issuer.outboundService },
           search: true,
+        });
+        class FileLog extends Log {
+          override log(message: string) {
+            logs.push(message);
+          }
+        }
+        // setBindings restarts workerd, so install observers before any case.
+        await app.setBindings(app.bindings, {
+          log: new FileLog(LogLevel.VERBOSE),
+          handleRuntimeStdio(stdout, stderr) {
+            for (const stream of [stdout, stderr])
+              stream.on('data', (chunk) => logs.push(chunk.toString()));
+          },
         });
       });
       beforeEach(async () => {
@@ -71,6 +96,7 @@ describe.each(['owner', 'machine'] as const)(
         app.services.clear();
         app.services.failEmbedding = true;
         app.labels.length = 0;
+        logs.length = 0;
         client = memoryClient(app, protocol, {
           machine: endpoint === 'machine',
           headers:
@@ -79,7 +105,27 @@ describe.each(['owner', 'machine'] as const)(
               : { 'Cf-Access-Jwt-Assertion': assertion },
         });
       });
-      afterAll(() => app?.close());
+      afterAll(async () => {
+        const captured = vi.spyOn(observation, 'observe');
+        try {
+          await app?.close();
+          if (beforeCanary) {
+            const collected = captured.mock.calls
+              .map(([value]) => value)
+              .find((value) => value.seam === 'worker');
+            expect(collected).toBeDefined();
+            const retained =
+              collected?.counters['apps/worker/src/memory.ts']?.s;
+            for (const [id, count] of Object.entries(beforeCanary))
+              expect(
+                retained?.[id],
+                `Memory statement ${id} retains its pre-E21 executions`,
+              ).toBeGreaterThanOrEqual(count);
+          }
+        } finally {
+          captured.mockRestore();
+        }
+      });
       const ownerHeaders = () => ({ 'Cf-Access-Jwt-Assertion': assertion });
       const get = () => client.call('get', { id: fileMemory });
       const search = () =>
@@ -424,22 +470,27 @@ describe.each(['owner', 'machine'] as const)(
           });
         }
       });
+      it.skipIf(!process.env.COVERAGE_RUN)(
+        'coverage collection retains the memory-list route executed before E21',
+        async () => {
+          const response = await fetch(
+            `${app.origin}/api/memories?bucket=${fileBucket}`,
+            { headers: ownerHeaders() },
+          );
+          expect(response.status).toBe(200);
+          await response.json();
+          const evidence = (await (
+            await app.mf.dispatchFetch(`${app.origin}/__test/coverage`)
+          ).json()) as Observation;
+          beforeCanary = evidence.counters['apps/worker/src/memory.ts'].s;
+          expect(Object.values(beforeCanary).some((count) => count > 0)).toBe(
+            true,
+          );
+        },
+      );
       it('E21: successful attach/download/replace/detach/forget and their errors never disclose the file canary', async () => {
         const canary = `private-attachment-${randomUUID()}-${randomUUID()}`;
-        const logs: string[] = [];
         const outputs: string[] = [];
-        class FileLog extends Log {
-          override log(message: string) {
-            logs.push(message);
-          }
-        }
-        await app.setBindings(app.bindings, {
-          log: new FileLog(LogLevel.VERBOSE),
-          handleRuntimeStdio(stdout, stderr) {
-            for (const stream of [stdout, stderr])
-              stream.on('data', (chunk) => logs.push(chunk.toString()));
-          },
-        });
         let transitions = 0;
         const check = () =>
           expectNoValue(
