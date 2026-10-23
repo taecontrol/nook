@@ -1,7 +1,12 @@
 import { acmePath, fetchValues } from '../tests/support/audit.ts';
 import { createAuthorization } from '../tests/support/authorizations.ts';
 import { issueGrant, seedGrantTree } from '../tests/support/grants.ts';
-import { manyMemories, seedMemories } from '../tests/support/memory.ts';
+import {
+  manyMemories,
+  memoryId,
+  seedMemories,
+} from '../tests/support/memory.ts';
+import { seedFile } from '../tests/support/memory-files.ts';
 import { seedSecrets, vaultRuntime } from '../tests/support/vault.ts';
 import { startHostIsolation } from './lib/host-isolation.ts';
 import {
@@ -21,6 +26,8 @@ try {
   await seedGrantTree(app);
   await seedSecrets(app);
   await seedMemories(app, manyMemories);
+  // Memory budgets include real file metadata (attachments E29).
+  await seedFile(app, { id: memoryId(100) });
   const { token } = await issueGrant(app);
   const used = await fetchValues(app, token, { secrets: [acmePath] });
   if (used.status !== 200)

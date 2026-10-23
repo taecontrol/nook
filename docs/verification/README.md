@@ -598,7 +598,7 @@ test wrapper.
 | E26 | `memory-files-worker.test.ts`, `memory-files-web.test.ts`: attachment security headers, HEAD 405 without audit, owner/machine authentication boundaries, restricted-grant masking and inert HTML download. |
 | E27 | `memory-files-audit.test.ts`, `memory-files-migrations.test.ts`: all five outcomes in API/Chromium, descendant filter, mixed Vault/file pagination, retained Vault facts, correct actors and file/mixed labels. |
 | E28 | `memory-files-owner-captures.test.ts`: sixty production reader/sheet/Details/scroll-end PNGs for prototype C, described below. |
-| E29 | `memory-files-web.test.ts`, existing Memory load-time suites and `pnpm verify:load-time`: separate intent-loaded Files script and unchanged 4G phone budgets (1000 ms cold, 100 ms after intent). |
+| E29 | `memory-files-web.test.ts`: separate intent-loaded Files script and real phone measurement conditions with file metadata. `pnpm verify:load-time` seeds a real attachment and enforces the unchanged five-sample 4G medians (1000 ms cold, 100 ms after intent). |
 | E30 | `memory-files-migrations.test.ts`, `pnpm verify:migrations`: empty/migrated/populated previous schemas, complete Vault audit preservation and bucket backfill, previous-writer trigger, and actual previous-Worker forget refusing attached files with 503. |
 | E31 | Hosted capture remains pending: [Memory file owner acceptance after deployment](../deployment.md#memory-file-e31-owner-acceptance-after-deployment-pending) requires a cross-machine 25 MiB digest match, workflow-created R2 bucket and owner download Audit with IP/country. |
 
