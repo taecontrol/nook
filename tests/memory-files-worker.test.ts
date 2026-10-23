@@ -252,8 +252,9 @@ it.each([
 ])(
   'E6: the HTTP boundary refuses invalid name %j with InvalidFile and stores nothing',
   async (name) => {
+    // The name gate rejects before reading a body; keep this input path-only.
     await expectHttpError(
-      await putFile(app, machine.token, { name }),
+      await putFile(app, machine.token, { name, bytes: Buffer.alloc(0) }),
       400,
       'InvalidFile',
     );
@@ -296,7 +297,7 @@ it('E6: a percent-encoded lone surrogate is refused as InvalidFile and stores no
         Authorization: `Bearer ${machine.token}`,
         'Content-Type': 'application/pdf',
       },
-      body: Buffer.from('invalid Unicode name fixture'),
+      body: Buffer.alloc(0),
     }),
     400,
     'InvalidFile',
@@ -313,6 +314,7 @@ it('E6: every C0/C1 control byte in a name, including an encoded slash, is Inval
       await expectHttpError(
         await putFile(app, machine.token, {
           name: `control-${String.fromCharCode(code)}.pdf`,
+          bytes: Buffer.alloc(0),
         }),
         400,
         'InvalidFile',
@@ -327,7 +329,10 @@ it('E6: every C0/C1 control byte in a name, including an encoded slash, is Inval
     }
   }
   await expectHttpError(
-    await putFile(app, machine.token, { name: 'encoded/slash.pdf' }),
+    await putFile(app, machine.token, {
+      name: 'encoded/slash.pdf',
+      bytes: Buffer.alloc(0),
+    }),
     400,
     'InvalidFile',
   );
@@ -537,7 +542,7 @@ it('E26: Bearer cannot authenticate owner downloads and Access cannot authentica
           await fetch(secured.origin + filePath(), {
             method,
             headers,
-            ...(method === 'PUT' ? { body: Buffer.from('synthetic') } : {}),
+            ...(method === 'PUT' ? { body: Buffer.alloc(0) } : {}),
           })
         ).status,
       ).toBe(401);
@@ -568,7 +573,11 @@ it('E11/E26: revoked machine credentials are rejected before file storage', asyn
     .prepare('DELETE FROM machine_tokens WHERE id=?')
     .bind(machine.id)
     .run();
-  await expectHttpError(await putFile(app, machine.token), 401, 'Unauthorized');
+  await expectHttpError(
+    await putFile(app, machine.token, { bytes: Buffer.alloc(0) }),
+    401,
+    'Unauthorized',
+  );
   await expectHttpError(
     await downloadFile(app, machine.token),
     401,
