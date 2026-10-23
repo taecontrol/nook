@@ -169,6 +169,91 @@ it('reuses cached detail on intent/open and restores a reloadable Files location
   }
 });
 
+it('E25: a missing download cancels a preload read before detach and refreshes after the 404', async () => {
+  const clock = Date.parse('2026-10-22T15:00:00Z');
+  const preloadGate = deferred();
+  const preloadRead = deferred();
+  const preloadReleased = deferred();
+  const events: string[] = [];
+  let reads = 0;
+  const visit = await filesPage(browser, {
+    names: [pdfName],
+    configure: async (page) => {
+      await page.clock.setFixedTime(clock);
+      page.on('response', (response) => {
+        if (
+          new URL(response.url()).pathname.includes('/files/') &&
+          response.status() === 404
+        )
+          events.push('download:404');
+      });
+      await page.route(`**/api/memories/${fileMemory}`, async (route) => {
+        const read = ++reads;
+        events.push(`detail:${read}`);
+        const response = await route.fetch();
+        if (read === 2) {
+          expect(await response.json()).toMatchObject({
+            files: [{ name: pdfName }],
+          });
+          preloadRead.resolve();
+          await preloadGate.promise;
+          await route.fulfill({ response }).catch(() => {});
+          preloadReleased.resolve();
+        } else await route.fulfill({ response });
+      });
+    },
+  });
+  try {
+    const { page, app, files } = visit;
+    await page.clock.setFixedTime(clock + 30_001);
+    await filesControl(page).hover();
+    await preloadRead.promise;
+    expect(reads).toBe(2);
+    expect(
+      (
+        await memoryClient(app, '2026-07-28').call('detach', {
+          id: fileMemory,
+          name: pdfName,
+          sha256: files[0].sha256,
+        })
+      ).isError,
+    ).not.toBe(true);
+    events.push('detached');
+    await openFiles(page);
+    const missing = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname.includes('/files/') &&
+        response.status() === 404,
+    );
+    await filesSheet(page)
+      .getByRole('button', { name: `Download ${pdfName}`, exact: true })
+      .click();
+    await (await missing).finished();
+    const alert = filesSheet(page).getByRole('alert');
+    await alert.getByText('File not found.', { exact: true }).waitFor();
+    events.push('preload:released');
+    preloadGate.resolve();
+    await preloadReleased.promise;
+    await alert.getByText(/The list is up to date/).waitFor();
+    expect(events.filter((event) => event !== 'preload:released')).toEqual([
+      'detail:1',
+      'detail:2',
+      'detached',
+      'download:404',
+      'detail:3',
+    ]);
+    expect(events.indexOf('preload:released')).toBeGreaterThan(
+      events.indexOf('download:404'),
+    );
+    await waitFileRows(page, 0);
+    expect(await filesControl(page).count()).toBe(0);
+    expect(await alert.innerText()).toContain(pdfName);
+  } finally {
+    preloadGate.resolve();
+    await visit.close();
+  }
+});
+
 it('a late missing-file response refreshes its original memory after navigating to another memory', async () => {
   const gate = deferred();
   const arrived = deferred();
