@@ -1,67 +1,5 @@
 # Verification
 
-Memory file storage is exercised against the built Worker, real local D1 and
-R2, and both owner/machine MCP endpoints by `memory-files-worker`,
-`memory-files-mcp`, `memory-files-faults`, `memory-files-audit`,
-`memory-files-migrations`, `memory-files-harness` and `memory-files-sweep`.
-The sweep suite walks more than 1000 real objects across Cron invocations and
-recovers a rejected persisted cursor. `memory-files-deploy` drives the actual
-provisioning shell with synthetic command responses. Checkpoints observe
-labels only. The test clock supplies request start and sweep time; publication
-still evaluates the clock predicate in the real D1 batch, with SQLite wall
-time substituted only by the test wrapper. CLI and Files drawer acceptance
-run through the same isolated process/browser fixtures; the hosted E31 capture
-is documented in [deployment](../deployment.md). The MCP suite also compares
-the deployment guide's tool inventory with real owner and machine `tools/list`
-responses under both protocol revisions.
-
-`memory-files-transfer-cli.test.ts` runs real sandboxed CLI processes on Linux
-and in the disposable macOS job. It replaces a download's temporary entry
-during a held stream and immediately before the actual hard link, checks that
-SIGINT and SIGTERM await partial-file cleanup, and refuses a FIFO with no
-writer before HTTP. Slow uploads and downloads must progress beyond the old
-ten-second total limit and retain their exact digest; stalled transfers must
-report inactivity separately from corruption. Integrity failures and stalled
-downloads leave neither a destination nor a temporary file. These tests use the real
-ten-second idle limit, with no test-only product setting; throttled transfers
-take about thirteen seconds each, plus the stalled-transfer waits. The
-existing file CLI suite retains overwrite, truncation, authorization and
-25 MiB boundary checks.
-
-The owner Files drawer is exercised by `memory-files-web.test.ts` and
-`memory-files-recovery-web.test.ts`: intent-only script loading, cached detail,
-newest-first metadata, Unicode browser downloads, pending peer locks across
-closing/reopening and A→B→A navigation, delivery of late 404/503 results to a
-remounted drawer, missing-file refresh of the original
-memory after navigation, cancellation of a preload read before detach with a
-fresh detail request after the download's 404, refresh coordination with
-pending forget, refresh failure, unavailable-object retry, keyboard focus,
-URL reload/Back and non-executing HTML downloads. The sweep suite holds a
-genuine embedding call while Cron independently lists R2 and deletes old garbage. Audit
-uses its existing rows and disclosures for all five file outcomes; the file
-Audit suite covers those alongside Vault pagination and descendant filtering,
-plus file-only and mixed activity column/region labels. Vault-only labels and
-captures remain unchanged.
-
-The preload regression holds a genuine detail response after D1 has read the
-file, detaches it through MCP, and releases that old response only after the
-download returns 404. It requires a subsequent detail read and removal of the
-last row and Files control. Chromium's existing fixed-clock seam advances
-staleness by 30,001 ms without a real thirty-second wait.
-
-`memory-files-owner-captures.test.ts` produces sixty production PNGs under
-`.local/verification/screenshots/memory-files-*.png`: reader and Files sheet
-for one-pdf, many-files, long-name, download-pending, download-missing and
-download-unavailable, at 1440×900 and 390×844 in light and dark. Many-files and
-long-name also capture Details; many-files captures the end of the independently
-scrolling list. Every capture checks horizontal overflow. D1/R2 hold real
-synthetic files with matching sizes and digests. Pending gates a real request,
-missing detaches through MCP, and unavailable removes only the R2 object.
-Compare against selected prototype C in `.work/design/attachments/selected-c/`;
-its scenario selector never enters production. The descriptive owner-capture
-filename places this suite in shard 1 with the current native sequencer,
-distributing its cost without changing checks, shards or timeouts.
-
 Run `pnpm verify` from the repository root with the pinned Node and pnpm versions. It stops on the first failure, in this order:
 
 | Command | What it proves |
@@ -609,3 +547,150 @@ remain explicit: retaining only history is hidden by the evicted detail, and
 default focus preserves scroll in the tested tall and short windows. Production
 still evicts history and uses preventScroll; source review confirms both,
 without claiming that those individual lines have independent browser proof.
+
+## Memory files (issue #67)
+
+Acceptance commit `8f8c75d` precedes production changes. The first seven-file
+run observed 105 failures, including missing file routes, metadata, migrations
+and the CLI command. After fixture corrections and added cases, the acceptance
+ledger recorded 113 expected failures and three passes: two harness probes and
+the existing no-files reader. The full gate stopped at the missing migrations
+after style, UI, types and complexity passed.
+
+Memory file storage is exercised against the built Worker, real local D1 and
+R2, and both owner/machine MCP endpoints under both observed protocols by
+`memory-files-worker.test.ts`, `memory-files-mcp.test.ts`,
+`memory-files-faults.test.ts`, `memory-files-audit.test.ts`,
+`memory-files-migrations.test.ts`, `memory-files-harness.test.ts` and
+`memory-files-sweep.test.ts`. CLI and Files drawer acceptance use the existing
+isolated process/browser fixtures. Checkpoints observe labels only. The test
+clock supplies request start and sweep time; publication evaluates its clock
+predicate in the real D1 batch, with SQLite wall time substituted only by the
+test wrapper.
+
+| Example | Tests or capture evidence |
+| --- | --- |
+| E1 | `memory-files-cli.test.ts`, `memory-files-worker.test.ts`: real CLI attach, basename, exact JSON and digest, unchanged text version/time and authenticated Audit provenance. |
+| E2 | The same suites: unchanged retry, one object, no extra audit or provenance write. |
+| E3 | The CLI and Worker suites, `memory-files-mcp.test.ts`: replacement reports both digests, removes the old object and appears once in get. |
+| E4 | `memory-files-cli.test.ts`, `memory-files-worker.test.ts`: byte-identical 25 MiB round trips, one-byte-over local refusal before HTTP, and Worker 413/411 gates before reading the body. |
+| E5 | The same suites: exact quota guidance, no failed row/object/audit, and smaller replacement at the limit; quota fixtures seed metadata rather than upload a GiB. |
+| E6 | The CLI, Worker and MCP suites: basename, 255/256 UTF-8 byte boundaries, byte-exact Unicode, empty files, separators, NUL, C0/C1 controls, lone surrogates and CLI/MCP dot-name refusal. HTTP normalization is documented below. |
+| E7 | `memory-files-faults.test.ts`: both controlled publication orders for different bytes; identical concurrent bytes yield created/unchanged, one object and original provenance. |
+| E8 | The same suite: both commit orders share the live quota guard; exactly one name publishes and the loser leaves no object or audit. |
+| E9 | The same suite: both attach/forget orders and forget between authorization and pre-read; no dangling file row or residual object. |
+| E10 | The same suite: post-put interruption, strict ten-minute publication boundary, sixty-minute sweep grace, ambiguous committed batch and unchanged retry; audit and publication stay atomic across a clock boundary within the batch. |
+| E11 | `memory-files-cli.test.ts`, `memory-files-worker.test.ts`: readable-but-unwritable denial, unreadable/missing masking, revoked credentials and no stored side effects. |
+| E12 | `memory-files-cli.test.ts`: the actual previous Worker produces the specific unsupported-files guidance. |
+| E13 | The same suite: another synthetic machine downloads into another directory, verifies SHA-256, emits only absolute-path metadata and appears in Audit. |
+| E14 | The CLI and Worker suites: canRead permits ancestors and me; unreadable and absent memories have the same refusal with no audit or bytes. |
+| E15 | `memory-files-cli.test.ts`: existing file/directory/symlink refusal before HTTP, explicit output path, no overwrite and no stdout bytes. |
+| E16 | The same suite and `memory-files-transfer-cli.test.ts`: corruption/truncation cleanup, publication-time EEXIST, temporary-entry substitution before/during publication, signal cleanup and stalled-transfer cleanup. |
+| E17 | `memory-files-cli.test.ts`, `memory-files-worker.test.ts`: missing name is File not found; a referenced missing R2 object is 503 and retains its row. |
+| E18 | `memory-files-mcp.test.ts`: all get files by name, at most ten compact search files with exact counts, empty metadata, unchanged owner feed, and no extra D1 trip in keyword-only or available-meaning search. |
+| E19 | The same suite: ten tools, byte-free CLI guidance, destructive/non-idempotent guarded detach, and deployment inventory equal to real tools/list. |
+| E20 | The same suite: current/stale digest detach, object/audit facts, not-found retry and grant denials. |
+| E21 | The same suite: all five successful lifecycle transitions, real CLI attach/download/replace, and canary absence from MCP, HTTP errors, CLI output/stderr, public/raw Audit and Worker logs. |
+| E22 | `memory-files-worker.test.ts`, `memory-files-mcp.test.ts`, `memory-files-faults.test.ts`: owner/MCP forget removes three files and multiple versions in one batch, audits each, permits bucket deletion, rolls back on audit failure and sweeps failed inline deletes. |
+| E23 | The Worker and MCP suites: genuinely stale forget versions preserve all file rows, objects, versions and audit facts. |
+| E24 | `memory-files-web.test.ts`, `memory-files-recovery-web.test.ts`: Files/History controls, responsive label/tooltip, newest-first metadata and Details, no-files reader, cached intent preload, keyboard focus and reload/Back. |
+| E25 | The same suites: Unicode owner download and IP/country audit, pending peer locks, named 404 with fresh detail/removal, 503 retry, late results across navigation/remounts and coordination with pending forget. |
+| E26 | `memory-files-worker.test.ts`, `memory-files-web.test.ts`: attachment security headers, HEAD 405 without audit, owner/machine authentication boundaries, restricted-grant masking and inert HTML download. |
+| E27 | `memory-files-audit.test.ts`, `memory-files-migrations.test.ts`: all five outcomes in API/Chromium, descendant filter, mixed Vault/file pagination, retained Vault facts, correct actors and file/mixed labels. |
+| E28 | `memory-files-owner-captures.test.ts`: sixty production reader/sheet/Details/scroll-end PNGs for prototype C, described below. |
+| E29 | `memory-files-web.test.ts`, existing Memory load-time suites and `pnpm verify:load-time`: separate intent-loaded Files script and unchanged 4G phone budgets (1000 ms cold, 100 ms after intent). |
+| E30 | `memory-files-migrations.test.ts`, `pnpm verify:migrations`: empty/migrated/populated previous schemas, complete Vault audit preservation and bucket backfill, previous-writer trigger, and actual previous-Worker forget refusing attached files with 503. |
+| E31 | Hosted capture remains pending: [Memory file owner acceptance after deployment](../deployment.md#memory-file-e31-owner-acceptance-after-deployment-pending) requires a cross-machine 25 MiB digest match, workflow-created R2 bucket and owner download Audit with IP/country. |
+
+`memory-files-owner-captures.test.ts` produces sixty production PNGs under
+`.local/verification/screenshots/memory-files-*.png`: reader and Files sheet
+for one-pdf, many-files, long-name, download-pending, download-missing and
+download-unavailable, at 1440×900 and 390×844 in light and dark. Many-files and
+long-name also capture Details; many-files captures the end of the independently
+scrolling list. Every capture checks horizontal overflow. D1/R2 hold real
+synthetic files with matching sizes and digests. Pending gates a real request,
+missing detaches through MCP, and unavailable removes only the R2 object.
+Compare each state, viewport and theme with the matching reader, files,
+Details or result screen in `.work/design/attachments/selected-c/screens/`.
+The prototype's scenario selector never enters production. The descriptive
+owner-capture filename places this suite in shard 1 with the current native
+sequencer, distributing its cost without changing checks, shards or timeouts.
+
+Refine added 21 regressions with red-before/green-after evidence, then one
+additional stale-preload regression. `memory-files-transfer-cli.test.ts` runs
+real sandboxed CLI processes on Linux and in the disposable macOS job. It
+replaces a download's temporary entry during a held stream and immediately
+before the actual hard link, checks that SIGINT and SIGTERM await partial-file
+cleanup, and refuses a FIFO with no writer before HTTP. Slow uploads and
+downloads must progress beyond the old ten-second total limit and retain
+their exact digest; stalled transfers must report inactivity separately from
+corruption. Integrity failures and stalled downloads leave neither a
+destination nor a temporary file. These tests use the real ten-second idle
+limit, with no test-only product setting; throttled transfers take about
+thirteen seconds each, plus the stalled-transfer waits. The existing file CLI
+suite retains overwrite, truncation, authorization and 25 MiB boundary checks.
+
+The owner Files drawer is exercised by `memory-files-web.test.ts` and
+`memory-files-recovery-web.test.ts`: intent-only script loading, cached detail,
+newest-first metadata, Unicode browser downloads, pending peer locks across
+closing/reopening and A→B→A navigation, delivery of late 404/503 results to a
+remounted drawer, missing-file refresh of the original memory after navigation,
+refresh coordination with pending forget, refresh failure, unavailable-object
+retry, keyboard focus, URL reload/Back and non-executing HTML downloads.
+The preload regression holds a genuine detail response after D1 has read the
+file, detaches it through MCP, and releases that old response only after the
+download returns 404. It requires a subsequent detail read and removal of the
+last row and Files control. Chromium's existing fixed-clock seam advances
+staleness by 30,001 ms without a real thirty-second wait.
+
+`memory-files-sweep.test.ts` walks more than 1000 real objects across Cron
+invocations, recovers a rejected persisted cursor, and holds a genuine
+embedding call while Cron independently lists R2 and deletes old garbage.
+`memory-files-deploy.test.ts` drives the actual provisioning shell with
+synthetic command responses. Audit uses its existing rows and disclosures
+for all five file outcomes; its file suite covers Vault pagination and
+descendant filtering plus file-only and mixed activity column/region labels.
+Vault-only labels and captures remain unchanged. The MCP suite also compares
+the deployment guide's tool inventory with real owner and machine tools/list
+responses under both protocol revisions.
+
+Existing exact MCP inventories grow from nine to ten tools (`detach`), and
+the numbered migration inventory grows from eleven to thirteen
+(`0012_memory_files.sql`, `0013_audit_file_entries.sql`). Exact get results add
+`files: []`; compact MCP search keys add `files` and `fileCount`. The owner
+feed stays unchanged. `memory-forget-worker.test.ts` requires one preflight
+plus one six-statement batch rather than four statements, with rollback
+injection moving from indexes 2/3 to 4/5. The file audit insert and file-row
+delete precede head deletion. Complete Cron D1 inventories add the file
+sweep's cursor read/persist: `memory-forget-search.test.ts` changes 3→5 before
+settle and 4→6 after settle; `memory-search-sync.test.ts` changes 6→8 for
+backfill. Existing memory-index counts and bounds remain unchanged.
+
+`routes-worker.test.ts` adds owner `GET /api/memories/:id/files/:name` and
+machine `PUT`/`GET /api/machine/memories/:id/files/:name`. `vault-cli.test.ts`
+adds attach/download to root usage. `http-error-status.test.ts` adds
+`InvalidFile:400`, `FileNotFound:404`, `FileChanged:409`, `FileTooLarge:413`
+and `FileQuotaExceeded:409`; the 400-tag allowlist adds only `InvalidFile`,
+and the web public-message allowlist adds only `FileNotFound`.
+`reveal-worker.test.ts` adds `audit_entries_bucket` to the current-schema
+index inventory while retaining all previous indexes. Historical migration
+fixtures prove their original rows/indexes before applying 0013 and calling
+the current Worker.
+
+The E27 source assertion now attributes the fixture's owner MCP detach and
+owner HTTP forget to the owner, with null machine names; attach, replace and
+download retain LG16. The original unconditional LG16 assertion misstated
+those authenticated callers. E24 requires Files and History adjacency in the
+DOM at both sizes, but same-row/left-to-right geometry only on desktop: the
+accepted C phone reader wraps History onto the next line. These correct the
+oracles to match the fixtures and selected prototype. Stale-forget fixtures
+create version two before rejecting version one; History selectors include
+its count, NUL is checked over HTTP rather than impossible argv, and download
+cleanup inspects its own destination directory rather than keyring HOME.
+Refine added regressions without changing existing acceptance assertions.
+
+The accepted transport deviation for E6 is that raw HTTP `.` and `..` file
+segments, literal or percent-encoded, normalize before file validation and
+answer 404. CLI and JSON MCP refuse dot names with `InvalidFile`; invalid
+names that reach HTTP validation still receive `InvalidFile` and store
+nothing. Hosted E31 remains separate from local Miniflare evidence.
