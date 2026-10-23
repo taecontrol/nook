@@ -16,4 +16,5 @@ export const macosCliSuites = [
   'tests/run-cli.test.ts',
   'tests/nook-json-cli.test.ts',
   'tests/memory-files-cli.test.ts',
+  'tests/memory-files-transfer-cli.test.ts',
 ];

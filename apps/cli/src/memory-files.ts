@@ -1,9 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { constants } from 'node:fs';
 import { link, lstat, open, unlink } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileLimits, validateFileName } from '@nook/contract';
 import { Effect, Stream } from 'effect';
 import { CliFailure, type RequestFailure } from './errors.ts';
+import {
+  transferTimedOut,
+  transferTimeoutMessage,
+} from './file-transfer-client.ts';
 import type { Host } from './host.ts';
 import { session } from './session.ts';
 
@@ -35,7 +40,7 @@ function requireSize(size: number) {
 function readUpload(path: string) {
   return Effect.tryPromise({
     try: async (signal) => {
-      const file = await open(path, 'r');
+      const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
       try {
         const info = await file.stat();
         if (!info.isFile()) throw new CliFailure(`Could not read ${path}.`);
@@ -62,6 +67,8 @@ function readUpload(path: string) {
   });
 }
 function fileFailure(error: RequestFailure) {
+  if (error.server.tag === 'TimeoutError')
+    return new CliFailure(transferTimeoutMessage);
   if (error.server.tag === 'NotFound')
     return new CliFailure('This Nook does not support files yet.');
   if (error.server.tag === 'Forbidden')
@@ -82,7 +89,7 @@ export function memoryAttach(
     const sha256 = createHash('sha256').update(bytes).digest('hex');
     const mediaType =
       mediaTypes[extname(name).toLowerCase()] ?? 'application/octet-stream';
-    const { request } = yield* session(host);
+    const { request } = yield* session(host, { transfer: true });
     const attached = yield* request((api, headers) =>
       api.machine.attachFile({
         params: { id, name },
@@ -123,6 +130,11 @@ function downloadChanged() {
     'The file changed while downloading; nothing was written. Download it again.',
   );
 }
+function downloadFailure(error: unknown) {
+  return transferTimedOut(error)
+    ? new CliFailure(transferTimeoutMessage)
+    : downloadChanged();
+}
 function downloadMetadata(headers: Readonly<Record<string, string>>) {
   const length = headers['content-length'] ?? '';
   const sha256 = headers['x-nook-sha256'] ?? '';
@@ -147,10 +159,56 @@ function temporaryFile(path: string) {
         try {
           await file.close();
         } finally {
-          await unlink(temporary);
+          await removeTemporary(temporary);
         }
       }),
   );
+}
+async function removeTemporary(temporary: string) {
+  try {
+    await unlink(temporary);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+}
+function sameFile(
+  left: { dev: bigint; ino: bigint },
+  right: { dev: bigint; ino: bigint },
+) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+function publishFile(
+  target: Effect.Success<ReturnType<typeof temporaryFile>>,
+  path: string,
+) {
+  return Effect.tryPromise({
+    try: async () => {
+      const verified = await target.file.stat({ bigint: true });
+      let published = false;
+      try {
+        if (
+          !sameFile(verified, await lstat(target.temporary, { bigint: true }))
+        )
+          throw downloadChanged();
+        await link(target.temporary, path);
+        published = true;
+        if (!sameFile(verified, await lstat(path, { bigint: true })))
+          throw downloadChanged();
+      } catch (error) {
+        // EEXIST never grants ownership of the destination name.
+        if (published) await unlink(path);
+        throw error;
+      }
+    },
+    catch: (error) => {
+      if (error instanceof CliFailure) return error;
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST')
+        return overwrite(path);
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+        return downloadChanged();
+      return new CliFailure(`Could not write ${path}.`);
+    },
+  }).pipe(Effect.uninterruptible);
 }
 function receiveFile<E>(
   stream: Stream.Stream<Uint8Array, E>,
@@ -162,7 +220,7 @@ function receiveFile<E>(
     const hash = createHash('sha256');
     let size = 0;
     yield* Stream.runForEach(
-      stream.pipe(Stream.mapError(downloadChanged)),
+      stream.pipe(Stream.mapError(downloadFailure)),
       (chunk) => {
         size += chunk.byteLength;
         if (size > expected.size) return Effect.fail(downloadChanged());
@@ -171,21 +229,10 @@ function receiveFile<E>(
           catch: () => new CliFailure(`Could not write ${path}.`),
         }).pipe(Effect.tap(() => Effect.sync(() => hash.update(chunk))));
       },
-    ).pipe(
-      Effect.timeout('10 seconds'),
-      Effect.mapError((error) =>
-        error instanceof CliFailure ? error : downloadChanged(),
-      ),
     );
     if (size !== expected.size || hash.digest('hex') !== expected.sha256)
       return yield* Effect.fail(downloadChanged());
-    yield* Effect.tryPromise({
-      try: () => link(target.temporary, path),
-      catch: (error) =>
-        (error as NodeJS.ErrnoException).code === 'EEXIST'
-          ? overwrite(path)
-          : new CliFailure(`Could not write ${path}.`),
-    });
+    yield* publishFile(target, path);
   });
 }
 export function memoryDownload(
@@ -205,7 +252,7 @@ export function memoryDownload(
       const path = resolve(output ?? name);
       yield* requireAbsent(path);
       const target = yield* temporaryFile(path);
-      const { request } = yield* session(host);
+      const { request } = yield* session(host, { transfer: true });
       const [stream, response] = yield* request((api, headers) =>
         api.machine.downloadFile({
           params: { id, name },

@@ -57,6 +57,30 @@ function creatingVault(args: readonly string[]) {
   return args[0] === 'vault' && args[1] === 'create' && args[2] !== '--help';
 }
 
+async function runInterruptible(effect: Effect.Effect<number>) {
+  const controller = new AbortController();
+  let interrupted = 0;
+  const interrupt = () => {
+    interrupted = 130;
+    controller.abort();
+  };
+  const terminate = () => {
+    interrupted = 143;
+    controller.abort();
+  };
+  process.on('SIGINT', interrupt);
+  process.on('SIGTERM', terminate);
+  try {
+    return await Effect.runPromise(effect, { signal: controller.signal });
+  } catch (error) {
+    if (interrupted) return interrupted;
+    throw error;
+  } finally {
+    process.off('SIGINT', interrupt);
+    process.off('SIGTERM', terminate);
+  }
+}
+
 export async function execute(
   args: string[],
   options: {
@@ -141,7 +165,7 @@ export async function execute(
       ),
     ]),
   );
-  return Effect.runPromise(
+  return runInterruptible(
     (creatingVault(args)
       ? vaultCreate(host, args.slice(2), write)
       : Command.runWith(command, {

@@ -9,6 +9,7 @@ import {
 } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { type PrivateKeyring, privateKeyring } from './support/cli.ts';
 import { deferred } from './support/machines.ts';
@@ -154,7 +155,7 @@ it('a real upload progressing for longer than ten seconds succeeds with the Work
       for await (const chunk of request) {
         chunks.push(Buffer.from(chunk));
         progress.push(performance.now());
-        await delay(500);
+        await delay(Math.ceil((chunk.byteLength * 500) / (1024 * 1024)));
       }
       return chunks;
     },
@@ -170,7 +171,7 @@ it('a real upload progressing for longer than ten seconds succeeds with the Work
     size: maximumFile,
     sha256: digest(bytes),
   });
-  expect(progress.at(-1)! - progress[0]).toBeGreaterThan(10_000);
+  expect(progress[progress.length - 1] - progress[0]).toBeGreaterThan(10_000);
   expect(
     Math.max(...progress.slice(1).map((at, index) => at - progress[index])),
   ).toBeLessThan(10_000);
@@ -205,7 +206,7 @@ it('a real download progressing for longer than ten seconds succeeds with byte-i
   });
   expect(digest(await readFile(path))).toBe(digest(bytes));
   expect(await readdir(directory)).toEqual([pdfName]);
-  expect(progress.at(-1)! - progress[0]).toBeGreaterThan(10_000);
+  expect(progress[progress.length - 1] - progress[0]).toBeGreaterThan(10_000);
 }, 30_000);
 
 it('a real download that stops progressing reports an idle timeout and removes its partial file', async () => {
@@ -219,3 +220,49 @@ it('a real download that stops progressing reports an idle timeout and removes i
   failure(await startDownload().done, timedOut);
   expect(await readdir(directory)).toEqual([]);
 }, 20_000);
+
+it('E16: substitution between the identity check and hard-link publication removes only the newly created destination', async () => {
+  await attachFile(app, machine.token, { bytes: Buffer.alloc(4096, 129) });
+  await proxy();
+  const hook = resolve(keyring.home, 'publication-race.mjs');
+  // Inject scheduling at the OS boundary, but perform the real filesystem
+  // replacement and hard link in the real CLI process (like run-spawn-gate).
+  await writeFile(
+    hook,
+    `
+import { promises } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const link = promises.link;
+promises.link = async (temporary, destination) => {
+  await promises.unlink(temporary);
+  await promises.writeFile(temporary, Buffer.alloc(32, 183), { flag: 'wx' });
+  await link(temporary, destination);
+};
+syncBuiltinESMExports();
+`,
+  );
+  const result = await keyring.start(
+    ['memory', 'download', fileMemory, pdfName],
+    { NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` },
+    '',
+    directory,
+  ).done;
+  failure(result, changed);
+  expect(await readdir(directory)).toEqual([]);
+});
+
+it('a real upload that stops accepting bytes reports an idle timeout without reaching the Worker', async () => {
+  const path = resolve(keyring.home, pdfName);
+  await writeFile(path, Buffer.alloc(maximumFile, 129));
+  const transport = await proxy({
+    receive: async (request) => {
+      request.pause();
+      await once(request.socket, 'close');
+      return [];
+    },
+  });
+  const result = await keyring.start(['memory', 'attach', fileMemory, path])
+    .done;
+  failure(result, timedOut);
+  expect(transport.requests).toEqual([]);
+}, 30_000);
