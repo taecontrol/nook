@@ -2,8 +2,13 @@ import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { deferred } from './support/machines.ts';
-import { memoryClient } from './support/memory.ts';
-import { fileMemory, pdfName } from './support/memory-files.ts';
+import {
+  memoryClient,
+  memoryFixture,
+  memoryId,
+  seedMemories,
+} from './support/memory.ts';
+import { fileBucket, fileMemory, pdfName } from './support/memory-files.ts';
 import {
   filesControl,
   filesPage,
@@ -155,6 +160,125 @@ it('reuses cached detail on intent/open and restores a reloadable Files location
       )
       .toBe(true);
   } finally {
+    await visit.close();
+  }
+});
+
+it('a late missing-file response refreshes its original memory after navigating to another memory', async () => {
+  const gate = deferred();
+  const arrived = deferred();
+  const reads: string[] = [];
+  const otherId = memoryId(602);
+  const visit = await filesPage(browser, {
+    names: [pdfName],
+    configure: async (page, app) => {
+      await seedMemories(app, [
+        memoryFixture(602, { bucket: fileBucket, content: '# Another memory' }),
+      ]);
+      page.on('request', (request) => {
+        const path = new URL(request.url()).pathname;
+        if (
+          path === `/api/memories/${fileMemory}` ||
+          path === `/api/memories/${otherId}`
+        )
+          reads.push(path);
+      });
+      await page.route('**/api/memories/*/files/*', async (route) => {
+        arrived.resolve();
+        await gate.promise;
+        await route.continue().catch(() => {});
+      });
+    },
+  });
+  try {
+    const { page, app, files } = visit;
+    await openFiles(page);
+    await filesSheet(page)
+      .getByRole('button', { name: `Download ${pdfName}`, exact: true })
+      .click();
+    await arrived.promise;
+    await page.keyboard.press('Escape');
+    await page.locator(`[data-memory-row="${otherId}"]`).click();
+    await page
+      .getByRole('heading', { name: 'Another memory', exact: true })
+      .waitFor();
+    expect(
+      (
+        await memoryClient(app, '2026-07-28').call('detach', {
+          id: fileMemory,
+          name: pdfName,
+          sha256: files[0].sha256,
+        })
+      ).isError,
+    ).not.toBe(true);
+    const before = reads.length;
+    gate.resolve();
+    await expect
+      .poll(() => reads.slice(before))
+      .toEqual([`/api/memories/${fileMemory}`]);
+    await page.waitForLoadState('networkidle');
+    expect(reads.slice(before)).toEqual([`/api/memories/${fileMemory}`]);
+    expect(new URL(page.url()).searchParams.get('memory')).toBe(otherId);
+    await page.locator(`[data-memory-row="${fileMemory}"]`).click();
+    await page
+      .getByRole('heading', { name: 'File guide', exact: true })
+      .waitFor();
+    expect(await filesControl(page).count()).toBe(0);
+  } finally {
+    gate.resolve();
+    await visit.close();
+  }
+});
+
+it('keeps a pending download and all peer locks across A to B to A navigation', async () => {
+  const gate = deferred();
+  const arrived = deferred();
+  const otherId = memoryId(602);
+  let downloads = 0;
+  const visit = await filesPage(browser, {
+    configure: async (page, app) => {
+      await seedMemories(app, [
+        memoryFixture(602, { bucket: fileBucket, content: '# Another memory' }),
+      ]);
+      await page.route('**/api/memories/*/files/*', async (route) => {
+        downloads += 1;
+        arrived.resolve();
+        await gate.promise;
+        await route.continue().catch(() => {});
+      });
+    },
+  });
+  try {
+    const { page, files } = visit;
+    await openFiles(page);
+    const button = filesSheet(page).getByRole('button', {
+      name: `Download ${files[0].name}`,
+      exact: true,
+    });
+    await button.click();
+    await arrived.promise;
+    await page.keyboard.press('Escape');
+    await page.locator(`[data-memory-row="${otherId}"]`).click();
+    await page
+      .getByRole('heading', { name: 'Another memory', exact: true })
+      .waitFor();
+    await page.locator(`[data-memory-row="${fileMemory}"]`).click();
+    await page
+      .getByRole('heading', { name: 'File guide', exact: true })
+      .waitFor();
+    await openFiles(page);
+    expect(await button.getAttribute('aria-busy')).toBe('true');
+    for (const peer of await filesSheet(page)
+      .getByRole('button', { name: /^Download / })
+      .all())
+      expect(await peer.isDisabled()).toBe(true);
+    expect(downloads).toBe(1);
+    const saved = page.waitForEvent('download');
+    gate.resolve();
+    expect((await saved).suggestedFilename()).toBe(files[0].name);
+    await expect.poll(() => button.isEnabled()).toBe(true);
+  } finally {
+    gate.resolve();
     await visit.close();
   }
 });

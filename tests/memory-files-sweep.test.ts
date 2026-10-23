@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it } from 'vitest';
+import { deferred } from './support/machines.ts';
 import {
   fileObjects,
   fileRows,
@@ -70,4 +71,32 @@ it('a rejected persisted R2 cursor resets the walk and the next Cron can collect
   expect(await fileObjects(app)).toHaveLength(1);
   expect((await app.sweep()).status).toBe(204);
   expect(await fileObjects(app)).toEqual([]);
+});
+
+it('Cron collects old file garbage while memory-index embedding is held', async () => {
+  app = await filesRuntime({ search: true });
+  await seedFileMemory(app);
+  const bucket = await app.mf.getR2Bucket('FILES');
+  await bucket.put(`files/${randomUUID()}`, new Uint8Array());
+  app.setTime((await fileObjects(app))[0].uploaded.getTime() + 3_600_001);
+  const gate = deferred();
+  const arrived = deferred();
+  const services = app.services!;
+  const respond = services.fetch.bind(services);
+  services.fetch = async (request) => {
+    if (new URL(request.url).pathname === '/run') {
+      arrived.resolve();
+      await gate.promise;
+    }
+    return respond(request);
+  };
+  const scheduled = app.sweep();
+  try {
+    await arrived.promise;
+    await expect.poll(() => app.labels.includes('/r2/list')).toBe(true);
+    await expect.poll(async () => (await fileObjects(app)).length).toBe(0);
+  } finally {
+    gate.resolve();
+    expect((await scheduled).status).toBe(204);
+  }
 });

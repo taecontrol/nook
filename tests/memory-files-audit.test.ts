@@ -5,7 +5,12 @@ import { auditRows } from './support/audit.ts';
 import { auditEntries, selectAudit } from './support/audit-browser.ts';
 import { closeBrowserPage } from './support/buckets-browser.ts';
 import { memoryFixture, memoryId, seedMemories } from './support/memory.ts';
-import { attachFile, fileBucket, fileMachine } from './support/memory-files.ts';
+import {
+  attachFile,
+  fileBucket,
+  fileMachine,
+  seedFileMemory,
+} from './support/memory-files.ts';
 import {
   fileAuditLifecycle,
   fileAuditPage,
@@ -145,3 +150,52 @@ it('E27: Chromium renders the five file outcomes with expandable facts, descenda
     await closeBrowserPage(page, context);
   }
 });
+
+it.each(['files', 'mixed'] as const)(
+  'Audit gives %s activity file-appropriate column and region labels',
+  async (kind) => {
+    if (kind === 'mixed') await fileAuditLifecycle(app);
+    else {
+      const machine = await seedFileMemory(app);
+      await attachFile(app, machine.token);
+    }
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(5000);
+    try {
+      await page.goto(`${app.origin}/audit`);
+      await expect.poll(() => auditEntries(page).count()).toBeGreaterThan(0);
+      const region = page.getByRole('region', {
+        name: kind === 'mixed' ? 'Secret and file activity' : 'File activity',
+        exact: true,
+      });
+      expect(await region.count()).toBe(1);
+      expect(
+        await region
+          .getByText(
+            kind === 'mixed' ? 'Secret or file / bucket' : 'File / bucket',
+            { exact: true },
+          )
+          .isVisible(),
+      ).toBe(true);
+      expect(
+        await region
+          .getByText(kind === 'mixed' ? 'Purpose or size' : 'Size', {
+            exact: true,
+          })
+          .isVisible(),
+      ).toBe(true);
+      expect(
+        await region
+          .getByText(kind === 'mixed' ? 'Source' : 'Source / client', {
+            exact: true,
+          })
+          .isVisible(),
+      ).toBe(true);
+    } finally {
+      await closeBrowserPage(page, context);
+    }
+  },
+);
