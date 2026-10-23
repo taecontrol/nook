@@ -9,6 +9,7 @@ import {
 import { readEvidence } from './lib/evidence-io.ts';
 import { digest, sourceIdentity } from './lib/identity.ts';
 import { evidenceRoot } from './lib/instrument.ts';
+import { macosShards } from './lib/macos-cli-suites.ts';
 
 const directories = process.argv.slice(2);
 const source = await sourceIdentity();
@@ -44,4 +45,6 @@ await writeFile(
     2,
   ),
 );
-console.log(`Merged all ${linuxShards} Linux coverage shards and macOS.`);
+console.log(
+  `Merged all ${linuxShards} Linux and ${macosShards} macOS coverage shards.`,
+);

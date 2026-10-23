@@ -1,5 +1,6 @@
 import type { FileCoverageData } from 'istanbul-lib-coverage';
 import { digest, type SourceIdentity } from './identity.ts';
+import { macosShards } from './macos-cli-suites.ts';
 
 export type Baseline = Record<
   string,
@@ -135,13 +136,16 @@ function requiredSeams(baseline: Baseline) {
     required.push('cli');
   return required;
 }
-// CI splits Linux coverage into this many shards; macOS adds one more source.
+// CI splits Linux coverage into this many shards; macOS adds its own shards.
 export const linuxShards = 10;
 export const coverageShards = [
   ...Array.from({ length: linuxShards }, (_, i) => `${i + 1}/${linuxShards}`),
-  'macos',
+  ...Array.from(
+    { length: macosShards },
+    (_, i) => `macos-${i + 1}/${macosShards}`,
+  ),
 ];
-const shardsMessage = `Expected all ${linuxShards} Linux coverage shards and macOS`;
+const shardsMessage = `Expected all ${linuxShards} Linux and ${macosShards} macOS coverage shards`;
 export function validateCoverage(
   manifest: Manifest,
   artifacts: Record<string, string>,

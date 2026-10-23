@@ -83,6 +83,10 @@ jobs:
   macos-cli:
     runs-on: macos-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     env:
       NOOK_TEST_MACOS_KEYCHAIN_BOOTSTRAP: github-hosted
     steps:
@@ -100,19 +104,20 @@ jobs:
       - name: Use an isolated Chromium cache
         run: echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/nook-browsers" >> "$GITHUB_ENV"
       - run: pnpm exec playwright install chromium
-      - run: pnpm test:coverage --macos-cli
-      - run: node scripts/release/binary.ts --output "$RUNNER_TEMP/nook"
+      - run: pnpm test:coverage --macos-cli=${{ matrix.shard }}/2
+      - if: ${{ matrix.shard == 1 }}
+        run: node scripts/release/binary.ts --output "$RUNNER_TEMP/nook"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ always() }}
         with:
-          name: macos-cli-evidence
+          name: macos-cli-evidence-${{ matrix.shard }}
           path: .local/verification/screenshots
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: coverage-macos
+          name: coverage-macos-${{ matrix.shard }}
           path: .local/verification/coverage
           include-hidden-files: true
           if-no-files-found: error
