@@ -241,9 +241,17 @@ promises.link = async (temporary, destination) => {
 syncBuiltinESMExports();
 `,
   );
+  const imports = [
+    ...(process.platform === 'darwin'
+      ? [resolve(keyring.home, 'process-groups.mjs')]
+      : []),
+    hook,
+  ]
+    .map((file) => `--import=${pathToFileURL(file).href}`)
+    .join(' ');
   const result = await keyring.start(
     ['memory', 'download', fileMemory, pdfName],
-    { NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` },
+    { NODE_OPTIONS: imports },
     '',
     directory,
   ).done;

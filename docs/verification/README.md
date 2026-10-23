@@ -11,15 +11,35 @@ labels only. The test clock supplies request start and sweep time; publication
 still evaluates the clock predicate in the real D1 batch, with SQLite wall
 time substituted only by the test wrapper. CLI and Files drawer acceptance
 run through the same isolated process/browser fixtures; the hosted E31 capture
-is documented in [deployment](../deployment.md).
+is documented in [deployment](../deployment.md). The MCP suite also compares
+the deployment guide's tool inventory with real owner and machine `tools/list`
+responses under both protocol revisions.
+
+`memory-files-transfer-cli.test.ts` runs real sandboxed CLI processes on Linux
+and in the disposable macOS job. It replaces a download's temporary entry
+during a held stream and immediately before the actual hard link, checks that
+SIGINT and SIGTERM await partial-file cleanup, and refuses a FIFO with no
+writer before HTTP. Slow uploads and downloads must progress beyond the old
+ten-second total limit and retain their exact digest; stalled transfers must
+report inactivity separately from corruption. Integrity failures and stalled
+downloads leave neither a destination nor a temporary file. These tests use the real
+ten-second idle limit, with no test-only product setting; throttled transfers
+take about thirteen seconds each, plus the stalled-transfer waits. The
+existing file CLI suite retains overwrite, truncation, authorization and
+25 MiB boundary checks.
 
 The owner Files drawer is exercised by `memory-files-web.test.ts` and
 `memory-files-recovery-web.test.ts`: intent-only script loading, cached detail,
 newest-first metadata, Unicode browser downloads, pending peer locks across
-closing/reopening, missing-file refresh and refresh failure, unavailable-object
-retry, keyboard focus, URL reload/Back and non-executing HTML downloads. Audit
+closing/reopening and A→B→A navigation, missing-file refresh of the original
+memory after navigation, refresh coordination with pending forget, refresh
+failure, unavailable-object retry, keyboard focus, URL reload/Back and
+non-executing HTML downloads. The sweep suite holds a genuine embedding call
+while Cron independently lists R2 and deletes old garbage. Audit
 uses its existing rows and disclosures for all five file outcomes; the file
-Audit suite covers those alongside Vault pagination and descendant filtering.
+Audit suite covers those alongside Vault pagination and descendant filtering,
+plus file-only and mixed activity column/region labels. Vault-only labels and
+captures remain unchanged.
 
 `memory-files-owner-captures.test.ts` produces sixty production PNGs under
 `.local/verification/screenshots/memory-files-*.png`: reader and Files sheet
