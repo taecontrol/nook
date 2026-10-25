@@ -581,7 +581,7 @@ test wrapper.
 | E9 | The same suite: both attach/forget orders and forget between authorization and pre-read; no dangling file row or residual object. |
 | E10 | The same suite: post-put interruption, strict ten-minute publication boundary, sixty-minute sweep grace, ambiguous committed batch and unchanged retry; audit and publication stay atomic across a clock boundary within the batch. |
 | E11 | `memory-files-cli.test.ts`, `memory-files-worker.test.ts`: readable-but-unwritable denial, unreadable/missing masking, revoked credentials and no stored side effects. |
-| E12 | `memory-files-cli.test.ts`: the actual previous Worker produces the specific unsupported-files guidance. |
+| E12 | `memory-files-cli.test.ts`: authenticated `whoami` succeeds against the actual previous Worker before its missing file routes produce the specific unsupported-files guidance. |
 | E13 | The same suite: another synthetic machine downloads into another directory, verifies SHA-256, emits only absolute-path metadata and appears in Audit. |
 | E14 | The Worker suite: canRead permits ancestors and me; it and the CLI suite give unreadable and absent memories the same refusal with no audit or bytes. |
 | E15 | `memory-files-cli.test.ts`: existing file/directory/symlink refusal before HTTP, explicit output path, no overwrite and no stdout bytes. |

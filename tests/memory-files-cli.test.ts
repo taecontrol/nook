@@ -280,6 +280,13 @@ it('E12: attaching against a previous Worker gives the specific unsupported-file
   try {
     const previousMachine = await seedFileMemory(previous);
     await configureFilesCli(keyring, previous.origin, previousMachine.token);
+    const identity = await keyring.start(['whoami']).done;
+    expect(identity.status).toBe(0);
+    expect(identity.stderr).toBe('');
+    expect(identity.stdout).toContain(
+      `${previousMachine.name} at ${previous.origin}`,
+    );
+    expect(identity.stdout).toContain(fileBucket);
     const path = resolve(keyring.home, 'guide.pdf');
     await writeFile(path, Buffer.from('previous Worker fixture'));
     publicFailure(await attach(path), 'This Nook does not support files yet.');
