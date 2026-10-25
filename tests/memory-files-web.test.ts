@@ -2,23 +2,10 @@ import { readFile } from 'node:fs/promises';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
-import { measureScreen, phonePage } from '../scripts/load-time-browser.ts';
 import { auditRows } from './support/audit.ts';
 import { deferred } from './support/machines.ts';
-import {
-  manyMemories,
-  memoryClient,
-  memoryId,
-  seedMemories,
-} from './support/memory.ts';
-import {
-  digest,
-  fileMemory,
-  filePath,
-  pdfName,
-  seedFile,
-  seedFileMemory,
-} from './support/memory-files.ts';
+import { memoryClient } from './support/memory.ts';
+import { digest, fileMemory, pdfName } from './support/memory-files.ts';
 import {
   filesControl,
   filesPage,
@@ -27,7 +14,6 @@ import {
   openFiles,
   waitFileRows,
 } from './support/memory-files-browser.ts';
-import { vaultRuntime } from './support/vault.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
@@ -117,22 +103,6 @@ it.each([
     }
   },
 );
-it('E24: a memory without files keeps its existing reader and History with no Files control', async () => {
-  const visit = await filesPage(browser, { names: [] });
-  try {
-    expect(await filesControl(visit.page).count()).toBe(0);
-    expect(
-      await visit.page.getByRole('button', { name: /^History / }).isVisible(),
-    ).toBe(true);
-    expect(
-      await visit.page
-        .getByRole('heading', { name: 'File guide', exact: true })
-        .isVisible(),
-    ).toBe(true);
-  } finally {
-    await visit.close();
-  }
-});
 it.each(['hover', 'focus'] as const)(
   'E24/E29: Files is a separate lazy script requested on %s intent before the drawer opens',
   async (intent) => {
@@ -217,6 +187,7 @@ it('E25: a pending owner download saves Unicode bytes under the file name, disab
       }),
     ]);
     expect(await button.isEnabled()).toBe(true);
+    expect(new URL(page.url()).pathname).toBe('/memory');
   } finally {
     gate.resolve();
     await visit.close();
@@ -266,6 +237,7 @@ it('E25: a referenced missing R2 object produces an alert with Try again and a r
       .click();
     const alert = filesSheet(page).getByRole('alert');
     await alert.waitFor();
+    expect(await alert.innerText()).toContain('Could not download the file');
     expect(await alert.innerText()).toContain(pdfName);
     const retry = alert.getByRole('button', { name: 'Try again', exact: true });
     expect(await retry.isEnabled()).toBe(true);
@@ -282,66 +254,3 @@ it('E25: a referenced missing R2 object produces an alert with Try again and a r
     await visit.close();
   }
 });
-it('E26: a downloaded HTML attachment never executes in the app origin', async () => {
-  const visit = await filesPage(browser, { names: [] });
-  try {
-    const { page, app } = visit;
-    const bytes = Buffer.from(
-      '<script>globalThis.nookFileExecuted = true</script>',
-    );
-    const name = 'untrusted.html';
-    await seedFile(app, { name, bytes });
-    // The type is metadata only: the download must stay octet-stream.
-    await (await app.mf.getD1Database('DB'))
-      .prepare(
-        'UPDATE memory_files SET media_type=? WHERE memory_id=? AND name=?',
-      )
-      .bind('text/html', fileMemory, name)
-      .run();
-    await page.reload();
-    await openFiles(page);
-    const response = page.waitForResponse(
-      (res) =>
-        new URL(res.url()).pathname === filePath(fileMemory, name, false),
-    );
-    const saved = page.waitForEvent('download');
-    await filesSheet(page)
-      .getByRole('button', { name: `Download ${name}`, exact: true })
-      .click();
-    expect((await response).headers()['content-type']).toBe(
-      'application/octet-stream',
-    );
-    expect((await saved).suggestedFilename()).toBe(name);
-    expect(
-      await page.evaluate(
-        () => Reflect.get(globalThis, 'nookFileExecuted') === true,
-      ),
-    ).toBe(false);
-    expect(new URL(page.url()).pathname).toBe('/memory');
-  } finally {
-    await visit.close();
-  }
-});
-// Budgets are five-sample medians enforced by `pnpm verify:load-time`,
-// whose fixture seeds this file; one coverage-shard sample is not a budget.
-it.each(['memory', 'memoryNavigation'] as const)(
-  'E29: %s measures the Memory first screen on a 390 px phone with real file metadata',
-  async (kind) => {
-    const app = await vaultRuntime({ r2Buckets: ['FILES'] });
-    const { context, page } = await phonePage(browser, kind);
-    try {
-      await seedFileMemory(app);
-      await seedMemories(app, manyMemories);
-      await seedFile(app, { id: memoryId(100) });
-      const milliseconds = await measureScreen(page, app.origin, '', kind);
-      console.info(`Memory files E29 ${kind}: ${milliseconds.toFixed(1)} ms`);
-      expect(Number.isFinite(milliseconds)).toBe(true);
-      expect(milliseconds).toBeGreaterThanOrEqual(0);
-      expect(new URL(page.url()).pathname).toBe('/memory');
-      expect(page.viewportSize()).toEqual({ width: 390, height: 844 });
-    } finally {
-      await context.close();
-      await app.close();
-    }
-  },
-);

@@ -29,48 +29,6 @@ beforeAll(async () => {
 });
 afterAll(() => closeBrowser?.());
 
-it('keeps an in-flight download and its peer lock when Files is dismissed and reopened', async () => {
-  const gate = deferred();
-  const arrived = deferred();
-  let downloads = 0;
-  const visit = await filesPage(browser, {
-    configure: async (page) => {
-      await page.route('**/api/memories/*/files/*', async (route) => {
-        downloads += 1;
-        arrived.resolve();
-        await gate.promise;
-        await route.continue().catch(() => {});
-      });
-    },
-  });
-  try {
-    const { page, files } = visit;
-    await openFiles(page);
-    const button = filesSheet(page).getByRole('button', {
-      name: `Download ${files[0].name}`,
-      exact: true,
-    });
-    await button.click();
-    await arrived.promise;
-    await page.keyboard.press('Escape');
-    await expect.poll(() => filesSheet(page).count()).toBe(0);
-    await openFiles(page);
-    expect(await button.getAttribute('aria-busy')).toBe('true');
-    for (const peer of await filesSheet(page)
-      .getByRole('button', { name: /^Download / })
-      .all())
-      expect(await peer.isDisabled()).toBe(true);
-    expect(downloads).toBe(1);
-    const saved = page.waitForEvent('download');
-    gate.resolve();
-    expect((await saved).suggestedFilename()).toBe(files[0].name);
-    await expect.poll(() => button.isEnabled()).toBe(true);
-  } finally {
-    gate.resolve();
-    await visit.close();
-  }
-});
-
 it('retains the missing-file warning when refresh fails, retries, and returns focus to History after the last file disappears', async () => {
   let unavailable = false;
   const visit = await filesPage(browser, {
@@ -348,6 +306,7 @@ it('keeps a pending download and all peer locks across A to B to A navigation', 
     await button.click();
     await arrived.promise;
     await page.keyboard.press('Escape');
+    await expect.poll(() => filesSheet(page).count()).toBe(0);
     await page.locator(`[data-memory-row="${otherId}"]`).click();
     await page
       .getByRole('heading', { name: 'Another memory', exact: true })
@@ -463,79 +422,63 @@ it('a late missing-file response does not read or repopulate a memory while forg
   }
 });
 
-it.each(['missing', 'unavailable'] as const)(
-  'delivers a late %s result to the reopened drawer after A to B to A navigation',
-  async (outcome) => {
-    const gate = deferred();
-    const arrived = deferred();
-    const otherId = memoryId(602);
-    const visit = await filesPage(browser, {
-      configure: async (page, app) => {
-        await seedMemories(app, [
-          memoryFixture(602, {
-            bucket: fileBucket,
-            content: '# Another memory',
-          }),
-        ]);
-        await page.route('**/api/memories/*/files/*', async (route) => {
-          arrived.resolve();
-          await gate.promise;
-          await route.continue().catch(() => {});
-        });
-      },
-    });
-    try {
-      const { page, app, files } = visit;
-      await openFiles(page);
-      const button = filesSheet(page).getByRole('button', {
-        name: `Download ${files[0].name}`,
-        exact: true,
+// The registry delivers every failure kind the same way; web E25 keeps the
+// unavailable alert and its retry.
+it('delivers a late missing result to the reopened drawer after A to B to A navigation', async () => {
+  const gate = deferred();
+  const arrived = deferred();
+  const otherId = memoryId(602);
+  const visit = await filesPage(browser, {
+    configure: async (page, app) => {
+      await seedMemories(app, [
+        memoryFixture(602, {
+          bucket: fileBucket,
+          content: '# Another memory',
+        }),
+      ]);
+      await page.route('**/api/memories/*/files/*', async (route) => {
+        arrived.resolve();
+        await gate.promise;
+        await route.continue().catch(() => {});
       });
-      await button.click();
-      await arrived.promise;
-      await page.keyboard.press('Escape');
-      await page.locator(`[data-memory-row="${otherId}"]`).click();
-      await page
-        .getByRole('heading', { name: 'Another memory', exact: true })
-        .waitFor();
-      await page.locator(`[data-memory-row="${fileMemory}"]`).click();
-      await page
-        .getByRole('heading', { name: 'File guide', exact: true })
-        .waitFor();
-      await openFiles(page);
-      expect(await button.getAttribute('aria-busy')).toBe('true');
-      if (outcome === 'missing') {
-        expect(
-          (
-            await memoryClient(app, '2026-07-28').call('detach', {
-              id: fileMemory,
-              name: files[0].name,
-              sha256: files[0].sha256,
-            })
-          ).isError,
-        ).not.toBe(true);
-      } else {
-        await (await app.mf.getR2Bucket('FILES')).delete(files[0].object_key);
-      }
-      gate.resolve();
-      if (outcome === 'missing') await waitFileRows(page, 2);
-      else await expect.poll(() => button.isEnabled()).toBe(true);
-      const alert = filesSheet(page).getByRole('alert');
-      expect(await alert.count()).toBe(1);
-      expect(await alert.innerText()).toContain(
-        outcome === 'missing'
-          ? 'File not found.'
-          : 'Could not download the file',
-      );
-      if (outcome === 'unavailable')
-        expect(
-          await alert
-            .getByRole('button', { name: 'Try again', exact: true })
-            .isEnabled(),
-        ).toBe(true);
-    } finally {
-      gate.resolve();
-      await visit.close();
-    }
-  },
-);
+    },
+  });
+  try {
+    const { page, app, files } = visit;
+    await openFiles(page);
+    const button = filesSheet(page).getByRole('button', {
+      name: `Download ${files[0].name}`,
+      exact: true,
+    });
+    await button.click();
+    await arrived.promise;
+    await page.keyboard.press('Escape');
+    await page.locator(`[data-memory-row="${otherId}"]`).click();
+    await page
+      .getByRole('heading', { name: 'Another memory', exact: true })
+      .waitFor();
+    await page.locator(`[data-memory-row="${fileMemory}"]`).click();
+    await page
+      .getByRole('heading', { name: 'File guide', exact: true })
+      .waitFor();
+    await openFiles(page);
+    expect(await button.getAttribute('aria-busy')).toBe('true');
+    expect(
+      (
+        await memoryClient(app, '2026-07-28').call('detach', {
+          id: fileMemory,
+          name: files[0].name,
+          sha256: files[0].sha256,
+        })
+      ).isError,
+    ).not.toBe(true);
+    gate.resolve();
+    await waitFileRows(page, 2);
+    const alert = filesSheet(page).getByRole('alert');
+    expect(await alert.count()).toBe(1);
+    expect(await alert.innerText()).toContain('File not found.');
+  } finally {
+    gate.resolve();
+    await visit.close();
+  }
+});
