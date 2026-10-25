@@ -217,6 +217,10 @@ it('E25: a genuine 404 names the missing file, refreshes detail and removes its 
     expect(await filesSheet(page).innerText()).toContain(pdfName);
     expect((await refreshed).status()).toBe(200);
     await waitFileRows(page, 0);
+    // The open sheet hides the reader from the accessibility tree; close it
+    // before asserting that the reader no longer offers Files.
+    await page.keyboard.press('Escape');
+    await expect.poll(() => filesSheet(page).count()).toBe(0);
     expect(await filesControl(page).count()).toBe(0);
     expect(
       (await auditRows(app)).filter((row) => row.outcome === 'file_downloaded'),
