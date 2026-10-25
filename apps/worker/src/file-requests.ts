@@ -3,18 +3,19 @@ import {
   validateFileName,
   validateFileSize,
 } from '@nook/contract';
-import type { FileActor } from './audit.ts';
+import { type FileActor, ownerFileActor } from './audit.ts';
 import { clientFrom } from './client-provenance.ts';
 import { fileRoutes, matches } from './routes.ts';
 
 export function fileActor(request: Request): FileActor {
   const source = request as Request & { cf?: { country?: string } };
-  return {
-    principal: { kind: 'owner' },
-    client: clientFrom(undefined, request.headers.get('User-Agent')),
-    ip: request.headers.get('CF-Connecting-IP') || null,
-    country: source.cf?.country || null,
-  };
+  return ownerFileActor(
+    clientFrom(undefined, request.headers.get('User-Agent')),
+    {
+      ip: request.headers.get('CF-Connecting-IP') || null,
+      country: source.cf?.country || null,
+    },
+  );
 }
 function lengthGate(request: Request) {
   const length = request.headers.get('Content-Length');
