@@ -192,6 +192,8 @@ it('E4: one 25 MiB real-process round trip is byte-identical; one extra byte is 
   const refused = await attach(source);
   expect(refused.status).toBe(1);
   expect(refused.stdout + refused.stderr).toMatch(/25 MiB/);
+  expect(refused.stdout).toBe('A file can be at most 25 MiB.\n');
+  expect(refused.stderr).toBe('');
   expect(transport.requests).toHaveLength(count);
 }, 30_000);
 it('E5: CLI quota failure reports exact usage with no row, object or audit; smaller replacement succeeds at the limit', async () => {
