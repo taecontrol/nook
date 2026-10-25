@@ -1,10 +1,6 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import { D1Client } from '@effect/sql-d1';
-import {
-  AuthorizationsApi,
-  fileRouterMaxParamLength,
-  MachineApi,
-} from '@nook/contract';
+import { AuthorizationsApi, MachineApi } from '@nook/contract';
 import { Effect, Layer } from 'effect';
 import { HttpRouter, HttpServer } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
@@ -16,6 +12,7 @@ import { unavailable as storageUnavailable } from './http-errors.ts';
 import { machineOperations } from './machines.ts';
 import { mcpHandler } from './mcp.ts';
 import { memoryFiles } from './memory-files.ts';
+import { fileRouterMaxParamLength } from './routes.ts';
 import { runSecrets } from './run-secrets.ts';
 import { machineVault } from './vault.ts';
 

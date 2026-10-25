@@ -9,6 +9,7 @@ import {
   FileNotFound,
   FileQuotaExceeded,
   FileTooLarge,
+  fileDigestMessage,
   fileLimits,
   InvalidFile,
   isFileDigest,
@@ -333,7 +334,7 @@ export const memoryFiles = (grant: BucketGrant, bindings: FileBindings = {}) =>
           if (!isFileDigest(input.sha256))
             return yield* Effect.fail(
               new InvalidFile({
-                message: 'Use a lowercase SHA-256 digest for the file.',
+                message: fileDigestMessage,
               }),
             );
           const guard = sql`memory_id=${input.id} AND name=${input.name} AND sha256=${input.sha256}`;

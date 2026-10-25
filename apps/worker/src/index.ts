@@ -8,7 +8,6 @@ import {
   Api,
   type BucketGrant,
   badRequestTags,
-  fileRouterMaxParamLength,
   secretLimits,
 } from '@nook/contract';
 import { Effect, Layer } from 'effect';
@@ -37,7 +36,13 @@ import { memoryStore } from './memory.ts';
 import { memoryFiles } from './memory-files.ts';
 import { memoryIndex } from './memory-index.ts';
 import { memorySync } from './memory-sync.ts';
-import { matches, ownerRoutes, revealRoute, tokenRoutes } from './routes.ts';
+import {
+  fileRouterMaxParamLength,
+  matches,
+  ownerRoutes,
+  revealRoute,
+  tokenRoutes,
+} from './routes.ts';
 import { ownerVault } from './vault.ts';
 
 export function handlerForPrincipal(

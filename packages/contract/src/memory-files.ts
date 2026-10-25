@@ -8,8 +8,6 @@ export const fileLimits = {
   nameBytes: 255,
 } as const;
 
-// Leave room for percent-encoded file names up to fileLimits.nameBytes.
-export const fileRouterMaxParamLength = 800;
 export const fileNameUnicodeMessage = 'Use valid Unicode for the file name.';
 
 export function validateFileSize(size: number): string | undefined {
@@ -18,6 +16,7 @@ export function validateFileSize(size: number): string | undefined {
 export function isFileDigest(sha256: string): boolean {
   return /^[0-9a-f]{64}$/.test(sha256);
 }
+export const fileDigestMessage = 'Use a lowercase SHA-256 digest for the file.';
 export function validateFileName(name: string): string | undefined {
   if (!name || name === '.' || name === '..') return 'Use a file name.';
   if (/[\\/\p{Cc}]/u.test(name))
