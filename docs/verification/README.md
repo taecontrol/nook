@@ -558,7 +558,8 @@ the existing no-files reader. The full gate stopped at the missing migrations
 after style, UI, types and complexity passed.
 
 Memory file storage is exercised against the built Worker, real local D1 and
-R2, and both owner/machine MCP endpoints under both observed protocols by
+R2, and both owner/machine MCP endpoints on protocol 2026-07-28 (the MCP
+transport, memory and machine-grant suites keep 2025-06-18) by
 `memory-files-worker.test.ts`, `memory-files-mcp.test.ts`,
 `memory-files-faults.test.ts`, `memory-files-audit.test.ts`,
 `memory-files-migrations.test.ts` and `memory-files-sweep.test.ts`. CLI and Files drawer acceptance use the existing
@@ -574,7 +575,7 @@ test wrapper.
 | E3 | The CLI and Worker suites: replacement reports both digests, removes the old key and leaves one row; `memory-files-mcp.test.ts` projects exactly the current row per name in get. |
 | E4 | `memory-files-cli.test.ts`, `memory-files-worker.test.ts`: a byte-identical 25 MiB real CLI round trip through the Worker with its declared length and digest, one-byte-over local refusal before HTTP, and Worker 413/411 gates before reading the body. |
 | E5 | The Worker suite: exact quota guidance, no failed row/object/audit, and smaller replacement at the limit; the CLI relays the exact guidance. Quota fixtures seed metadata rather than upload a GiB. |
-| E6 | The CLI, Worker and MCP suites: basename, 255/256 UTF-8 byte boundaries, byte-exact Unicode, empty files, separators, NUL, C0/C1 controls, lone surrogates and CLI/MCP dot-name refusal. HTTP normalization is documented below. |
+| E6 | The CLI, Worker and MCP suites: basename, 255/256 UTF-8 byte boundaries, byte-exact Unicode, empty files, separators, lone surrogates and CLI/MCP dot-name refusal; the Worker checks NUL and every C0/C1 control. HTTP normalization is documented below. |
 | E7 | `memory-files-faults.test.ts`: both controlled publication orders for different bytes; identical concurrent bytes yield created/unchanged, one object and original provenance. |
 | E8 | The same suite: both commit orders share the live quota guard; exactly one name publishes and the loser leaves no object or audit. |
 | E9 | The same suite: both attach/forget orders and forget between authorization and pre-read; no dangling file row or residual object. |
@@ -595,7 +596,7 @@ test wrapper.
 | E24 | `memory-files-web.test.ts`, `memory-files-recovery-web.test.ts`: Files/History controls, responsive label/tooltip, newest-first metadata and Details, no Files control once the last file is gone, cached intent preload, keyboard focus and reload/Back. |
 | E25 | The same suites: Unicode owner download and IP/country audit, pending peer locks, named 404 with fresh detail/removal, 503 retry, late results across navigation/remounts and coordination with pending forget. |
 | E26 | `memory-files-worker.test.ts`, `memory-files-web.test.ts`: attachment security headers for an HTML file, HEAD 405 without audit, owner/machine authentication boundaries and restricted-grant masking; owner downloads save a file without leaving the page. |
-| E27 | `memory-files-audit.test.ts`, `memory-files-migrations.test.ts`: all five outcomes in API/Chromium, descendant filter, mixed Vault/file pagination, retained Vault facts, correct actors and file/mixed labels. |
+| E27 | `memory-files-audit.test.ts`, `memory-files-migrations.test.ts`: all five outcomes in API/Chromium, descendant filter (API), mixed Vault/file pagination, retained Vault facts, correct actors and file/mixed labels. |
 | E28 | `memory-files-owner-captures.test.ts`: sixty production reader/sheet/Details/scroll-end PNGs for prototype C, described below. |
 | E29 | `memory-files-web.test.ts`: separate intent-loaded Files script. `pnpm verify:load-time` seeds a real attachment and enforces the unchanged five-sample 4G medians (1000 ms cold, 100 ms after intent). |
 | E30 | `memory-files-migrations.test.ts`, `pnpm verify:migrations`: empty/migrated/populated schema replay, complete Vault audit preservation and bucket backfill from the pre-file schema, previous-writer trigger, and actual previous-Worker forget refusing attached files with 503. |
@@ -637,8 +638,9 @@ keep-alive request. E4's 411/413 probes instead leave the upload unfinished and
 destroy each owned socket after reading its response, preserving proof that
 the Worker rejects before reading. Bucket-grant denial examples keep their
 nonempty inputs because that path consumes the body before authorization.
-Production validation and body limits are unchanged. No acceptance assertion,
-transfer deadline or protocol combination is removed.
+Production validation and body limits are unchanged. No transfer deadline is
+removed; the later prune described below removed replayed assertions and the
+2025-06-18 file-suite replay.
 
 Refine added 21 regressions with red-before/green-after evidence, then one
 additional stale-preload regression. `memory-files-transfer-cli.test.ts` runs
@@ -657,7 +659,7 @@ suite retains overwrite, truncation, authorization and 25 MiB boundary checks.
 The owner Files drawer is exercised by `memory-files-web.test.ts` and
 `memory-files-recovery-web.test.ts`: intent-only script loading, cached detail,
 newest-first metadata, Unicode browser downloads, pending peer locks across
-closing/reopening and A→B→A navigation, delivery of late 404/503 results to a
+closing/reopening and A→B→A navigation, delivery of a late 404 result to a
 remounted drawer, missing-file refresh of the original memory after navigation,
 refresh coordination with pending forget, refresh failure, unavailable-object
 retry, keyboard focus and URL reload/Back.
