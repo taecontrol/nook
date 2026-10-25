@@ -8,18 +8,8 @@ export function principalName(principal: Principal) {
 export function clientName(client: ProvenanceRecord['client']) {
   return `${client.name}${client.version ? ` ${client.version}` : ''}`;
 }
-export function formatExactBytes(bytes: number): string;
-export function formatExactBytes(
-  bytes: number,
-  output: 'parts',
-): readonly string[];
-export function formatExactBytes(
-  bytes: number,
-  output?: 'parts',
-): string | readonly string[] {
-  // Audit keeps its existing separate count and unit text nodes.
-  const parts = [bytes.toLocaleString('en-US'), ' bytes'] as const;
-  return output === 'parts' ? parts : parts.join('');
+export function formatExactBytes(bytes: number): string {
+  return `${bytes.toLocaleString('en-US')} bytes`;
 }
 
 const units = ['B', 'KiB', 'MiB'] as const;

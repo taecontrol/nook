@@ -479,7 +479,7 @@ function FileEntryDetails({
         <Fact label="Recorded">
           <time dateTime={entry.at}>{formatDateTime(entry.at)}</time>
         </Fact>
-        <Fact label="Size">{formatExactBytes(entry.size, 'parts')}</Fact>
+        <Fact label="Size">{formatExactBytes(entry.size)}</Fact>
         <Fact label="SHA-256">
           <span className="font-mono break-all">{entry.sha256}</span>
         </Fact>
