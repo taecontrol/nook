@@ -114,7 +114,12 @@ it('E3: replacement publishes one new digest, removes the old key and audits bot
   const old = await attachFile(app, machine.token);
   const [previous] = await fileRows(app);
   const bytes = Buffer.from('replacement bytes');
-  expect(await attachFile(app, machine.token, { bytes })).toEqual({
+  expect(
+    await attachFile(app, machine.token, {
+      bytes,
+      headers: { 'uSeR-aGeNt': 'replacement-client/2.0' },
+    }),
+  ).toEqual({
     ...old,
     size: bytes.length,
     sha256: digest(bytes),
@@ -123,6 +128,10 @@ it('E3: replacement publishes one new digest, removes the old key and audits bot
   });
   const current = await fileRows(app);
   expect(current).toHaveLength(1);
+  expect(current[0]).toMatchObject({
+    client_name: 'replacement-client',
+    client_version: '2.0',
+  });
   expect(current[0].sha256).toBe(digest(bytes));
   expect(current[0].object_key).not.toBe(previous.object_key);
   expect(
@@ -131,7 +140,12 @@ it('E3: replacement publishes one new digest, removes the old key and audits bot
   expect(await fileObjects(app)).toHaveLength(1);
   expect(
     (await auditRows(app)).find((r) => r.outcome === 'file_replaced'),
-  ).toMatchObject({ file_sha256: digest(bytes), replaced_sha256: old.sha256 });
+  ).toMatchObject({
+    file_sha256: digest(bytes),
+    replaced_sha256: old.sha256,
+    client_name: 'replacement-client',
+    client_version: '2.0',
+  });
 });
 it('E4: the Worker rejects an oversized declared body before reading it and requires Content-Length', async () => {
   async function headersOnly(length?: number) {
