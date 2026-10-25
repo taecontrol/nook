@@ -143,6 +143,7 @@ it('E25: a pending owner download saves Unicode bytes under the file name, disab
   const arrived = deferred();
   const visit = await filesPage(browser, {
     configure: async (page) => {
+      await page.clock.install();
       await page.route('**/api/memories/*/files/*', async (route) => {
         arrived.resolve();
         await gate.promise;
@@ -154,6 +155,24 @@ it('E25: a pending owner download saves Unicode bytes under the file name, disab
     const { page, app, files } = visit;
     const file = files[1];
     await openFiles(page);
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+    await page.evaluate(() => {
+      const urls = Object.assign(URL, {
+        created: [] as string[],
+        revoked: [] as string[],
+      });
+      const create = URL.createObjectURL.bind(URL);
+      const revoke = URL.revokeObjectURL.bind(URL);
+      URL.createObjectURL = (blob) => {
+        const url = create(blob);
+        urls.created.push(url);
+        return url;
+      };
+      URL.revokeObjectURL = (url) => {
+        urls.revoked.push(url);
+        revoke(url);
+      };
+    });
     const saved = page.waitForEvent('download');
     const button = filesSheet(page).getByRole('button', {
       name: `Download ${file.name}`,
@@ -188,6 +207,20 @@ it('E25: a pending owner download saves Unicode bytes under the file name, disab
     ]);
     expect(await button.isEnabled()).toBe(true);
     expect(new URL(page.url()).pathname).toBe('/memory');
+    const urls = () =>
+      page.evaluate(() => {
+        const tracked = URL as typeof URL & {
+          created: string[];
+          revoked: string[];
+        };
+        return { created: tracked.created, revoked: tracked.revoked };
+      });
+    expect((await urls()).created).toHaveLength(1);
+    expect((await urls()).revoked).toEqual([]);
+    await page.clock.runFor(1000);
+    expect((await urls()).revoked).toEqual([]);
+    await page.clock.fastForward(60_000);
+    expect((await urls()).revoked).toEqual((await urls()).created);
   } finally {
     gate.resolve();
     await visit.close();
