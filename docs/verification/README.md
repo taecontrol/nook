@@ -658,7 +658,8 @@ suite retains overwrite, truncation, authorization and 25 MiB boundary checks.
 
 The owner Files drawer is exercised by `memory-files-web.test.ts` and
 `memory-files-recovery-web.test.ts`: intent-only script loading, cached detail,
-newest-first metadata, Unicode browser downloads, pending peer locks across
+newest-first metadata, Unicode browser downloads, blob URLs retained through
+the first second and eventually revoked under a controlled clock, pending peer locks across
 closing/reopening and A→B→A navigation, delivery of a late 404 result to a
 remounted drawer, missing-file refresh of the original memory after navigation,
 refresh coordination with pending forget, refresh failure, unavailable-object
