@@ -561,8 +561,7 @@ Memory file storage is exercised against the built Worker, real local D1 and
 R2, and both owner/machine MCP endpoints under both observed protocols by
 `memory-files-worker.test.ts`, `memory-files-mcp.test.ts`,
 `memory-files-faults.test.ts`, `memory-files-audit.test.ts`,
-`memory-files-migrations.test.ts`, `memory-files-harness.test.ts` and
-`memory-files-sweep.test.ts`. CLI and Files drawer acceptance use the existing
+`memory-files-migrations.test.ts` and `memory-files-sweep.test.ts`. CLI and Files drawer acceptance use the existing
 isolated process/browser fixtures. Checkpoints observe labels only. The test
 clock supplies request start and sweep time; publication evaluates its clock
 predicate in the real D1 batch, with SQLite wall time substituted only by the
@@ -572,9 +571,9 @@ test wrapper.
 | --- | --- |
 | E1 | `memory-files-cli.test.ts`, `memory-files-worker.test.ts`: real CLI attach, basename, exact JSON and digest, unchanged text version/time and authenticated Audit provenance. |
 | E2 | The same suites: unchanged retry, one object, no extra audit or provenance write. |
-| E3 | The CLI and Worker suites, `memory-files-mcp.test.ts`: replacement reports both digests, removes the old object and appears once in get. |
-| E4 | `memory-files-cli.test.ts`, `memory-files-worker.test.ts`: byte-identical 25 MiB round trips, one-byte-over local refusal before HTTP, and Worker 413/411 gates before reading the body. |
-| E5 | The same suites: exact quota guidance, no failed row/object/audit, and smaller replacement at the limit; quota fixtures seed metadata rather than upload a GiB. |
+| E3 | The CLI and Worker suites: replacement reports both digests, removes the old key and leaves one row; `memory-files-mcp.test.ts` projects exactly the current row per name in get. |
+| E4 | `memory-files-cli.test.ts`, `memory-files-worker.test.ts`: a byte-identical 25 MiB real CLI round trip through the Worker with its declared length and digest, one-byte-over local refusal before HTTP, and Worker 413/411 gates before reading the body. |
+| E5 | The Worker suite: exact quota guidance, no failed row/object/audit, and smaller replacement at the limit; the CLI relays the exact guidance. Quota fixtures seed metadata rather than upload a GiB. |
 | E6 | The CLI, Worker and MCP suites: basename, 255/256 UTF-8 byte boundaries, byte-exact Unicode, empty files, separators, NUL, C0/C1 controls, lone surrogates and CLI/MCP dot-name refusal. HTTP normalization is documented below. |
 | E7 | `memory-files-faults.test.ts`: both controlled publication orders for different bytes; identical concurrent bytes yield created/unchanged, one object and original provenance. |
 | E8 | The same suite: both commit orders share the live quota guard; exactly one name publishes and the loser leaves no object or audit. |
@@ -583,23 +582,23 @@ test wrapper.
 | E11 | `memory-files-cli.test.ts`, `memory-files-worker.test.ts`: readable-but-unwritable denial, unreadable/missing masking, revoked credentials and no stored side effects. |
 | E12 | `memory-files-cli.test.ts`: the actual previous Worker produces the specific unsupported-files guidance. |
 | E13 | The same suite: another synthetic machine downloads into another directory, verifies SHA-256, emits only absolute-path metadata and appears in Audit. |
-| E14 | The CLI and Worker suites: canRead permits ancestors and me; unreadable and absent memories have the same refusal with no audit or bytes. |
+| E14 | The Worker suite: canRead permits ancestors and me; it and the CLI suite give unreadable and absent memories the same refusal with no audit or bytes. |
 | E15 | `memory-files-cli.test.ts`: existing file/directory/symlink refusal before HTTP, explicit output path, no overwrite and no stdout bytes. |
 | E16 | The same suite and `memory-files-transfer-cli.test.ts`: corruption/truncation cleanup, publication-time EEXIST, temporary-entry substitution before/during publication, signal cleanup and stalled-transfer cleanup. |
 | E17 | `memory-files-cli.test.ts`, `memory-files-worker.test.ts`: missing name is File not found; a referenced missing R2 object is 503 and retains its row. |
 | E18 | `memory-files-mcp.test.ts`: all get files by name, at most ten compact search files with exact counts, empty metadata, unchanged owner feed, and no extra D1 trip in keyword-only or available-meaning search. |
-| E19 | The same suite: ten tools, byte-free CLI guidance, destructive/non-idempotent guarded detach, and deployment inventory equal to real tools/list. |
-| E20 | The same suite: current/stale digest detach, object/audit facts, not-found retry and grant denials. |
+| E19 | The same suite: byte-free CLI guidance, destructive/non-idempotent guarded detach, and deployment inventory equal to real tools/list; the exact ten-tool inventory stays in the MCP discovery suites. |
+| E20 | The same suite: current/stale digest detach with its exact result, object/audit facts, not-found retry and grant denials. |
 | E21 | The same suite: all five successful lifecycle transitions, real CLI attach/download/replace, and canary absence from MCP, HTTP errors, CLI output/stderr, public/raw Audit and Worker logs. |
-| E22 | `memory-files-worker.test.ts`, `memory-files-mcp.test.ts`, `memory-files-faults.test.ts`: owner/MCP forget removes three files and multiple versions in one batch, audits each, permits bucket deletion, rolls back on audit failure and sweeps failed inline deletes. |
-| E23 | The Worker and MCP suites: genuinely stale forget versions preserve all file rows, objects, versions and audit facts. |
-| E24 | `memory-files-web.test.ts`, `memory-files-recovery-web.test.ts`: Files/History controls, responsive label/tooltip, newest-first metadata and Details, no-files reader, cached intent preload, keyboard focus and reload/Back. |
+| E22 | `memory-files-worker.test.ts`, `memory-files-mcp.test.ts`, `memory-files-faults.test.ts`: owner forget removes three files and multiple versions in one batch, audits each, permits bucket deletion, rolls back on audit failure and sweeps failed inline deletes; MCP forget attributes each file audit to its endpoint. |
+| E23 | The Worker suite: a genuinely stale forget version preserves all file rows, objects and audit facts. |
+| E24 | `memory-files-web.test.ts`, `memory-files-recovery-web.test.ts`: Files/History controls, responsive label/tooltip, newest-first metadata and Details, no Files control once the last file is gone, cached intent preload, keyboard focus and reload/Back. |
 | E25 | The same suites: Unicode owner download and IP/country audit, pending peer locks, named 404 with fresh detail/removal, 503 retry, late results across navigation/remounts and coordination with pending forget. |
-| E26 | `memory-files-worker.test.ts`, `memory-files-web.test.ts`: attachment security headers, HEAD 405 without audit, owner/machine authentication boundaries, restricted-grant masking and inert HTML download. |
+| E26 | `memory-files-worker.test.ts`, `memory-files-web.test.ts`: attachment security headers for an HTML file, HEAD 405 without audit, owner/machine authentication boundaries and restricted-grant masking; owner downloads save a file without leaving the page. |
 | E27 | `memory-files-audit.test.ts`, `memory-files-migrations.test.ts`: all five outcomes in API/Chromium, descendant filter, mixed Vault/file pagination, retained Vault facts, correct actors and file/mixed labels. |
 | E28 | `memory-files-owner-captures.test.ts`: sixty production reader/sheet/Details/scroll-end PNGs for prototype C, described below. |
-| E29 | `memory-files-web.test.ts`: separate intent-loaded Files script and real phone measurement conditions with file metadata. `pnpm verify:load-time` seeds a real attachment and enforces the unchanged five-sample 4G medians (1000 ms cold, 100 ms after intent). |
-| E30 | `memory-files-migrations.test.ts`, `pnpm verify:migrations`: empty/migrated/populated previous schemas, complete Vault audit preservation and bucket backfill, previous-writer trigger, and actual previous-Worker forget refusing attached files with 503. |
+| E29 | `memory-files-web.test.ts`: separate intent-loaded Files script. `pnpm verify:load-time` seeds a real attachment and enforces the unchanged five-sample 4G medians (1000 ms cold, 100 ms after intent). |
+| E30 | `memory-files-migrations.test.ts`, `pnpm verify:migrations`: empty/migrated/populated schema replay, complete Vault audit preservation and bucket backfill from the pre-file schema, previous-writer trigger, and actual previous-Worker forget refusing attached files with 503. |
 | E31 | Hosted capture remains pending: [Memory file owner acceptance after deployment](../deployment.md#memory-file-e31-owner-acceptance-after-deployment-pending) requires a cross-machine 25 MiB digest match, workflow-created R2 bucket and owner download Audit with IP/country. |
 
 `memory-files-owner-captures.test.ts` produces sixty production PNGs under
@@ -625,8 +624,8 @@ fifteen-minute limit without a custom sequencer or maintained duration table.
 Coverage merging requires all ten Linux manifests plus macOS, with distinct
 indexes and the same source. All checks and timeouts remain in force.
 
-The compatible file CLI suites share one Worker per file, and MCP shares one
-per endpoint/protocol combination. Before every example the fixtures clear
+The compatible file Worker and CLI suites share one Worker per file, and MCP
+shares one per endpoint. Before every example the fixtures clear
 file, memory, machine-token, audit and removal rows, R2 keys and search state.
 CLI cases and distinct synthetic machines keep separate private HOME/keyrings;
 E13 downloads from a genuinely separate fixture. Fault-configured runtimes
@@ -661,7 +660,7 @@ newest-first metadata, Unicode browser downloads, pending peer locks across
 closing/reopening and A→B→A navigation, delivery of late 404/503 results to a
 remounted drawer, missing-file refresh of the original memory after navigation,
 refresh coordination with pending forget, refresh failure, unavailable-object
-retry, keyboard focus, URL reload/Back and non-executing HTML downloads.
+retry, keyboard focus and URL reload/Back.
 The preload regression holds a genuine detail response after D1 has read the
 file, detaches it through MCP, and releases that old response only after the
 download returns 404. It requires a subsequent detail read and removal of the
@@ -676,8 +675,7 @@ synthetic command responses. Audit uses its existing rows and disclosures
 for all five file outcomes; its file suite covers Vault pagination and
 descendant filtering plus file-only and mixed activity column/region labels.
 Vault-only labels and captures remain unchanged. The MCP suite also compares
-the deployment guide's tool inventory with real owner and machine tools/list
-responses under both protocol revisions.
+the deployment guide's tool inventory with a real tools/list response.
 
 Existing exact MCP inventories grow from nine to ten tools (`detach`), and
 the numbered migration inventory grows from eleven to thirteen
@@ -719,3 +717,14 @@ segments, literal or percent-encoded, normalize before file validation and
 answer 404. CLI and JSON MCP refuse dot names with `InvalidFile`; invalid
 names that reach HTTP validation still receive `InvalidFile` and store
 nothing. Hosted E31 remains separate from local Miniflare evidence.
+
+A later prune removed replays of a stronger keeper: Worker name rows repeated
+by the C0/C1 loop, the Worker 25 MiB round trip (the CLI moves 25 MiB through
+the Worker), CLI quota and ancestor replays, the 2025-06-18 MCP replay and
+endpoint-independent MCP repeats, the harness self-tests, the E29 browser
+samples without a budget, the attachment-only migration check, and drawer
+cases repeated by A→B→A navigation. Each removal was proven by a production
+mutation that a remaining test turns red. It also strengthened weak oracles:
+the CLI client provenance, the 256-byte refusal message, dangling-symlink
+refusal, the exact detach result and messages, and the clock-crossing
+publication outcome.
