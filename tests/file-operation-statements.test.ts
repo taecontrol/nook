@@ -80,7 +80,7 @@ it('file operations retain their D1 statement and round-trip budgets', async () 
   expectStatements(7, 2, [6]);
 });
 
-it('Cron retains its persisted cursor when file storage is missing or fails without a cursor error', async () => {
+it('Cron retains its cursor without FILES and recovers a rejected list even without cursor wording', async () => {
   app = await filesRuntime();
   const db = await app.mf.getD1Database('DB');
   await db
@@ -97,22 +97,33 @@ it('Cron retains its persisted cursor when file storage is missing or fails with
     await db.prepare('SELECT cursor FROM file_sweep WHERE id=1').first(),
   ).toEqual({ cursor: 'resume-me' });
   const bucket = await app.mf.getR2Bucket('FILES');
-  const unavailable = new Proxy(bucket, {
+  const garbage = await bucket.put('files/old-garbage', new Uint8Array());
+  const cursors: (string | undefined)[] = [];
+  const rejected = new Proxy(bucket, {
     get(target, key) {
       if (key === 'list')
-        return async () => {
-          throw new Error('Synthetic storage outage');
+        return async (options?: Parameters<typeof bucket.list>[0]) => {
+          cursors.push(options?.cursor);
+          if (options?.cursor) throw new Error('Invalid continuation token');
+          return target.list(options);
         };
-      return Reflect.get(target, key, target);
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
     },
   });
-  await worker.scheduled(controller, {
+  const available = {
     ...env,
-    FILES: unavailable as unknown as Parameters<
+    FILE_CLOCK: { now: () => garbage.uploaded.getTime() + 3_600_001 },
+    FILES: rejected as unknown as Parameters<
       typeof worker.fetch
     >[1]['FILES'],
-  });
+  };
+  await worker.scheduled(controller, available);
   expect(
     await db.prepare('SELECT cursor FROM file_sweep WHERE id=1').first(),
-  ).toEqual({ cursor: 'resume-me' });
+  ).toEqual({ cursor: null });
+  expect(await bucket.head(garbage.key)).not.toBeNull();
+  await worker.scheduled(controller, available);
+  expect(cursors).toEqual(['resume-me', undefined]);
+  expect(await bucket.head(garbage.key)).toBeNull();
 });
