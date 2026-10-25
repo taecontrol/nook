@@ -1,4 +1,8 @@
-import type { AuditEntry, FileAuditEntry } from '@nook/contract';
+import {
+  type AuditEntry,
+  type FileAuditEntry,
+  isFileAuditEntry,
+} from '@nook/contract';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { cn } from 'cn';
@@ -43,6 +47,7 @@ import { type AuditFilters, auditOptions } from './audit-api';
 import { useBucketList } from './buckets-api';
 import { LoadFailure } from './failure';
 import { useMachineList } from './machines-api';
+import { clientName, formatExactBytes, principalName } from './memory-format';
 import { formatDateTime, recentTime } from './time';
 import { useSecretList } from './vault-api';
 
@@ -92,7 +97,7 @@ function Filters({
   );
   const secretPaths = filterPaths(
     secrets,
-    entries.flatMap((entry) => ('path' in entry ? [entry.path] : [])),
+    entries.flatMap((entry) => (isFileAuditEntry(entry) ? [] : [entry.path])),
     filters.secret,
   ).filter((path) => path === filters.secret || inBucket(path, filters.bucket));
   const changeBucket = (value: string): AuditFilters => {
@@ -241,12 +246,10 @@ function Fact({
   );
 }
 function entrySource(entry: AuditEntry) {
-  if ('memoryId' in entry)
+  if (isFileAuditEntry(entry))
     return {
-      name: entry.principal.kind === 'machine' ? entry.principal.name : 'Owner',
-      detail: [entry.client.name, entry.client.version]
-        .filter(Boolean)
-        .join(' '),
+      name: principalName(entry.principal),
+      detail: clientName(entry.client),
     };
   if (entry.outcome === 'revealed')
     return {
@@ -269,11 +272,12 @@ function Entry({
 }) {
   const [open, setOpen] = useState(false);
   const { name: machineName, detail: executable } = entrySource(entry);
-  const summary =
-    'purpose' in entry
-      ? entry.purpose
-      : `${entry.size.toLocaleString('en-US')} bytes`;
-  const path = 'path' in entry ? entry.path : `${entry.memoryId}/${entry.name}`;
+  const summary = isFileAuditEntry(entry)
+    ? formatExactBytes(entry.size)
+    : entry.purpose;
+  const path = isFileAuditEntry(entry)
+    ? `${entry.memoryId}/${entry.name}`
+    : entry.path;
   return (
     <li
       data-entry={entry.id}
@@ -377,7 +381,7 @@ function EntryDetails({
   revoked: boolean;
   deleted: boolean;
 }) {
-  if ('memoryId' in entry)
+  if (isFileAuditEntry(entry))
     return <FileEntryDetails entry={entry} revoked={revoked} />;
   return (
     <div className="border-t bg-muted/30 px-4 py-4 lg:px-6">
@@ -475,7 +479,7 @@ function FileEntryDetails({
         <Fact label="Recorded">
           <time dateTime={entry.at}>{formatDateTime(entry.at)}</time>
         </Fact>
-        <Fact label="Size">{entry.size.toLocaleString('en-US')} bytes</Fact>
+        <Fact label="Size">{formatExactBytes(entry.size, 'parts')}</Fact>
         <Fact label="SHA-256">
           <span className="font-mono break-all">{entry.sha256}</span>
         </Fact>
@@ -485,12 +489,10 @@ function FileEntryDetails({
           </Fact>
         )}
         <Fact label="Source">
-          {entry.principal.kind === 'machine' ? entry.principal.name : 'Owner'}
+          {principalName(entry.principal)}
           {revoked && <Badge variant="outline">Revoked</Badge>}
         </Fact>
-        <Fact label="Client (as reported)">
-          {[entry.client.name, entry.client.version].filter(Boolean).join(' ')}
-        </Fact>
+        <Fact label="Client (as reported)">{clientName(entry.client)}</Fact>
         {entry.principal.kind === 'owner' && (
           <>
             <Fact label="IP address">{entry.ip ?? 'Unknown'}</Fact>
@@ -507,7 +509,7 @@ function FileEntryDetails({
   );
 }
 function revokedEntry(entry: AuditEntry, machines?: readonly { id: string }[]) {
-  if ('memoryId' in entry) {
+  if (isFileAuditEntry(entry)) {
     const principal = entry.principal;
     return (
       principal.kind === 'machine' &&
@@ -692,7 +694,7 @@ function AuditResults({
                 entry={entry}
                 revoked={revokedEntry(entry, machines)}
                 deleted={
-                  'path' in entry &&
+                  !isFileAuditEntry(entry) &&
                   missingFrom(secrets, (secret) => secret.path === entry.path)
                 }
               />
@@ -722,14 +724,14 @@ function AuditResults({
 }
 
 function activityLabels(entries: readonly AuditEntry[]) {
-  if (!entries.some((entry) => 'memoryId' in entry))
+  if (!entries.some(isFileAuditEntry))
     return {
       region: 'Secret activity',
       item: 'Secret / bucket',
       summary: 'Purpose',
       source: 'Machine / executable',
     };
-  if (entries.some((entry) => 'path' in entry))
+  if (entries.some((entry) => !isFileAuditEntry(entry)))
     return {
       region: 'Secret and file activity',
       item: 'Secret or file / bucket',

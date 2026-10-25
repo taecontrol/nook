@@ -59,6 +59,9 @@ export const FileAuditEntry = Schema.Struct({
 export type FileAuditEntry = typeof FileAuditEntry.Type;
 export const AuditEntry = Schema.Union([VaultAuditEntry, FileAuditEntry]);
 export type AuditEntry = typeof AuditEntry.Type;
+export function isFileAuditEntry(entry: AuditEntry): entry is FileAuditEntry {
+  return 'memoryId' in entry;
+}
 export const AuditFilters = Schema.Struct({
   bucket: Schema.optionalKey(Schema.String),
   secret: Schema.optionalKey(Schema.String),
