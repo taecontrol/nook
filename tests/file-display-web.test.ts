@@ -114,6 +114,17 @@ it('Files and Audit retain exact principal, client and byte-count text', async (
       );
       await row.getByRole('button', { name: /Show details/ }).click();
       expect(await fact(row, 'Size').textContent()).toBe(fixture.exact);
+      expect(
+        await fact(row, 'Size').evaluate((element) =>
+          Array.from(element.childNodes, (node) => ({
+            type: node.nodeType,
+            text: node.textContent,
+          })),
+        ),
+      ).toEqual([
+        { type: 3, text: fixture.exact.slice(0, -6) },
+        { type: 3, text: ' bytes' },
+      ]);
       expect(await fact(row, 'Client (as reported)').textContent()).toBe(
         fixture.auditClient,
       );
