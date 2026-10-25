@@ -8,12 +8,20 @@ export const fileLimits = {
   nameBytes: 255,
 } as const;
 
+export const fileNameUnicodeMessage = 'Use valid Unicode for the file name.';
+
+export function validateFileSize(size: number): string | undefined {
+  if (size > fileLimits.bytes) return 'A file can be at most 25 MiB.';
+}
+export function isFileDigest(sha256: string): boolean {
+  return /^[0-9a-f]{64}$/.test(sha256);
+}
+export const fileDigestMessage = 'Use a lowercase SHA-256 digest for the file.';
 export function validateFileName(name: string): string | undefined {
   if (!name || name === '.' || name === '..') return 'Use a file name.';
   if (/[\\/\p{Cc}]/u.test(name))
     return 'A file name cannot contain slashes or control characters.';
-  if (/[\uD800-\uDFFF]/u.test(name))
-    return 'Use valid Unicode for the file name.';
+  if (/[\uD800-\uDFFF]/u.test(name)) return fileNameUnicodeMessage;
   if (new TextEncoder().encode(name).length > fileLimits.nameBytes)
     return 'A file name can be at most 255 UTF-8 bytes.';
 }

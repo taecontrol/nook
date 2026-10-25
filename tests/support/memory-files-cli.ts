@@ -23,7 +23,6 @@ export async function configureFilesCli(
 export async function fileTransport(
   app: TestRuntime,
   options: {
-    before?: (method: string, path: string) => Promise<Response | undefined>;
     after?: (response: Response, path: string) => Promise<Response>;
     receive?: (request: IncomingMessage) => Promise<Buffer[]>;
     deliver?: (source: Response, target: ServerResponse) => Promise<void>;
@@ -37,10 +36,11 @@ export async function fileTransport(
         const chunks = options.receive
           ? await options.receive(request)
           : await readRequest(request);
+        // A client that gave up never reaches the Worker.
+        if (request.socket.destroyed) return;
         const method = request.method ?? 'GET';
         const path = request.url ?? '/';
         requests.push({ method, path });
-        const injected = await options.before?.(method, path);
         const headers = new Headers();
         for (const [name, value] of Object.entries(request.headers)) {
           if (
@@ -57,13 +57,11 @@ export async function fileTransport(
         // Fetch decodes compression but retains its headers. Forward identity
         // bytes so the downstream fetch cannot decompress the same body twice.
         headers.set('accept-encoding', 'identity');
-        const upstream =
-          injected ??
-          (await fetch(app.origin + path, {
-            method,
-            headers,
-            ...(chunks.length ? { body: Buffer.concat(chunks) } : {}),
-          }));
+        const upstream = await fetch(app.origin + path, {
+          method,
+          headers,
+          ...(chunks.length ? { body: Buffer.concat(chunks) } : {}),
+        });
         const delivered = (await options.after?.(upstream, path)) ?? upstream;
         response.writeHead(delivered.status, {
           ...Object.fromEntries(delivered.headers),

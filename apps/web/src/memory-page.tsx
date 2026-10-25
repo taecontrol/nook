@@ -157,7 +157,7 @@ function MemoryRow({
                 </span>
                 <span aria-hidden>·</span>
                 <span className="min-w-0 truncate">
-                  {principalName(memory)}
+                  {principalName(memory.provenance.principal)}
                 </span>
               </div>
             </ItemContent>
@@ -390,6 +390,13 @@ function MemoryBack({ model }: { model: MemoryPageModel }) {
     </div>
   );
 }
+function preloadOnIntent(prefetch: () => void, load: () => Promise<unknown>) {
+  const preload = () => {
+    prefetch();
+    void load();
+  };
+  return { onMouseEnter: preload, onFocus: preload };
+}
 function ReadingActions({
   model,
   memory,
@@ -413,14 +420,7 @@ function ReadingActions({
               className="ml-auto"
               data-memory-files
               aria-label={`Files, ${memory.files.length}`}
-              onMouseEnter={() => {
-                model.prefetchFiles();
-                void loadFiles();
-              }}
-              onFocus={() => {
-                model.prefetchFiles();
-                void loadFiles();
-              }}
+              {...preloadOnIntent(model.prefetchFiles, loadFiles)}
               onClick={model.openFiles}
             >
               <Paperclip />
@@ -441,14 +441,7 @@ function ReadingActions({
         size="sm"
         className={memory.files.length > 0 ? undefined : 'ml-auto'}
         data-memory-history
-        onMouseEnter={() => {
-          model.prefetchHistory();
-          void loadHistory();
-        }}
-        onFocus={() => {
-          model.prefetchHistory();
-          void loadHistory();
-        }}
+        {...preloadOnIntent(model.prefetchHistory, loadHistory)}
         onClick={model.openHistory}
       >
         <History /> History{' '}

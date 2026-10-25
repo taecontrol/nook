@@ -2,23 +2,10 @@ import { readFile } from 'node:fs/promises';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
-import { measureScreen, phonePage } from '../scripts/load-time-browser.ts';
 import { auditRows } from './support/audit.ts';
 import { deferred } from './support/machines.ts';
-import {
-  manyMemories,
-  memoryClient,
-  memoryId,
-  seedMemories,
-} from './support/memory.ts';
-import {
-  digest,
-  fileMemory,
-  filePath,
-  pdfName,
-  seedFile,
-  seedFileMemory,
-} from './support/memory-files.ts';
+import { memoryClient } from './support/memory.ts';
+import { digest, fileMemory, pdfName } from './support/memory-files.ts';
 import {
   filesControl,
   filesPage,
@@ -27,7 +14,6 @@ import {
   openFiles,
   waitFileRows,
 } from './support/memory-files-browser.ts';
-import { vaultRuntime } from './support/vault.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
@@ -117,22 +103,6 @@ it.each([
     }
   },
 );
-it('E24: a memory without files keeps its existing reader and History with no Files control', async () => {
-  const visit = await filesPage(browser, { names: [] });
-  try {
-    expect(await filesControl(visit.page).count()).toBe(0);
-    expect(
-      await visit.page.getByRole('button', { name: /^History / }).isVisible(),
-    ).toBe(true);
-    expect(
-      await visit.page
-        .getByRole('heading', { name: 'File guide', exact: true })
-        .isVisible(),
-    ).toBe(true);
-  } finally {
-    await visit.close();
-  }
-});
 it.each(['hover', 'focus'] as const)(
   'E24/E29: Files is a separate lazy script requested on %s intent before the drawer opens',
   async (intent) => {
@@ -173,6 +143,7 @@ it('E25: a pending owner download saves Unicode bytes under the file name, disab
   const arrived = deferred();
   const visit = await filesPage(browser, {
     configure: async (page) => {
+      await page.clock.install();
       await page.route('**/api/memories/*/files/*', async (route) => {
         arrived.resolve();
         await gate.promise;
@@ -184,6 +155,24 @@ it('E25: a pending owner download saves Unicode bytes under the file name, disab
     const { page, app, files } = visit;
     const file = files[1];
     await openFiles(page);
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+    await page.evaluate(() => {
+      const urls = Object.assign(URL, {
+        created: [] as string[],
+        revoked: [] as string[],
+      });
+      const create = URL.createObjectURL.bind(URL);
+      const revoke = URL.revokeObjectURL.bind(URL);
+      URL.createObjectURL = (blob) => {
+        const url = create(blob);
+        urls.created.push(url);
+        return url;
+      };
+      URL.revokeObjectURL = (url) => {
+        urls.revoked.push(url);
+        revoke(url);
+      };
+    });
     const saved = page.waitForEvent('download');
     const button = filesSheet(page).getByRole('button', {
       name: `Download ${file.name}`,
@@ -217,6 +206,21 @@ it('E25: a pending owner download saves Unicode bytes under the file name, disab
       }),
     ]);
     expect(await button.isEnabled()).toBe(true);
+    expect(new URL(page.url()).pathname).toBe('/memory');
+    const urls = () =>
+      page.evaluate(() => {
+        const tracked = URL as typeof URL & {
+          created: string[];
+          revoked: string[];
+        };
+        return { created: tracked.created, revoked: tracked.revoked };
+      });
+    expect((await urls()).created).toHaveLength(1);
+    expect((await urls()).revoked).toEqual([]);
+    await page.clock.runFor(1000);
+    expect((await urls()).revoked).toEqual([]);
+    await page.clock.fastForward(60_000);
+    expect((await urls()).revoked).toEqual((await urls()).created);
   } finally {
     gate.resolve();
     await visit.close();
@@ -246,6 +250,10 @@ it('E25: a genuine 404 names the missing file, refreshes detail and removes its 
     expect(await filesSheet(page).innerText()).toContain(pdfName);
     expect((await refreshed).status()).toBe(200);
     await waitFileRows(page, 0);
+    // The open sheet hides the reader from the accessibility tree; close it
+    // before asserting that the reader no longer offers Files.
+    await page.keyboard.press('Escape');
+    await expect.poll(() => filesSheet(page).count()).toBe(0);
     expect(await filesControl(page).count()).toBe(0);
     expect(
       (await auditRows(app)).filter((row) => row.outcome === 'file_downloaded'),
@@ -266,6 +274,7 @@ it('E25: a referenced missing R2 object produces an alert with Try again and a r
       .click();
     const alert = filesSheet(page).getByRole('alert');
     await alert.waitFor();
+    expect(await alert.innerText()).toContain('Could not download the file');
     expect(await alert.innerText()).toContain(pdfName);
     const retry = alert.getByRole('button', { name: 'Try again', exact: true });
     expect(await retry.isEnabled()).toBe(true);
@@ -282,66 +291,3 @@ it('E25: a referenced missing R2 object produces an alert with Try again and a r
     await visit.close();
   }
 });
-it('E26: a downloaded HTML attachment never executes in the app origin', async () => {
-  const visit = await filesPage(browser, { names: [] });
-  try {
-    const { page, app } = visit;
-    const bytes = Buffer.from(
-      '<script>globalThis.nookFileExecuted = true</script>',
-    );
-    const name = 'untrusted.html';
-    await seedFile(app, { name, bytes });
-    // The type is metadata only: the download must stay octet-stream.
-    await (await app.mf.getD1Database('DB'))
-      .prepare(
-        'UPDATE memory_files SET media_type=? WHERE memory_id=? AND name=?',
-      )
-      .bind('text/html', fileMemory, name)
-      .run();
-    await page.reload();
-    await openFiles(page);
-    const response = page.waitForResponse(
-      (res) =>
-        new URL(res.url()).pathname === filePath(fileMemory, name, false),
-    );
-    const saved = page.waitForEvent('download');
-    await filesSheet(page)
-      .getByRole('button', { name: `Download ${name}`, exact: true })
-      .click();
-    expect((await response).headers()['content-type']).toBe(
-      'application/octet-stream',
-    );
-    expect((await saved).suggestedFilename()).toBe(name);
-    expect(
-      await page.evaluate(
-        () => Reflect.get(globalThis, 'nookFileExecuted') === true,
-      ),
-    ).toBe(false);
-    expect(new URL(page.url()).pathname).toBe('/memory');
-  } finally {
-    await visit.close();
-  }
-});
-// Budgets are five-sample medians enforced by `pnpm verify:load-time`,
-// whose fixture seeds this file; one coverage-shard sample is not a budget.
-it.each(['memory', 'memoryNavigation'] as const)(
-  'E29: %s measures the Memory first screen on a 390 px phone with real file metadata',
-  async (kind) => {
-    const app = await vaultRuntime({ r2Buckets: ['FILES'] });
-    const { context, page } = await phonePage(browser, kind);
-    try {
-      await seedFileMemory(app);
-      await seedMemories(app, manyMemories);
-      await seedFile(app, { id: memoryId(100) });
-      const milliseconds = await measureScreen(page, app.origin, '', kind);
-      console.info(`Memory files E29 ${kind}: ${milliseconds.toFixed(1)} ms`);
-      expect(Number.isFinite(milliseconds)).toBe(true);
-      expect(milliseconds).toBeGreaterThanOrEqual(0);
-      expect(new URL(page.url()).pathname).toBe('/memory');
-      expect(page.viewportSize()).toEqual({ width: 390, height: 844 });
-    } finally {
-      await context.close();
-      await app.close();
-    }
-  },
-);

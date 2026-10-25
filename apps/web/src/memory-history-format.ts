@@ -5,7 +5,7 @@ import type {
 import { clientName, principalName } from './memory-format';
 
 export function principalLabel(memory: { provenance: ProvenanceRecord }) {
-  return `${principalName(memory)} · ${clientName(memory.provenance.client)}`;
+  return `${principalName(memory.provenance.principal)} · ${clientName(memory.provenance.client)}`;
 }
 
 export function tagChanges(

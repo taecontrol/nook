@@ -1,18 +1,13 @@
 import type { R2Bucket } from '@cloudflare/workers-types';
-import { Data, Effect } from 'effect';
+import { Effect } from 'effect';
 import { HttpApiError } from 'effect/http-api';
 
 export type FileBindings = {
   FILES?: R2Bucket;
   FILE_CLOCK?: { now(): number };
 };
-export class InvalidFileCursor extends Data.TaggedError('InvalidFileCursor') {}
 export const fileNow = (bindings: FileBindings) =>
   bindings.FILE_CLOCK?.now() ?? Date.now();
-
-export function sameFileBindings(left: FileBindings, right: FileBindings) {
-  return left.FILES === right.FILES && left.FILE_CLOCK === right.FILE_CLOCK;
-}
 
 // The binding can be decorated by the test runtime; no storage error escapes.
 export function fileObjects(bindings: FileBindings) {
@@ -43,27 +38,19 @@ export function fileObjects(bindings: FileBindings) {
           );
       }),
     list: (cursor?: string) =>
-      Effect.tryPromise({
-        try: async () => {
-          const bucket = bindings.FILES;
-          if (!bucket) throw new Error('File storage unavailable');
-          const page = await bucket.list({
-            prefix: 'files/',
-            cursor,
-            limit: 1000,
-          });
-          return {
-            objects: page.objects.map(({ key, uploaded }) => ({
-              key,
-              uploaded,
-            })),
-            cursor: page.truncated ? page.cursor : null,
-          };
-        },
-        catch: (error) =>
-          error instanceof Error && /cursor/i.test(error.message)
-            ? new InvalidFileCursor()
-            : new HttpApiError.ServiceUnavailable(),
+      call(async (bucket) => {
+        const page = await bucket.list({
+          prefix: 'files/',
+          cursor,
+          limit: 1000,
+        });
+        return {
+          objects: page.objects.map(({ key, uploaded }) => ({
+            key,
+            uploaded,
+          })),
+          cursor: page.truncated ? page.cursor : null,
+        };
       }),
   };
 }

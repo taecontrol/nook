@@ -14,9 +14,14 @@ import { Effect, Layer } from 'effect';
 import { HttpRouter, HttpServer, HttpServerRequest } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
 import { auditStore } from './audit.ts';
-import { type AuthBindings, authenticate } from './auth.ts';
+import { authenticate } from './auth.ts';
+import {
+  type MemoryBindings,
+  sameBindings,
+  type WorkerBindings,
+} from './bindings.ts';
 import { bucketOperations } from './buckets.ts';
-import { type FileBindings, sameFileBindings } from './file-objects.ts';
+import type { FileBindings } from './file-objects.ts';
 import { fileActor, fileRequestGate } from './file-requests.ts';
 import { fileResponse } from './file-response.ts';
 import { fileSweep } from './file-sweep.ts';
@@ -29,9 +34,15 @@ import { machineOperations } from './machines.ts';
 import { mcpHandler } from './mcp.ts';
 import { memoryStore } from './memory.ts';
 import { memoryFiles } from './memory-files.ts';
-import { memoryIndex, type SearchBindings } from './memory-index.ts';
+import { memoryIndex } from './memory-index.ts';
 import { memorySync } from './memory-sync.ts';
-import { matches, ownerRoutes, revealRoute, tokenRoutes } from './routes.ts';
+import {
+  fileRouterMaxParamLength,
+  matches,
+  ownerRoutes,
+  revealRoute,
+  tokenRoutes,
+} from './routes.ts';
 import { ownerVault } from './vault.ts';
 
 export function handlerForPrincipal(
@@ -39,16 +50,16 @@ export function handlerForPrincipal(
   db: D1Database,
   grant: BucketGrant = 'all',
   vaultKey = '',
-  searchBindings: SearchBindings & FileBindings = {},
+  bindings: MemoryBindings = {},
 ) {
-  const index = memoryIndex(searchBindings);
+  const index = memoryIndex(bindings);
   const session = HttpApiBuilder.group(Api, 'session', (handlers) =>
     handlers.handle('whoami', () => Effect.succeed({ email })),
   );
   const memories = HttpApiBuilder.group(Api, 'memories', (handlers) =>
     Effect.gen(function* () {
-      const store = yield* memoryStore(grant, index, undefined, searchBindings);
-      const files = yield* memoryFiles(grant, searchBindings);
+      const store = yield* memoryStore(grant, index, undefined, bindings);
+      const files = yield* memoryFiles(grant, bindings);
       return handlers
         .handleRaw('downloadFile', ({ params, request }) =>
           files
@@ -142,7 +153,10 @@ export function handlerForPrincipal(
     disableLogger: true,
     // The router checks decoded params: six 32-character segments plus the name.
     routerConfig: {
-      maxParamLength: Math.max(800, 6 * (32 + 1) + secretLimits.name),
+      maxParamLength: Math.max(
+        fileRouterMaxParamLength,
+        6 * (32 + 1) + secretLimits.name,
+      ),
     },
   }).handler;
   return (request: Request, ctx?: Pick<ExecutionContext, 'waitUntil'>) =>
@@ -150,7 +164,7 @@ export function handlerForPrincipal(
       ? mcpHandler(
           db,
           { grant, principal: { kind: 'owner' } },
-          { index, waitUntil: ctx?.waitUntil.bind(ctx), files: searchBindings },
+          { index, waitUntil: ctx?.waitUntil.bind(ctx), files: bindings },
         ).fetch(request)
       : apiHandler(request);
 }
@@ -160,42 +174,31 @@ let cached:
       db: D1Database;
       grant: BucketGrant;
       vaultKey: string;
-      searchBindings: SearchBindings & FileBindings;
+      bindings: MemoryBindings;
       handler: ReturnType<typeof handlerForPrincipal>;
     }
   | undefined;
-function sameBindings(
-  left: SearchBindings & FileBindings,
-  right: SearchBindings & FileBindings,
-) {
-  return (
-    left.AI === right.AI &&
-    left.MEMORY_INDEX === right.MEMORY_INDEX &&
-    left.EMBEDDING_MODEL === right.EMBEDDING_MODEL &&
-    sameFileBindings(left, right)
-  );
-}
 function handlerFor(
   email: string,
   db: D1Database,
   grant: BucketGrant,
   vaultKey = '',
-  searchBindings: SearchBindings & FileBindings = {},
+  bindings: MemoryBindings = {},
 ) {
   if (
     cached?.email !== email ||
     cached.db !== db ||
     cached.grant !== grant ||
     cached.vaultKey !== vaultKey ||
-    !sameBindings(cached.searchBindings, searchBindings)
+    !sameBindings(cached.bindings, bindings)
   )
     cached = {
       email,
       db,
       grant,
       vaultKey,
-      searchBindings,
-      handler: handlerForPrincipal(email, db, grant, vaultKey, searchBindings),
+      bindings,
+      handler: handlerForPrincipal(email, db, grant, vaultKey, bindings),
     };
   return cached.handler;
 }
@@ -231,7 +234,7 @@ function routesFor(
     machineRoutes?.db !== db ||
     machineRoutes.origin !== origin ||
     machineRoutes.vaultKey !== vaultKey ||
-    !sameFileBindings(machineRoutes.files, files)
+    !sameBindings(machineRoutes.files, files, 'files')
   )
     machineRoutes = {
       db,
@@ -290,16 +293,16 @@ async function machineRequest(
   url: URL,
   db: D1Database,
   vaultKey = '',
-  searchBindings: SearchBindings & FileBindings = {},
+  bindings: MemoryBindings = {},
   ctx?: Pick<ExecutionContext, 'waitUntil'>,
 ) {
   if (url.pathname === '/api/machine/mcp') {
     if (foreignOrigin(request, url))
       return Response.json({ _tag: 'Forbidden' }, { status: 403 });
     return machineMcpHandler(db, request, {
-      index: memoryIndex(searchBindings),
+      index: memoryIndex(bindings),
       waitUntil: ctx?.waitUntil.bind(ctx),
-      files: searchBindings,
+      files: bindings,
     });
   }
   if (
@@ -314,15 +317,12 @@ async function machineRequest(
     url,
     db,
     vaultKey,
-    searchBindings,
+    bindings,
   );
   if (url.pathname === '/api/machine/secrets/values')
     response.headers.set('Cache-Control', 'no-store');
   return response;
 }
-type WorkerBindings = AuthBindings &
-  SearchBindings &
-  FileBindings & { DB: D1Database; VAULT_KEY?: string };
 async function ownerRequest(
   request: Request,
   url: URL,
@@ -357,9 +357,7 @@ async function ownerRequest(
 export default {
   async fetch(
     request: Request,
-    env: AuthBindings &
-      SearchBindings &
-      FileBindings & { DB: D1Database; VAULT_KEY?: string },
+    env: WorkerBindings,
     ctx?: Pick<ExecutionContext, 'waitUntil'>,
   ): Promise<Response> {
     const url = new URL(request.url);
@@ -369,10 +367,7 @@ export default {
       return machineRequest(request, url, env.DB, env.VAULT_KEY, env, ctx);
     return ownerRequest(request, url, env, ctx);
   },
-  scheduled(
-    controller: ScheduledController,
-    env: SearchBindings & FileBindings & { DB: D1Database },
-  ) {
+  scheduled(controller: ScheduledController, env: WorkerBindings) {
     return Effect.runPromise(
       Effect.all(
         [

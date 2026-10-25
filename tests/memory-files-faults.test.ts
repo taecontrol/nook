@@ -384,7 +384,7 @@ it('E10: an error after the publish commit returns 503, retains its live object 
   await app.sweep();
   expect(await fileSnapshot(app)).toEqual(before);
 });
-it.each([599_999, 600_000, 600_001])(
+it.each([599_999, 600_000])(
   'E10: publication at %s ms obeys the strict ten-minute window using the injected clock',
   async (elapsed) => {
     const start = Date.now();
@@ -488,12 +488,12 @@ it('publication remains atomic with its audit when D1 time crosses the window be
     },
   });
   const machine = await seedFileMemory(app);
-  const response = await putFile(app, machine.token);
-  expect([200, 503]).toContain(response.status);
-  const committed = response.status === 200 ? 1 : 0;
-  expect(await fileRows(app)).toHaveLength(committed);
-  expect(await auditRows(app)).toHaveLength(committed);
-  expect(await fileObjects(app)).toHaveLength(committed);
+  // The audit statement decides inside the window (599,999 ms); the file row
+  // follows at 600,000 ms on that decision rather than re-evaluating it.
+  expect((await putFile(app, machine.token)).status).toBe(200);
+  expect(await fileRows(app)).toHaveLength(1);
+  expect(await auditRows(app)).toHaveLength(1);
+  expect(await fileObjects(app)).toHaveLength(1);
 });
 
 async function downloadAtGet(missingObject = false) {

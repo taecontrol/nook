@@ -438,7 +438,7 @@ export const memoryStore = (
       forget: (
         input: { id: string; expectedVersion?: unknown },
         query = false,
-        actor: FileActor = ownerFileActor,
+        actor: FileActor = ownerFileActor(),
       ) =>
         Effect.gen(function* () {
           const bucket = yield* bucketFor(input.id, true);

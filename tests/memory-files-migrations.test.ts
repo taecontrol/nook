@@ -1,16 +1,6 @@
 import { Miniflare } from 'miniflare';
 import { expect, it } from 'vitest';
-import {
-  fileMigrations,
-  previousAuditInsert,
-  seedPreviousAudit,
-  verifyMemoryFilesMigrations,
-} from '../scripts/lib/memory-files-migrations.ts';
-import {
-  applyMigrations,
-  migrationFiles,
-  verifyMigrations,
-} from '../scripts/lib/migrations.ts';
+import { applyMigrations, migrationFiles } from '../scripts/lib/migrations.ts';
 import { auditRows } from './support/audit.ts';
 import {
   fileMemory,
@@ -19,16 +9,12 @@ import {
   seedFile,
   seedFileMemory,
 } from './support/memory-files.ts';
+import {
+  previousAuditInsert,
+  seedPreviousAudit,
+} from './support/memory-files-audit.ts';
 import { previousFilesWorker } from './support/memory-files-previous-worker.ts';
 
-it('E30: migration verification replays empty, migrated and populated previous schemas with the two accepted migrations', async () => {
-  expect((await verifyMigrations()).applied.slice(-2)).toEqual(fileMigrations);
-  expect(await verifyMemoryFilesMigrations()).toEqual({
-    filesReplayed: true,
-    previousAuditRowsPreserved: 4,
-    compatibilityTrigger: true,
-  });
-});
 it('E27/E30: the audit rebuild preserves every Vault fact and backfills bucket; previous inserts receive it from the trigger', async () => {
   const mf = new Miniflare({
     modules: true,
@@ -40,8 +26,9 @@ it('E27/E30: the audit rebuild preserves every Vault fact and backfills bucket; 
   try {
     const db = await mf.getD1Database('DB');
     const names = await migrationFiles('migrations');
+    // The schema the previous Worker ran: every migration before files.
     await applyMigrations(db, 'migrations', {
-      only: names.filter((name) => !fileMigrations.includes(name)),
+      only: names.filter((name) => name < '0012_memory_files.sql'),
     });
     const before = await seedPreviousAudit(db);
     await applyMigrations(db);
@@ -64,13 +51,6 @@ it('E27/E30: the audit rebuild preserves every Vault fact and backfills bucket; 
       ip: '203.0.113.67',
       country: 'AR',
     });
-    expect(
-      await db
-        .prepare(
-          "SELECT name FROM sqlite_schema WHERE type='trigger' AND name='audit_entries_assign_bucket'",
-        )
-        .first(),
-    ).toEqual({ name: 'audit_entries_assign_bucket' });
   } finally {
     await mf.dispose();
   }

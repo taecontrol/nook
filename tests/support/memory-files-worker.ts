@@ -145,20 +145,6 @@ export function memoryFilesWorker(
   return {
     async fetch(request: Request, env: Env, ctx: ExecutionContext) {
       const wrapped = await environment(env, options.batchClockStepMs ?? 0);
-      if (new URL(request.url).pathname === '/api/__test/files-probe') {
-        if (request.method === 'PUT')
-          await wrapped.FILES.put(
-            'files/harness-probe',
-            new Uint8Array([1, 2, 3]),
-          );
-        if (request.method === 'DELETE')
-          await wrapped.FILES.delete('files/harness-probe');
-        return Response.json(
-          await wrapped.DB.prepare(
-            "SELECT unixepoch('subsec')*1000 AS now",
-          ).first(),
-        );
-      }
       if (new URL(request.url).pathname === '/api/__test/files-sweep') {
         await worker.scheduled(
           { scheduledTime: await clock(), cron: '* * * * *', noRetry() {} },

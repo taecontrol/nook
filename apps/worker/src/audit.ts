@@ -105,10 +105,21 @@ export type FileActor = {
   ip?: string | null;
   country?: string | null;
 };
-export const ownerFileActor: FileActor = {
-  principal: { kind: 'owner' },
-  client: { name: 'unknown', version: null },
-};
+export function ownerFileActor(
+  client: MemoryClient = { name: 'unknown', version: null },
+  facts: Pick<FileActor, 'ip' | 'country'> = {},
+): FileActor {
+  return { principal: { kind: 'owner' }, client, ...facts };
+}
+export function machineFileActor(
+  machine: { id: string; name: string },
+  client: MemoryClient,
+): FileActor {
+  return {
+    principal: { kind: 'machine', id: machine.id, name: machine.name },
+    client,
+  };
+}
 // A selection can contain many forgotten files. Generate an independent v4 id
 // per selected row inside D1, keeping every audit write in the caller's batch.
 export function fileAuditInsert(

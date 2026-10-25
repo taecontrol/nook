@@ -4,6 +4,7 @@ import { AuthorizationsApi, MachineApi } from '@nook/contract';
 import { Effect, Layer } from 'effect';
 import { HttpRouter, HttpServer } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
+import { machineFileActor } from './audit.ts';
 import { clientFrom } from './client-provenance.ts';
 import type { FileBindings } from './file-objects.ts';
 import { fileResponse } from './file-response.ts';
@@ -11,6 +12,7 @@ import { unavailable as storageUnavailable } from './http-errors.ts';
 import { machineOperations } from './machines.ts';
 import { mcpHandler } from './mcp.ts';
 import { memoryFiles } from './memory-files.ts';
+import { fileRouterMaxParamLength } from './routes.ts';
 import { runSecrets } from './run-secrets.ts';
 import { machineVault } from './vault.ts';
 
@@ -61,52 +63,43 @@ export function machineHandler(
     Effect.gen(function* () {
       const store = yield* machineOperations;
       const sql = yield* D1Client.D1Client;
+      const fileAccess = (authorization: string, userAgent: string | null) =>
+        Effect.gen(function* () {
+          const machine = yield* store.forAudit(authorization);
+          const attachments = yield* memoryFiles(machine.grant, files);
+          const actor = machineFileActor(
+            { id: machine.id, name: machine.machine },
+            clientFrom(undefined, userAgent),
+          );
+          return { attachments, actor };
+        }).pipe(Effect.provideService(D1Client.D1Client, sql));
       return handlers
         .handleRaw('attachFile', ({ params, headers, request }) =>
           Effect.gen(function* () {
-            const machine = yield* store.forAudit(headers.authorization);
-            const attachments = yield* memoryFiles(machine.grant, files);
+            const { attachments, actor } = yield* fileAccess(
+              headers.authorization,
+              request.headers['user-agent'] ?? null,
+            );
             const bytes = new Uint8Array(
               yield* request.arrayBuffer.pipe(storageUnavailable),
             );
-            return yield* attachments.attach(
-              {
-                principal: {
-                  kind: 'machine',
-                  id: machine.id,
-                  name: machine.machine,
-                },
-                client: clientFrom(
-                  undefined,
-                  request.headers['user-agent'] ?? null,
-                ),
-              },
-              { ...params, bytes, mediaType: headers['content-type'] },
-            );
-          }).pipe(Effect.provideService(D1Client.D1Client, sql)),
+            return yield* attachments.attach(actor, {
+              ...params,
+              bytes,
+              mediaType: headers['content-type'],
+            });
+          }),
         )
         .handleRaw('downloadFile', ({ params, headers, request }) =>
           Effect.gen(function* () {
-            const machine = yield* store.forAudit(headers.authorization);
-            const attachments = yield* memoryFiles(machine.grant, files);
-            return fileResponse(
-              yield* attachments.download(
-                {
-                  principal: {
-                    kind: 'machine',
-                    id: machine.id,
-                    name: machine.machine,
-                  },
-                  client: clientFrom(
-                    undefined,
-                    request.headers['user-agent'] ?? null,
-                  ),
-                },
-                params.id,
-                params.name,
-              ),
+            const { attachments, actor } = yield* fileAccess(
+              headers.authorization,
+              request.headers['user-agent'] ?? null,
             );
-          }).pipe(Effect.provideService(D1Client.D1Client, sql)),
+            return fileResponse(
+              yield* attachments.download(actor, params.id, params.name),
+            );
+          }),
         )
         .handle('authorize', ({ payload }) =>
           store.create(origin, payload.suggestedName, payload.client),
@@ -142,7 +135,7 @@ export function machineHandler(
   );
   return HttpRouter.toWebHandler(routes, {
     disableLogger: true,
-    routerConfig: { maxParamLength: 800 },
+    routerConfig: { maxParamLength: fileRouterMaxParamLength },
   }).handler;
 }
 export function authorizationHandler(db: D1Database) {

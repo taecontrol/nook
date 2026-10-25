@@ -1,16 +1,30 @@
-import type { Provenance as ProvenanceRecord } from '@nook/contract';
+import type { Principal, Provenance as ProvenanceRecord } from '@nook/contract';
 import { formatDateTime } from './time';
 
-export function principalName(memory: {
-  provenance: Pick<ProvenanceRecord, 'principal'>;
-}) {
-  return memory.provenance.principal.kind === 'owner'
-    ? 'Owner'
-    : memory.provenance.principal.name;
+export function principalName(principal: Principal) {
+  return principal.kind === 'owner' ? 'Owner' : principal.name;
 }
 
 export function clientName(client: ProvenanceRecord['client']) {
   return `${client.name}${client.version ? ` ${client.version}` : ''}`;
+}
+export function formatExactBytes(bytes: number): string {
+  return `${bytes.toLocaleString('en-US')} bytes`;
+}
+
+const units = ['B', 'KiB', 'MiB'] as const;
+export function formatBytes(bytes: number) {
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const text =
+    unit === 0 || Number.isInteger(value)
+      ? String(value)
+      : value.toFixed(1).replace(/\.0$/, '');
+  return `${text} ${units[unit]}`;
 }
 export function Provenance({
   provenance,
@@ -25,7 +39,7 @@ export function Provenance({
       <div>
         <dt className="text-muted-foreground">Written by</dt>
         <dd className="mt-0.5 font-medium wrap-anywhere">
-          {principalName({ provenance })}
+          {principalName(provenance.principal)}
         </dd>
       </div>
       <div>

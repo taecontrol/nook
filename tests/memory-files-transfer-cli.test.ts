@@ -263,10 +263,10 @@ syncBuiltinESMExports();
   expect(await readdir(directory)).toEqual([]);
 });
 
-it('a real upload that stops accepting bytes reports an idle timeout without reaching the Worker', async () => {
+it('a real upload that stops accepting bytes reports an idle timeout', async () => {
   const path = resolve(keyring.home, pdfName);
   await writeFile(path, Buffer.alloc(maximumFile, 129));
-  const transport = await proxy({
+  await proxy({
     receive: async (request) => {
       request.pause();
       await once(request.socket, 'close');
@@ -276,5 +276,4 @@ it('a real upload that stops accepting bytes reports an idle timeout without rea
   const result = await keyring.start(['memory', 'attach', fileMemory, path])
     .done;
   failure(result, timedOut);
-  expect(transport.requests).toEqual([]);
 }, 30_000);

@@ -89,14 +89,16 @@ export function putFile(
     headers?: HeadersInit;
   } = {},
 ) {
+  const headers = new Headers({
+    Authorization: `Bearer ${token}`,
+    'Content-Type': options.mediaType ?? 'application/pdf',
+    'User-Agent': 'nook-acceptance/1.0',
+  });
+  for (const [name, value] of new Headers(options.headers))
+    headers.set(name, value);
   return fetch(app.origin + filePath(options.id, options.name), {
     method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': options.mediaType ?? 'application/pdf',
-      'User-Agent': 'nook-acceptance/1.0',
-      ...Object.fromEntries(new Headers(options.headers)),
-    },
+    headers,
     body: Buffer.from(options.bytes ?? Buffer.from('synthetic file bytes')),
   });
 }

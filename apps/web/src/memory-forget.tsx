@@ -334,7 +334,7 @@ function problemCopy(
           )
         : 'It is still stored with the version you last saw. Nothing was deleted.'
     }`;
-  return `${current ? principalName(current) : 'Another writer'} saved version ${current?.version ?? 'a newer version'} while you were deciding, not ${entry.subject.version}. Nothing was deleted.`;
+  return `${current ? principalName(current.provenance.principal) : 'Another writer'} saved version ${current?.version ?? 'a newer version'} while you were deciding, not ${entry.subject.version}. Nothing was deleted.`;
 }
 function ProblemAction({
   model,

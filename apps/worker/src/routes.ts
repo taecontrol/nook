@@ -8,6 +8,10 @@ import {
 
 export type Route = { readonly method: string; readonly path: string };
 
+// fileLimits.nameBytes allows 255 UTF-8 bytes: percent encoding needs at most
+// 3 × 255 = 765 characters for a file-name route parameter.
+export const fileRouterMaxParamLength = 800;
+
 function endpoints<Id extends string, Groups extends HttpApiGroup.Constraint>(
   api: HttpApi.HttpApi<Id, Groups>,
 ) {

@@ -29,7 +29,8 @@ async function saveFile(id: string, name: string) {
   anchor.href = url;
   anchor.download = name;
   anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  // WebKit may start reading after click returns; keep the URL alive for it.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 type DownloadState = {

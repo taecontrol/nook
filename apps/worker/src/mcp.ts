@@ -21,6 +21,7 @@ import {
   UpdateMemory,
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
+import { machineFileActor, ownerFileActor } from './audit.ts';
 import { bucketOperations } from './buckets.ts';
 import { clientFrom } from './client-provenance.ts';
 import type { FileBindings } from './file-objects.ts';
@@ -134,6 +135,12 @@ export function mcpHandler(
   return createMcpHandler(({ requestInfo }) => {
     const server = new McpServer({ name: 'nook', version: '1.0.0' });
     const userAgent = requestInfo?.headers.get('User-Agent') ?? null;
+    function fileActor(envelope: unknown) {
+      const client = clientFrom(envelope, userAgent);
+      return principal.kind === 'owner'
+        ? ownerFileActor(client)
+        : machineFileActor(principal, client);
+    }
     const memories = memoryStore(
       grant,
       options.index,
@@ -183,10 +190,7 @@ export function mcpHandler(
         execute(
           memories.pipe(
             Effect.flatMap((store) =>
-              store.forget(input, false, {
-                principal,
-                client: clientFrom(ctx.mcpReq.envelope, userAgent),
-              }),
+              store.forget(input, false, fileActor(ctx.mcpReq.envelope)),
             ),
           ),
         ),
@@ -311,13 +315,7 @@ export function mcpHandler(
         execute(
           memoryFiles(grant, options.files).pipe(
             Effect.flatMap((store) =>
-              store.detach(
-                {
-                  principal,
-                  client: clientFrom(ctx.mcpReq.envelope, userAgent),
-                },
-                input,
-              ),
+              store.detach(fileActor(ctx.mcpReq.envelope), input),
             ),
           ),
         ),

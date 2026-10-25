@@ -48,24 +48,14 @@ import {
 import { Spinner } from '@/components/ui/spinner';
 import { describeFailure } from './api-client';
 import { type DownloadFailure, useFileDownload } from './memory-file-download';
-import { clientName, principalName } from './memory-format';
+import {
+  clientName,
+  formatBytes,
+  formatExactBytes,
+  principalName,
+} from './memory-format';
 import { formatDateTime, timeAgo } from './time';
 import type { MemoryPageModel } from './use-memory-page';
-
-const units = ['B', 'KiB', 'MiB'] as const;
-function formatBytes(bytes: number) {
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  const text =
-    unit === 0 || Number.isInteger(value)
-      ? String(value)
-      : value.toFixed(1).replace(/\.0$/, '');
-  return `${text} ${units[unit]}`;
-}
 
 function mediaIcon(mediaType: string) {
   if (mediaType.startsWith('image/')) return FileImage;
@@ -156,8 +146,7 @@ function FileRow({
                 >
                   {formatDateTime(file.attachedAt)}
                 </time>{' '}
-                by{' '}
-                {principalName({ provenance: { principal: file.principal } })}
+                by {principalName(file.principal)}
               </p>
               <CollapsibleTrigger asChild>
                 <Button
@@ -183,7 +172,7 @@ function FileRow({
         <CollapsibleContent>
           <dl className="mx-4 mb-3 grid gap-3 rounded-md border bg-muted/30 p-3 text-xs">
             <Fact label="Name">{file.name}</Fact>
-            <Fact label="Size">{`${file.size.toLocaleString('en-US')} bytes`}</Fact>
+            <Fact label="Size">{formatExactBytes(file.size)}</Fact>
             <div>
               <dt className="text-muted-foreground">SHA-256</dt>
               <dd className="mt-0.5 break-all font-mono font-medium">
