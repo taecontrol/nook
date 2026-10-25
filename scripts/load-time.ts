@@ -26,7 +26,7 @@ try {
   await seedGrantTree(app);
   await seedSecrets(app);
   await seedMemories(app, manyMemories);
-  // Memory budgets include real file metadata (attachments E29).
+  // The additional reader measurements open this memory with real file metadata (E29).
   await seedFile(app, { id: memoryId(100) });
   const { token } = await issueGrant(app);
   const used = await fetchValues(app, token, { secrets: [acmePath] });
@@ -63,6 +63,8 @@ try {
       auditNavigation: [],
       memory: [],
       memoryNavigation: [],
+      memoryReader: [],
+      memoryReaderNavigation: [],
       gzipBytes: (await measureInitialJs('dist/assets')).gzipBytes,
     };
     for (const kind of [
@@ -80,6 +82,8 @@ try {
       'auditNavigation',
       'memory',
       'memoryNavigation',
+      'memoryReader',
+      'memoryReaderNavigation',
     ] as const) {
       for (let run = 0; run < loadTimeBudgets.runs; run++) {
         const { context, page } = await phonePage(browser, kind);

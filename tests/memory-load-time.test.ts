@@ -2,7 +2,13 @@ import type { Browser } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { measureScreen, phonePage } from '../scripts/load-time-browser.ts';
-import { manyMemories, memoryRows, seedMemories } from './support/memory.ts';
+import {
+  manyMemories,
+  memoryId,
+  memoryRows,
+  seedMemories,
+} from './support/memory.ts';
+import { seedFile } from './support/memory-files.ts';
 import { seedSecrets, vaultRuntime } from './support/vault.ts';
 
 describe('E31 production measurement conditions', () => {
@@ -13,13 +19,19 @@ describe('E31 production measurement conditions', () => {
     app = await vaultRuntime();
     await seedSecrets(app);
     await seedMemories(app, manyMemories);
+    await seedFile(app, { id: memoryId(100) });
     ({ browser, close: closeBrowser } = await launchTestBrowser());
   });
   afterAll(async () => {
     await closeBrowser?.();
     await app?.close();
   });
-  it.each(['memory', 'memoryNavigation'] as const)(
+  it.each([
+    'memory',
+    'memoryNavigation',
+    'memoryReader',
+    'memoryReaderNavigation',
+  ] as const)(
     '%s measures the real Memory first screen on a 390 px phone',
     async (kind) => {
       const { context, page } = await phonePage(browser, kind);
@@ -30,7 +42,20 @@ describe('E31 production measurement conditions', () => {
         expect(measured).toBeGreaterThanOrEqual(0);
         const url = new URL(page.url());
         expect(url.pathname).toBe('/memory');
-        if (kind === 'memory') {
+        if (kind === 'memoryReader' || kind === 'memoryReaderNavigation') {
+          expect(url.searchParams.get('bucket')).toBe('work/acme');
+          expect(url.searchParams.get('memory')).toBe(memoryId(100));
+          expect(
+            await page
+              .getByRole('article', { name: 'Memory detail' })
+              .isVisible(),
+          ).toBe(true);
+          expect(
+            await page
+              .getByRole('button', { name: 'Files, 1', exact: true })
+              .isVisible(),
+          ).toBe(true);
+        } else if (kind === 'memory') {
           expect(url.searchParams.get('bucket')).toBe('work/acme');
           expect(await memoryRows(page).count()).toBe(25);
           expect(await memoryRows(page).first().isVisible()).toBe(true);

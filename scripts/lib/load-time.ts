@@ -28,6 +28,8 @@ export type Measurements = {
   auditNavigation: number[];
   memory: number[];
   memoryNavigation: number[];
+  memoryReader: number[];
+  memoryReaderNavigation: number[];
   gzipBytes?: number;
 };
 export function median(samples: number[]) {
@@ -44,6 +46,16 @@ export function assertLoadTimes(measured: Measurements) {
     [
       'memoryNavigation',
       'Intent navigation /memory',
+      loadTimeBudgets.navigationMs,
+    ],
+    [
+      'memoryReader',
+      'Cold open /memory with files',
+      loadTimeBudgets.coldOpenMs,
+    ],
+    [
+      'memoryReaderNavigation',
+      'Intent navigation /memory with files',
       loadTimeBudgets.navigationMs,
     ],
     ['home', 'Cold open /', loadTimeBudgets.coldOpenMs],
@@ -105,6 +117,8 @@ export function formatMeasurements(measured: Measurements) {
         vaultNavigation: median(measured.vaultNavigation),
         memory: median(measured.memory),
         memoryNavigation: median(measured.memoryNavigation),
+        memoryReader: median(measured.memoryReader),
+        memoryReaderNavigation: median(measured.memoryReaderNavigation),
       },
       samplesMs: measured,
       coldOpenGzipBytes: measured.gzipBytes,

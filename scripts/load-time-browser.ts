@@ -1,4 +1,5 @@
 import type { Browser, Page, Request } from 'playwright';
+import { memoryId } from '../tests/fixtures/memories.ts';
 import { loadTimeBudgets, type Measurements } from './lib/load-time.ts';
 
 export async function phonePage(browser: Browser, kind: string) {
@@ -13,6 +14,8 @@ export async function phonePage(browser: Browser, kind: string) {
       'auditNavigation',
       'memory',
       'memoryNavigation',
+      'memoryReader',
+      'memoryReaderNavigation',
     ].includes(kind)
       ? { viewport: { width: 390, height: 844 } }
       : {}),
@@ -32,7 +35,8 @@ type ColdScreen =
   | 'machines'
   | 'vault'
   | 'audit'
-  | 'memory';
+  | 'memory'
+  | 'memoryReader';
 function markFirstScreen(kind: ColdScreen) {
   const selectors = {
     buckets: '[aria-label="All buckets"] [data-path]',
@@ -40,6 +44,8 @@ function markFirstScreen(kind: ColdScreen) {
     machines: '[data-machine]',
     audit: '[data-entry]',
     memory: '[data-memory-row]',
+    memoryReader:
+      '[data-memory-reading] [data-memory-files][aria-label="Files, 1"]',
     home: '',
     vault: '',
   };
@@ -77,6 +83,7 @@ async function cold(page: Page, origin: string, kind: ColdScreen) {
     vault: '/vault?bucket=work/acme',
     audit: '/audit',
     memory: '/memory?bucket=work/acme',
+    memoryReader: `/memory?bucket=work/acme&memory=${memoryId(100)}`,
   };
   await page.goto(origin + paths[kind]);
   await page.waitForFunction(
@@ -194,10 +201,16 @@ async function settleNetworkAfter<T>(
 async function navigate(
   page: Page,
   origin: string,
-  kind: 'buckets' | 'machines' | 'vault' | 'audit' | 'memory',
+  kind: 'buckets' | 'machines' | 'vault' | 'audit' | 'memory' | 'memoryReader',
   preloadTimeout: number,
 ) {
   const link = await settleNetworkAfter(page, preloadTimeout, async () => {
+    if (kind === 'memoryReader') {
+      await page.goto(`${origin}/memory?bucket=work/acme`);
+      const link = page.locator(`[data-memory-row="${memoryId(100)}"]`);
+      await link.hover();
+      return link;
+    }
     await page.goto(origin);
     await page.getByRole('heading', { name: "You're signed in" }).waitFor();
     const link = page
@@ -240,6 +253,8 @@ async function navigate(
       machines: '[data-machine]',
       audit: '[data-entry]',
       memory: '[aria-label="Memory buckets"] [data-path="me"]',
+      memoryReader:
+        '[data-memory-reading] [data-memory-files][aria-label="Files, 1"]',
     }[kind],
   );
   await link.click();
@@ -329,6 +344,7 @@ export async function measureScreen(
     vaultNavigation: 'vault',
     auditNavigation: 'audit',
     memoryNavigation: 'memory',
+    memoryReaderNavigation: 'memoryReader',
   } as const;
   const destination = destinations[kind as keyof typeof destinations];
   if (kind === 'approvalNavigation')
