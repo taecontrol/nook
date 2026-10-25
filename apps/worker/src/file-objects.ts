@@ -10,10 +10,6 @@ export class InvalidFileCursor extends Data.TaggedError('InvalidFileCursor') {}
 export const fileNow = (bindings: FileBindings) =>
   bindings.FILE_CLOCK?.now() ?? Date.now();
 
-export function sameFileBindings(left: FileBindings, right: FileBindings) {
-  return left.FILES === right.FILES && left.FILE_CLOCK === right.FILE_CLOCK;
-}
-
 // The binding can be decorated by the test runtime; no storage error escapes.
 export function fileObjects(bindings: FileBindings) {
   function call<A>(operation: (bucket: R2Bucket) => Promise<A>) {
