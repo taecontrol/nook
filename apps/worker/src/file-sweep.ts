@@ -14,7 +14,9 @@ export const fileSweep = (bindings: FileBindings) =>
     const cursor = rows[0]?.cursor ?? undefined;
     const page = yield* objects.list(cursor).pipe(Effect.result);
     if (page._tag === 'Failure') {
-      if (cursor && page.failure._tag === 'InvalidFileCursor')
+      // R2 does not promise cursor-error wording. Restarting is idempotent;
+      // a missing binding never attempted a list and keeps its saved position.
+      if (cursor && bindings.FILES)
         yield* sql`UPDATE file_sweep SET cursor=NULL WHERE id=1`.pipe(
           unavailable,
         );

@@ -1,28 +1,23 @@
 import type { R2Bucket } from '@cloudflare/workers-types';
-import { Data, Effect } from 'effect';
+import { Effect } from 'effect';
 import { HttpApiError } from 'effect/http-api';
 
 export type FileBindings = {
   FILES?: R2Bucket;
   FILE_CLOCK?: { now(): number };
 };
-export class InvalidFileCursor extends Data.TaggedError('InvalidFileCursor') {}
 export const fileNow = (bindings: FileBindings) =>
   bindings.FILE_CLOCK?.now() ?? Date.now();
 
 // The binding can be decorated by the test runtime; no storage error escapes.
 export function fileObjects(bindings: FileBindings) {
-  function call<A, Failure = HttpApiError.ServiceUnavailable>(
-    operation: (bucket: R2Bucket) => Promise<A>,
-    failure?: (error: unknown) => Failure,
-  ) {
+  function call<A>(operation: (bucket: R2Bucket) => Promise<A>) {
     return Effect.tryPromise({
       try: () => {
         if (!bindings.FILES) throw new Error('File storage unavailable');
         return operation(bindings.FILES);
       },
-      catch: (error) =>
-        failure ? failure(error) : new HttpApiError.ServiceUnavailable(),
+      catch: () => new HttpApiError.ServiceUnavailable(),
     });
   }
   return {
@@ -43,25 +38,19 @@ export function fileObjects(bindings: FileBindings) {
           );
       }),
     list: (cursor?: string) =>
-      call(
-        async (bucket) => {
-          const page = await bucket.list({
-            prefix: 'files/',
-            cursor,
-            limit: 1000,
-          });
-          return {
-            objects: page.objects.map(({ key, uploaded }) => ({
-              key,
-              uploaded,
-            })),
-            cursor: page.truncated ? page.cursor : null,
-          };
-        },
-        (error) =>
-          error instanceof Error && /cursor/i.test(error.message)
-            ? new InvalidFileCursor()
-            : new HttpApiError.ServiceUnavailable(),
-      ),
+      call(async (bucket) => {
+        const page = await bucket.list({
+          prefix: 'files/',
+          cursor,
+          limit: 1000,
+        });
+        return {
+          objects: page.objects.map(({ key, uploaded }) => ({
+            key,
+            uploaded,
+          })),
+          cursor: page.truncated ? page.cursor : null,
+        };
+      }),
   };
 }

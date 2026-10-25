@@ -673,6 +673,9 @@ staleness by 30,001 ms without a real thirty-second wait.
 `memory-files-sweep.test.ts` walks more than 1000 real objects across Cron
 invocations, recovers a rejected persisted cursor, and holds a genuine
 embedding call while Cron independently lists R2 and deletes old garbage.
+`file-operation-statements.test.ts` also rejects a saved position without
+"cursor" in its error, requires the next invocation to collect old garbage,
+and keeps the saved position when the `FILES` binding is missing.
 `memory-files-deploy.test.ts` drives the actual provisioning shell with
 synthetic command responses. Audit uses its existing rows and disclosures
 for all five file outcomes; its file suite covers Vault pagination and
