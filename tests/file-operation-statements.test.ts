@@ -114,9 +114,7 @@ it('Cron retains its cursor without FILES and recovers a rejected list even with
   const available = {
     ...env,
     FILE_CLOCK: { now: () => garbage.uploaded.getTime() + 3_600_001 },
-    FILES: rejected as unknown as Parameters<
-      typeof worker.fetch
-    >[1]['FILES'],
+    FILES: rejected as unknown as Parameters<typeof worker.fetch>[1]['FILES'],
   };
   await worker.scheduled(controller, available);
   expect(
