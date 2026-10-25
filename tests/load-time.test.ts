@@ -19,11 +19,13 @@ const screens = [
   ['vault', 'Cold open /vault', 1000],
   ['audit', 'Cold open /audit', 1000],
   ['memory', 'Cold open /memory', 1000],
+  ['memoryReader', 'Cold open /memory with files', 1000],
   ['navigation', 'Intent navigation', 100],
   ['machinesNavigation', 'Intent navigation /machines', 100],
   ['vaultNavigation', 'Intent navigation /vault', 100],
   ['auditNavigation', 'Intent navigation /audit', 100],
   ['memoryNavigation', 'Intent navigation /memory', 100],
+  ['memoryReaderNavigation', 'Intent navigation /memory with files', 100],
   ['approvalNavigation', 'Loaded approval tree', 100],
   ['machineAccessNavigation', 'Loaded machine access tree', 100],
 ] as const;
