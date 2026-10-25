@@ -4,6 +4,7 @@ import {
   type Detached,
   type DetachFile,
   type FileAttached,
+  type FileAuditOutcome,
   FileChanged,
   FileNotFound,
   FileQuotaExceeded,
@@ -32,15 +33,11 @@ type FileRow = {
   size: number;
   sha256: string;
 };
+// A left join returns a complete file row or nulls for every file column.
 type FileState = {
   id: string | null;
-  name: string | null;
-  object_key: string | null;
-  media_type: string | null;
-  size: number | null;
-  sha256: string | null;
   usage: number;
-};
+} & (FileRow | { [Key in keyof FileRow]: null });
 type Upload = {
   id: string;
   name: string;
@@ -89,18 +86,30 @@ function attached(
     replacedSha256,
   };
 }
-function requireFile(
+function requireMemoryState(
   state: FileState | undefined,
 ): Effect.Effect<
-  FileState & FileRow,
-  | HttpApiError.ServiceUnavailable
-  | FileNotFound
-  | ReturnType<typeof memoryNotFound>
+  FileState,
+  HttpApiError.ServiceUnavailable | ReturnType<typeof memoryNotFound>
 > {
   if (!state) return Effect.fail(new HttpApiError.ServiceUnavailable());
   if (!state.id) return Effect.fail(memoryNotFound());
-  if (!state.object_key) return Effect.fail(fileNotFound());
-  return Effect.succeed(state as FileState & FileRow);
+  return Effect.succeed(state);
+}
+function requireFile(state: FileState | undefined) {
+  return requireMemoryState(state).pipe(
+    Effect.flatMap((current) =>
+      current.object_key
+        ? Effect.succeed(current)
+        : Effect.fail(fileNotFound()),
+    ),
+  );
+}
+function matchesDigest(
+  state: FileState,
+  sha256: string,
+): state is FileState & FileRow {
+  return state.sha256 === sha256;
 }
 function notPublished(
   state: FileState | undefined,
@@ -113,17 +122,34 @@ function notPublished(
   | FileQuotaExceeded
   | HttpApiError.ServiceUnavailable
 > {
-  if (!state) return Effect.fail(new HttpApiError.ServiceUnavailable());
-  if (!state.id) return Effect.fail(memoryNotFound());
-  if (state.sha256 === sha256)
-    return Effect.succeed(
-      attached(input.id, bucket, state as FileState & FileRow, 'unchanged'),
-    );
-  if (quotaExceeded(state, input.bytes.byteLength))
-    return Effect.fail(
-      quotaError(bucket, input.name, state.usage, input.bytes.byteLength),
-    );
-  return Effect.fail(new HttpApiError.ServiceUnavailable());
+  return Effect.gen(function* () {
+    const current = yield* requireMemoryState(state);
+    if (matchesDigest(current, sha256))
+      return attached(input.id, bucket, current, 'unchanged');
+    if (quotaExceeded(current, input.bytes.byteLength))
+      return yield* Effect.fail(
+        quotaError(bucket, input.name, current.usage, input.bytes.byteLength),
+      );
+    return yield* Effect.fail(new HttpApiError.ServiceUnavailable());
+  });
+}
+function bucketUsage(
+  sql: D1Client.D1Client,
+  bucket: string,
+  excluded?: Pick<Upload, 'id' | 'name'>,
+) {
+  const exclusion = excluded
+    ? sql` AND NOT (u.memory_id=${excluded.id} AND u.name=${excluded.name})`
+    : sql``;
+  return sql`(SELECT COALESCE(sum(u.size),0) FROM memory_files u JOIN memories h ON h.id=u.memory_id WHERE h.bucket=${bucket}${exclusion})`;
+}
+function fileAuditSelection(
+  sql: D1Client.D1Client,
+  outcome: FileAuditOutcome,
+  bucket: Fragment,
+  guard: Fragment,
+) {
+  return sql`SELECT ${outcome} AS outcome,${bucket} AS bucket,memory_id,name,size,sha256,NULL AS replaced_sha256 FROM memory_files WHERE ${guard}`;
 }
 
 // Project the complete detail in the existing memory SELECT, never a new trip.
@@ -143,7 +169,12 @@ export function forgetFileStatements(
     fileAuditInsert(
       sql,
       actor,
-      sql`SELECT 'file_forgotten' AS outcome,(SELECT bucket FROM memories WHERE id=memory_id) AS bucket,memory_id,name,size,sha256,NULL AS replaced_sha256 FROM memory_files WHERE ${matching}`,
+      fileAuditSelection(
+        sql,
+        'file_forgotten',
+        sql`(SELECT bucket FROM memories WHERE id=memory_id)`,
+        matching,
+      ),
     ),
     sql<{
       object_key: string;
@@ -165,7 +196,7 @@ export const memoryFiles = (grant: BucketGrant, bindings: FileBindings = {}) =>
     const remove = (keys: readonly string[]) =>
       objects.remove(keys).pipe(Effect.catchCause(() => Effect.void));
     const state = (id: string, bucket: string, name: string) =>
-      sql<FileState>`SELECT m.id,f.name,f.object_key,f.media_type,f.size,f.sha256, (SELECT COALESCE(sum(u.size),0) FROM memory_files u JOIN memories h ON h.id=u.memory_id WHERE h.bucket=${bucket}) AS usage FROM (SELECT 1) LEFT JOIN memories m ON m.id=${id} AND m.bucket=${bucket} LEFT JOIN memory_files f ON f.memory_id=m.id AND f.name=${name}`;
+      sql<FileState>`SELECT m.id,f.name,f.object_key,f.media_type,f.size,f.sha256, ${bucketUsage(sql, bucket)} AS usage FROM (SELECT 1) LEFT JOIN memories m ON m.id=${id} AND m.bucket=${bucket} LEFT JOIN memory_files f ON f.memory_id=m.id AND f.name=${name}`;
     const read = (id: string, bucket: string, name: string) =>
       state(id, bucket, name).pipe(
         unavailable,
@@ -195,7 +226,12 @@ export const memoryFiles = (grant: BucketGrant, bindings: FileBindings = {}) =>
         const audit = yield* fileAuditInsert(
           sql,
           actor,
-          sql`SELECT 'file_downloaded' AS outcome,${bucket} AS bucket,memory_id,name,size,sha256,NULL AS replaced_sha256 FROM memory_files WHERE memory_id=${id} AND name=${name} AND object_key=${row.object_key}`,
+          fileAuditSelection(
+            sql,
+            'file_downloaded',
+            sql`${bucket}`,
+            sql`memory_id=${id} AND name=${name} AND object_key=${row.object_key}`,
+          ),
         ).pipe(unavailable, Effect.result);
         if (audit._tag === 'Failure') {
           yield* cancelled(body);
@@ -246,13 +282,8 @@ export const memoryFiles = (grant: BucketGrant, bindings: FileBindings = {}) =>
             unavailable,
           ))[0];
           if (!pre?.id) return yield* Effect.fail(memoryNotFound());
-          if (pre.sha256 === hash)
-            return attached(
-              input.id,
-              bucket,
-              pre as FileState & FileRow,
-              'unchanged',
-            );
+          if (matchesDigest(pre, hash))
+            return attached(input.id, bucket, pre, 'unchanged');
           if (quotaExceeded(pre, input.bytes.byteLength))
             return yield* Effect.fail(
               quotaError(bucket, input.name, pre.usage, input.bytes.byteLength),
@@ -268,7 +299,7 @@ export const memoryFiles = (grant: BucketGrant, bindings: FileBindings = {}) =>
           yield* objects.put(key, input.bytes, hash);
           const machine =
             actor.principal.kind === 'machine' ? actor.principal : null;
-          const usage = sql`(SELECT COALESCE(sum(u.size),0) FROM memory_files u JOIN memories h ON h.id=u.memory_id WHERE h.bucket=${bucket} AND NOT (u.memory_id=${input.id} AND u.name=${input.name}))`;
+          const usage = bucketUsage(sql, bucket, input);
           // Both writes use all four guards against the same D1 snapshot. Only
           // D1's clock decides whether this never-reused key can still publish.
           const publishable = sql`m.id=${input.id} AND m.bucket=${bucket} AND COALESCE(f.sha256,'')<>${hash} AND ${usage}+${file.size}<=${fileLimits.bucketBytes} AND unixepoch('subsec')*1000-${startedAt}<${publishWindowMs}`;
@@ -311,7 +342,7 @@ export const memoryFiles = (grant: BucketGrant, bindings: FileBindings = {}) =>
               fileAuditInsert(
                 sql,
                 actor,
-                sql`SELECT 'file_detached' AS outcome,${bucket} AS bucket,memory_id,name,size,sha256,NULL AS replaced_sha256 FROM memory_files WHERE ${guard}`,
+                fileAuditSelection(sql, 'file_detached', sql`${bucket}`, guard),
               ),
               sql<{
                 object_key: string;

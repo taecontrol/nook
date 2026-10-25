@@ -12,13 +12,17 @@ export const fileNow = (bindings: FileBindings) =>
 
 // The binding can be decorated by the test runtime; no storage error escapes.
 export function fileObjects(bindings: FileBindings) {
-  function call<A>(operation: (bucket: R2Bucket) => Promise<A>) {
+  function call<A, Failure = HttpApiError.ServiceUnavailable>(
+    operation: (bucket: R2Bucket) => Promise<A>,
+    failure?: (error: unknown) => Failure,
+  ) {
     return Effect.tryPromise({
       try: () => {
         if (!bindings.FILES) throw new Error('File storage unavailable');
         return operation(bindings.FILES);
       },
-      catch: () => new HttpApiError.ServiceUnavailable(),
+      catch: (error) =>
+        failure ? failure(error) : new HttpApiError.ServiceUnavailable(),
     });
   }
   return {
@@ -39,10 +43,8 @@ export function fileObjects(bindings: FileBindings) {
           );
       }),
     list: (cursor?: string) =>
-      Effect.tryPromise({
-        try: async () => {
-          const bucket = bindings.FILES;
-          if (!bucket) throw new Error('File storage unavailable');
+      call(
+        async (bucket) => {
           const page = await bucket.list({
             prefix: 'files/',
             cursor,
@@ -56,10 +58,10 @@ export function fileObjects(bindings: FileBindings) {
             cursor: page.truncated ? page.cursor : null,
           };
         },
-        catch: (error) =>
+        (error) =>
           error instanceof Error && /cursor/i.test(error.message)
             ? new InvalidFileCursor()
             : new HttpApiError.ServiceUnavailable(),
-      }),
+      ),
   };
 }
