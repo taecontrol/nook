@@ -1,4 +1,8 @@
-import { fileLimits, validateFileName } from '@nook/contract';
+import {
+  fileNameUnicodeMessage,
+  validateFileName,
+  validateFileSize,
+} from '@nook/contract';
 import type { FileActor } from './audit.ts';
 import { clientFrom } from './client-provenance.ts';
 import { fileRoutes, matches } from './routes.ts';
@@ -21,11 +25,9 @@ function lengthGate(request: Request) {
       { _tag: 'InvalidFile', message: 'Use a valid Content-Length.' },
       { status: 400 },
     );
-  if (Number(length) > fileLimits.bytes)
-    return Response.json(
-      { _tag: 'FileTooLarge', message: 'A file can be at most 25 MiB.' },
-      { status: 413 },
-    );
+  const message = validateFileSize(Number(length));
+  if (message)
+    return Response.json({ _tag: 'FileTooLarge', message }, { status: 413 });
 }
 function nameGate(path: string) {
   // URL decoding can otherwise fail before domain validation (invalid UTF-8).
@@ -36,7 +38,7 @@ function nameGate(path: string) {
       return Response.json({ _tag: 'InvalidFile', message }, { status: 400 });
   } catch {
     return Response.json(
-      { _tag: 'InvalidFile', message: 'Use valid Unicode for the file name.' },
+      { _tag: 'InvalidFile', message: fileNameUnicodeMessage },
       { status: 400 },
     );
   }

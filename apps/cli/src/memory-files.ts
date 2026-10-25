@@ -2,7 +2,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { link, lstat, open, unlink } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve } from 'node:path';
-import { fileLimits, validateFileName } from '@nook/contract';
+import {
+  fileLimits,
+  isFileDigest,
+  validateFileName,
+  validateFileSize,
+} from '@nook/contract';
 import { Effect, Stream } from 'effect';
 import { CliFailure, type RequestFailure } from './errors.ts';
 import {
@@ -34,8 +39,8 @@ function validName(name: string) {
   return message ? Effect.fail(new CliFailure(message)) : Effect.void;
 }
 function requireSize(size: number) {
-  if (size > fileLimits.bytes)
-    throw new CliFailure('A file can be at most 25 MiB.');
+  const message = validateFileSize(size);
+  if (message) throw new CliFailure(message);
 }
 function readUpload(path: string) {
   return Effect.tryPromise({
@@ -139,11 +144,7 @@ function downloadMetadata(headers: Readonly<Record<string, string>>) {
   const length = headers['content-length'] ?? '';
   const sha256 = headers['x-nook-sha256'] ?? '';
   const size = Number(length);
-  if (
-    !/^\d+$/.test(length) ||
-    size > fileLimits.bytes ||
-    !/^[0-9a-f]{64}$/.test(sha256)
-  )
+  if (!/^\d+$/.test(length) || validateFileSize(size) || !isFileDigest(sha256))
     return Effect.fail(downloadChanged());
   return Effect.succeed({ size, sha256 });
 }

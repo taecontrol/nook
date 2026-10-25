@@ -8,6 +8,7 @@ import {
   Api,
   type BucketGrant,
   badRequestTags,
+  fileRouterMaxParamLength,
   secretLimits,
 } from '@nook/contract';
 import { Effect, Layer } from 'effect';
@@ -142,7 +143,10 @@ export function handlerForPrincipal(
     disableLogger: true,
     // The router checks decoded params: six 32-character segments plus the name.
     routerConfig: {
-      maxParamLength: Math.max(800, 6 * (32 + 1) + secretLimits.name),
+      maxParamLength: Math.max(
+        fileRouterMaxParamLength,
+        6 * (32 + 1) + secretLimits.name,
+      ),
     },
   }).handler;
   return (request: Request, ctx?: Pick<ExecutionContext, 'waitUntil'>) =>

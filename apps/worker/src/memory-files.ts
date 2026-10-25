@@ -10,7 +10,9 @@ import {
   FileTooLarge,
   fileLimits,
   InvalidFile,
+  isFileDigest,
   validateFileName,
+  validateFileSize,
   validateMediaType,
 } from '@nook/contract';
 import { Effect } from 'effect';
@@ -55,10 +57,9 @@ function validUpload(
   const message =
     validateFileName(input.name) ?? validateMediaType(input.mediaType);
   if (message) return Effect.fail(new InvalidFile({ message }));
-  return input.bytes.byteLength > fileLimits.bytes
-    ? Effect.fail(
-        new FileTooLarge({ message: 'A file can be at most 25 MiB.' }),
-      )
+  const sizeMessage = validateFileSize(input.bytes.byteLength);
+  return sizeMessage
+    ? Effect.fail(new FileTooLarge({ message: sizeMessage }))
     : Effect.void;
 }
 function quotaExceeded(state: FileState, size: number) {
@@ -298,7 +299,7 @@ export const memoryFiles = (grant: BucketGrant, bindings: FileBindings = {}) =>
         Effect.gen(function* () {
           const bucket = yield* authorize(input.id, true);
           yield* validName(input.name);
-          if (!/^[0-9a-f]{64}$/.test(input.sha256))
+          if (!isFileDigest(input.sha256))
             return yield* Effect.fail(
               new InvalidFile({
                 message: 'Use a lowercase SHA-256 digest for the file.',

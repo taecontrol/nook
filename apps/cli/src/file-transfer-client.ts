@@ -5,8 +5,8 @@ import { Effect } from 'effect';
 import { HttpClient, HttpClientError, HttpClientResponse } from 'effect/http';
 
 class TransferTimeout extends Error {}
-export const transferTimeoutMessage =
-  'The file transfer timed out after 10 seconds without progress. Try again.';
+const transferInactivityMs = 10_000;
+export const transferTimeoutMessage = `The file transfer timed out after ${transferInactivityMs / 1000} seconds without progress. Try again.`;
 export function transferTimedOut(error: unknown) {
   return (
     error instanceof TransferTimeout ||
@@ -58,7 +58,7 @@ export const fileTransferLayer = HttpClient.layerMergedContext(
                 headers: request.headers,
                 signal,
                 agent: false,
-                timeout: 10_000,
+                timeout: transferInactivityMs,
               });
               outgoing.once('timeout', () => {
                 timedOut = true;

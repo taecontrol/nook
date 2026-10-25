@@ -1,6 +1,10 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import { D1Client } from '@effect/sql-d1';
-import { AuthorizationsApi, MachineApi } from '@nook/contract';
+import {
+  AuthorizationsApi,
+  fileRouterMaxParamLength,
+  MachineApi,
+} from '@nook/contract';
 import { Effect, Layer } from 'effect';
 import { HttpRouter, HttpServer } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
@@ -142,7 +146,7 @@ export function machineHandler(
   );
   return HttpRouter.toWebHandler(routes, {
     disableLogger: true,
-    routerConfig: { maxParamLength: 800 },
+    routerConfig: { maxParamLength: fileRouterMaxParamLength },
   }).handler;
 }
 export function authorizationHandler(db: D1Database) {
