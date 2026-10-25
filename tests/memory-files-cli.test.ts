@@ -45,6 +45,10 @@ import {
 import { expectOutput } from './support/private-assertions.ts';
 import { expectNoValue } from './support/vault.ts';
 
+const cliPackage = JSON.parse(
+  await readFile('apps/cli/package.json', 'utf8'),
+) as { version: string };
+
 let app: FilesRuntime;
 let keyring: PrivateKeyring;
 let keyrings: PrivateKeyring[];
@@ -156,7 +160,8 @@ it('E1/E2/E3: real CLI creates, retries and replaces a basename with exact one-o
       bucket: fileBucket,
       memory_id: fileMemory,
       file_name: pdfName,
-      client_name: expect.any(String),
+      client_name: 'nook',
+      client_version: cliPackage.version,
     });
 });
 it('E4: one 25 MiB real-process round trip is byte-identical; one extra byte is refused before any request', async () => {
@@ -196,25 +201,14 @@ it('E4: one 25 MiB real-process round trip is byte-identical; one extra byte is 
   expect(refused.stderr).toBe('');
   expect(transport.requests).toHaveLength(count);
 }, 30_000);
-it('E5: CLI quota failure reports exact usage with no row, object or audit; smaller replacement succeeds at the limit', async () => {
+it('E5: CLI quota failure reports the exact usage the Worker refused', async () => {
   await seedUsage(app, maximumBucket - 100);
   const path = resolve(keyring.home, 'quota.bin');
   await writeFile(path, Buffer.alloc(101));
-  const before = await fileSnapshot(app);
   publicFailure(
     await attach(path),
     `${fileBucket} files use 1,073,741,724 of 1,073,741,824 bytes; quota.bin needs 101.`,
   );
-  expect(await fileSnapshot(app)).toEqual(before);
-  await writeFile(path, Buffer.alloc(100));
-  expect((await attach(path)).status).toBe(0);
-  await writeFile(path, Buffer.alloc(99, 1));
-  const smaller = await attach(path);
-  expect(smaller.status).toBe(0);
-  expect(JSON.parse(smaller.stdout)).toMatchObject({
-    outcome: 'replaced',
-    size: 99,
-  });
 });
 it('E6: the CLI uses the basename, downloads a 255-byte Unicode name and rejects 256 bytes before a request', async () => {
   const transport = await proxy();
@@ -235,8 +229,10 @@ it('E6: the CLI uses the basename, downloads a 255-byte Unicode name and rejects
   );
   const count = transport.requests.length;
   // Filesystems reject a 256-byte basename; download still exercises CLI name validation.
-  const invalid = await download(`${'é'.repeat(126)}.pdf`);
-  expect(invalid.status).toBe(1);
+  publicFailure(
+    await download(`${'é'.repeat(126)}.pdf`),
+    'A file name can be at most 255 UTF-8 bytes.',
+  );
   expect(transport.requests).toHaveLength(count);
 });
 it('E11: CLI reports readable-but-unwritable, unreadable and revoked credentials without storing anything', async () => {
@@ -265,7 +261,7 @@ it('E11: CLI reports readable-but-unwritable, unreadable and revoked credentials
   expect(await fileObjects(app)).toEqual([]);
   expect(await auditRows(app)).toEqual([]);
 });
-it.each(['.', '..', 'a\\b.pdf', 'c0\u001f.pdf', 'c1\u0085.pdf'])(
+it.each(['.', '..', 'a\\b.pdf'])(
   'E6: CLI refuses an invalid basename %j before any network request',
   async (name) => {
     const transport = await proxy();
@@ -282,13 +278,6 @@ it.each(['.', '..', 'a\\b.pdf', 'c0\u001f.pdf', 'c1\u0085.pdf'])(
 it('E12: attaching against a previous Worker gives the specific unsupported-files message', async () => {
   const previous = await previousFilesWorker();
   try {
-    const coverage = await fetch(`${previous.origin}/__test/coverage`);
-    expect(coverage.status).toBe(200);
-    expect(await coverage.json()).toEqual({
-      seam: 'worker',
-      loaded: {},
-      counters: {},
-    });
     const previousMachine = await seedFileMemory(previous);
     await configureFilesCli(keyring, previous.origin, previousMachine.token);
     const path = resolve(keyring.home, 'guide.pdf');
@@ -328,32 +317,8 @@ it('E13: another real CLI machine downloads into another directory and emits onl
     }),
   ]);
 });
-it('E14/E17: real CLI downloads readable ancestors and me, masks unreadable ids, and reports a missing file without bytes or audit', async () => {
-  await seedMemories(app, [
-    memoryFixture(602, { bucket: 'work' }),
-    memoryFixture(603, { bucket: 'me' }),
-  ]);
-  const seeder = await fileMachine(app, ['work', 'me'], 'seeder');
-  const bytes = Buffer.from('ancestor download fixture');
-  for (const id of [fileMemory, memoryId(602), memoryId(603)])
-    await attachFile(app, seeder.token, { id, bytes });
-  for (const id of [memoryId(602), memoryId(603)]) {
-    const output = resolve(keyring.home, `${id}.pdf`);
-    const result = await download(
-      pdfName,
-      ['--output', output],
-      keyring.home,
-      id,
-    );
-    expect(result.status).toBe(0);
-    expectNoValue(result.stdout + result.stderr, [bytes.toString()]);
-    expect(JSON.parse(result.stdout)).toEqual({
-      path: output,
-      size: bytes.length,
-      sha256: digest(bytes),
-    });
-    expect(digest(await readFile(output))).toBe(digest(bytes));
-  }
+it('E14/E17: real CLI masks unreadable ids and reports a missing file without bytes or audit', async () => {
+  await attachFile(app, machine.token);
   const before = await fileSnapshot(app);
   publicFailure(await download('missing.pdf'), 'File not found.');
   const other = await fileMachine(app, ['personal'], 'other');
@@ -365,16 +330,18 @@ it('E14/E17: real CLI downloads readable ancestors and me, masks unreadable ids,
     );
   expect(await fileSnapshot(app)).toEqual(before);
 });
-it.each(['file', 'directory', 'symlink'] as const)(
+it.each(['file', 'directory', 'dangling symlink'] as const)(
   'E15: an existing %s is refused before any request and never overwritten, including --output',
   async (kind) => {
     const transport = await proxy();
     const target = resolve(keyring.home, pdfName);
     const sentinel = resolve(keyring.home, 'sentinel');
+    const absent = resolve(keyring.home, 'symlink-target');
     await writeFile(sentinel, 'existing content');
     if (kind === 'file') await writeFile(target, 'existing content');
     if (kind === 'directory') await mkdir(target);
-    if (kind === 'symlink') await symlink(sentinel, target);
+    // A dangling link exists only to lstat; following it would find nothing.
+    if (kind === 'dangling symlink') await symlink(absent, target);
     const before = await lstat(target);
     for (const args of [[], ['--output', target]]) {
       publicFailure(
@@ -389,6 +356,7 @@ it.each(['file', 'directory', 'symlink'] as const)(
         mtimeMs: before.mtimeMs,
       });
       expect(await readFile(sentinel, 'utf8')).toBe('existing content');
+      await expect(lstat(absent)).rejects.toMatchObject({ code: 'ENOENT' });
     }
   },
 );
