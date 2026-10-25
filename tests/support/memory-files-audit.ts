@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import type { D1Database } from '@cloudflare/workers-types';
 import { expect } from 'vitest';
-import { seedPreviousAudit } from '../../scripts/lib/memory-files-migrations.ts';
 import { auditRows } from './audit.ts';
 import { memoryClient, memoryFixture, seedMemories } from './memory.ts';
 import {
@@ -60,4 +61,59 @@ export async function fileAuditPage(app: TestRuntime, query = '') {
     entries: Record<string, unknown>[];
     next: string | null;
   };
+}
+// Vault audit rows and writes as they existed before file attachments.
+export async function seedPreviousAudit(db: D1Database) {
+  const outcomes = ['created', 'delivered', 'denied', 'revealed'] as const;
+  for (const outcome of outcomes) {
+    const owner = outcome === 'revealed';
+    const run = outcome === 'delivered' || outcome === 'denied';
+    const machineFacts = owner
+      ? [null, null, null]
+      : ['synthetic-previous-machine', 'previous-LG16', '/synthetic/previous'];
+    const commandFacts = run ? ['pnpm', randomUUID()] : [null, null];
+    const networkFacts = owner ? ['203.0.113.67', 'AR'] : [null, null];
+    await db
+      .prepare(
+        'INSERT INTO audit_entries(id,at,outcome,path,purpose,machine_id,machine_name,working_directory,executable,run_id,ip,country) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      )
+      .bind(
+        randomUUID(),
+        '2026-10-08T12:00:00.000Z',
+        outcome,
+        `work/mamasan/${outcome.toUpperCase()}_KEY`,
+        `Historical ${outcome} purpose`,
+        ...machineFacts,
+        ...commandFacts,
+        ...networkFacts,
+      )
+      .run();
+  }
+  return (
+    await db
+      .prepare('SELECT * FROM audit_entries ORDER BY id')
+      .all<Record<string, unknown>>()
+  ).results;
+}
+export async function previousAuditInsert(db: D1Database) {
+  const id = randomUUID();
+  await db
+    .prepare(
+      "INSERT INTO audit_entries(id,at,outcome,path,purpose,ip,country) VALUES (?,?,'revealed',?,'Revealed in web app',?,?)",
+    )
+    .bind(
+      id,
+      '2026-10-22T18:00:00.000Z',
+      'work/mamasan/LEGACY_KEY',
+      '203.0.113.67',
+      'AR',
+    )
+    .run();
+  const row = await db
+    .prepare('SELECT * FROM audit_entries WHERE id=?')
+    .bind(id)
+    .first<Record<string, unknown>>();
+  if (!row)
+    throw new Error('The previous Worker audit insert did not persist.');
+  return row;
 }
