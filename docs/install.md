@@ -17,9 +17,10 @@ GitHub and Cloudflare; you do not need to edit source or commit identifiers.
   and [R2 setup](https://developers.cloudflare.com/r2/get-started/).
 - A domain with an **Active** DNS zone in that Cloudflare account. Choose
   an unused hostname; the deployment attaches it as the Worker's custom domain.
-- No unrelated D1 database named `nook`, R2 bucket named `nook-files`, or
-  Vectorize index named `nook-memories`. The workflow reuses these names;
-  it must not adopt another application's resources. Use a separate account
+- No unrelated Worker or D1 database named `nook`, R2 bucket named
+  `nook-files`, or Vectorize index named `nook-memories`. The workflow deploys
+  to this Worker name and reuses these resources; it must not overwrite or
+  adopt another application's resources. Use a separate account
   if those names are already taken. This guide supports one installation
   per account.
 - An email inbox for the owner's Access one-time PIN, a browser, `curl`,
@@ -88,15 +89,15 @@ can be configured separately; they must supply the same owner email claim.
 ## 5. Protect the whole hostname with Access
 
 Before setting `NOOK_HOSTNAME` in GitHub, go to **Zero Trust → Access controls
-→ Applications → Add an application → Self-hosted**.
+→ Applications → Create new application → Self-hosted and private**.
 
-1. Name it Nook. Add a public hostname for `<hostname>` and leave **Path
+1. Name it Nook. Select **Add public hostname** for `<hostname>` and leave **Path
    empty**. Protection must include `/`, all assets, owner APIs, `/mcp`, and
    the CLI approval page.
 2. Add an **Allow** policy with **Include → Emails → your exact owner email**.
    Do not allow Everyone. Select **One-time PIN** as the application's login
    method; disable accepting all identity providers if necessary to select it.
-3. Save. Edit the application, open **Advanced settings**, enable **Managed
+3. Select **Create**. Edit the application, open **Advanced settings**, enable **Managed
    OAuth**, and save again. This lets owner MCP clients use the same Access
    policy. Nook verifies Access's forwarded assertion itself.
 4. Open the application's **Configure → Additional settings** and retain
@@ -109,9 +110,10 @@ and [Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-cont
 
 ## 6. Add the machine API Bypass application
 
-Create a second **Self-hosted** Access application on the same hostname,
-with **Path `api/machine/*`**. Give it a **Bypass** policy with **Include →
-Everyone**. Save it without adding Managed OAuth.
+Select **Create new application → Self-hosted and private → Add public
+hostname** for a second Access application on the same hostname, with
+**Path `api/machine/*`**. Give it a **Bypass** policy with **Include →
+Everyone**. Select **Create** without adding Managed OAuth.
 
 The more specific application wins. Keep the slash before `*`: neither
 `api/*` nor `api/machine*` is safe. `/api/machines`, `/api/authorizations/*`,
