@@ -129,7 +129,11 @@ describe('E1 / installation E5: Access identity through HTTP to the built Worker
     await expectRejection(app, undefined, 'no-assertion');
   });
   it('denies malformed assertions', async () => {
-    await expectRejection(app, 'malformed', 'malformed-assertion');
+    await expectRejection(
+      app,
+      randomBytes(32).toString('hex'),
+      'malformed-assertion',
+    );
   });
   it('denies assertions with an invalid signature', async () => {
     const otherKey = await generateKeyPair('RS256');

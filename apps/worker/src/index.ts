@@ -330,11 +330,21 @@ async function ownerRequest(
   ctx?: Pick<ExecutionContext, 'waitUntil'>,
 ): Promise<Response> {
   const identity = await authenticate(request, env);
-  if ('status' in identity)
-    return Response.json(
-      { _tag: identity.status === 401 ? 'Unauthorized' : 'Forbidden' },
-      { status: identity.status },
+  if ('status' in identity) {
+    const { status, ...rejection } = identity;
+    console.warn(
+      JSON.stringify({
+        event: 'auth-rejected',
+        ...rejection,
+        method: request.method,
+        path: url.pathname,
+      }),
     );
+    return Response.json(
+      { _tag: status === 401 ? 'Unauthorized' : 'Forbidden' },
+      { status },
+    );
+  }
   if (foreignOrigin(request, url))
     return Response.json({ _tag: 'Forbidden' }, { status: 403 });
   if (url.pathname.startsWith('/api/authorizations/'))
