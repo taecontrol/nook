@@ -742,10 +742,20 @@ assertion, claim values, configured values, and query string out of captured
 logs. Valid and synthetic local owners emit no rejection. The malformed
 assertion fixture uses random hexadecimal bytes so its text cannot collide
 with the public `malformed-assertion` reason; E6's assertion is unchanged.
+The log observer also requires exactly one line across the Worker's stdout
+and stderr, so raw JWKS errors cannot escape the check by omitting the event
+name. A loopback HTTP issuer either returns a failure body containing synthetic
+private values or closes the socket before sending a response. The latter
+exercises a real fetch rejection: throwing from Miniflare's JavaScript outbound
+callback instead produces an HTTP 500 and never reaches the network-error
+handler. Both cases recover on the next fetch. HTTP failure-body logging is
+rejected by the private-value check.
 
 `configuration.test.ts` E8 requires observability while its existing E5
 still forbids installation identifiers. Automatic invocation logs are disabled
 to avoid full request URLs; custom rejection logs remain enabled.
+A separate E6 configuration check requires invocation logs to stay disabled,
+including when removing that setting would restore the platform default.
 `installation-deploy.test.ts` E9 runs the actual deployment shell with fake
 Wrangler responses, proving name-only missing-secret summaries, advisory
 list failures, and no secret check after a failed deployment. Wrangler

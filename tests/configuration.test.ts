@@ -52,6 +52,11 @@ it('installation E8: Workers observability is enabled', async () => {
   expect(config.observability?.enabled).toBe(true);
 });
 
+it('installation E6: automatic invocation logs cannot record request query strings', async () => {
+  const config = JSON.parse(await readFile('wrangler.jsonc', 'utf8'));
+  expect(config.observability?.logs?.invocation_logs).toBe(false);
+});
+
 it('E17/#33 E21: PR CI requires static checks, ten Linux shards, macOS CLI and the final coverage/build/budget gate without Cloudflare credentials', async () => {
   const ci = await workflow('verify');
   expect(ci.on).toHaveProperty('pull_request');

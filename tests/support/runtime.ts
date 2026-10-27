@@ -69,7 +69,7 @@ export async function runtime(
   options: {
     bindings?: Record<string, string>;
     directory?: string;
-    outboundService?: (request: Request) => Promise<Response>;
+    outboundService?: Parameters<typeof startRuntime>[0]['outboundService'];
     configPath?: string;
     r2Buckets?: string[];
     coverageEndpoint?: boolean;
@@ -98,7 +98,7 @@ export async function runtime(
     async setBindings(
       bindings: Record<string, string>,
       overrides: {
-        outboundService?: (request: Request) => Promise<Response>;
+        outboundService?: Parameters<typeof startRuntime>[0]['outboundService'];
         log?: Log;
         handleRuntimeStdio?: (stdout: Readable, stderr: Readable) => void;
         cf?: Record<string, unknown> | false;

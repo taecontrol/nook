@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { createServer } from 'node:http';
 import { isDeepStrictEqual } from 'node:util';
 import { decodeJwt, generateKeyPair } from 'jose';
 import { Log, LogLevel } from 'miniflare';
@@ -15,6 +16,7 @@ async function loggedRuntime(options: Parameters<typeof runtime>[0] = {}) {
   const bindings = { VAULT_KEY: vaultKey, ...options.bindings };
   const app = await runtime({ ...options, bindings });
   const logs: string[] = [];
+  const workerLogs: string[] = [];
   class AuthLog extends Log {
     override log(message: string) {
       logs.push(message);
@@ -24,10 +26,13 @@ async function loggedRuntime(options: Parameters<typeof runtime>[0] = {}) {
     log: new AuthLog(LogLevel.VERBOSE),
     handleRuntimeStdio(stdout, stderr) {
       for (const stream of [stdout, stderr])
-        stream.on('data', (chunk) => logs.push(chunk.toString()));
+        stream.on('data', (chunk) => {
+          logs.push(chunk.toString());
+          workerLogs.push(chunk.toString());
+        });
     },
   });
-  return { ...app, logs };
+  return { ...app, logs, workerLogs };
 }
 
 function rejectionLines(logs: string[]) {
@@ -55,6 +60,7 @@ async function expectRejection(
 ) {
   const query = `private-query=${randomUUID()}`;
   target.logs.length = 0;
+  target.workerLogs.length = 0;
   const response = await fetch(`${target.origin}${path}?${query}`, {
     method,
     headers: token ? { 'Cf-Access-Jwt-Assertion': token } : {},
@@ -86,6 +92,10 @@ async function expectRejection(
   });
   const lines = rejectionLines(target.logs);
   expect(lines.length, 'E5: exactly one rejection line per request').toBe(1);
+  expect(
+    target.workerLogs.join('').trim().split(/\r?\n/).length,
+    'E5: no additional Worker log lines, including raw verifier or fetch errors',
+  ).toBe(1);
   let logged: unknown;
   try {
     const line = lines[0];
@@ -394,28 +404,47 @@ it.each(['http', 'network'] as const)(
   async (failure) => {
     const fresh = await accessFixture();
     let attempts = 0;
-    const isolate = await loggedRuntime({
-      bindings: access,
-      outboundService: async (request) => {
-        attempts++;
-        if (attempts === 1 && failure === 'network')
-          throw new Error('Synthetic JWKS network failure');
-        return attempts === 1
-          ? new Response('Unavailable', { status: 503 })
-          : fresh.outboundService(request);
-      },
+    let failing = true;
+    const server = createServer(async (request, response) => {
+      attempts++;
+      if (failing) {
+        if (failure === 'network') response.destroy();
+        else response.writeHead(503).end(Object.values(access).join(' '));
+        return;
+      }
+      const result = await fresh.outboundService(
+        new Request(new URL(request.url ?? '/', access.ACCESS_ISSUER)),
+      );
+      response.writeHead(result.status).end(await result.text());
     });
+    await new Promise<void>((accept) => server.listen(0, '127.0.0.1', accept));
+    const address = server.address();
+    if (typeof address !== 'object' || !address)
+      throw new Error('Synthetic JWKS server unavailable');
+    let isolate: Awaited<ReturnType<typeof loggedRuntime>> | undefined;
     try {
+      isolate = await loggedRuntime({
+        bindings: access,
+        outboundService: {
+          external: { address: `127.0.0.1:${address.port}`, http: {} },
+        },
+      });
       const token = await fresh.assertion();
+      const origin = isolate.origin;
       const send = () =>
-        fetch(`${isolate.origin}/api/whoami`, {
+        fetch(`${origin}/api/whoami`, {
           headers: { 'Cf-Access-Jwt-Assertion': token },
         });
       await expectRejection(isolate, token, 'certs-unavailable');
+      failing = false;
       expect((await send()).status).toBe(200);
       expect(attempts).toBe(2);
     } finally {
-      await isolate.close();
+      await isolate?.close();
+      await new Promise<void>((accept) => {
+        server.close(() => accept());
+        server.closeAllConnections();
+      });
     }
   },
 );
