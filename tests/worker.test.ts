@@ -35,9 +35,19 @@ async function loggedRuntime(options: Parameters<typeof runtime>[0] = {}) {
   return { ...app, logs, workerLogs };
 }
 
+// Stdout chunks can split a line, and workerd may flush it after the response.
+async function completeWorkerOutput(target: { workerLogs: string[] }) {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    const output = target.workerLogs.join('');
+    if (output.trim() && output.endsWith('\n')) return output;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return target.workerLogs.join('');
+}
+
 function rejectionLines(logs: string[]) {
   return logs
-    .join('\n')
+    .join('')
     .split(/\r?\n/)
     .filter((line) => line.includes('auth-rejected'));
 }
@@ -69,6 +79,7 @@ async function expectRejection(
   expect(await response.text()).toBe(
     status === 401 ? '{"_tag":"Unauthorized"}' : '{"_tag":"Forbidden"}',
   );
+  const output = await completeWorkerOutput(target);
   let claims: Record<string, unknown> = {};
   try {
     if (token) claims = decodeJwt(token);
@@ -76,7 +87,7 @@ async function expectRejection(
     // Malformed JWS has no readable claims; its full text is still private.
   }
   rejections.push({
-    logs: target.logs.join('\n'),
+    logs: [...target.logs, output].join('\n'),
     privateValues: [
       ...Object.values(access),
       vaultKey,
@@ -90,10 +101,10 @@ async function expectRejection(
       }),
     ],
   });
-  const lines = rejectionLines(target.logs);
+  const lines = rejectionLines([output]);
   expect(lines.length, 'E5: exactly one rejection line per request').toBe(1);
   expect(
-    target.workerLogs.join('').trim().split(/\r?\n/).length,
+    output.trim().split(/\r?\n/).length,
     'E5: no additional Worker log lines, including raw verifier or fetch errors',
   ).toBe(1);
   let logged: unknown;

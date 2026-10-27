@@ -742,8 +742,9 @@ assertion, claim values, configured values, and query string out of captured
 logs. Valid and synthetic local owners emit no rejection. The malformed
 assertion fixture uses random hexadecimal bytes so its text cannot collide
 with the public `malformed-assertion` reason; E6's assertion is unchanged.
-The log observer also requires exactly one line across the Worker's stdout
-and stderr, so raw JWKS errors cannot escape the check by omitting the event
+The log observer waits for the Worker's newline-terminated output, which
+workerd may split across chunks or flush after the response, and requires
+exactly one line across its stdout and stderr, so raw JWKS errors cannot escape the check by omitting the event
 name. A loopback HTTP issuer either returns a failure body containing synthetic
 private values or closes the socket before sending a response. The latter
 exercises a real fetch rejection: throwing from Miniflare's JavaScript outbound
