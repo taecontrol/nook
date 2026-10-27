@@ -905,7 +905,7 @@ it('E15: approval, approved result, and deployment guidance direct later access 
     expect(await visit.page.locator('main').innerText()).toContain(
       'To change access later, edit it in Machines.',
     );
-    const guidance = await readFile('docs/deployment.md', 'utf8');
+    const guidance = await readFile('docs/install.md', 'utf8');
     expect(guidance).toContain(
       'To change access, use Edit access in Machines.',
     );

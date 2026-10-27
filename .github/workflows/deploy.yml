@@ -107,3 +107,19 @@ jobs:
             done
           fi
           pnpm exec wrangler deploy --domain "$NOOK_HOSTNAME"
+          # Keep this advisory name-only check independent of the deploy result.
+          guide="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/main/docs/install.md#9-set-the-worker-secrets"
+          if secrets=$(pnpm exec wrangler secret list --format json 2>/dev/null) &&
+            missing=$(printf '%s' "$secrets" | node --input-type=module -e '
+              let input = "";
+              for await (const part of process.stdin) input += part;
+              const secrets = JSON.parse(input);
+              const required = ["ACCESS_ISSUER", "ACCESS_AUDIENCE", "OWNER_EMAIL", "VAULT_KEY"];
+              console.log(required.filter(name => !secrets.some(secret => secret.name === name)).join(", "));
+            ' 2>/dev/null); then
+            if [ -n "$missing" ]; then
+              printf 'Missing Worker secrets: %s. See [Set the Worker secrets](%s).\n' "$missing" "$guide" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            fi
+          else
+            printf 'The Worker secret check could not run. See [Set the Worker secrets](%s).\n' "$guide" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          fi

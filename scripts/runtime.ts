@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { build } from 'esbuild';
-import { Miniflare } from 'miniflare';
+import { type ExternalServer, Miniflare } from 'miniflare';
 import { unstable_readConfig } from 'wrangler';
 import { applyMigrations } from './lib/migrations.ts';
 import { embeddingRecordings, SearchStandIns } from './search-stand-ins.ts';
@@ -13,7 +13,9 @@ export function runtimeOptions(options: {
   syntheticOwner?: boolean;
   strictEmbeddings?: boolean;
   coverage?: boolean;
-  outboundService?: (request: Request) => Promise<Response>;
+  outboundService?:
+    | ((request: Request) => Promise<Response>)
+    | { external: ExternalServer };
   r2Buckets?: string[];
 }) {
   const config = unstable_readConfig({
