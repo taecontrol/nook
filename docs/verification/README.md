@@ -99,7 +99,7 @@ The load-time stage uses Chromium against the uninstrumented production build an
 
 Intent navigation tracks requests from before Home loads through hover, then requires a fresh 500 ms without active requests before clicking. A previously reached document `networkidle` state cannot satisfy that wait. Completed and failed requests release the tracker, which has a bounded 15 s wait and removes its listeners on exit; the unfinished-preload test injects a 1 s bound. `load-time-browser.test.ts` holds the real bucket preload after Home is already idle and measures the interval from response completion to the navigation click. The 100 ms navigation budget begins at that click and remains unchanged.
 
-The CLI approval suite captures twelve states at 1440×900 and 390×844 in light, plus pending, approved, and expired in dark. Thirty `cli-authorize-*` PNGs and a mobile brand-focus capture share `.local/verification/screenshots/` and CI screenshot artifacts. The chosen Enter-the-code prototype is the fidelity reference. Checking stays on step one as recommended by the judge; the brand focus ring remains within the mobile viewport and long names wrap below the input. Focus captures disable animations so the ring has settled. `tests/cli-*.test.ts` proves accepted CLI login examples; production Access and Omarchy captures (E25) remain the owner’s post-deployment step in [deployment.md](../deployment.md).
+The CLI approval suite captures twelve states at 1440×900 and 390×844 in light, plus pending, approved, and expired in dark. Thirty `cli-authorize-*` PNGs and a mobile brand-focus capture share `.local/verification/screenshots/` and CI screenshot artifacts. The chosen Enter-the-code prototype is the fidelity reference. Checking stays on step one as recommended by the judge; the brand focus ring remains within the mobile viewport and long names wrap below the input. Focus captures disable animations so the ring has settled. `tests/cli-*.test.ts` proves accepted CLI login examples; local evidence does not establish hosted Access behavior.
 
 Session concurrency tests run overlapping real login/logout processes against one private keyring, including different config directories and a held keyring deletion. A Linux abstract socket coordinates credential-changing commands for the same user and actual Secret Service bus ID, obtained by the real `dbus-send`; it carries no credential and disappears on process exit. Private-bus aliases omit guid, escape the path, use a symlink, or add a failed fallback address; each proves the same bus ID before running the CLI. On macOS, real CLI concurrency tests use an empty HOME-scoped `session.lock` opened with `O_EXLOCK | O_NONBLOCK`; another config directory shares that lock. SIGKILL and denied-login tests prove subsequent commands can proceed on both platforms. D1 failure tests use real aborting SQL triggers to prove rollback and retry of creation, approval, exchange, and revocation. Request-time assertions bracket the creation call so a shifted ten-minute deadline cannot pass by preserving only the difference between stored timestamps. Approval retries prove that retrying Deny never grants access, including with an empty machine name.
 
@@ -119,7 +119,7 @@ Real CLI processes use the private Secret Service fixture to prove the single JS
 
 The load-time stage adds five phone-network samples for code acceptance to the rendered, preloaded approval tree. Its median must be at most 100 ms. Step one requests buckets before lookup; step two uses the same cached query with no extra loading screen. Existing cold-open and navigation limits remain mandatory.
 
-`pnpm test tests/machine-grant-captures.test.ts` records the 12 accepted Inline tree scenarios at 1440×900 and 390×844 in light and dark. The `machine-grant-*` viewport and full-page PNGs live in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare them with reference A in `.work/prototypes/machine-grant/candidates/inline-tree/shots/`, accounting for DECISION.md's production corrections. E23 remains the owner's post-deployment capture for both real clients, documented in [deployment.md](../deployment.md#e23-owner-capture-after-deployment-pending).
+`pnpm test tests/machine-grant-captures.test.ts` records the 12 accepted Inline tree scenarios at 1440×900 and 390×844 in light and dark. The `machine-grant-*` viewport and full-page PNGs live in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare them with reference A in `.work/prototypes/machine-grant/candidates/inline-tree/shots/`, accounting for DECISION.md's production corrections. Local synthetic-credential evidence does not establish hosted integration with both real clients.
 
 ## Editing machine access
 
@@ -185,7 +185,7 @@ UI metadata refresh waits for an active write's response to settle. Intent, rout
 
 The load-time stage seeds the representative nine secrets and their buckets in the uninstrumented production target. It uses the existing 9 Mbps/3 Mbps/85 ms profile, cache disabled, five runs, and animation-frame marks for both the loaded outline and secret rows. Vault uses the existing Home/Buckets viewport; the responsive phone journey is verified separately in Chromium. The Home Tools card and sidebar both preload Vault's route and single metadata query on intent. Sample validity and budgets remain fixed and independently enforced.
 
-Production foreign keys and the approximately 85 KiB bound ciphertext parameter remain the owner's [post-deployment smoke test](../deployment.md#vault-key-and-post-deployment-smoke-test). Local evidence does not claim production execution.
+Local evidence does not establish production foreign-key enforcement or the approximately 85 KiB bound ciphertext parameter in hosted D1.
 
 ## Audited command delivery
 
@@ -285,7 +285,7 @@ another: recorded reveals may exceed displayed values, never the reverse.
 
 `migrations/NNNN_name.sql` files are applied in order using Wrangler's SQL splitter and one atomic D1 batch per file, including its `d1_migrations` record. `migrations/schema.sql` is a snapshot, not a migration. The D1 binding's `migrations_pattern` selects only numbered files; a local Wrangler acceptance test proves that it excludes the snapshot and preserves replay. Verification uses fresh Miniflare databases, checks an idempotent replay, and applies the latest file to the previous schema containing a sentinel bucket. Both final normalized schemas must match the snapshot, and the sentinel must remain unchanged. A second migration enforces the reserved `me` invariant at the database boundary.
 
-Fetch `origin/main` before verification: a migration present there cannot change or disappear. SQL errors, schema drift, and `BEGIN TRANSACTION` fail the gate. Deployment relies on the commit's successful Verify run instead of repeating it, builds, creates the named database if missing, applies remote migrations, then deploys the Worker. Production acceptance remains an owner step described in [deployment.md](../deployment.md).
+Fetch `origin/main` before verification: a migration present there cannot change or disappear. SQL errors, schema drift, and `BEGIN TRANSACTION` fail the gate. Deployment relies on the commit's successful Verify run instead of repeating it, builds, creates the named database if missing, applies remote migrations, then deploys the Worker. Local migration evidence does not claim production execution.
 
 `tests/cli-release.test.ts` proves that `nook version` prints `{"version":"X.Y.Z"}` from `apps/cli/package.json`, the only version source, and that the CLI bundle runs as a Node single executable with no Node on `PATH`. It runs in the Linux shards and the macOS CLI job. Verify's `linux-binary` job (Linux x64) and the `macos-cli` job (macOS arm64) also run `node scripts/release/binary.ts`, the release packaging step, which checks `nook version` under `env -i PATH=/usr/bin:/bin`. `tests/release-archive.test.ts` extracts a release archive with the system `tar` and requires exactly the executable, byte for byte, beside a `sha256sum` checksum. `tests/release-rollback.test.ts` runs the release workflow's own publish and unpublish scripts against a local bare repository with stub `gh` and `ssh`: a failed release deletes the tag it pushed and the release it created, and neither script passes the deploy key in an argument list. The release workflow's own checks are described in [releasing](../releasing.md).
 
@@ -365,7 +365,7 @@ Issue #11 uses the production Worker bundle, migrated D1, and its genuine schedu
 | E21 | `memory-search-reference-captures.test.ts`: eleven states × two sizes × two themes, 44 genuine-product PNGs. |
 | E22 | `tests/journeys/owner.e2e.ts`: deterministic strict-cache search and opening of the Spanish ancestor memory. |
 | E23 | `memory-search-deploy.test.ts`: the workflow's actual shell against a temporary command fixture, missing index/metadata combinations, idempotent reruns, delayed metadata readiness and timeout without deployment. |
-| E24 | Pending owner production acceptance in [deployment.md](../deployment.md#search-e24-owner-acceptance-after-merge-pending). |
+| E24 | Hosted search integration is outside local synthetic-index evidence. |
 
 `tests/fixtures/bge-m3.json.gz` records exact-text embeddings from the authorized bge-m3 experiment. `scripts/record-search-fixtures.ts` is an explicit, separate recording tool and never runs in verification. The strict embedder rejects unrecorded input; `memory-search-stand-ins.test.ts` also proves the observed Vectorize metadata-index timing, upsert replacement, delayed visibility and request limits. D1 round trips and AI/index calls are counted without recording SQL or bindings. Dense 16 KiB content, large bilingual content and six-level paths with valid 32-character segments are included.
 
@@ -417,7 +417,7 @@ tripwire remain mandatory under `pnpm verify`.
 | E28 | `memory-history-web.test.ts` observes separate lazy sheet and diff script requests. Existing `memory-load-time.test.ts`, `load-time.test.ts` and `pnpm verify:load-time` retain the five-sample 4G budgets of 1000 ms cold and 100 ms after intent. |
 | E29 | `memory-history-captures.test.ts`: all seven chosen Sheet scenarios and reading/list/version/changes states at 1440×900 and 390×844 in both themes. Loading gates a genuine response; failure injects a service failure. |
 | E30 | `tests/journeys/owner.e2e.ts`: real MCP remember/update, current reading content, exactly two history versions with their writers, version-one text with disabled Show changes and "First version, nothing to compare", then the newer arrow to version two and its directional source diff. Deterministic locators run under `pnpm test:journey` after `pnpm test`, with mandatory strict cache replay and zero retries. |
-| E31 | Pending owner hosted acceptance in [deployment.md](../deployment.md#memory-update-e31-owner-acceptance-after-deployment-pending). |
+| E31 | Hosted metadata and freshness are outside local synthetic-index evidence. |
 
 The `memory-history-*.png` captures are in
 `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare
@@ -444,9 +444,8 @@ inspection and marker invalidation even when pending embedding repair fails.
 
 The inspection acknowledgement case prepares the replacement-model marker in
 real D1; it tests conditional invalidation without claiming a two-deployment
-hosted integration. The owner completes hosted metadata and freshness evidence
-in E31. Sweep setup uses explicit scheduled times and advances the stand-in's
-asynchronous vector visibility between repair runs, so the assertions do not
+hosted integration. Sweep setup uses explicit scheduled times and advances
+the stand-in's asynchronous vector visibility between repair runs, so the assertions do not
 depend on the wall-clock rotation window.
 
 The existing 104-memory search corpus also advances vector visibility after
@@ -517,8 +516,8 @@ capture suites in that shard. The descriptive visual/reference filenames
 redistribute them using the existing sequencer. All cases, assertions, four
 Linux shards, coverage requirements and timeouts remain unchanged.
 
-Hosted deleteByIds call limits, unknown-id behavior and propagation remain the
-owner's [post-deployment acceptance](../deployment.md#forget-owner-acceptance-after-deployment-pending).
+Local synthetic-index evidence does not establish hosted deleteByIds call
+limits, unknown-id behavior, or propagation timing.
 
 Refine first found a held keyword search returning forgotten snippets and a
 lost DELETE response restoring stale detail. Both now have failing-before-fix
@@ -600,7 +599,7 @@ test wrapper.
 | E28 | `memory-files-owner-captures.test.ts`: sixty production reader/sheet/Details/scroll-end PNGs for prototype C, described below. |
 | E29 | `memory-files-web.test.ts`: separate intent-loaded Files script. `memory-load-time.test.ts` proves the added production reader measurements open the memory holding the attachment and render its Files count. `load-time.test.ts` and `pnpm verify:load-time` require their five-sample 4G medians (1000 ms cold, 100 ms after intent), alongside all existing measurements. |
 | E30 | `memory-files-migrations.test.ts`, `pnpm verify:migrations`: empty/migrated/populated schema replay, complete Vault audit preservation and bucket backfill from the pre-file schema, previous-writer trigger, and actual previous-Worker forget refusing attached files with 503. |
-| E31 | Hosted capture remains pending: [Memory file owner acceptance after deployment](../deployment.md#memory-file-e31-owner-acceptance-after-deployment-pending) requires a cross-machine 25 MiB digest match, workflow-created R2 bucket and owner download Audit with IP/country. |
+| E31 | Local evidence does not establish a hosted cross-machine 25 MiB digest match, real R2 provisioning, or edge-supplied download Audit IP/country. |
 
 `memory-files-owner-captures.test.ts` produces sixty production PNGs under
 `.local/verification/screenshots/memory-files-*.png`: reader and Files sheet
@@ -734,3 +733,26 @@ mutation that a remaining test turns red. It also strengthened weak oracles:
 the CLI client provenance, the 256-byte refusal message, dangling-symlink
 refusal, the exact detach result and messages, and the clock-crossing
 publication outcome.
+## Self-hosted installation
+
+`worker.test.ts` installation E5–E7 drives the built Worker under workerd
+with a synthetic Access issuer. Each rejection keeps its original status
+and byte-identical body, writes exactly one public reason, and keeps the
+assertion, claim values, configured values, and query string out of captured
+logs. Valid and synthetic local owners emit no rejection. The malformed
+assertion fixture uses random hexadecimal bytes so its text cannot collide
+with the public `malformed-assertion` reason; E6's assertion is unchanged.
+
+`configuration.test.ts` E8 requires observability while its existing E5
+still forbids installation identifiers. Automatic invocation logs are disabled
+to avoid full request URLs; custom rejection logs remain enabled.
+`installation-deploy.test.ts` E9 runs the actual deployment shell with fake
+Wrangler responses, proving name-only missing-secret summaries, advisory
+list failures, and no secret check after a failed deployment. Wrangler
+4.147.0's locked implementation and its [command documentation](https://developers.cloudflare.com/workers/wrangler/commands/workers/#secret-list)
+confirm `--format json` lists name/type records without values.
+
+The installation guide is reviewed against E10's fourteen steps; the operations
+reference and README fulfill E11. Existing MCP inventory and access-guidance
+tests now read `docs/install.md`; their assertions are unchanged. E1–E4
+require a real Cloudflare installation and are not claimed by local verification.

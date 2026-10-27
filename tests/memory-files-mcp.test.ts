@@ -266,10 +266,10 @@ describe.each(['owner', 'machine'] as const)(
       },
     );
     once(
-      'E19: the deployment MCP inventory matches the real tools/list response',
+      'E19: the installation MCP inventory matches the real tools/list response',
       async () => {
         const { tools } = await client.listTools();
-        const documentation = await readFile('docs/deployment.md', 'utf8');
+        const documentation = await readFile('docs/install.md', 'utf8');
         const inventory = /Nook serves[^\n]+/.exec(documentation)?.[0] ?? '';
         const documented = [...inventory.matchAll(/`([a-z_]+)`/g)].map(
           (match) => match[1],
