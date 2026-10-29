@@ -680,16 +680,14 @@ it('E14: deleting the target bucket after Review fails every selected key with B
 });
 
 async function cancelPendingReload(page: Page) {
+  const url = page.url();
   const warning = page.waitForEvent('dialog');
-  const reload = page.reload({ timeout: 5000 }).catch((error: Error) => {
-    expect(error.message).toMatch(
-      /ERR_ABORTED|Navigation.*(cancel|interrupt)/i,
-    );
-  });
+  const reload = page.evaluate(() => window.location.reload());
   const dialog = await warning;
   expect(dialog.type()).toBe('beforeunload');
   await dialog.dismiss();
   await reload;
+  expect(page.url()).toBe(url);
 }
 
 async function checkPendingControls(page: Page, originalValue: string) {

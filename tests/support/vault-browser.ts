@@ -156,10 +156,20 @@ export async function privateClientState(
               .getAll()
               .map((entry) => (entry as { state: unknown }).state),
           };
+          // A metadata UUID can contain a short value such as PORT=4000 by
+          // chance. Still detect any complete private value, including a UUID.
+          const privateText = (text: string) =>
+            /^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(
+              text,
+            ) && !privateValues.includes(text)
+              ? ''
+              : text;
           const seen = new WeakSet<object>();
           const containsValue = (value: unknown): boolean => {
             if (typeof value === 'string')
-              return privateValues.some((secret) => value.includes(secret));
+              return privateValues.some((secret) =>
+                privateText(value).includes(secret),
+              );
             if (!value || typeof value !== 'object' || seen.has(value))
               return false;
             seen.add(value);
@@ -171,7 +181,9 @@ export async function privateClientState(
               containsValue((value as Record<string, unknown>)[key]),
             );
           };
-          const cache = JSON.stringify(retained);
+          const cache = JSON.stringify(retained, (_key, value) =>
+            typeof value === 'string' ? privateText(value) : value,
+          );
           const dom = `${document.documentElement.innerHTML} ${Array.from(
             document.querySelectorAll('textarea, input'),
           )
