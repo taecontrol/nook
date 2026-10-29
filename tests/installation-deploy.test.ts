@@ -19,9 +19,17 @@ const requiredSecrets = [
   'VAULT_KEY',
 ];
 
-it.each(['none', 'issuer-only', 'complete', 'list-failed', 'deploy-failed'])(
-  'installation E9: the real deploy shell checks secret names without changing its result: %s',
-  async (state) => {
+it.each([
+  ['none', 'file'],
+  ['issuer-only', 'file'],
+  ['complete', 'file'],
+  ['list-failed', 'file'],
+  ['deploy-failed', 'file'],
+  ['none', 'directory'],
+  ['list-failed', 'directory'],
+])(
+  'installation E9: the real deploy shell checks secret names without changing its result: %s, summary %s',
+  async (state, summaryKind) => {
     const workflow = parse(
       await readFile('.github/workflows/deploy.yml', 'utf8'),
     );
@@ -34,7 +42,8 @@ it.each(['none', 'issuer-only', 'complete', 'list-failed', 'deploy-failed'])(
     try {
       await mkdir(resolve(directory, 'home'));
       await writeFile(calls, '[]');
-      await writeFile(summary, '');
+      if (summaryKind === 'directory') await mkdir(summary);
+      else await writeFile(summary, '');
       await writeFile(
         resolve(directory, 'pnpm'),
         `#!/usr/bin/env node
@@ -75,7 +84,9 @@ ${step.run}`,
           timeout: 10_000,
         },
       );
-      expect(result.status).toBe(state === 'deploy-failed' ? 1 : 0);
+      expect(result.status, result.stderr).toBe(
+        state === 'deploy-failed' ? 1 : 0,
+      );
       const observed = JSON.parse(await readFile(calls, 'utf8')) as string[][];
       const secretCommands = observed.filter((args) => args[2] === 'secret');
       expect(secretCommands).toEqual(
@@ -87,10 +98,12 @@ ${step.run}`,
         expect(
           observed.findIndex((args) => args[2] === 'secret'),
         ).toBeGreaterThan(observed.findIndex((args) => args[2] === 'deploy'));
-      const text = await readFile(summary, 'utf8');
+      const text =
+        summaryKind === 'file' ? await readFile(summary, 'utf8') : '';
       const output = `${text}\n${result.stdout}\n${result.stderr}`;
       expect(output.includes('UNRELATED_NAME_CANARY')).toBe(false);
       expect(output.includes('private-command-error-canary')).toBe(false);
+      if (summaryKind === 'directory') return;
       if (state === 'complete' || state === 'deploy-failed') {
         expect(text).toBe('');
       } else if (state === 'list-failed') {
