@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
+import type { Readable } from 'node:stream';
 import { isDeepStrictEqual } from 'node:util';
 import { decodeJwt, generateKeyPair } from 'jose';
 import { Log, LogLevel } from 'miniflare';
@@ -17,6 +18,7 @@ async function loggedRuntime(options: Parameters<typeof runtime>[0] = {}) {
   const app = await runtime({ ...options, bindings });
   const logs: string[] = [];
   const workerLogs: string[] = [];
+  const workerStdio: Readable[] = [];
   class AuthLog extends Log {
     override log(message: string) {
       logs.push(message);
@@ -25,6 +27,7 @@ async function loggedRuntime(options: Parameters<typeof runtime>[0] = {}) {
   await app.setBindings(bindings, {
     log: new AuthLog(LogLevel.VERBOSE),
     handleRuntimeStdio(stdout, stderr) {
+      workerStdio.splice(0, workerStdio.length, stdout, stderr);
       for (const stream of [stdout, stderr])
         stream.on('data', (chunk) => {
           logs.push(chunk.toString());
@@ -32,7 +35,7 @@ async function loggedRuntime(options: Parameters<typeof runtime>[0] = {}) {
         });
     },
   });
-  return { ...app, logs, workerLogs };
+  return { ...app, logs, workerLogs, workerStdio };
 }
 
 // Stdout chunks can split a line, and workerd may flush it after the response.
@@ -204,6 +207,8 @@ describe('E1 / installation E5: Access identity through HTTP to the built Worker
         status: 403,
       },
     );
+    // Deliver any follow-up request's real workerd output during E7 instead.
+    for (const stream of app.workerStdio) stream.pause();
     const response = await request(
       '/api/whoami',
       await issuer.assertion({ email: other }),
@@ -216,6 +221,7 @@ describe('E1 / installation E5: Access identity through HTTP to the built Worker
   });
   it('E7: returns exactly the verified owner email without a rejection log', async () => {
     app.logs.length = 0;
+    for (const stream of app.workerStdio) stream.resume();
     const response = await request('/api/whoami', await issuer.assertion());
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ email: access.OWNER_EMAIL });
