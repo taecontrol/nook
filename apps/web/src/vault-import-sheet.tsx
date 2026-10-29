@@ -67,7 +67,6 @@ type Row = ImportRow & { group: Group };
 type Skipped = Run['skipped'][number];
 type Step = 'paste' | 'review' | 'run';
 const NAME_MAX = secretLimits.name;
-const DESCRIPTION_MAX = secretLimits.description;
 
 export const sectionLabel =
   'text-xs font-medium tracking-wider text-muted-foreground uppercase';
@@ -351,7 +350,6 @@ function ReviewRow({
           </div>
           <Input
             value={row.description}
-            maxLength={DESCRIPTION_MAX}
             placeholder="Description (optional)"
             aria-label={`Description for ${row.name}`}
             aria-invalid={status === 'invalid-description' || undefined}

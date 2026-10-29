@@ -240,6 +240,34 @@ it('E5: an overlong description blocks only its row with the contract message an
   }
 });
 
+it('E5: a valid description of 200 Unicode characters reaches storage without native truncation', async () => {
+  const visit = await importPage(browser);
+  const description = '😀'.repeat(200);
+  try {
+    await reviewPaste(
+      visit.page,
+      'UNICODE_DESCRIPTION=synthetic-unicode-description',
+    );
+    const field = importSheet(visit.page).getByRole('textbox', {
+      name: 'Description for UNICODE_DESCRIPTION',
+      exact: true,
+    });
+    await field.fill(description);
+    expect(await field.inputValue()).toBe(description);
+    await createImport(visit.page, 1);
+    await importSettled(visit.page);
+    await expectOutcome(visit.page, 'UNICODE_DESCRIPTION', 'Created');
+    expect(visit.traffic.posts[0].description).toBe(description);
+    expect(
+      (await listSecrets(visit.app)).find(
+        (secret) => secret.name === 'UNICODE_DESCRIPTION',
+      )?.description,
+    ).toBe(description);
+  } finally {
+    await visit.close();
+  }
+});
+
 it('E7: 101 keys stay on Paste with a count and trim guidance; exactly 100 reach Review without a write', async () => {
   const visit = await importPage(browser);
   const { page } = visit;
