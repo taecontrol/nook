@@ -114,35 +114,36 @@ function BucketField({
   compact?: boolean;
 }) {
   return (
-    <Field
-      orientation="horizontal"
-      className={
-        compact
-          ? 'flex-col items-start sm:flex-row sm:flex-wrap sm:items-center'
-          : 'flex-col items-start'
-      }
-    >
-      <FieldLabel htmlFor="import-bucket" className="flex-none">
-        Bucket
-      </FieldLabel>
-      <Select value={bucket} onValueChange={onBucket}>
-        <SelectTrigger
-          id="import-bucket"
-          className={compact ? 'w-full sm:w-auto' : 'w-full'}
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {buckets.map((path) => (
-            <SelectItem key={path} value={path}>
-              <span className="font-mono">{path}</span>
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <FieldDescription>
-        {reachText(bucket, parents.has(bucket), 'them')}
-      </FieldDescription>
+    <Field orientation="horizontal">
+      <div
+        className={
+          compact
+            ? 'flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3'
+            : 'flex w-full flex-col gap-3'
+        }
+      >
+        <FieldLabel htmlFor="import-bucket" className="flex-none">
+          Bucket
+        </FieldLabel>
+        <Select value={bucket} onValueChange={onBucket}>
+          <SelectTrigger
+            id="import-bucket"
+            className={compact ? 'w-full sm:w-auto' : 'w-full'}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {buckets.map((path) => (
+              <SelectItem key={path} value={path}>
+                <span className="font-mono">{path}</span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <FieldDescription>
+          {reachText(bucket, parents.has(bucket), 'them')}
+        </FieldDescription>
+      </div>
     </Field>
   );
 }
