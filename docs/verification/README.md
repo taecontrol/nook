@@ -187,6 +187,36 @@ The load-time stage seeds the representative nine secrets and their buckets in t
 
 Local evidence does not establish production foreign-key enforcement or the approximately 85 KiB bound ciphertext parameter in hosted D1.
 
+## Vault import
+
+The import uses the existing owner create endpoint and write-id contract. The
+browser suite runs the built SPA and Worker with migrated D1, a synthetic owner
+and Vault key, and a temporary Chromium profile. No new endpoint, schema or audit
+entry is introduced.
+
+| Examples | Evidence |
+| --- | --- |
+| E1–E2 | `env-parse.test.ts` checks starting line numbers, redaction and dotenv parity for comments, exports, quoting, multiline values, literal references, CRLF, UTF-8, empty values and the 64 KiB boundary. It preserves duplicate entries and reports unreadable line numbers only. `vault-import-model.test.ts` checks the mixed review; `vault-import-web.test.ts` verifies the resulting values against independent decryption, including a 100-key round trip. |
+| E3–E4 | `vault-import-model.test.ts` checks duplicates, exclusion, renaming and the contract's name validator. |
+| E5 | The model suite checks the UTF-8 value limit, empty values and description validation. The browser suite proves an invalid description blocks only its key and renders the contract message. |
+| E6–E8 | Both model and browser suites check bucket changes, the 100-key cap and selection counts, including a disabled Create 0 secrets. |
+| E9 | `vault-import-web.test.ts` holds genuine requests to require distinct write ids, at most three requests in flight, optimistic saving rows and exactly one metadata list after settlement. It decrypts the created values and verifies existing secrets stay unchanged. |
+| E10–E14 | The browser suite uses a real concurrent writer, aborting D1 triggers and lost responses after genuine Worker commits. It covers automatic and manual retry with the same ids, all three list-reconciled outcomes, a lost list, missing Vault keys and a deleted target bucket. |
+| E15 | The browser suite holds requests through closing the Sheet and navigating to Memory and back. It verifies disabled writes, available Reveal, the progress notice and a native leave warning only while keys are pending. `vault-import-privacy-web.test.ts` observes every mutation transition to prove the gate has no gap between keys. |
+| E16–E17 | The browser suite checks that review, progress and results expose no values, creation clears the paste, and Done leaves no imported value in the DOM, Query cache or mutation state. Retry disappears and reopening starts empty. `vault-import-privacy-web.test.ts` proves the privacy probe detects retained text and exact private UUIDs while avoiding accidental matches inside unrelated metadata UUIDs. |
+| E18–E19 | The browser suite requires no requests before Create, only checked Ready keys in request bodies, no overwrite or delete, and unchanged Audit history. |
+| E20 | Delivery captures cover seven states at 1440×900 and 390×844 in light and dark, compared with the accepted Sheet design. This is delivery evidence, not a CI check; capture-suite upkeep is tracked in issue #84. |
+| E20a | `vault-import-web.test.ts` checks mixed review and partial results at both viewports for horizontal overflow, application console errors and page errors. Deliberately lost HTTP responses remain genuine network failures. |
+| E21 | `load-time.test.ts` and `pnpm verify:load-time` retain five-sample medians for cold `/vault` within 1000 ms and navigation after intent within 100 ms under the existing phone-network profile. |
+
+Import mutations retain metadata only. The session keeps redacted values outside
+Query and mutation state until Done, including across in-app navigation. Queued
+mutations hold the existing write gate continuously while three request slots
+advance. Batch writes skip per-key feedback and invalidation; one final metadata
+read also reconciles Not confirmed rows through the existing version logic.
+The Sheet loads on import intent. Its Progress primitive comes from the official
+shadcn new-york-v4 registry and is recorded in the generated-component inventory.
+
 ## Audited command delivery
 
 The issue #5 acceptance suites run the production CLI with the private Linux/macOS keyring, the built Worker with migrated D1, and Chromium with a temporary profile and a fixed clock. No owner account, token, key, bus, or browser profile is used. The macOS job includes `run-cli.test.ts`; only the util-linux `script` TTY case is Linux-only.
