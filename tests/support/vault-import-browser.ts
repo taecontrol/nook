@@ -160,10 +160,10 @@ export async function expectOutcome(page: Page, name: string, status: string) {
 export async function expectCreated(page: Page, names: readonly string[]) {
   for (const name of names) await expectOutcome(page, name, 'Created');
 }
-export async function importSettled(page: Page) {
+export async function importSettled(page: Page, timeout?: number) {
   await importSheet(page)
     .getByRole('button', { name: 'Done', exact: true })
-    .waitFor();
+    .waitFor({ timeout });
   await page.waitForLoadState('networkidle');
 }
 export async function expectDomPrivate(page: Page, values = importedValues) {

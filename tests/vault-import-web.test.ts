@@ -1087,7 +1087,8 @@ it('E2/E7/E9: exactly 100 keys round-trip CRLF, a 64 KiB UTF-8 value, multiline 
   try {
     await reviewPaste(visit.page, text);
     await createImport(visit.page, 100);
-    await importSettled(visit.page);
+    // 100 writes at three in flight outlast the default wait on CI runners.
+    await importSettled(visit.page, 20_000);
     await expectCreated(visit.page, Object.keys(values));
     expect(visit.traffic.posts).toHaveLength(100);
     expectWriteIds(visit.traffic.posts, 100);
