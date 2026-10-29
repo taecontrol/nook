@@ -79,7 +79,8 @@ async function expectRejection(
     headers: token ? { 'Cf-Access-Jwt-Assertion': token } : {},
   });
   expect(response.status).toBe(status);
-  expect(await response.text()).toBe(
+  const body = await response.text();
+  expect(body).toBe(
     status === 401 ? '{"_tag":"Unauthorized"}' : '{"_tag":"Forbidden"}',
   );
   const output = await completeWorkerOutput(target);
@@ -129,6 +130,7 @@ async function expectRejection(
     }),
     'E5: the rejection line contains exactly the public fields',
   ).toBe(true);
+  return body;
 }
 
 beforeAll(async () => {
@@ -199,7 +201,7 @@ describe('E1 / installation E5: Access identity through HTTP to the built Worker
   });
   it('denies another identity without naming either email in the body', async () => {
     const other = 'other@nook.test';
-    await expectRejection(
+    const body = await expectRejection(
       app,
       await issuer.assertion({ email: other }),
       'not-owner',
@@ -207,14 +209,8 @@ describe('E1 / installation E5: Access identity through HTTP to the built Worker
         status: 403,
       },
     );
-    // Deliver any follow-up request's real workerd output during E7 instead.
+    // Keep unconsumed denial output pending across E7's log-buffer reset.
     for (const stream of app.workerStdio) stream.pause();
-    const response = await request(
-      '/api/whoami',
-      await issuer.assertion({ email: other }),
-    );
-    expect(response.status).toBe(403);
-    const body = await response.text();
     expect(body).not.toContain('@');
     expect(body).not.toContain(access.OWNER_EMAIL);
     expect(body).not.toContain(other);
