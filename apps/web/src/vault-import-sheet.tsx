@@ -128,7 +128,7 @@ function BucketField({
       <Select value={bucket} onValueChange={onBucket}>
         <SelectTrigger
           id="import-bucket"
-          className={compact ? 'w-full sm:w-56' : 'w-full'}
+          className={compact ? 'w-full sm:w-auto' : 'w-full'}
         >
           <SelectValue />
         </SelectTrigger>
