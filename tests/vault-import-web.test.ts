@@ -11,6 +11,7 @@ import {
   readyNames,
 } from './fixtures/vault-import.ts';
 import { auditRows } from './support/audit.ts';
+import { observeBrowserPage } from './support/buckets-browser.ts';
 import { revealSecret } from './support/reveal.ts';
 import {
   createSecret,
@@ -813,6 +814,7 @@ it('E15: pending import locks writes, permits Reveal and navigation, shows progr
       warnings.push(dialog.type());
       await dialog.dismiss();
     });
+    await observeBrowserPage(page);
     await page.reload();
     await page.getByRole('heading', { name: 'Vault', exact: true }).waitFor();
     expect(warnings).toEqual([]);

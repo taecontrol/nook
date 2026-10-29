@@ -47,8 +47,13 @@ function successFeedback(write: ObservedWrite): Feedback {
     message: message ?? `${past[op]} ${secret.path}.`,
   };
 }
+function hasPageFeedback(
+  write: ObservedWrite | undefined,
+): write is ObservedWrite {
+  return write !== undefined && !write.input.batch && write.status !== 'idle';
+}
 export function feedbackFor(write: ObservedWrite | undefined): Feedback | null {
-  if (!write || write.input.batch || write.status === 'idle') return null;
+  if (!hasPageFeedback(write)) return null;
   const { op, secret } = write.input;
   const path = secret.path;
   if (write.status === 'pending')
