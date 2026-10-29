@@ -7,7 +7,8 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import { Redacted } from 'effect';
-import { ApiError, runApi, writeOutcome } from './api-client';
+import { useRef } from 'react';
+import { ApiError, describeFailure, runApi, writeOutcome } from './api-client';
 import { preloadBuckets } from './buckets-api';
 import type { WriteOp } from './vault-state';
 import { createWriteGate, observedWrites } from './write-gate';
@@ -44,6 +45,17 @@ export type ObservedWrite = {
   revision: number;
   queued?: boolean;
 };
+export function failureMessage(write: ObservedWrite, error: ApiError) {
+  const { op, secret } = write.input;
+  const unchanged =
+    op === 'create' ? 'Nothing was stored.' : 'Nothing changed.';
+  if (error.tag === 'BucketNotFound') return 'Bucket not found.';
+  if (error.tag === 'SecretChanged')
+    return describeFailure(error, 'change secrets');
+  if (error.tag === 'SecretNotFound')
+    return `${secret.path} is no longer stored.`;
+  return describeFailure(error, 'change secrets', unchanged);
+}
 function without(secrets: readonly OwnerSecret[], path: string) {
   return secrets.filter((secret) => secret.path !== path);
 }
@@ -268,6 +280,7 @@ export function useSecretList() {
 export function useVault() {
   const queries = useQueryClient();
   const { secrets, writes, busy, write: latest } = useSecretState();
+  const values = useRef(new Map<string, Redacted.Redacted<string>>());
   return {
     secrets,
     busy,
@@ -288,7 +301,11 @@ export function useVault() {
       onError: (error: Error) => void,
     ) =>
       vaultGate.start(queries, () => {
-        void executeWrite(queries, input, Redacted.make(value)).catch(onError);
+        const redacted = Redacted.make(value);
+        values.current.set(input.writeId, redacted);
+        void executeWrite(queries, input, redacted)
+          .finally(() => values.current.delete(input.writeId))
+          .catch(onError);
       }),
   };
 }

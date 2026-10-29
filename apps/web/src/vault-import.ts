@@ -2,9 +2,10 @@ import { secretPath } from '@nook/contract';
 import { type QueryClient, useQueryClient } from '@tanstack/react-query';
 import type { Redacted } from 'effect';
 import { useSyncExternalStore } from 'react';
-import { ApiError, describeFailure } from './api-client';
+import { ApiError } from './api-client';
 import {
   executeWrite,
+  failureMessage,
   type ObservedWrite,
   readVaultWrites,
   refreshVault,
@@ -63,15 +64,19 @@ function keyFor(
   return {
     ...input.secret,
     outcome: state,
-    reason: state === 'failed' ? failureReason(write) : undefined,
+    reason: reasonFor(state, write),
   };
 }
 function failureReason(write: ObservedWrite | undefined) {
-  if (write?.error instanceof ApiError && write.error.tag === 'BucketNotFound')
-    return 'Bucket not found.';
+  if (!write) return undefined;
   return (
-    write?.result?.message ?? describeFailure(write?.error, 'change secrets')
+    write.result?.message ?? failureMessage(write, write.error as ApiError)
   );
+}
+function reasonFor(state: ImportOutcome, write: ObservedWrite | undefined) {
+  if (state === 'unconfirmed')
+    return 'The response was lost. Nook will check it on the next refresh.';
+  return state === 'failed' ? failureReason(write) : undefined;
 }
 export function retryable(key: ImportKey) {
   return key.outcome === 'failed' || key.outcome === 'unconfirmed';
@@ -154,8 +159,13 @@ function createSession(queries: QueryClient) {
     for (const listener of listeners) listener();
   }
   function observe() {
-    const mutations = queries.getMutationCache().subscribe(publish);
-    const cache = queries.getQueryCache().subscribe(publish);
+    const mutations = queries.getMutationCache().subscribe((event) => {
+      if (event.type === 'updated') publish();
+    });
+    const cache = queries.getQueryCache().subscribe((event) => {
+      if (event.type === 'updated' && event.query.queryKey[0] === 'vault')
+        publish();
+    });
     unsubscribe = () => {
       mutations();
       cache();

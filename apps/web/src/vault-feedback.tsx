@@ -3,7 +3,10 @@ import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { type ApiError, describeFailure } from './api-client';
 import { DismissibleAlert } from './failure';
-import { type ObservedWrite, unconfirmed } from './vault-api';
+import { Path } from './path-text';
+import { failureMessage, type ObservedWrite, unconfirmed } from './vault-api';
+import { type ImportRun, retryable } from './vault-import';
+import { plural } from './vault-model';
 import type { Feedback, WriteOp } from './vault-state';
 
 const saving = {
@@ -34,16 +37,6 @@ function uncertain(op: WriteOp, path: string) {
   };
   return `Nook could not confirm whether ${event[op]}.`;
 }
-function failureMessage(write: ObservedWrite, error: ApiError) {
-  const { op, secret } = write.input;
-  const unchanged =
-    op === 'create' ? 'Nothing was stored.' : 'Nothing changed.';
-  if (error.tag === 'SecretChanged')
-    return describeFailure(error, 'change secrets');
-  if (error.tag === 'SecretNotFound')
-    return `${secret.path} is no longer stored.`;
-  return describeFailure(error, 'change secrets', unchanged);
-}
 function successFeedback(write: ObservedWrite): Feedback {
   const { op, secret } = write.input;
   const message = write.result?.message;
@@ -55,7 +48,7 @@ function successFeedback(write: ObservedWrite): Feedback {
   };
 }
 export function feedbackFor(write: ObservedWrite | undefined): Feedback | null {
-  if (!write || write.status === 'idle') return null;
+  if (!write || write.input.batch || write.status === 'idle') return null;
   const { op, secret } = write.input;
   const path = secret.path;
   if (write.status === 'pending')
@@ -71,6 +64,59 @@ export function feedbackFor(write: ObservedWrite | undefined): Feedback | null {
       ? describeFailure(error, 'change secrets', uncertain(op, path))
       : failureMessage(write, error as ApiError),
   };
+}
+
+export function ImportNotice({
+  run,
+  onShow,
+  onDismiss,
+}: {
+  run: ImportRun;
+  onShow: () => void;
+  onDismiss: () => void;
+}) {
+  const created = run.keys.filter((key) => key.outcome === 'created').length;
+  const failed = run.keys.filter(retryable).length;
+  if (!run.settled)
+    return (
+      <DismissibleAlert icon={<Spinner />} title="Importing secrets…">
+        <p>
+          {created} of {run.keys.length} created in <Path>{run.bucket}</Path>.
+          New secret, Replace and Delete are paused until it finishes.
+        </p>
+        <Button variant="outline" size="sm" className="mt-1" onClick={onShow}>
+          Show progress
+        </Button>
+      </DismissibleAlert>
+    );
+  if (failed)
+    return (
+      <DismissibleAlert
+        destructive
+        icon={<CircleAlert />}
+        title="Import finished with problems"
+        onDismiss={onDismiss}
+      >
+        <p>
+          {created} created in <Path>{run.bucket}</Path>; {failed} need another
+          try.
+        </p>
+        <Button variant="outline" size="sm" className="mt-1" onClick={onShow}>
+          Show results
+        </Button>
+      </DismissibleAlert>
+    );
+  return (
+    <DismissibleAlert
+      icon={<CircleCheck />}
+      title="Import finished"
+      onDismiss={onDismiss}
+    >
+      <p>
+        {plural(created, 'secret')} created in <Path>{run.bucket}</Path>.
+      </p>
+    </DismissibleAlert>
+  );
 }
 function heading(feedback: Feedback) {
   if (feedback.kind === 'saving') return saving[feedback.op];
