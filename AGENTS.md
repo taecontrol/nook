@@ -53,8 +53,8 @@ select beta, RC, canary, or other prerelease direct versions.
 
 ## Verification
 
-Every change passes `pnpm verify`, locally and in CI. Do not weaken, skip,
-or loosen a check to make a change pass. Fix the code, or raise the conflict
+Every change passes `pnpm verify`, locally on Linux and in CI. Do not weaken,
+skip, or loosen a check to make a change pass. Fix the code, or raise the conflict
 with the owner. Test observable behavior. Local runs and tests use a
 synthetic owner and need no Cloudflare account or secret.
 
