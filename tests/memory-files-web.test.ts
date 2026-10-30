@@ -114,12 +114,45 @@ it.each(viewports)(
 it.each(viewports)(
   'E24: twelve files scroll inside the drawer to the last Download at $width px',
   async (viewport) => {
-    const names = Array.from({ length: 12 }, (_, index) => `f${index}.pdf`);
-    const visit = await filesPage(browser, { viewport, names });
+    const icons: [string, string, string][] = [
+      ['photo.png', 'image/png', 'lucide-file-image'],
+      ['bundle.zip', 'application/zip', 'lucide-file-archive'],
+      ['ledger.csv', 'text/csv', 'lucide-file-spreadsheet'],
+      [
+        'budget.xlsx',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'lucide-file-spreadsheet',
+      ],
+      ['config.json', 'application/json', 'lucide-file-json'],
+      ['notes.txt', 'text/plain', 'lucide-file-text'],
+      ['firmware.bin', 'application/octet-stream', 'lucide-file'],
+      ...Array.from({ length: 5 }, (_, index): [string, string, string] => [
+        `f${index}.pdf`,
+        'application/pdf',
+        'lucide-file-text',
+      ]),
+    ];
+    const visit = await filesPage(browser, {
+      viewport,
+      files: icons.map(([name, mediaType], index) => ({
+        name,
+        mediaType,
+        attachedAt: new Date(Date.UTC(2026, 9, 22, 14, index)).toISOString(),
+      })),
+    });
     try {
       const { page } = visit;
       await openFiles(page);
-      await waitFileRows(page, names.length);
+      await waitFileRows(page, icons.length);
+      // Each media type shows its kind of file icon.
+      for (const [name, , icon] of icons)
+        expect(
+          await filesSheet(page)
+            .locator(`[data-file-row="${name}"] svg`)
+            .first()
+            .evaluate((svg, icon) => svg.classList.contains(icon), icon),
+          name,
+        ).toBe(true);
       const last = filesRows(page)
         .last()
         .getByRole('button', { name: /^Download / });
