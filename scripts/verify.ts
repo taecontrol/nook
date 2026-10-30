@@ -1,8 +1,10 @@
 import { spawnSync } from 'node:child_process';
 import { startHostIsolation } from './lib/host-isolation.ts';
 import { testEnvironment } from './lib/test-environment.ts';
+import { requireVerificationPlatform } from './lib/verification-platform.ts';
 import { verificationStages } from './verification-stages.ts';
 
+requireVerificationPlatform(process.platform, 'pnpm verify');
 const isolation = await startHostIsolation();
 try {
   for (const stage of verificationStages) {

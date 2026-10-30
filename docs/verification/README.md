@@ -1,6 +1,6 @@
 # Verification
 
-Run `pnpm verify` from the repository root with the pinned Node and pnpm versions. It stops on the first failure, in this order:
+Run `pnpm verify` on Linux from the repository root with the pinned Node and pnpm versions. It stops on the first failure, in this order:
 
 | Command | What it proves |
 | --- | --- |
@@ -13,6 +13,13 @@ Run `pnpm verify` from the repository root with the pinned Node and pnpm version
 | `pnpm verify:crap` | Complete, current execution evidence gives each scoped function a CRAP score at most eight. |
 | `pnpm build` | Vite builds the SPA and esbuild bundles the Worker for workerd and the CLI for Node 26. |
 | `pnpm verify:load-time` | The production first screens and navigation fit fixed load-time budgets on a 4G phone network. |
+
+On macOS, `pnpm verify` and `pnpm test:coverage` without `--macos-cli`,
+including `--shard=I/10`, refuse before starting host isolation, building,
+running verification stages, or changing coverage evidence. Run the full
+check on Linux or push and let CI decide. Native macOS suites run only in
+CI's `macos-cli` job. Narrow `pnpm test <files>` commands and individual
+`verify:*` stages remain available on macOS.
 
 `pnpm test` builds the production target before running Vitest. A narrow run such as `pnpm test tests/worker.test.ts` uses the same HTTP target. After `pnpm test`, `pnpm test:journey` runs the journey against that target, with the same allowlisted environment and host-resource tripwire; strict cache replay and zero retries stay mandatory. `pnpm test:coverage` prepares its own separately instrumented build and needs no prior build. The complete test, coverage, verification, and load-time commands also keep their build, E2E, and browser subprocesses inside the isolation lifecycle.
 
@@ -29,7 +36,13 @@ unshare --user --map-current-user --pid --fork --mount-proc \
 
 All local identities, signing keys, and issuer responses are synthetic. Linux CLI tests require Node 26.10, `bubblewrap` (`bwrap`), `dbus-run-session`, `dbus-send`, `gnome-keyring-daemon`, and `secret-tool`. CI installs `bubblewrap`, `gnome-keyring`, `libsecret-tools`, and `dbus` in the test jobs. Each CLI fixture creates private HOME/XDG directories, including XDG_DATA_HOME for the encrypted keyring files, and a private bus with no service activation directories, asserts that its address differs from the inherited bus, and unlocks a real isolated keyring before launching the CLI. The daemon runs with `--foreground` alongside `--unlock --components=secrets`: the fixture waits for stdout EOF after initialization, then requires a real store/lookup/clear probe. The background launcher exits before initialization, so its exit is insufficient. Daemon streams are discarded. PATH shims record opener URLs and secret-tool argv, then delegate to the real binaries; the bus-identity shim delegates to the real dbus-send; values travel only over stdin. Missing-service tests deliberately omit the daemon. Fixtures reject bus overrides before every child, clean failed setup, stop the owned daemon and children before removing HOME, and kill any remaining private process group; shutdown has a bounded force-kill fallback. A concurrent fixture regression proves that inherited XDG data remains untouched. The runtime reads asset routing and compatibility settings from `wrangler.jsonc`, binds only to `127.0.0.1`, and takes explicit test bindings. Test port leases stay above Fetch's blocked-port range and outside Linux's ephemeral range. No test reads production credentials or contacts a Cloudflare account. Coverage endpoints and counters exist only in the test build.
 
-The macOS CLI acceptance runs only on a disposable GitHub-hosted `macos-latest` runner, with `pnpm test:coverage --macos-cli=I/2`; `scripts/lib/macos-cli-suites.ts` assigns every macOS suite to exactly one of the two groups, balanced by observed suite time. Only that workflow job sets the allowlisted `NOOK_TEST_MACOS_KEYCHAIN_BOOTSTRAP=github-hosted` opt-in. Without it, fixture setup fails with a message pointing to [#22](https://github.com/taecontrol/nook/issues/22); `CI=true` alone never enables creation. Local creation is forbidden on the owner's Mac. Each fixture creates and resolves a fresh temporary HOME, rejects the real owner HOME, and requires an empty user search list and an absent login keychain before creating `Library/Keychains/login.keychain-db` with an absolute path. Immediately after creation, both login and default keychain must resolve inside HOME before any item command or CLI child. No test changes the search list or default, locks, unlocks, deletes, or moves a keychain. Missing and locked states are reproduced with failing/stalling PATH shims. Every child requires the fixture file to exist and the shims to be first on PATH; `open` never delegates to the real opener. Commands and process groups stop before HOME is removed.
+The owner normally develops and verifies on Linux. Native macOS acceptance
+stays in CI because allowing local Keychain creation would risk the owner's
+real Keychain search list or default keychain to save a rare CI run. The
+tripwire detects those changes but never repairs owner resources. This
+verification rule is recorded in [#87](https://github.com/taecontrol/nook/issues/87).
+
+The macOS CLI acceptance runs only in CI's `macos-cli` job on a disposable GitHub-hosted `macos-latest` runner, with `pnpm test:coverage --macos-cli=I/2`; `scripts/lib/macos-cli-suites.ts` assigns every macOS suite to exactly one of the two groups, balanced by observed suite time. Only that workflow job sets the allowlisted `NOOK_TEST_MACOS_KEYCHAIN_BOOTSTRAP=github-hosted` opt-in. Without it, fixture setup fails with a message pointing to [#87](https://github.com/taecontrol/nook/issues/87); `CI=true` alone never enables creation. Local creation is forbidden on the owner's Mac. Each fixture creates and resolves a fresh temporary HOME, rejects the real owner HOME, and requires an empty user search list and an absent login keychain before creating `Library/Keychains/login.keychain-db` with an absolute path. Immediately after creation, both login and default keychain must resolve inside HOME before any item command or CLI child. No test changes the search list or default, locks, unlocks, deletes, or moves a keychain. Missing and locked states are reproduced with failing/stalling PATH shims. Every child requires the fixture file to exist and the shims to be first on PATH; `open` never delegates to the real opener. Commands and process groups stop before HOME is removed.
 
 The portable `macos-keyring-policy.test.ts` and `macos-boundary-policy.test.ts` suites run on both platforms. They exercise security-command transcripts, malformed metadata, filesystem errors, the observer's read-only command allowlist, and process-registration failure with generation-safe cleanup. They use injected OS responses and test-owned temporary directories. The macOS job also proves the genuine keychain, lock, and subprocess boundaries in its existing native acceptance suites.
 
