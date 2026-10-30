@@ -108,6 +108,55 @@ it('E3: renaming one duplicate makes both distinct names Ready', () => {
   expect(result.toFix).toBe(0);
 });
 
+it.each([
+  { issue: 'empty value', value: '', description: '', status: 'empty' },
+  {
+    issue: 'too-long value',
+    value: 'x'.repeat(64 * 1024 + 1),
+    description: '',
+    status: 'too-long',
+  },
+  {
+    issue: 'invalid description',
+    value: 'synthetic-blocked-description',
+    description: 'x'.repeat(201),
+    status: 'invalid-description',
+  },
+])(
+  'E3: a duplicate blocked by $issue blocks the sendable row until excluded or renamed',
+  ({ value, description, status }) => {
+    const { rows, values } = model(
+      entries([
+        ['DATABASE_URL', 'synthetic-sendable'],
+        ['DATABASE_URL', value],
+      ]),
+    );
+    rows[1].description = description;
+    const duplicate = review(rows, values, new Set());
+    expect(statuses(rows, duplicate)).toEqual([
+      ['DATABASE_URL', 'duplicate'],
+      ['DATABASE_URL', status],
+    ]);
+    expect(duplicate.selection).toEqual([]);
+
+    const unchecked = rows.map((row, index) => ({
+      ...row,
+      included: index === 0,
+    }));
+    const excluded = review(unchecked, values, new Set());
+    expect(excluded.status.get(rows[0].id)).toBe('ready');
+    expect(selectedNames(excluded)).toEqual(['DATABASE_URL']);
+
+    rows[1].name = 'OTHER_DATABASE_URL';
+    const renamed = review(rows, values, new Set());
+    expect(statuses(rows, renamed)).toEqual([
+      ['DATABASE_URL', 'ready'],
+      ['OTHER_DATABASE_URL', status],
+    ]);
+    expect(selectedNames(renamed)).toEqual(['DATABASE_URL']);
+  },
+);
+
 it('E4: editing a name recomputes Ready, Already exists and both Duplicate statuses', () => {
   const { rows, values } = model(
     entries([
