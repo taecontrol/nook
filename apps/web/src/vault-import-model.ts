@@ -64,14 +64,10 @@ export function needsFix(status: RowStatus, included: boolean) {
     (status === 'duplicate' && included)
   );
 }
-function duplicateCounts(
-  rows: readonly ImportRow[],
-  base: ReadonlyMap<string, RowStatus>,
-) {
+function duplicateCounts(rows: readonly ImportRow[]) {
   const counts = new Map<string, number>();
   for (const row of rows) {
-    if (row.included && base.get(row.id) === 'ready')
-      counts.set(row.name, (counts.get(row.name) ?? 0) + 1);
+    if (row.included) counts.set(row.name, (counts.get(row.name) ?? 0) + 1);
   }
   return counts;
 }
@@ -87,13 +83,12 @@ export function review(
   const status = new Map(
     rows.map((row) => [row.id, baseStatus(row, existing)]),
   );
-  const counts = duplicateCounts(rows, status);
+  const counts = duplicateCounts(rows);
   const selection: { row: ImportRow; value: Redacted.Redacted<string> }[] = [];
   for (const row of rows) {
-    if (
-      status.get(row.id) === 'ready' &&
-      (counts.get(row.name) ?? 0) > Number(row.included)
-    )
+    // Keep a row's own blocking reason; otherwise a repeated included name
+    // takes precedence over Ready, regardless of the other rows' validity.
+    if (status.get(row.id) === 'ready' && (counts.get(row.name) ?? 0) > 1)
       status.set(row.id, 'duplicate');
     const value = values.get(row.id);
     if (row.included && status.get(row.id) === 'ready' && value)
