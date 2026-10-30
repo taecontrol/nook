@@ -1,3 +1,4 @@
+import type { Page } from 'playwright';
 import { expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { privateClientState } from './support/vault-browser.ts';
@@ -7,8 +8,57 @@ import {
   holdImportCreates,
   importPage,
   importSettled,
+  openImport,
+  pasteField,
   reviewPaste,
 } from './support/vault-import-browser.ts';
+
+function privacyProbeRef(page: Page) {
+  return pasteField(page).evaluateHandle((element) => {
+    type Fiber = {
+      return?: Fiber;
+      child?: Fiber;
+      sibling?: Fiber;
+      stateNode?: { current?: Fiber };
+      memoizedProps?: {
+        textRef?: { current: unknown };
+        parsed?: { entries: { value: unknown }[] };
+      };
+    };
+    const key = Object.keys(element).find((key) =>
+      key.startsWith('__reactFiber$'),
+    );
+    let root = key
+      ? (element as unknown as Record<string, Fiber>)[key]
+      : undefined;
+    while (root?.return) root = root.return;
+    const seen = new WeakSet<object>();
+    const find = (
+      fiber: Fiber | undefined,
+    ):
+      | {
+          ref: { current: unknown };
+          original: unknown;
+          redacted: unknown;
+        }
+      | undefined => {
+      if (!fiber || seen.has(fiber)) return;
+      seen.add(fiber);
+      const props = fiber.memoizedProps;
+      if (props?.textRef && props.parsed?.entries[0])
+        return {
+          ref: props.textRef,
+          original: props.textRef.current,
+          redacted: props.parsed.entries[0].value,
+        };
+      return find(fiber.child) ?? find(fiber.sibling);
+    };
+    const probe = find(root?.stateNode?.current ?? root);
+    if (!probe)
+      throw new Error('Import textarea ref and redacted value missing.');
+    return probe;
+  });
+}
 
 it('E17: the privacy probe detects private text and exact private UUIDs while allowing unrelated metadata UUIDs', async () => {
   const launched = await launchTestBrowser();
@@ -41,6 +91,69 @@ it('E17: the privacy probe detects private text and exact private UUIDs while al
     await cache.evaluate((client) =>
       client.removeQueries({ queryKey: ['privacy-probe'] }),
     );
+    await openImport(visit.page);
+    const value = 'synthetic-nested-private-value';
+    await pasteField(visit.page).fill(`PRIVACY_PROBE=${value}`);
+    const probe = await privacyProbeRef(visit.page);
+    await pasteField(visit.page).fill('');
+    try {
+      for (const source of ['ref', 'cache'])
+        for (const kind of ['text', 'Redacted'])
+          for (const key of [
+            'child',
+            'alternate',
+            'return',
+            'sibling',
+            'stateNode',
+          ]) {
+            await probe.evaluate(
+              (probe, { client, source, kind, key, value }) => {
+                const nested = {
+                  tag: 0,
+                  [key]: kind === 'Redacted' ? probe.redacted : value,
+                };
+                if (source === 'ref') probe.ref.current = nested;
+                else client.setQueryData(['privacy-probe'], nested);
+              },
+              { client: cache, source, kind, key, value },
+            );
+            for (const inspectReact of [false, true])
+              expect
+                .soft(
+                  await privateClientState(visit.page, [value], {
+                    inspectReact,
+                  }),
+                  `${source}.${key}: ${kind}, inspectReact=${inspectReact}`,
+                )
+                .toEqual({
+                  found: true,
+                  absentFromCache: false,
+                  absentFromDom: true,
+                });
+            if (kind === 'Redacted')
+              expect(
+                await privateClientState(visit.page, [value], {
+                  allowRedacted: true,
+                  inspectReact: true,
+                }),
+              ).toEqual({
+                found: true,
+                absentFromCache: true,
+                absentFromDom: true,
+              });
+            await probe.evaluate((probe) => {
+              probe.ref.current = probe.original;
+            });
+            await cache.evaluate((client) =>
+              client.removeQueries({ queryKey: ['privacy-probe'] }),
+            );
+          }
+    } finally {
+      await probe.evaluate((probe) => {
+        probe.ref.current = probe.original;
+      });
+      await probe.dispose();
+    }
     await cache.dispose();
   } finally {
     await visit.close();

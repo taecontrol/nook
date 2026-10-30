@@ -318,6 +318,64 @@ it('E7: 101 keys stay on Paste with a count and trim guidance; exactly 100 reach
   }
 });
 
+it.each([
+  ['empty', ''],
+  ['too-long', 'synthetic-too-long-'.repeat(4096)],
+])(
+  'E3: excluding a blocked %s occurrence through its checkbox makes the valid occurrence Ready',
+  async (kind, blockedValue) => {
+    const visit = await importPage(browser);
+    const { page, traffic } = visit;
+    try {
+      await reviewPaste(
+        page,
+        `DATABASE_URL=synthetic-one\nDATABASE_URL=${blockedValue}`,
+      );
+      const valid = reviewRow(page, 1);
+      const blocked = reviewRow(page, 2);
+      const reason =
+        kind === 'empty'
+          ? 'Empty value. Skipped.'
+          : 'Value is over 64 KiB. Skipped.';
+      expect(await valid.innerText()).toContain('Duplicate.');
+      expect(await blocked.innerText()).toContain(reason);
+      expect(
+        await importSheet(page)
+          .getByRole('button', { name: 'Create 0 secrets', exact: true })
+          .isEnabled(),
+      ).toBe(false);
+      expect(traffic.posts).toHaveLength(0);
+      const checkbox = blocked.getByRole('checkbox', {
+        name: 'Include DATABASE_URL',
+        exact: true,
+      });
+      expect(await checkbox.count()).toBe(1);
+      expect(await checkbox.isChecked()).toBe(true);
+      await checkbox.uncheck();
+      expect(await checkbox.isChecked()).toBe(false);
+      expect(await blocked.innerText()).toContain(reason);
+      expect(await valid.innerText()).toContain('Ready.');
+      expect(
+        await importSheet(page)
+          .getByRole('button', { name: 'Create 1 secret', exact: true })
+          .isEnabled(),
+      ).toBe(true);
+      await createImport(page, 1);
+      await importSettled(page);
+      await expectOutcome(page, 'DATABASE_URL', 'Created');
+      expect(traffic.posts).toHaveLength(1);
+      expect(traffic.posts[0]).toMatchObject({
+        bucket: importBucket,
+        name: 'DATABASE_URL',
+        value: 'synthetic-one',
+      });
+      await expectStoredValues(visit, { DATABASE_URL: 'synthetic-one' });
+    } finally {
+      await visit.close();
+    }
+  },
+);
+
 it('E8: unchecking every Ready row disables Create 0 secrets', async () => {
   const visit = await importPage(browser);
   const { page } = visit;
