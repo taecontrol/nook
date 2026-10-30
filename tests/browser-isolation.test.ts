@@ -1,6 +1,6 @@
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { chromium } from 'playwright';
+import { chromium, type Page } from 'playwright';
 import { expect, it, vi } from 'vitest';
 import { fingerprintDirectory } from '../scripts/lib/host-resources.ts';
 import * as browserSupport from '../scripts/lib/test-browser.ts';
@@ -124,42 +124,64 @@ it('a missing visibility Chromium executable removes its temporary HOME', async 
   }
 });
 
-it.each([
-  ['no page arrives', false, /no page appeared within 1000 ms/],
-  ['a page arrives late', true, /a page appeared \d+ ms later/],
-] as const)(
-  'a visibility context without a page fails with Chromium evidence when %s',
-  async (_, arrives, late) => {
-    const environment = await browserSupport.browserEnvironment();
-    const factory = vi
-      .spyOn(browserSupport, 'browserEnvironment')
-      .mockResolvedValueOnce(environment);
-    const realConnect = chromium.connectOverCDP.bind(chromium);
-    const connect = vi
-      .spyOn(chromium, 'connectOverCDP')
-      .mockImplementationOnce((async (
-        ...args: Parameters<typeof realConnect>
-      ) => {
-        const browser = await realConnect(...args);
-        const context = browser.contexts()[0];
-        vi.spyOn(context, 'pages').mockReturnValueOnce([]);
-        if (arrives) setTimeout(() => void context.newPage(), 100);
-        return browser;
-      }) as typeof realConnect);
-    try {
-      const failure = visibilityBrowser();
-      await expect(failure).rejects.toThrow(
-        /^The visibility browser connected without a page: DevToolsActivePort \d+ ms after launch, connected \d+ ms after launch, /,
-      );
-      await expect(failure).rejects.toThrow(late);
-      await expect(failure).rejects.toThrow(
-        /Targets at connection: (.+, )?page about:blank attached=true[,.]/,
-      );
-      expect(await fingerprintDirectory(environment.home)).toBe('absent');
-    } finally {
+async function connectWithoutPages(arrives: boolean) {
+  const environment = await browserSupport.browserEnvironment();
+  const factory = vi
+    .spyOn(browserSupport, 'browserEnvironment')
+    .mockResolvedValueOnce(environment);
+  const realConnect = chromium.connectOverCDP.bind(chromium);
+  let late: Promise<Page> | undefined;
+  const connect = vi
+    .spyOn(chromium, 'connectOverCDP')
+    .mockImplementationOnce((async (
+      ...args: Parameters<typeof realConnect>
+    ) => {
+      const browser = await realConnect(...args);
+      const context = browser.contexts()[0];
+      // Reproduces #97: the connection attaches before Chromium's startup tab.
+      vi.spyOn(context, 'pages').mockReturnValueOnce([]);
+      if (arrives)
+        late = new Promise((accept) =>
+          setTimeout(() => accept(context.newPage()), 200),
+        );
+      return browser;
+    }) as typeof realConnect);
+  return {
+    home: environment.home,
+    late: () => late,
+    async restore() {
       factory.mockRestore();
       connect.mockRestore();
       await environment.close();
-    }
-  },
-);
+    },
+  };
+}
+
+it('a visibility startup page that arrives after the connection is handed over', async () => {
+  const connection = await connectWithoutPages(true);
+  let browser: Awaited<ReturnType<typeof visibilityBrowser>> | undefined;
+  try {
+    browser = await visibilityBrowser();
+    expect(browser.page).toBe(await connection.late());
+    expect(await browser.page.evaluate(() => document.readyState)).toBe(
+      'complete',
+    );
+  } finally {
+    await browser?.close();
+    await connection.restore();
+  }
+  expect(await fingerprintDirectory(connection.home)).toBe('absent');
+});
+
+it('a visibility context whose startup page never arrives fails with Chromium evidence', async () => {
+  const connection = await connectWithoutPages(false);
+  try {
+    const failure = visibilityBrowser();
+    await expect(failure).rejects.toThrow(
+      /^The visibility browser has no startup page 5000 ms after connecting: DevToolsActivePort \d+ ms after launch, connected \d+ ms after launch\. Targets now: (.+, )?page about:blank attached=true[,.]/,
+    );
+    expect(await fingerprintDirectory(connection.home)).toBe('absent');
+  } finally {
+    await connection.restore();
+  }
+});

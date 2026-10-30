@@ -6,22 +6,25 @@ import { type Browser, type BrowserContext, chromium } from 'playwright';
 import { expect } from 'vitest';
 import { browserEnvironment } from '../../scripts/lib/test-browser.ts';
 
-const latePageWait = 1_000;
+const startupPageWait = 5_000;
 const elapsed = (from: number, to: number) => `${Math.round(to - from)} ms`;
 
-// Issue #97: a rare CI run handed over a context without a page. Fail with
-// what Chromium reported so the next occurrence shows why.
-async function missingPage(
+// Issue #97: under CI load, connectOverCDP can attach before Chromium creates
+// any target, and the startup tab arrives a few hundred milliseconds later.
+// Wait for it within a bound; past that, fail with what Chromium reports.
+async function startupPage(
   browser: Browser,
   context: BrowserContext,
   launched: number,
   published: number,
 ) {
+  const page = context.pages()[0];
+  if (page) return page;
   const connected = performance.now();
-  const late = context.waitForEvent('page', { timeout: latePageWait }).then(
-    () => `a page appeared ${elapsed(connected, performance.now())} later`,
-    () => `no page appeared within ${latePageWait} ms`,
-  );
+  const late = await context
+    .waitForEvent('page', { timeout: startupPageWait })
+    .catch(() => undefined);
+  if (late) return late;
   const targets = await browser
     .newBrowserCDPSession()
     .then((session) => session.send('Target.getTargets'))
@@ -31,8 +34,8 @@ async function missingPage(
         .join(', '),
     )
     .catch((error: Error) => `unavailable (${error.message})`);
-  return new Error(
-    `The visibility browser connected without a page: DevToolsActivePort ${elapsed(launched, published)} after launch, connected ${elapsed(launched, connected)} after launch, ${await late}. Targets at connection: ${targets || 'none'}.`,
+  throw new Error(
+    `The visibility browser has no startup page ${startupPageWait} ms after connecting: DevToolsActivePort ${elapsed(launched, published)} after launch, connected ${elapsed(launched, connected)} after launch. Targets now: ${targets || 'none'}.`,
   );
 }
 
@@ -85,8 +88,7 @@ export async function visibilityBrowser() {
       noDefaults: true,
     });
     const context = browser.contexts()[0];
-    const page = context.pages()[0];
-    if (!page) throw await missingPage(browser, context, launched, published);
+    const page = await startupPage(browser, context, launched, published);
     return { context, page, close };
   } catch (error) {
     await close();
