@@ -2,9 +2,9 @@ import { relative } from 'node:path';
 import { defineConfig } from 'vitest/config';
 import { BaseSequencer, type TestSpecification } from 'vitest/node';
 import { coveragePlugin } from './scripts/lib/instrument.ts';
-import { assignShards, bySlowest } from './scripts/lib/test-shards.ts';
+import { assignShards } from './scripts/lib/test-shards.ts';
 
-// Shards and orders files by their measured CI time instead of a path hash.
+// Shards files by their measured CI time instead of a path hash.
 class TimedSequencer extends BaseSequencer {
   private path(spec: TestSpecification) {
     return relative(this.ctx.config.root, spec.moduleId).replaceAll('\\', '/');
@@ -19,15 +19,6 @@ class TimedSequencer extends BaseSequencer {
       )[index - 1],
     );
     return files.filter((f) => mine.has(this.path(f)));
-  }
-
-  async sort(files: TestSpecification[]) {
-    const rank = new Map(
-      bySlowest(files.map((f) => this.path(f))).map((path, i) => [path, i]),
-    );
-    return [...files].sort(
-      (a, b) => (rank.get(this.path(a)) ?? 0) - (rank.get(this.path(b)) ?? 0),
-    );
   }
 }
 
