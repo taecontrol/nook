@@ -99,9 +99,14 @@ export function useAuthorizationFlow() {
   );
   useEffect(() => {
     if (phase !== 'request' || !request) return;
+    // A delay beyond setTimeout's 32-bit limit fires at once, so a browser
+    // clock far behind the server's would expire a fresh request.
     const timer = setTimeout(
       () => setPhase('expired'),
-      Math.max(0, Date.parse(request.expiresAt) - Date.now()),
+      Math.min(
+        2 ** 31 - 1,
+        Math.max(0, Date.parse(request.expiresAt) - Date.now()),
+      ),
     );
     return () => clearTimeout(timer);
   }, [phase, request]);
