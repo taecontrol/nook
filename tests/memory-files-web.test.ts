@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import type { Browser } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { auditRows } from './support/audit.ts';
@@ -14,6 +14,7 @@ import {
   openFiles,
   waitFileRows,
 } from './support/memory-files-browser.ts';
+import { expectNoOverflow } from './support/page-checks.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
@@ -22,10 +23,18 @@ beforeAll(async () => {
 });
 afterAll(() => closeBrowser?.());
 
-it.each([
+const viewports = [
   { width: 1440, height: 900 },
   { width: 390, height: 844 },
-])(
+];
+// The Files drawer never scrolls sideways inside itself.
+async function expectSheetFits(page: Page) {
+  expect(
+    await filesSheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth),
+  ).toBe(true);
+}
+
+it.each(viewports)(
   'E24: Files count sits beside History and the drawer lists newest-first metadata and full Details at $width px',
   async (viewport) => {
     const visit = await filesPage(browser, { viewport });
@@ -95,9 +104,40 @@ it.each([
         expect(details).toContain('Client (as reported)');
         expect(details).toContain('nook-acceptance');
       }
+      await expectNoOverflow(page);
+      await expectSheetFits(page);
+    } finally {
+      await visit.close();
+    }
+  },
+);
+it.each(viewports)(
+  'E24: twelve files scroll inside the drawer to the last Download at $width px',
+  async (viewport) => {
+    const names = Array.from({ length: 12 }, (_, index) => `f${index}.pdf`);
+    const visit = await filesPage(browser, { viewport, names });
+    try {
+      const { page } = visit;
+      await openFiles(page);
+      await waitFileRows(page, names.length);
+      const last = filesRows(page)
+        .last()
+        .getByRole('button', { name: /^Download / });
+      await last.scrollIntoViewIfNeeded();
+      expect(await last.isVisible()).toBe(true);
+      // Scrolled into view, the button is on screen and receives the click.
       expect(
-        await page.evaluate(() => document.documentElement.scrollWidth),
-      ).toBe(viewport.width);
+        await last.evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(
+            box.x + box.width / 2,
+            box.y + box.height / 2,
+          );
+          return el.contains(hit);
+        }),
+      ).toBe(true);
+      await expectSheetFits(page);
+      await expectNoOverflow(page);
     } finally {
       await visit.close();
     }
@@ -262,32 +302,40 @@ it('E25: a genuine 404 names the missing file, refreshes detail and removes its 
     await visit.close();
   }
 });
-it('E25: a referenced missing R2 object produces an alert with Try again and a real restored download succeeds', async () => {
-  const visit = await filesPage(browser, { names: [pdfName] });
-  try {
-    const { page, app, files } = visit;
-    await openFiles(page);
-    const bucket = await app.mf.getR2Bucket('FILES');
-    await bucket.delete(files[0].object_key);
-    await filesSheet(page)
-      .getByRole('button', { name: `Download ${pdfName}`, exact: true })
-      .click();
-    const alert = filesSheet(page).getByRole('alert');
-    await alert.waitFor();
-    expect(await alert.innerText()).toContain('Could not download the file');
-    expect(await alert.innerText()).toContain(pdfName);
-    const retry = alert.getByRole('button', { name: 'Try again', exact: true });
-    expect(await retry.isEnabled()).toBe(true);
-    await waitFileRows(page, 1);
-    await bucket.put(files[0].object_key, Buffer.alloc(2_418_734, 30));
-    const saved = page.waitForEvent('download');
-    await retry.click();
-    const download = await saved;
-    expect(download.suggestedFilename()).toBe(pdfName);
-    const path = await download.path();
-    if (!path) throw new Error('Chromium did not save the file.');
-    expect(digest(await readFile(path))).toBe(files[0].sha256);
-  } finally {
-    await visit.close();
-  }
-});
+it.each(viewports)(
+  'E25: a referenced missing R2 object produces an alert with Try again and a real restored download succeeds at $width px',
+  async (viewport) => {
+    const visit = await filesPage(browser, { viewport, names: [pdfName] });
+    try {
+      const { page, app, files } = visit;
+      await openFiles(page);
+      const bucket = await app.mf.getR2Bucket('FILES');
+      await bucket.delete(files[0].object_key);
+      await filesSheet(page)
+        .getByRole('button', { name: `Download ${pdfName}`, exact: true })
+        .click();
+      const alert = filesSheet(page).getByRole('alert');
+      await alert.waitFor();
+      expect(await alert.innerText()).toContain('Could not download the file');
+      expect(await alert.innerText()).toContain(pdfName);
+      await expectNoOverflow(page);
+      await expectSheetFits(page);
+      const retry = alert.getByRole('button', {
+        name: 'Try again',
+        exact: true,
+      });
+      expect(await retry.isEnabled()).toBe(true);
+      await waitFileRows(page, 1);
+      await bucket.put(files[0].object_key, Buffer.alloc(2_418_734, 30));
+      const saved = page.waitForEvent('download');
+      await retry.click();
+      const download = await saved;
+      expect(download.suggestedFilename()).toBe(pdfName);
+      const path = await download.path();
+      if (!path) throw new Error('Chromium did not save the file.');
+      expect(digest(await readFile(path))).toBe(files[0].sha256);
+    } finally {
+      await visit.close();
+    }
+  },
+);
