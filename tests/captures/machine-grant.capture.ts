@@ -4,9 +4,9 @@ import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../../scripts/lib/test-browser.ts';
 import { bucketCheck, grantPage } from '../support/grant-browser.ts';
-import { seedGrantTree } from '../support/grants.ts';
+import { largeGrantPaths, seedGrantTree } from '../support/grants.ts';
 import { deferred } from '../support/machines.ts';
-import { grantCaptureMachines, largeGrantPaths } from './fixtures/grants.ts';
+import { grantCaptureMachines } from './fixtures/grants.ts';
 
 const directory = resolve('.local/verification/screenshots');
 let browser: Browser;

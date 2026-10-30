@@ -4,6 +4,7 @@ import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { bucketCheck, grantPage, selectDeep } from './support/grant-browser.ts';
 import { grantTree, issueGrant, machineMcp } from './support/grants.ts';
 import { listMachines } from './support/machines.ts';
+import { expectNoOverflow } from './support/page-checks.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
@@ -167,6 +168,7 @@ it.each(['click', 'Enter'])(
         .getByText('Choose at least one bucket.', { exact: true })
         .waitFor();
       expect(approvals).toEqual([]);
+      await expectNoOverflow(page);
     } finally {
       await close();
     }
@@ -194,9 +196,14 @@ it.each(['loading', 'failed'])(
     });
     try {
       await reveal();
-      if (state === 'failed')
+      if (state === 'failed') {
         await page
           .getByText("Couldn't load buckets", { exact: true })
+          .waitFor();
+        await expectNoOverflow(page);
+      } else
+        await page
+          .getByRole('status', { name: 'Loading buckets', exact: true })
           .waitFor();
       expect(
         await page
@@ -246,6 +253,7 @@ it('E30: failed approval preserves its grant on retry and repeats it in the resu
     );
     await page.getByRole('button', { name: 'Approve', exact: true }).click();
     await page.getByText("Couldn't reach Nook", { exact: true }).waitFor();
+    await expectNoOverflow(page);
     expect(await bucketCheck(page, 'work/acme').isChecked()).toBe(true);
     await page.unroute('**/api/authorizations/*/approve');
     await page.getByRole('button', { name: 'Try again', exact: true }).click();
@@ -254,6 +262,7 @@ it('E30: failed approval preserves its grant on retry and repeats it in the resu
       Array(2).fill({ machineName: 'omarchy', grant: ['work/acme'] }),
     );
     await page.getByText('Read only: me, work', { exact: true }).waitFor();
+    await expectNoOverflow(page);
     expect(await page.getByText('work/acme', { exact: true }).count()).toBe(1);
     expect(
       (

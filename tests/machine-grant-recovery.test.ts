@@ -2,7 +2,9 @@ import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { bucketCheck, grantPage, selectDeep } from './support/grant-browser.ts';
+import { largeGrantPaths, seedGrantTree } from './support/grants.ts';
 import { deferred } from './support/machines.ts';
+import { expectNoOverflow } from './support/page-checks.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
@@ -23,6 +25,7 @@ it('E24/E33: the mobile transition preserves name focus and keeps the approval h
       .poll(() => page.evaluate(() => document.activeElement?.id))
       .toBe('machine-name');
     expect(await page.evaluate(() => scrollY)).toBe(0);
+    await expectNoOverflow(page);
     for (const locator of [
       page.getByRole('heading', { name: 'Approve this machine?' }),
       page.getByRole('heading', { name: 'Bucket access', exact: true }),
@@ -43,6 +46,29 @@ it('E24/E33: the mobile transition preserves name focus and keeps the approval h
         'Approval context remains visible after the natural transition',
       ).toBe(true);
     }
+  } finally {
+    await close();
+  }
+});
+it('E24/E33: a large deep tree on a phone keeps its deepest choice within the page width', async () => {
+  const deepest =
+    'work/acme/platform/services/notifications/push-delivery-retry-scheduler-v2';
+  const { page, reveal, close } = await grantPage(browser, {
+    viewport: { width: 390, height: 844 },
+    configure: (_page, app) => seedGrantTree(app, largeGrantPaths),
+  });
+  try {
+    await reveal();
+    const row = page.locator(`[data-grant-path="${deepest}"] > div`);
+    await row.scrollIntoViewIfNeeded();
+    expect(
+      await row.evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        return box.left >= 0 && box.right <= innerWidth;
+      }),
+      'The deepest choice fits the phone width instead of being clipped',
+    ).toBe(true);
+    await expectNoOverflow(page);
   } finally {
     await close();
   }
