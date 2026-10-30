@@ -10,6 +10,7 @@ import {
   Replace,
   SearchX,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import { lazy, Suspense, useRef } from 'react';
 import {
@@ -57,13 +58,15 @@ import { Path, PathList } from './path-text';
 import { formatDate } from './time';
 import { useLastValue } from './use-confirm-target';
 import { useVaultPage } from './use-vault-page';
-import { WriteFeedback } from './vault-feedback';
+import { ImportNotice, WriteFeedback } from './vault-feedback';
 import { ancestorsOf, plural, type Secret, secretsIn } from './vault-model';
 import { SecretSheet } from './vault-sheet';
 
 // Intent loads only the dialog's code; the value is fetched, and audited, on open.
 const loadRevealDialog = () => import('./reveal-dialog');
 const RevealDialog = lazy(loadRevealDialog);
+const loadImportSheet = () => import('./vault-import-sheet');
+const VaultImportSheet = lazy(loadImportSheet);
 
 const sectionLabel =
   'text-xs font-medium tracking-wider text-muted-foreground uppercase';
@@ -73,12 +76,14 @@ const sectionLabel =
 function SecretMenu({
   secret,
   busy,
+  allowReveal,
   onReveal,
   onReplace,
   onDelete,
 }: {
   secret: Secret;
   busy: boolean;
+  allowReveal: boolean;
   onReveal: (secret: Secret) => void;
   onReplace: (secret: Secret) => void;
   onDelete: (secret: Secret, trigger: HTMLButtonElement | null) => void;
@@ -108,7 +113,10 @@ function SecretMenu({
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem disabled={busy} onSelect={() => onReveal(secret)}>
+        <DropdownMenuItem
+          disabled={busy && !allowReveal}
+          onSelect={() => onReveal(secret)}
+        >
           <Eye />
           Reveal value…
         </DropdownMenuItem>
@@ -346,7 +354,13 @@ function SecretsLoadFailure({
   );
 }
 
-function NoSecretsAnywhere({ onCreate }: { onCreate: () => void }) {
+function NoSecretsAnywhere({
+  onCreate,
+  busy,
+}: {
+  onCreate: () => void;
+  busy: boolean;
+}) {
   return (
     <div className="rounded-lg border border-dashed">
       <Empty>
@@ -362,7 +376,7 @@ function NoSecretsAnywhere({ onCreate }: { onCreate: () => void }) {
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
-          <Button size="sm" onClick={onCreate}>
+          <Button size="sm" disabled={busy} onClick={onCreate}>
             <Plus />
             New secret
           </Button>
@@ -373,12 +387,14 @@ function NoSecretsAnywhere({ onCreate }: { onCreate: () => void }) {
 }
 
 function NoSecretsHere({
+  busy,
   bucket,
   inheriting,
   onCreate,
 }: {
   bucket: string;
   inheriting: boolean;
+  busy: boolean;
   onCreate: () => void;
 }) {
   return (
@@ -398,7 +414,12 @@ function NoSecretsHere({
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
-          <Button size="sm" variant="outline" onClick={onCreate}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={onCreate}
+          >
             <Plus />
             New secret in <span className="font-mono">{bucket}</span>
           </Button>
@@ -485,10 +506,13 @@ function StoredSecrets({
   const { selected, saving, highlighted, busy } = page;
   const own = secretsIn(list, selected);
   if (list.length === 0)
-    return <NoSecretsAnywhere onCreate={() => page.openCreate()} />;
+    return (
+      <NoSecretsAnywhere busy={page.busy} onCreate={() => page.openCreate()} />
+    );
   if (own.length === 0)
     return (
       <NoSecretsHere
+        busy={page.busy}
         bucket={selected}
         inheriting={ancestorsOf(selected).some(
           (ancestor) => secretsIn(list, ancestor).length > 0,
@@ -515,6 +539,9 @@ function StoredSecrets({
                   <SecretMenu
                     secret={secret}
                     busy={busy}
+                    allowReveal={
+                      page.importer.run !== null && !page.importer.run.settled
+                    }
                     onReveal={page.openReveal}
                     onReplace={page.openReplace}
                     onDelete={page.requestDelete}
@@ -575,7 +602,10 @@ function MobileListStatus({ page }: { page: Page }) {
   if (page.list?.length === 0)
     return (
       <div className="mb-6 lg:hidden">
-        <NoSecretsAnywhere onCreate={() => page.openCreate()} />
+        <NoSecretsAnywhere
+          busy={page.busy}
+          onCreate={() => page.openCreate()}
+        />
       </div>
     );
   return null;
@@ -622,6 +652,17 @@ function TreePane({ page }: { page: Page }) {
   );
 }
 
+function ImportStatus({ page }: { page: Page }) {
+  if (!page.importer.run || page.importOpen) return null;
+  return (
+    <ImportNotice
+      run={page.importer.run}
+      onShow={page.openImport}
+      onDismiss={page.importer.dismiss}
+    />
+  );
+}
+
 export function VaultPage() {
   const page = useVaultPage();
   const { ui, drilled, loaded, busy } = page;
@@ -635,6 +676,17 @@ export function VaultPage() {
         >
           Vault
         </h1>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!loaded || busy}
+          onPointerEnter={() => void loadImportSheet()}
+          onFocus={() => void loadImportSheet()}
+          onClick={page.openImport}
+        >
+          <Upload />
+          Import .env
+        </Button>
         <Button
           size="sm"
           disabled={!loaded || busy}
@@ -655,6 +707,7 @@ export function VaultPage() {
         in Audit.
       </p>
       <div className="mb-6 empty:hidden">
+        <ImportStatus page={page} />
         {ui.feedback && (
           <WriteFeedback
             feedback={ui.feedback}
@@ -704,6 +757,22 @@ function VaultDialogs({ page }: { page: Page }) {
       : null;
   return (
     <>
+      {(page.importOpen || page.importer.run) && (
+        <Suspense fallback={null}>
+          <VaultImportSheet
+            open={page.importOpen}
+            initialBucket={
+              page.buckets.includes(page.selected) ? page.selected : 'me'
+            }
+            buckets={page.buckets}
+            parents={page.parents}
+            secrets={page.list ?? []}
+            importer={page.importer}
+            onClose={page.closeImport}
+            onStarted={page.importStarted}
+          />
+        </Suspense>
+      )}
       <SecretSheet
         sheet={ui.sheet}
         buckets={page.buckets}

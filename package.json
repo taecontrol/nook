@@ -47,6 +47,7 @@
     "ai": "7.0.127",
     "class-variance-authority": "0.7.1",
     "cn": "0.4.0",
+    "dotenv": "18.0.9",
     "e2e": "0.16.0",
     "esbuild": "0.28.2",
     "istanbul-lib-coverage": "3.2.2",

@@ -14,6 +14,7 @@ import { useDesktop } from './hooks/use-desktop';
 import { useReturnFocus } from './use-confirm-target';
 import { type SecretWrite, unconfirmed, useVault } from './vault-api';
 import { feedbackFor } from './vault-feedback';
+import { useVaultImport } from './vault-import';
 import { countByBucket, type Secret } from './vault-model';
 import {
   type Draft,
@@ -109,6 +110,8 @@ export function useVaultPage() {
   }, [location.href]);
   const bucketsQuery = useBucketList();
   const vault = useVault();
+  const importer = useVaultImport();
+  const [importOpen, setImportOpen] = useState(false);
   const { secrets, busy } = vault;
   const [state, setUi] = useState<VaultUi>(idleUi);
   const [dismissed, setDismissed] = useState<number>();
@@ -161,7 +164,8 @@ export function useVaultPage() {
   const confirmReplace = () => {
     if (state.sheet) run(fromDraft(state.sheet.draft), state.sheet.draft);
   };
-  const openCreate = (bucket?: string) =>
+  const openCreate = (bucket?: string) => {
+    if (busy) return;
     patch({
       sheet: openSheet(
         blankDraft(
@@ -169,8 +173,10 @@ export function useVaultPage() {
         ),
       ),
     });
-  const openReplace = (secret: Secret) =>
-    patch({ sheet: openSheet(replacement(secret)) });
+  };
+  const openReplace = (secret: Secret) => {
+    if (!busy) patch({ sheet: openSheet(replacement(secret)) });
+  };
   const requestDelete = (secret: Secret, trigger: HTMLButtonElement | null) => {
     if (busy) return;
     deleteFocus.capture(trigger);
@@ -222,9 +228,18 @@ export function useVaultPage() {
         ?.scrollIntoView({ block: 'nearest' });
   }, [highlighted]);
   return {
+    importer,
+    importOpen,
+    openImport: () => setImportOpen(true),
+    closeImport: () => setImportOpen(false),
+    importStarted: (bucket: string) => {
+      setDismissed(vault.write?.id);
+      void show(bucket);
+    },
     revealing: reveal?.href === location.href ? reveal.secret : null,
     openReveal: (secret: Secret) => {
-      if (!busy) setReveal({ href: location.href, secret });
+      if (!busy || (importer.run && !importer.run.settled))
+        setReveal({ href: location.href, secret });
     },
     closeReveal: () => setReveal(null),
     ui: { ...state, feedback },

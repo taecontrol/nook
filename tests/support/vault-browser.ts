@@ -98,6 +98,7 @@ export async function replaceDraft(page: Page, path = 'work/acme/STRIPE_KEY') {
 export async function privateClientState(
   page: Page,
   values: readonly string[],
+  options: { allowRedacted?: boolean; inspectReact?: boolean } = {},
 ) {
   // JSON hides live Redacted values. Find their brand through the public predicate
   // and inspect retained state before serialization as well.
@@ -106,90 +107,144 @@ export async function privateClientState(
   ).find((key) => Redacted.isRedacted({ [key]: true }));
   if (!brand) throw new Error('Cannot inspect redacted client values.');
   return page.evaluate(
-    ({ privateValues, brand }) => {
-      const element = document.querySelector('#root > *');
-      const key = Object.keys(element ?? {}).find((entry) =>
-        entry.startsWith('__reactFiber$'),
-      );
-      type Hook = {
-        memoizedState?: { current?: unknown };
-        next?: Hook;
+    ({ privateValues, brand, allowRedacted, inspectReact }) => {
+      type Client = {
+        getQueryCache(): { getAll(): { state: unknown }[] };
+        getMutationCache(): { getAll(): { state: unknown }[] };
       };
       type Fiber = {
         return?: Fiber;
         child?: Fiber;
         sibling?: Fiber;
-        memoizedState?: Hook;
-        memoizedProps?: {
-          client?: {
-            getQueryCache(): { getAll(): unknown[] };
-            getMutationCache(): { getAll(): unknown[] };
-          };
-        };
+        stateNode?: { current?: Fiber };
+        memoizedState?: unknown;
+        memoizedProps?: { client?: Client };
       };
-      let fiber = key
-        ? (element as unknown as Record<string, Fiber>)[key]
-        : undefined;
-      while (fiber) {
-        const client = fiber.memoizedProps?.client;
-        if (client?.getQueryCache) {
-          const refs: unknown[] = [];
-          const collectRefs = (node: Fiber | undefined) => {
-            if (!node) return;
-            let hook = node.memoizedState;
-            while (hook) {
-              const value = hook.memoizedState?.current;
-              if (value !== undefined) refs.push(value);
-              hook = hook.next;
-            }
-            collectRefs(node.child);
-            collectRefs(node.sibling);
-          };
-          collectRefs(fiber.child);
-          const retained = {
-            queries: client
-              .getQueryCache()
-              .getAll()
-              .map((entry) => (entry as { state: unknown }).state),
-            mutations: client
-              .getMutationCache()
-              .getAll()
-              .map((entry) => (entry as { state: unknown }).state),
-          };
-          const seen = new WeakSet<object>();
-          const containsValue = (value: unknown): boolean => {
-            if (typeof value === 'string')
-              return privateValues.some((secret) => value.includes(secret));
-            if (!value || typeof value !== 'object' || seen.has(value))
-              return false;
-            seen.add(value);
-            if (value instanceof Node) return false;
-            if (brand in value) return true;
-            if (value instanceof Map)
-              return Array.from(value.values()).some(containsValue);
-            return Object.getOwnPropertyNames(value).some((key) =>
-              containsValue((value as Record<string, unknown>)[key]),
-            );
-          };
-          const cache = JSON.stringify(retained);
-          const dom = `${document.documentElement.innerHTML} ${Array.from(
-            document.querySelectorAll('textarea, input'),
-          )
-            .map((input) => (input as HTMLInputElement).value)
-            .join(' ')}`;
-          return {
-            found: true,
-            absentFromCache:
-              !containsValue(retained) &&
-              !containsValue(refs) &&
-              privateValues.every((value) => !cache.includes(value)),
-            absentFromDom: privateValues.every((value) => !dom.includes(value)),
-          };
+      type Hook = { memoizedState?: { current?: unknown }; next?: Hook };
+      const refsFrom = (state: unknown) => {
+        const refs: unknown[] = [];
+        const hooks = new WeakSet<object>();
+        let hook = state as Hook | undefined;
+        while (hook && !hooks.has(hook)) {
+          hooks.add(hook);
+          const value = hook.memoizedState?.current;
+          if (value !== undefined) refs.push(value);
+          hook = hook.next;
         }
-        fiber = fiber.return;
-      }
-      return { found: false, absentFromCache: false, absentFromDom: false };
+        return refs;
+      };
+      const attachedFiber = (element: Element | null) => {
+        const key = Object.keys(element ?? {}).find((entry) =>
+          /^__react(Container|Fiber)\$/.test(entry),
+        );
+        return key
+          ? (element as unknown as Record<string, Fiber>)[key]
+          : undefined;
+      };
+      let root =
+        attachedFiber(document.querySelector('#root')) ??
+        attachedFiber(document.querySelector('#root > *'));
+      while (root?.return) root = root.return;
+      // The container attachment can point to the initial HostRoot fiber.
+      root = root?.stateNode?.current ?? root;
+      const react: unknown[] = [];
+      const refs: unknown[] = [];
+      const fibers = new WeakSet<object>();
+      let client: Client | undefined;
+      const collectState = (fiber: Fiber | undefined) => {
+        if (!fiber || fibers.has(fiber)) return;
+        fibers.add(fiber);
+        react.push(fiber.memoizedState, fiber.memoizedProps);
+        refs.push(...refsFrom(fiber.memoizedState));
+        if (fiber.memoizedProps?.client?.getQueryCache)
+          client = fiber.memoizedProps.client;
+        collectState(fiber.child);
+        collectState(fiber.sibling);
+      };
+      collectState(root);
+      if (!client)
+        return { found: false, absentFromCache: false, absentFromDom: false };
+      const retained = {
+        queries: client
+          .getQueryCache()
+          .getAll()
+          .map((entry) => entry.state),
+        mutations: client
+          .getMutationCache()
+          .getAll()
+          .map((entry) => entry.state),
+      };
+      // A metadata UUID can contain a short value such as PORT=4000 by
+      // chance. Still detect any complete private value, including a UUID.
+      const privateText = (text: string) =>
+        /^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(
+          text,
+        ) && !privateValues.includes(text)
+          ? ''
+          : text;
+      const seen = new WeakSet<object>();
+      const inspectable = (value: unknown): value is object =>
+        !!value &&
+        typeof value === 'object' &&
+        !seen.has(value) &&
+        !(value instanceof Node);
+      const fiberLinks = new Set([
+        'return',
+        'child',
+        'sibling',
+        'alternate',
+        'stateNode',
+      ]);
+      const isFiber = (value: object) =>
+        'tag' in value &&
+        typeof value.tag === 'number' &&
+        'memoizedState' in value &&
+        'memoizedProps' in value &&
+        'return' in value;
+      const children = (value: object): unknown[] => {
+        if (value instanceof Map) return Array.from(value.entries());
+        if (value instanceof Set) return Array.from(value.values());
+        // Only React fibers own links to skip; ordinary data can use any key.
+        const skipLinks = isFiber(value);
+        return Object.getOwnPropertyNames(value)
+          .filter((key) => !skipLinks || !fiberLinks.has(key))
+          .map((key) => (value as Record<string, unknown>)[key]);
+      };
+      const containsValue = (value: unknown): boolean => {
+        if (typeof value === 'string')
+          return privateValues.some((secret) =>
+            privateText(value).includes(secret),
+          );
+        if (!inspectable(value)) return false;
+        seen.add(value);
+        // Redacted is opaque: pending imports may retain it, never its text.
+        if (brand in value) return !allowRedacted;
+        return children(value).some(containsValue);
+      };
+      const cache = JSON.stringify(retained, (_key, value) =>
+        typeof value === 'string' ? privateText(value) : value,
+      );
+      const dom = `${document.documentElement.innerHTML} ${Array.from(
+        document.querySelectorAll('textarea, input'),
+      )
+        .map((input) => (input as HTMLInputElement).value)
+        .join(' ')}`;
+      return {
+        found: true,
+        absentFromCache:
+          !containsValue(retained) &&
+          // Reveal intentionally renders values; import Review checks all
+          // React state and props in addition to the existing cache/ref guard.
+          !containsValue(inspectReact ? react : refs) &&
+          privateValues.every((value) => !cache.includes(value)),
+        absentFromDom: privateValues.every((value) => !dom.includes(value)),
+      };
     },
-    { privateValues: [...values], brand },
+    {
+      privateValues: [...values],
+      brand,
+      allowRedacted: options.allowRedacted,
+      inspectReact: options.inspectReact,
+    },
   );
 }

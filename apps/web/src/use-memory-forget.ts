@@ -108,6 +108,13 @@ function isChecking(
   if (write.subject.check && write.status === 'pending') return true;
   return Boolean(reading?.id === write.id && reading.pending);
 }
+function canReadForget<Entry extends object>(
+  entry: Entry | null,
+  checking: boolean,
+  queries: QueryClient,
+): entry is Entry {
+  return entry !== null && !checking && !memoryWriteGate.isWriting(queries);
+}
 function shouldRestore(
   pathname: string,
   wasOpen: boolean,
@@ -238,7 +245,7 @@ export function useMemoryForget({
       restoreEntryFocus();
     },
     refreshCurrent: async () => {
-      if (!entry || checking || memoryWriteGate.isWriting(queries)) return;
+      if (!canReadForget(entry, checking, queries)) return;
       const token = entry.id;
       setReading({ id: token, pending: true });
       try {
@@ -249,7 +256,7 @@ export function useMemoryForget({
       }
     },
     check: async () => {
-      if (!entry || checking || memoryWriteGate.isWriting(queries)) return;
+      if (!canReadForget(entry, checking, queries)) return;
       const { result, token } = submit(entry.subject, entry, true);
       try {
         await result;
