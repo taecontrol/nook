@@ -2,7 +2,7 @@ import type {
   VectorizeIndex,
   VectorizeVector,
 } from '@cloudflare/workers-types';
-import { Effect, Schema } from 'effect';
+import { Array as Arr, Effect, Schema } from 'effect';
 import type { SqlClient, Statement } from 'effect/sql';
 import { sha256 } from './digest.ts';
 import { memoryBounds } from './memory-bounds.ts';
@@ -66,11 +66,8 @@ function inBatches<A>(
   size: number,
   call: (batch: string[]) => Promise<A>,
 ) {
-  return Effect.forEach(
-    Array.from({ length: Math.ceil(ids.length / size) }, (_, i) =>
-      ids.slice(i * size, (i + 1) * size),
-    ),
-    (batch) => Effect.tryPromise(() => call(batch)),
+  return Effect.forEach(Arr.chunksOf(ids, size), (batch) =>
+    Effect.tryPromise(() => call(batch)),
   );
 }
 
