@@ -272,10 +272,12 @@ function reasonFor(
 }
 function ReviewCheckbox({
   row,
+  rows,
   status,
   onRow,
 }: {
   row: Row;
+  rows: readonly Row[];
   status: Status;
   onRow: (patch: Partial<Row>) => void;
 }) {
@@ -287,7 +289,16 @@ function ReviewCheckbox({
         aria-label={`${row.name} can’t be included until its name is fixed`}
       />
     );
-  if (['ready', 'duplicate', 'invalid-description'].includes(status))
+  const collision =
+    row.value !== 'present' &&
+    rows.some(
+      (other) =>
+        other.id !== row.id && other.name === row.name && other.included,
+    );
+  if (
+    ['ready', 'duplicate', 'invalid-description'].includes(status) ||
+    collision
+  )
     return (
       <Checkbox
         checked={row.included}
@@ -334,7 +345,7 @@ function ReviewRow({
     <li className="px-3 py-2.5 sm:px-4" data-row={row.name}>
       <div className="flex items-start gap-3">
         <div className="flex h-8 w-4 shrink-0 items-center">
-          <ReviewCheckbox row={row} status={status} onRow={onRow} />
+          <ReviewCheckbox row={row} rows={rows} status={status} onRow={onRow} />
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row">
           <div className="min-w-0 font-mono sm:w-64 sm:shrink-0">
