@@ -2,13 +2,13 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
-import { deferred } from './support/machines.ts';
+import { launchTestBrowser } from '../../scripts/lib/test-browser.ts';
+import { deferred } from '../support/machines.ts';
 import {
   historyPage,
   type ScenarioName,
   scenarios,
-} from './support/memory-history.ts';
+} from '../support/memory-history.ts';
 
 let browser: Browser;
 let closeBrowser: (() => Promise<void>) | undefined;

@@ -2,10 +2,10 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
-import { deferred } from './support/machines.ts';
-import { memoryClient } from './support/memory.ts';
-import { fileMemory } from './support/memory-files.ts';
+import { launchTestBrowser } from '../../scripts/lib/test-browser.ts';
+import { deferred } from '../support/machines.ts';
+import { memoryClient } from '../support/memory.ts';
+import { fileMemory } from '../support/memory-files.ts';
 import {
   filesControl,
   filesPage,
@@ -13,14 +13,14 @@ import {
   filesSheet,
   openFiles,
   waitFileRows,
-} from './support/memory-files-browser.ts';
+} from '../support/memory-files-browser.ts';
 import {
   capturedFiles,
   capturedMemory,
   captureNeighbors,
   type FileCaptureState,
   fileCaptureStates,
-} from './support/memory-files-captures.ts';
+} from './fixtures/memory-files.ts';
 
 let browser: Browser;
 let closeBrowser: (() => Promise<void>) | undefined;

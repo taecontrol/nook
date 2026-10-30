@@ -1,4 +1,4 @@
-import { vaultSeeds } from './vault.ts';
+import { vaultSeeds } from '../../support/vault.ts';
 
 const long = (text: string) => text;
 const extra: [string, string | null][] = [

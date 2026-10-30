@@ -1,9 +1,12 @@
 import type { BucketGrant } from '@nook/contract';
 import type { Page } from 'playwright';
 import { expect } from 'vitest';
-import { createAuthorization, jsonRequest } from './authorizations.ts';
-import { seedGrantTree } from './grants.ts';
-import type { TestRuntime } from './runtime.ts';
+import {
+  createAuthorization,
+  jsonRequest,
+} from '../../support/authorizations.ts';
+import { seedGrantTree } from '../../support/grants.ts';
+import type { TestRuntime } from '../../support/runtime.ts';
 
 export const largeGrantPaths = [
   'work/taecontrol/website',

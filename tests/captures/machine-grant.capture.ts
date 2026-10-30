@@ -2,14 +2,11 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
-import { bucketCheck, grantPage } from './support/grant-browser.ts';
-import {
-  grantCaptureMachines,
-  largeGrantPaths,
-} from './support/grant-captures.ts';
-import { seedGrantTree } from './support/grants.ts';
-import { deferred } from './support/machines.ts';
+import { launchTestBrowser } from '../../scripts/lib/test-browser.ts';
+import { bucketCheck, grantPage } from '../support/grant-browser.ts';
+import { seedGrantTree } from '../support/grants.ts';
+import { deferred } from '../support/machines.ts';
+import { grantCaptureMachines, largeGrantPaths } from './fixtures/grants.ts';
 
 const directory = resolve('.local/verification/screenshots');
 let browser: Browser;

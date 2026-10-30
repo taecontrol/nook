@@ -2,18 +2,18 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
-import { fetchValues } from './support/audit.ts';
-import { auditEntries } from './support/audit-browser.ts';
-import { issueGrant } from './support/grants.ts';
-import { deferred } from './support/machines.ts';
+import { launchTestBrowser } from '../../scripts/lib/test-browser.ts';
+import { fetchValues } from '../support/audit.ts';
+import { auditEntries } from '../support/audit-browser.ts';
+import { issueGrant } from '../support/grants.ts';
+import { deferred } from '../support/machines.ts';
 import {
   openReveal,
   revealPage,
   revealPath,
   revealSecret,
   valueField,
-} from './support/reveal.ts';
+} from '../support/reveal.ts';
 
 const directory = resolve('.local/verification/screenshots');
 let browser: Browser;
