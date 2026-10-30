@@ -30,7 +30,7 @@ erasure guarantee.
 
 ## Memory search and capacity
 
-Search combines exact words with meaning across the selected bucket, its ancestors, and `me`, within the caller's grant. Exact words are available when `remember` succeeds. Embeddings are written afterwards; Vectorize can take about a minute to expose them. The five-minute Cron Trigger repairs up to 50 pending or outdated memories per run, including memories stored before search was installed. Changing `EMBEDDING_MODEL` in configuration schedules re-embedding; the index still requires 1,024-dimensional vectors.
+Search combines exact words with meaning across the selected bucket, its ancestors, and `me`, within the caller's grant. Exact words are available when `remember` succeeds. Embeddings are written afterwards; Vectorize can take about a minute to expose them. The five-minute Cron Trigger repairs up to 50 pending or outdated memories per run, including memories stored before search was installed. Changing `EMBEDDING_MODEL` in configuration schedules re-embedding; the index still requires 1,024-dimensional vectors. Each vector records its model, and scheduled inspection re-embeds a vector from another model or none, so the first deployment that records models re-embeds every memory once, about one run per fifty memories, while existing vectors keep serving search ([ADR-0017](adrs/0017-vectors-carry-their-embedding-model-and-unknown-models-are-re-embedded.md)).
 
 Vectorize [creates metadata indexes asynchronously](https://developers.cloudflare.com/vectorize/get-started/intro/).
 Deployment waits for the string `bucket` index to appear in

@@ -125,7 +125,10 @@ export const memorySync = (
           const stale = await Promise.all(
             rows.map(async (row) => {
               const vector = vectors.find((v) => v.id === row.id);
+              // A vector without a model predates model metadata or comes
+              // from an old Worker mid-deploy; it is re-embedded once.
               return !vector ||
+                vector.model !== index.model ||
                 vector.contentHash !== row.content_hash ||
                 vector.bucket !== (await vectorBucket(row.bucket))
                 ? row

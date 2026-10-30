@@ -227,6 +227,7 @@ it('E18: a vector without model identity, from before model metadata or an old W
   expect(await marker()).toBeNull();
   expect(await recalled()).toBe(true);
 
+  app.services.resetCalls();
   await app.scheduled(new Date('2030-01-01T00:05:00Z'));
   app.services.advance();
   expect(app.services.embeddingCalls.flatMap((c) => c.text)).toEqual([

@@ -49,6 +49,7 @@ const InspectedVectors = Schema.Array(
         Schema.Struct({
           bucket: Schema.optionalKey(Schema.String),
           contentHash: Schema.optionalKey(Schema.String),
+          model: Schema.optionalKey(Schema.String),
         }),
       ),
     ),
@@ -127,6 +128,7 @@ export function memoryIndex(env: SearchBindings = {}) {
           id: v.id,
           bucket: v.metadata?.bucket,
           contentHash: v.metadata?.contentHash,
+          model: v.metadata?.model,
         }));
       }),
     write: (
@@ -152,9 +154,12 @@ export function memoryIndex(env: SearchBindings = {}) {
               batch.map(async (row, i) => ({
                 id: row.id,
                 values: [...data[i]],
+                // Inspection compares the producing model: a marker cannot
+                // tell a late write from another deployment's model apart.
                 metadata: {
                   bucket: await vectorBucket(row.bucket),
                   contentHash: row.content_hash,
+                  model,
                 },
               })),
             ),
