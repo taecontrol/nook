@@ -220,7 +220,7 @@ it.each(viewports)(
       await expectWithinViewport(sheet);
       await page.keyboard.press('Escape');
       await sheet.waitFor({ state: 'detached' });
-      await openSecretMenu(page, 'work/acme/DATABASE_URL', 'Delete secret…');
+      await openSecretMenu(page, longPath, 'Delete secret…');
       await expectWithinViewport(page.getByRole('alertdialog'));
       await expectNoOverflow(page);
     } finally {

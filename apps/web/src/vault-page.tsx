@@ -480,7 +480,7 @@ function DeleteConfirmation({
           </AlertDialogTitle>
           <AlertDialogDescription>
             Its value is deleted and can’t be recovered. {where} will no longer
-            find <span className="font-mono">{shown.name}</span>.
+            find <span className="font-mono wrap-anywhere">{shown.name}</span>.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
