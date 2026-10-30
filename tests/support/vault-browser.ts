@@ -1,6 +1,7 @@
 import { Redacted } from 'effect';
 import type { Browser, Page } from 'playwright';
 import { closeBrowserPage } from './buckets-browser.ts';
+import { watchPageErrors } from './page-checks.ts';
 import { seedSecrets, vaultRuntime } from './vault.ts';
 
 export const secretRow = (page: Page, path: string) =>
@@ -27,6 +28,7 @@ export async function vaultPage(
   });
   const page = await context.newPage();
   page.setDefaultTimeout(5000);
+  const expectNoPageErrors = watchPageErrors(page);
   const requests: { method: string; path: string }[] = [];
   page.on('request', (request) =>
     requests.push({
@@ -34,12 +36,16 @@ export async function vaultPage(
       path: new URL(request.url()).pathname,
     }),
   );
-  const close = async () => {
+  const release = async () => {
     try {
       await closeBrowserPage(page, context);
     } finally {
       await app.close();
     }
+  };
+  const close = async () => {
+    await release();
+    expectNoPageErrors();
   };
   try {
     if (options.fresh)
@@ -51,7 +57,7 @@ export async function vaultPage(
     await page.goto(app.origin + (options.start ?? '/vault?bucket=work/acme'));
     return { page, app, context, requests, values, close };
   } catch (error) {
-    await close();
+    await release();
     throw error;
   }
 }

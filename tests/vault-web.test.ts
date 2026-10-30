@@ -4,12 +4,17 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { deferred } from './support/machines.ts';
 import {
+  expectNoOverflow,
+  expectWithinViewport,
+} from './support/page-checks.ts';
+import {
   createSecret,
   deleteSecret,
   listSecrets,
   replaceSecret,
   secretInput,
   secretRows,
+  vaultSeeds,
 } from './support/vault.ts';
 import {
   createDraft,
@@ -137,6 +142,92 @@ it('the Vault bucket selection follows both sides of the desktop breakpoint', as
     await visit.close();
   }
 });
+const viewports = [
+  { name: 'desktop', width: 1440, height: 900 },
+  { name: 'phone', width: 390, height: 844 },
+];
+it.each(viewports)(
+  'E19: the first load shows loading, then a failure without cached data, within the $name viewport',
+  async (viewport) => {
+    const gate = deferred();
+    const visit = await vaultPage(browser, {
+      viewport,
+      configure: async (page) => {
+        await page.route('**/api/secrets', async (route) => {
+          await gate.promise;
+          await route
+            .fulfill({
+              status: 503,
+              contentType: 'application/json',
+              body: '{"_tag":"ServiceUnavailable"}',
+            })
+            .catch(() => {});
+        });
+      },
+    });
+    const { page } = visit;
+    try {
+      await page.getByRole('status', { name: 'Loading secrets' }).waitFor();
+      await expectNoOverflow(page);
+      gate.resolve();
+      await page.getByText('Couldn’t load secrets', { exact: true }).waitFor();
+      expect(await page.locator('body').innerText()).not.toContain(
+        'Previously loaded data',
+      );
+      await expectNoOverflow(page);
+    } finally {
+      gate.resolve();
+      await visit.close();
+    }
+  },
+);
+it.each(viewports)(
+  'E19: Vault screens, long metadata, the invalid create Sheet and Delete confirmation fit the $name viewport',
+  async (viewport) => {
+    const longName = `LONG_${'N'.repeat(59)}`;
+    const longPath = `work/acme/${longName}`;
+    const visit = await vaultPage(browser, {
+      viewport,
+      start: '/vault',
+      seeds: [
+        ...vaultSeeds,
+        ['work/acme', longName, 'd'.repeat(200), '2026-10-02'],
+      ],
+    });
+    const { page } = visit;
+    try {
+      await page
+        .getByRole('list', { name: 'Buckets', exact: true })
+        .locator('[data-path="work/acme"]')
+        .waitFor();
+      await expectNoOverflow(page);
+      await page.goto(`${visit.app.origin}/vault?bucket=work/globex`);
+      await page
+        .getByText('No secrets in work/globex', { exact: true })
+        .waitFor();
+      await expectNoOverflow(page);
+      await page.goto(`${visit.app.origin}/vault?bucket=work/acme`);
+      await secretRow(page, longPath).waitFor();
+      await expectNoOverflow(page);
+      const sheet = await createDraft(page, { name: 'resend_api_key' });
+      await sheet
+        .getByText(
+          'Use uppercase letters, digits, and underscores, starting with a letter or underscore.',
+          { exact: true },
+        )
+        .waitFor();
+      await expectNoOverflow(page);
+      await expectWithinViewport(sheet);
+      await page.keyboard.press('Escape');
+      await sheet.waitFor({ state: 'detached' });
+      await openSecretMenu(page, 'work/acme/DATABASE_URL', 'Delete secret…');
+      await expectWithinViewport(page.getByRole('alertdialog'));
+      await expectNoOverflow(page);
+    } finally {
+      await visit.close();
+    }
+  },
+);
 it.each([false, true])(
   'E19: create is optimistic and settled values disappear from DOM, Query cache and mutation state (submit burst: %s)',
   async (submitBurst) => {
