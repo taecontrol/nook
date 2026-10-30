@@ -18,7 +18,10 @@ import {
   openForget,
   uniqueTerm,
 } from './support/memory-forget.ts';
-import { expectNoOverflow } from './support/page-checks.ts';
+import {
+  expectNoOverflow,
+  expectWithinViewport,
+} from './support/page-checks.ts';
 
 let browser: Browser;
 let closeBrowser: (() => Promise<void>) | undefined;
@@ -64,6 +67,10 @@ describe.each(viewports)('Forget #13 at $width px', (viewport) => {
       await detail(page).waitFor();
       await openForget(page);
       await expectNoOverflow(page);
+      await expectWithinViewport(forgetDialog(page));
+      expect(await forgetDialog(page).textContent()).toContain(
+        'What is deleted',
+      );
       expect(await forgetDialog(page).textContent()).toContain(
         'all 3 versions',
       );
@@ -265,6 +272,7 @@ describe.each(viewports)('Forget #13 at $width px', (viewport) => {
       const forgetItem = page.getByRole('menuitem', { name: 'Forget memory…' });
       await forgetItem.waitFor();
       await expectNoOverflow(page);
+      await expectWithinViewport(page.getByRole('menu'));
       await forgetItem.press('Enter');
       const cancel = forgetDialog(page).getByRole('button', { name: 'Cancel' });
       await expect
@@ -300,6 +308,7 @@ describe.each(viewports)('Forget #13 at $width px', (viewport) => {
         await page.locator(`[data-memory-actions="${memoryId(2)}"]`).click();
         await forgetItem.waitFor();
         await expectNoOverflow(page);
+        await expectWithinViewport(page.getByRole('menu'));
       }
     } finally {
       await visit.close();
@@ -386,6 +395,7 @@ it.each(viewports)(
         await page.getByRole('link', { name: 'Results', exact: true }).click();
       await openForget(page, memoryId(2));
       await expectNoOverflow(page);
+      await expectWithinViewport(forgetDialog(page));
       await expect
         .poll(() =>
           forgetDialog(page)

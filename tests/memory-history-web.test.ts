@@ -8,7 +8,10 @@ import {
   memories,
   seedHistory,
 } from './support/memory-history.ts';
-import { expectNoOverflow } from './support/page-checks.ts';
+import {
+  expectNoOverflow,
+  expectWithinViewport,
+} from './support/page-checks.ts';
 
 let browser: Browser;
 let closeBrowser: (() => Promise<void>) | undefined;
@@ -23,12 +26,11 @@ const settleSheet = (page: Page) =>
       el.getAnimations().map((animation) => animation.finished.catch(() => {})),
     ),
   );
-// Neither the page nor the open sheet scrolls sideways.
+// Neither the page nor the open sheet, down to its scrolled rows, reaches
+// past the viewport.
 const expectSheetFits = async (page: Page) => {
   await expectNoOverflow(page);
-  expect(
-    await sheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth),
-  ).toBe(true);
+  await expectWithinViewport(sheet(page));
 };
 const history = (page: Page) =>
   page.getByRole('button', { name: /History.*versions?/ });
@@ -582,21 +584,14 @@ it('E27: 16 KiB Unicode, six 32-character segments, long names and directories f
       `${visit.app.origin}/memory?bucket=${bucket}&memory=${fixture.id}&history=1&version=2&changes=1`,
     );
     await sheet(page).locator('[data-memory-diff]').waitFor();
-    expect(
-      await page.evaluate(() => document.documentElement.scrollWidth),
-    ).toBe(390);
-    expect(
-      await sheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth),
-    ).toBe(true);
+    await expectSheetFits(page);
     expect(await sheet(page).textContent()).toContain('Removed tag');
     expect(await sheet(page).textContent()).toContain('Added tag');
     await sheet(page).getByRole('button', { name: 'Older version' }).click();
     await sheet(page)
       .getByRole('heading', { name: 'Version 1 of 2' })
       .waitFor();
-    expect(
-      await sheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth),
-    ).toBe(true);
+    await expectSheetFits(page);
   } finally {
     await visit.close();
   }

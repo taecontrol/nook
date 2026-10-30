@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import type { Browser, Page } from 'playwright';
+import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { auditRows } from './support/audit.ts';
@@ -14,7 +14,10 @@ import {
   openFiles,
   waitFileRows,
 } from './support/memory-files-browser.ts';
-import { expectNoOverflow } from './support/page-checks.ts';
+import {
+  expectNoOverflow,
+  expectWithinViewport,
+} from './support/page-checks.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
@@ -27,12 +30,6 @@ const viewports = [
   { width: 1440, height: 900 },
   { width: 390, height: 844 },
 ];
-// The Files drawer never scrolls sideways inside itself.
-async function expectSheetFits(page: Page) {
-  expect(
-    await filesSheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth),
-  ).toBe(true);
-}
 
 it.each(viewports)(
   'E24: Files count sits beside History and the drawer lists newest-first metadata and full Details at $width px',
@@ -105,7 +102,7 @@ it.each(viewports)(
         expect(details).toContain('nook-acceptance');
       }
       await expectNoOverflow(page);
-      await expectSheetFits(page);
+      await expectWithinViewport(filesSheet(page));
     } finally {
       await visit.close();
     }
@@ -169,7 +166,7 @@ it.each(viewports)(
           return el.contains(hit);
         }),
       ).toBe(true);
-      await expectSheetFits(page);
+      await expectWithinViewport(filesSheet(page));
       await expectNoOverflow(page);
     } finally {
       await visit.close();
@@ -352,7 +349,7 @@ it.each(viewports)(
       expect(await alert.innerText()).toContain('Could not download the file');
       expect(await alert.innerText()).toContain(pdfName);
       await expectNoOverflow(page);
-      await expectSheetFits(page);
+      await expectWithinViewport(filesSheet(page));
       const retry = alert.getByRole('button', {
         name: 'Try again',
         exact: true,
