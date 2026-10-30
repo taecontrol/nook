@@ -1,6 +1,7 @@
 {
   "tests/agent-create-audit.test.ts": 18,
-  "tests/agent-create-cli.test.ts": 334,
+  "tests/agent-create-cli.test.ts": 196,
+  "tests/agent-create-retry-cli.test.ts": 138,
   "tests/agent-create-worker.test.ts": 133,
   "tests/assets.test.ts": 4,
   "tests/audit-cursors.test.ts": 6,
