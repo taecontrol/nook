@@ -404,6 +404,12 @@ cannot log `auth-rejected`; check the Access application, policy, and selected
 identity provider. Successful owner and synthetic local-owner requests do
 not emit rejection logs. Machine-token rejections have no Access reason log.
 
+The five-minute Cron retries memory indexing on its own, so a failed run
+does not stop Nook. To see why meaning search lags behind D1, filter
+`event` equal to `memory-sync-failed`. The `stage` field names the work
+that failed (`sweep`, `embedding`, or `inspection`), and `error` holds the
+failing service's message.
+
 Other installation problems:
 
 - **Deploy skipped:** confirm `NOOK_HOSTNAME` exists, the branch is `main`,

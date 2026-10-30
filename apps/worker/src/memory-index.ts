@@ -2,7 +2,7 @@ import type {
   VectorizeIndex,
   VectorizeVector,
 } from '@cloudflare/workers-types';
-import { Effect, Schema } from 'effect';
+import { Array as Arr, Effect, Schema } from 'effect';
 import type { SqlClient, Statement } from 'effect/sql';
 import { sha256 } from './digest.ts';
 import { memoryBounds } from './memory-bounds.ts';
@@ -61,6 +61,16 @@ export async function vectorBucket(path: string) {
   return (await sha256(path)).slice(0, 32);
 }
 
+function inBatches<A>(
+  ids: readonly string[],
+  size: number,
+  call: (batch: string[]) => Promise<A>,
+) {
+  return Effect.forEach(Arr.chunksOf(ids, size), (batch) =>
+    Effect.tryPromise(() => call(batch)),
+  );
+}
+
 export function memoryIndex(env: SearchBindings = {}) {
   const model = env.EMBEDDING_MODEL ?? '@cf/baai/bge-m3';
   const embed = (text: string[]) =>
@@ -86,10 +96,10 @@ export function memoryIndex(env: SearchBindings = {}) {
     markerSql: (sql: SqlClient.SqlClient, hash: Statement.Fragment) =>
       sql`${model} || ':' || ${hash}`,
     remove: (ids: string[]) =>
-      Effect.tryPromise(() => {
+      inBatches(ids, memoryBounds.vectorDeleteIds, (batch) => {
         if (!env.MEMORY_INDEX)
           throw new Error('Meaning search is unavailable.');
-        return env.MEMORY_INDEX.deleteByIds(ids);
+        return env.MEMORY_INDEX.deleteByIds(batch);
       }),
     query: (query: string, paths: readonly string[]) =>
       Effect.gen(function* () {
@@ -117,13 +127,18 @@ export function memoryIndex(env: SearchBindings = {}) {
       }),
     inspect: (ids: string[]) =>
       Effect.gen(function* () {
-        const raw = yield* Effect.tryPromise(() => {
-          if (!env.MEMORY_INDEX)
-            throw new Error('Meaning search is unavailable.');
-          return env.MEMORY_INDEX.getByIds(ids);
-        });
-        const vectors =
-          yield* Schema.decodeUnknownEffect(InspectedVectors)(raw);
+        const raw = yield* inBatches(
+          ids,
+          memoryBounds.vectorGetIds,
+          (batch) => {
+            if (!env.MEMORY_INDEX)
+              throw new Error('Meaning search is unavailable.');
+            return env.MEMORY_INDEX.getByIds(batch);
+          },
+        );
+        const vectors = yield* Schema.decodeUnknownEffect(InspectedVectors)(
+          raw.flat(),
+        );
         return vectors.map((v) => ({
           id: v.id,
           bucket: v.metadata?.bucket,

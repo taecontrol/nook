@@ -1,6 +1,5 @@
 import { D1Client } from '@effect/sql-d1';
-import { Effect, Schema } from 'effect';
-import { unavailable } from './http-errors.ts';
+import { Cause, Effect, Schema } from 'effect';
 import { memoryBounds } from './memory-bounds.ts';
 import {
   type EmbeddingMemory,
@@ -17,6 +16,32 @@ const EmbeddingRows = Schema.Array(
   }),
 );
 
+// Every stage is retried by a later cron, so a failure needs only to reach
+// an operator. Workers Logs keep console output while invocation logs stay
+// off (docs/install.md); filter `event` equal to `memory-sync-failed`.
+const logFailure =
+  (stage: 'sweep' | 'embedding' | 'inspection') =>
+  (cause: Cause.Cause<unknown>) =>
+    Effect.sync(() =>
+      console.error(
+        JSON.stringify({
+          event: 'memory-sync-failed',
+          stage,
+          error: reason(Cause.squash(cause)),
+        }),
+      ),
+    );
+// Effect and SQL wrappers keep the service's own message in `cause`.
+function reason(error: unknown) {
+  let current = error;
+  while (current instanceof Error && current.cause instanceof Error)
+    current = current.cause;
+  return (current instanceof Error ? current.message : String(current)).slice(
+    0,
+    300,
+  );
+}
+
 export const memorySync = (
   index: MemoryIndex,
   waitUntil?: (promise: Promise<unknown>) => void,
@@ -27,39 +52,35 @@ export const memorySync = (
       Effect.gen(function* () {
         if (!rows.length) return;
         // Filter after the slow AI request, immediately before the external upsert.
-        const written = yield* index
-          .write(rows, (candidates) =>
-            Effect.gen(function* () {
-              const current = yield* sql<{
-                id: string;
-                content_hash: string;
-              }>`SELECT id, content_hash FROM memories WHERE ${sql.in(
-                'id',
-                candidates.map((row) => row.id),
-              )}`.pipe(unavailable);
-              return candidates.filter((row) =>
-                current.some(
-                  (m) => m.id === row.id && m.content_hash === row.content_hash,
-                ),
-              );
-            }),
-          )
-          .pipe(unavailable);
+        const written = yield* index.write(rows, (candidates) =>
+          Effect.gen(function* () {
+            const current = yield* sql<{
+              id: string;
+              content_hash: string;
+            }>`SELECT id, content_hash FROM memories WHERE ${sql.in(
+              'id',
+              candidates.map((row) => row.id),
+            )}`;
+            return candidates.filter((row) =>
+              current.some(
+                (m) => m.id === row.id && m.content_hash === row.content_hash,
+              ),
+            );
+          }),
+        );
         if (!written.length) return;
-        yield* sql
-          .batch(
-            written.map(
-              (row) =>
-                sql`UPDATE memories SET embedding_marker=CASE WHEN content_hash=${row.content_hash} THEN ${index.marker(row.content_hash)} ELSE NULL END WHERE id=${row.id}`,
-            ),
-          )
-          .pipe(unavailable);
+        yield* sql.batch(
+          written.map(
+            (row) =>
+              sql`UPDATE memories SET embedding_marker=CASE WHEN content_hash=${row.content_hash} THEN ${index.marker(row.content_hash)} ELSE NULL END WHERE id=${row.id}`,
+          ),
+        );
       });
     const scheduleEmbedding = (rows: readonly EmbeddingMemory[]) => {
       if (waitUntil)
         waitUntil(
           Effect.runPromise(
-            embedding(rows).pipe(Effect.catchCause(() => Effect.void)),
+            embedding(rows).pipe(Effect.catchCause(logFailure('embedding'))),
           ),
         );
     };
@@ -68,18 +89,14 @@ export const memorySync = (
         const rows = yield* sql<{
           id: string;
           forgotten_at: string;
-        }>`SELECT r.id,r.forgotten_at FROM memory_vector_removals r WHERE NOT EXISTS (SELECT 1 FROM memories m WHERE m.id=r.id) ORDER BY r.forgotten_at,r.id LIMIT ${memoryBounds.indexChunk}`.pipe(
-          unavailable,
-        );
+        }>`SELECT r.id,r.forgotten_at FROM memory_vector_removals r WHERE NOT EXISTS (SELECT 1 FROM memories m WHERE m.id=r.id) ORDER BY r.forgotten_at,r.id LIMIT ${memoryBounds.indexChunk}`;
         if (!rows.length) return;
-        const vectors = yield* index
-          .inspect(rows.map((row) => row.id))
-          .pipe(unavailable);
+        const vectors = yield* index.inspect(rows.map((row) => row.id));
         const present = new Set(vectors.map((vector) => vector.id));
         const remove = rows
           .filter((row) => present.has(row.id))
           .map((row) => row.id);
-        if (remove.length) yield* index.remove(remove).pipe(unavailable);
+        if (remove.length) yield* index.remove(remove);
         const settled = rows
           .filter(
             (row) =>
@@ -89,9 +106,7 @@ export const memorySync = (
           )
           .map((row) => row.id);
         if (settled.length)
-          yield* sql`DELETE FROM memory_vector_removals WHERE ${sql.in('id', settled)} AND NOT EXISTS (SELECT 1 FROM memories m WHERE m.id=memory_vector_removals.id)`.pipe(
-            unavailable,
-          );
+          yield* sql`DELETE FROM memory_vector_removals WHERE ${sql.in('id', settled)} AND NOT EXISTS (SELECT 1 FROM memories m WHERE m.id=memory_vector_removals.id)`;
       });
     const inspect = (scheduledTime: number, repaired: readonly string[]) =>
       Effect.gen(function* () {
@@ -102,9 +117,7 @@ export const memorySync = (
         // so invalidation and repair cannot shrink the sweep under its cursor.
         const slots = yield* sql<{
           n: number;
-        }>`SELECT count(*) AS n FROM memories WHERE updated_at < ${cutoff}`.pipe(
-          unavailable,
-        );
+        }>`SELECT count(*) AS n FROM memories WHERE updated_at < ${cutoff}`;
         const pages = Math.ceil((slots[0]?.n ?? 0) / memoryBounds.indexChunk);
         if (!pages) return;
         const offset =
@@ -114,13 +127,9 @@ export const memorySync = (
           id: string;
           bucket: string;
           content_hash: string;
-        }>`SELECT id,bucket,content_hash FROM (SELECT * FROM memories WHERE updated_at < ${cutoff} ORDER BY seq LIMIT ${memoryBounds.indexChunk} OFFSET ${offset}) WHERE embedding_marker=${index.markerSql(sql, sql`content_hash`)} AND NOT ${sql.in('id', repaired)}`.pipe(
-          unavailable,
-        );
+        }>`SELECT id,bucket,content_hash FROM (SELECT * FROM memories WHERE updated_at < ${cutoff} ORDER BY seq LIMIT ${memoryBounds.indexChunk} OFFSET ${offset}) WHERE embedding_marker=${index.markerSql(sql, sql`content_hash`)} AND NOT ${sql.in('id', repaired)}`;
         if (!rows.length) return;
-        const vectors = yield* index
-          .inspect(rows.map((row) => row.id))
-          .pipe(unavailable);
+        const vectors = yield* index.inspect(rows.map((row) => row.id));
         const wrong = yield* Effect.promise(async () => {
           const stale = await Promise.all(
             rows.map(async (row) => {
@@ -138,35 +147,34 @@ export const memorySync = (
           return stale.filter((row) => row !== undefined);
         });
         if (wrong.length)
-          yield* sql
-            .batch(
-              wrong.map(
-                (row) =>
-                  sql`UPDATE memories SET embedding_marker=NULL WHERE id=${row.id} AND content_hash=${row.content_hash} AND updated_at < ${cutoff} AND embedding_marker=${index.markerSql(sql, sql`content_hash`)}`,
-              ),
-            )
-            .pipe(unavailable);
+          yield* sql.batch(
+            wrong.map(
+              (row) =>
+                sql`UPDATE memories SET embedding_marker=NULL WHERE id=${row.id} AND content_hash=${row.content_hash} AND updated_at < ${cutoff} AND embedding_marker=${index.markerSql(sql, sql`content_hash`)}`,
+            ),
+          );
       });
     return {
       scheduleEmbedding,
       sync: (scheduledTime = Date.now()) =>
         Effect.gen(function* () {
           yield* sweepRemovals(scheduledTime).pipe(
-            Effect.catchCause(() => Effect.void),
+            Effect.catchCause(logFailure('sweep')),
           );
-          const raw =
-            yield* sql`SELECT m.id, m.bucket, m.content_hash, v.content FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE embedding_marker IS NULL OR embedding_marker <> ${index.markerSql(sql, sql`m.content_hash`)} ORDER BY m.seq LIMIT ${memoryBounds.indexChunk}`.pipe(
-              unavailable,
-            );
           const rows =
-            yield* Schema.decodeUnknownEffect(EmbeddingRows)(raw).pipe(
-              unavailable,
+            yield* sql`SELECT m.id, m.bucket, m.content_hash, v.content FROM memories m JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE embedding_marker IS NULL OR embedding_marker <> ${index.markerSql(sql, sql`m.content_hash`)} ORDER BY m.seq LIMIT ${memoryBounds.indexChunk}`.pipe(
+              Effect.flatMap(Schema.decodeUnknownEffect(EmbeddingRows)),
+              Effect.catchCause((cause) =>
+                Effect.as(logFailure('embedding')(cause), []),
+              ),
             );
-          yield* embedding(rows).pipe(Effect.catchCause(() => Effect.void));
+          yield* embedding(rows).pipe(
+            Effect.catchCause(logFailure('embedding')),
+          );
           yield* inspect(
             scheduledTime,
             rows.map((row) => row.id),
-          ).pipe(Effect.catchCause(() => Effect.void));
+          ).pipe(Effect.catchCause(logFailure('inspection')));
         }),
     };
   });
