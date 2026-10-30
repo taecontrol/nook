@@ -1,11 +1,13 @@
-import { mkdir } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { auditRows } from './support/audit.ts';
 import { jsonRequest } from './support/authorizations.ts';
 import { deferred } from './support/machines.ts';
+import {
+  expectNoOverflow,
+  expectWithinViewport,
+} from './support/page-checks.ts';
 import {
   openReveal,
   revealPage,
@@ -34,9 +36,7 @@ import { vaultCheckpoints } from './support/vault-checkpoints.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
-const screenshots = resolve('.local/verification/screenshots');
 beforeAll(async () => {
-  await mkdir(screenshots, { recursive: true });
   ({ browser, close: closeBrowser } = await launchTestBrowser());
 });
 afterAll(async () => {
@@ -174,21 +174,6 @@ it.each([
     try {
       const { page } = visit;
       await secretRow(page, path).getByRole('button').waitFor();
-      await page.screenshot({
-        path: resolve(
-          screenshots,
-          `vault-max-path-${width}-${colorScheme}.png`,
-        ),
-        animations: 'disabled',
-      });
-      await page.screenshot({
-        path: resolve(
-          screenshots,
-          `vault-max-inherited-path-${width}-${colorScheme}.png`,
-        ),
-        fullPage: true,
-        animations: 'disabled',
-      });
       const inheritedCount = page
         .getByRole('link', { name: parent, exact: true })
         .locator('..')
@@ -213,13 +198,14 @@ it.each([
       const field = valueField(page);
       await field.waitFor();
       expect((await field.inputValue()) === value).toBe(true);
-      await page.screenshot({
-        path: resolve(
-          screenshots,
-          `reveal-max-path-${width}-${colorScheme}.png`,
+      // Let the open animation settle before measuring the dialog.
+      await dialog.evaluate((element) =>
+        Promise.all(
+          element
+            .getAnimations({ subtree: true })
+            .map((animation) => animation.finished.catch(() => {})),
         ),
-        animations: 'disabled',
-      });
+      );
       expect(
         await dialog.locator('[data-slot="dialog-description"]').innerText(),
       ).toContain(`${path} · Updated `);
@@ -492,38 +478,46 @@ it('E3: clipboard feedback is reset at three seconds and restarts after another 
     await visit.close();
   }
 });
-it('E5: a held genuine reveal request shows skeleton/Revealing and disabled Copy, with no automatic retry', async () => {
-  const gate = deferred();
-  const visit = await revealPage(browser, {
-    configure: async (page) => {
-      await page.route('**/api/secrets/*/reveal', async (route) => {
-        await gate.promise;
-        await route.continue().catch(() => {});
-      });
-    },
-  });
-  try {
-    const dialog = await openReveal(visit.page);
-    await dialog.getByText('Revealing…', { exact: true }).waitFor();
-    expect(
-      await dialog.locator('[data-slot="skeleton"]').count(),
-    ).toBeGreaterThan(0);
-    expect(
-      await dialog
-        .getByRole('button', { name: 'Copy', exact: true })
-        .isEnabled(),
-    ).toBe(false);
-    expect(await valueField(visit.page).count()).toBe(0);
-    expect(revealRequests(visit.requests)).toHaveLength(1);
-    expect(await auditRows(visit.app)).toEqual([]);
-    gate.resolve();
-    await valueField(visit.page).waitFor();
-    expect(revealRequests(visit.requests)).toHaveLength(1);
-  } finally {
-    gate.resolve();
-    await visit.close();
-  }
-});
+const desktop = { width: 1440, height: 900 };
+const phone = { width: 390, height: 844 };
+it.each([desktop, phone])(
+  'E5: a held genuine reveal request shows skeleton/Revealing and disabled Copy, with no automatic retry ($width)',
+  async (viewport) => {
+    const gate = deferred();
+    const visit = await revealPage(browser, {
+      viewport,
+      configure: async (page) => {
+        await page.route('**/api/secrets/*/reveal', async (route) => {
+          await gate.promise;
+          await route.continue().catch(() => {});
+        });
+      },
+    });
+    try {
+      const dialog = await openReveal(visit.page);
+      await dialog.getByText('Revealing…', { exact: true }).waitFor();
+      await expectWithinViewport(dialog);
+      await expectNoOverflow(visit.page);
+      expect(
+        await dialog.locator('[data-slot="skeleton"]').count(),
+      ).toBeGreaterThan(0);
+      expect(
+        await dialog
+          .getByRole('button', { name: 'Copy', exact: true })
+          .isEnabled(),
+      ).toBe(false);
+      expect(await valueField(visit.page).count()).toBe(0);
+      expect(revealRequests(visit.requests)).toHaveLength(1);
+      expect(await auditRows(visit.app)).toEqual([]);
+      gate.resolve();
+      await valueField(visit.page).waitFor();
+      expect(revealRequests(visit.requests)).toHaveLength(1);
+    } finally {
+      gate.resolve();
+      await visit.close();
+    }
+  },
+);
 it.each(['Close', 'Escape', 'x', 'outside'])(
   'E6/E8: %s removes the value and reopening makes a new request/entry',
   async (method) => {
@@ -594,15 +588,23 @@ it.each(['Audit', 'Back', 'sidebar', 'bucket-back'])(
   },
 );
 it.each([
-  'deleted',
-  'missing-key',
-  'other-key',
-  'read-failure',
-  'audit-failure',
+  ...(
+    [
+      'deleted',
+      'missing-key',
+      'other-key',
+      'read-failure',
+      'audit-failure',
+    ] as const
+  ).map((kind) => ({ kind, viewport: desktop })),
+  ...(['missing-key', 'audit-failure'] as const).map((kind) => ({
+    kind,
+    viewport: phone,
+  })),
 ])(
-  'E9–E12: %s shows the safe error with Try again and disabled Copy, without a value or entry',
-  async (kind) => {
-    const visit = await revealPage(browser);
+  'E9–E12: $kind shows the safe error with Try again and disabled Copy, without a value or entry ($viewport.width)',
+  async ({ kind, viewport }) => {
+    const visit = await revealPage(browser, { viewport });
     try {
       const { page, app } = visit;
       await secretRow(page, revealPath).waitFor();
@@ -643,6 +645,8 @@ it.each([
               ? 'Cannot open a secret encrypted with key 0000000000000000.'
               : "Couldn't reveal the value. Try again in a moment.";
       expect(await dialog.innerText()).toContain(message);
+      await expectWithinViewport(dialog);
+      await expectNoOverflow(page);
       expect(
         await dialog
           .getByRole('button', { name: 'Copy', exact: true })
@@ -741,6 +745,8 @@ it('E5/E11: an explicit held retry resets pending UI and recovers after the D1 f
       .click();
     await expect.poll(() => requests).toBe(2);
     await dialog.getByText('Revealing…', { exact: true }).waitFor();
+    await expectWithinViewport(dialog);
+    await expectNoOverflow(visit.page);
     expect(
       await dialog
         .getByRole('button', { name: 'Try again', exact: true })

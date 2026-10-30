@@ -1,5 +1,3 @@
-import { mkdir } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
@@ -9,9 +7,7 @@ import { runtime, type TestRuntime } from './support/runtime.ts';
 let browser: Browser;
 let closeBrowser: (() => Promise<void>) | undefined;
 let app: TestRuntime;
-const screenshots = resolve('.local/verification/screenshots');
 beforeAll(async () => {
-  await mkdir(screenshots, { recursive: true });
   app = await runtime();
   ({ browser, close: closeBrowser } = await launchTestBrowser());
 });
@@ -363,10 +359,6 @@ it.each(visualMatrix)(
           true,
         );
       }
-      await page.screenshot({
-        path: resolve(screenshots, `${name}.png`),
-        animations: 'disabled',
-      });
       if (size.name === 'mobile') {
         await page.getByRole('button', { name: 'Toggle Sidebar' }).click();
         await expect
@@ -384,11 +376,6 @@ it.each(visualMatrix)(
           .getAttribute('href'),
       ).toBe('/vault');
       if (state.name === 'long-email') {
-        if (size.name === 'mobile')
-          await page.screenshot({
-            path: resolve(screenshots, `${name}-sheet.png`),
-            animations: 'disabled',
-          });
         await page.getByRole('button', { name: 'Owner account' }).click();
         await expect.poll(() => page.getByRole('menu').isVisible()).toBe(true);
         expect(await page.getByRole('menu').innerText()).toContain(state.email);
@@ -402,10 +389,6 @@ it.each(visualMatrix)(
         expect((menu?.x ?? 0) + (menu?.width ?? 0)).toBeLessThanOrEqual(
           size.width,
         );
-        await page.screenshot({
-          path: resolve(screenshots, `${name}-user-menu.png`),
-          animations: 'disabled',
-        });
       }
     } finally {
       await closePage(page, context);

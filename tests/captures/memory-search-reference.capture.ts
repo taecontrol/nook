@@ -2,16 +2,16 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
-import { memoryId } from './fixtures/memories.ts';
+import { launchTestBrowser } from '../../scripts/lib/test-browser.ts';
+import { memoryId } from '../fixtures/memories.ts';
 import {
   deepBucket,
   extremeMemories,
   searchMemories,
-} from './fixtures/search-corpus.ts';
-import { deferred } from './support/machines.ts';
-import { memoryRows } from './support/memory.ts';
-import { searchPage } from './support/search.ts';
+} from '../fixtures/search-corpus.ts';
+import { deferred } from '../support/machines.ts';
+import { memoryRows } from '../support/memory.ts';
+import { searchPage } from '../support/search.ts';
 
 const directory = resolve('.local/verification/screenshots');
 let browser: Browser;

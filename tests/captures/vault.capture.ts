@@ -2,17 +2,17 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
-import { deferred } from './support/machines.ts';
-import type { vaultRuntime } from './support/vault.ts';
+import { launchTestBrowser } from '../../scripts/lib/test-browser.ts';
+import { deferred } from '../support/machines.ts';
+import type { vaultRuntime } from '../support/vault.ts';
 import {
   createDraft,
   openSecretMenu,
   replaceDraft,
   secretRow,
   vaultPage,
-} from './support/vault-browser.ts';
-import { manyVaultSeeds } from './support/vault-captures.ts';
+} from '../support/vault-browser.ts';
+import { manyVaultSeeds } from './fixtures/vault.ts';
 
 const directory = resolve('.local/verification/screenshots');
 let browser: Browser;

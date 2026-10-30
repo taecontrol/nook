@@ -1,45 +1,13 @@
 import type { BucketGrant } from '@nook/contract';
 import type { Page } from 'playwright';
 import { expect } from 'vitest';
-import { createAuthorization, jsonRequest } from './authorizations.ts';
-import { seedGrantTree } from './grants.ts';
-import type { TestRuntime } from './runtime.ts';
+import {
+  createAuthorization,
+  jsonRequest,
+} from '../../support/authorizations.ts';
+import { largeGrantPaths, seedGrantTree } from '../../support/grants.ts';
+import type { TestRuntime } from '../../support/runtime.ts';
 
-export const largeGrantPaths = [
-  'work/taecontrol/website',
-  'clients/acme-logistics/dispatch',
-  'clients/acme-logistics/dispatch/routes',
-  'clients/acme-logistics/dispatch/routes/regional',
-  'clients/acme-logistics/dispatch/routes/regional/manifests',
-  'clients/acme-logistics/invoices',
-  'clients/acme-logistics/invoices/archive',
-  'clients/river-studio',
-  'clients/river-studio/design',
-  'clients/river-studio/design/assets',
-  'clients/river-studio/website',
-  'clients/river-studio/website/content',
-  'personal/finances/taxes',
-  'personal/finances/taxes/2025',
-  'personal/finances/receipts',
-  'personal/health/appointments',
-  'personal/health/records',
-  'personal/travel',
-  'personal/travel/bookings',
-  'work/acme/platform',
-  'work/acme/platform/services',
-  'work/acme/platform/services/notifications',
-  'work/acme/platform/services/notifications/push-delivery-retry-scheduler-v2',
-  'work/acme/platform/services/billing',
-  'work/acme/platform/operations',
-  'work/acme/api/contracts',
-  'work/acme/api/tests',
-  'work/acme/web/components',
-  'work/acme/web/content',
-  'work/taecontrol/nook/docs',
-  'work/taecontrol/nook/releases',
-  'work/taecontrol/website/content',
-  'work/taecontrol/website/assets',
-];
 export async function grantCaptureMachines(app: TestRuntime, page: Page) {
   const now = Date.parse('2026-10-05T12:00:00Z');
   await page.clock.install({ time: new Date(now) });

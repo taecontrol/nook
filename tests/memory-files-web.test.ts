@@ -14,6 +14,10 @@ import {
   openFiles,
   waitFileRows,
 } from './support/memory-files-browser.ts';
+import {
+  expectNoOverflow,
+  expectWithinViewport,
+} from './support/page-checks.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
@@ -22,10 +26,12 @@ beforeAll(async () => {
 });
 afterAll(() => closeBrowser?.());
 
-it.each([
+const viewports = [
   { width: 1440, height: 900 },
   { width: 390, height: 844 },
-])(
+];
+
+it.each(viewports)(
   'E24: Files count sits beside History and the drawer lists newest-first metadata and full Details at $width px',
   async (viewport) => {
     const visit = await filesPage(browser, { viewport });
@@ -95,9 +101,73 @@ it.each([
         expect(details).toContain('Client (as reported)');
         expect(details).toContain('nook-acceptance');
       }
+      await expectNoOverflow(page);
+      await expectWithinViewport(filesSheet(page));
+    } finally {
+      await visit.close();
+    }
+  },
+);
+it.each(viewports)(
+  'E24: twelve files scroll inside the drawer to the last Download at $width px',
+  async (viewport) => {
+    const icons: [string, string, string][] = [
+      ['photo.png', 'image/png', 'lucide-file-image'],
+      ['bundle.zip', 'application/zip', 'lucide-file-archive'],
+      ['ledger.csv', 'text/csv', 'lucide-file-spreadsheet'],
+      [
+        'budget.xlsx',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'lucide-file-spreadsheet',
+      ],
+      ['config.json', 'application/json', 'lucide-file-json'],
+      ['notes.txt', 'text/plain', 'lucide-file-text'],
+      ['firmware.bin', 'application/octet-stream', 'lucide-file'],
+      ...Array.from({ length: 5 }, (_, index): [string, string, string] => [
+        `f${index}.pdf`,
+        'application/pdf',
+        'lucide-file-text',
+      ]),
+    ];
+    const visit = await filesPage(browser, {
+      viewport,
+      files: icons.map(([name, mediaType], index) => ({
+        name,
+        mediaType,
+        attachedAt: new Date(Date.UTC(2026, 9, 22, 14, index)).toISOString(),
+      })),
+    });
+    try {
+      const { page } = visit;
+      await openFiles(page);
+      await waitFileRows(page, icons.length);
+      // Each media type shows its kind of file icon.
+      for (const [name, , icon] of icons)
+        expect(
+          await filesSheet(page)
+            .locator(`[data-file-row="${name}"] svg`)
+            .first()
+            .evaluate((svg, icon) => svg.classList.contains(icon), icon),
+          name,
+        ).toBe(true);
+      const last = filesRows(page)
+        .last()
+        .getByRole('button', { name: /^Download / });
+      await last.scrollIntoViewIfNeeded();
+      expect(await last.isVisible()).toBe(true);
+      // Scrolled into view, the button is on screen and receives the click.
       expect(
-        await page.evaluate(() => document.documentElement.scrollWidth),
-      ).toBe(viewport.width);
+        await last.evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(
+            box.x + box.width / 2,
+            box.y + box.height / 2,
+          );
+          return el.contains(hit);
+        }),
+      ).toBe(true);
+      await expectWithinViewport(filesSheet(page));
+      await expectNoOverflow(page);
     } finally {
       await visit.close();
     }
@@ -262,32 +332,40 @@ it('E25: a genuine 404 names the missing file, refreshes detail and removes its 
     await visit.close();
   }
 });
-it('E25: a referenced missing R2 object produces an alert with Try again and a real restored download succeeds', async () => {
-  const visit = await filesPage(browser, { names: [pdfName] });
-  try {
-    const { page, app, files } = visit;
-    await openFiles(page);
-    const bucket = await app.mf.getR2Bucket('FILES');
-    await bucket.delete(files[0].object_key);
-    await filesSheet(page)
-      .getByRole('button', { name: `Download ${pdfName}`, exact: true })
-      .click();
-    const alert = filesSheet(page).getByRole('alert');
-    await alert.waitFor();
-    expect(await alert.innerText()).toContain('Could not download the file');
-    expect(await alert.innerText()).toContain(pdfName);
-    const retry = alert.getByRole('button', { name: 'Try again', exact: true });
-    expect(await retry.isEnabled()).toBe(true);
-    await waitFileRows(page, 1);
-    await bucket.put(files[0].object_key, Buffer.alloc(2_418_734, 30));
-    const saved = page.waitForEvent('download');
-    await retry.click();
-    const download = await saved;
-    expect(download.suggestedFilename()).toBe(pdfName);
-    const path = await download.path();
-    if (!path) throw new Error('Chromium did not save the file.');
-    expect(digest(await readFile(path))).toBe(files[0].sha256);
-  } finally {
-    await visit.close();
-  }
-});
+it.each(viewports)(
+  'E25: a referenced missing R2 object produces an alert with Try again and a real restored download succeeds at $width px',
+  async (viewport) => {
+    const visit = await filesPage(browser, { viewport, names: [pdfName] });
+    try {
+      const { page, app, files } = visit;
+      await openFiles(page);
+      const bucket = await app.mf.getR2Bucket('FILES');
+      await bucket.delete(files[0].object_key);
+      await filesSheet(page)
+        .getByRole('button', { name: `Download ${pdfName}`, exact: true })
+        .click();
+      const alert = filesSheet(page).getByRole('alert');
+      await alert.waitFor();
+      expect(await alert.innerText()).toContain('Could not download the file');
+      expect(await alert.innerText()).toContain(pdfName);
+      await expectNoOverflow(page);
+      await expectWithinViewport(filesSheet(page));
+      const retry = alert.getByRole('button', {
+        name: 'Try again',
+        exact: true,
+      });
+      expect(await retry.isEnabled()).toBe(true);
+      await waitFileRows(page, 1);
+      await bucket.put(files[0].object_key, Buffer.alloc(2_418_734, 30));
+      const saved = page.waitForEvent('download');
+      await retry.click();
+      const download = await saved;
+      expect(download.suggestedFilename()).toBe(pdfName);
+      const path = await download.path();
+      if (!path) throw new Error('Chromium did not save the file.');
+      expect(digest(await readFile(path))).toBe(files[0].sha256);
+    } finally {
+      await visit.close();
+    }
+  },
+);

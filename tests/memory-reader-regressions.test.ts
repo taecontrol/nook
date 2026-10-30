@@ -15,6 +15,7 @@ import {
   seedMemories,
   typicalMemories,
 } from './support/memory.ts';
+import { expectNoOverflow } from './support/page-checks.ts';
 import { visibilityBrowser } from './support/visibility-browser.ts';
 
 let browser: Browser;
@@ -153,6 +154,7 @@ it('E22/E28: Retry recovers failed counts and the feed with an existing URL sele
     await page
       .getByText('Could not load memory counts', { exact: true })
       .waitFor();
+    await expectNoOverflow(page);
     await (await visit.app.mf.getD1Database('DB'))
       .prepare('ALTER TABLE unavailable_memories RENAME TO memories')
       .run();

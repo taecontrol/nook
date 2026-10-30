@@ -8,6 +8,10 @@ import {
   deepBuckets,
   typicalBuckets,
 } from './support/buckets-browser.ts';
+import {
+  expectNoOverflow,
+  expectWithinViewport,
+} from './support/page-checks.ts';
 import { runtime, type TestRuntime } from './support/runtime.ts';
 
 function deferred() {
@@ -462,6 +466,68 @@ it('the deepest accepted bucket disables Create inside and explains the limit', 
     await closeBrowserPage(page, context);
   }
 });
+
+it.each([
+  { width: 390, height: 844 },
+  { width: 1440, height: 900 },
+])(
+  'deep buckets, previews, feedback, confirmation, loading and failure never overflow ($width)',
+  async (viewport) => {
+    const { page, context } = await bucketPage(browser, app.origin, {
+      viewport,
+      buckets: deepBuckets,
+    });
+    try {
+      await row(page, 'side-projects/memorable').waitFor();
+      await expectNoOverflow(page);
+      const field = page.getByRole('textbox', { name: 'New bucket path' });
+      await field.fill('clients/acme/website');
+      await row(page, 'clients/acme/website').waitFor();
+      await expectNoOverflow(page);
+      await field.fill('Work/Acme');
+      await page
+        .getByText('Use lowercase letters:', { exact: false })
+        .waitFor();
+      await expectNoOverflow(page);
+      await field.fill('');
+      await page
+        .getByRole('button', {
+          name: 'Actions for work/taecontrol/nook',
+          exact: true,
+        })
+        .click();
+      await page.getByRole('menuitem', { name: 'Delete bucket…' }).click();
+      await expectWithinViewport(page.getByRole('alertdialog'));
+    } finally {
+      await closeBrowserPage(page, context);
+    }
+    const failed = await bucketPage(browser, app.origin, {
+      viewport,
+      loadStatus: 503,
+    });
+    try {
+      await failed.page
+        .getByText("Couldn't load buckets", { exact: true })
+        .waitFor();
+      await expectNoOverflow(failed.page);
+    } finally {
+      await closeBrowserPage(failed.page, failed.context);
+    }
+    const loading = await bucketPage(browser, app.origin, {
+      viewport,
+      loadStatus: 0,
+    });
+    try {
+      await loading.page
+        .getByRole('status', { name: 'Loading buckets' })
+        .waitFor();
+      await expectNoOverflow(loading.page);
+    } finally {
+      loading.release();
+      await closeBrowserPage(loading.page, loading.context);
+    }
+  },
+);
 
 it.each(['POST', 'DELETE'])(
   'E15/E16: a %s remains exclusive across remounts and its one recovery GET',
@@ -1001,11 +1067,30 @@ it('the delete dialog keeps the bucket path in its title while it closes', async
     await closeBrowserPage(page, context);
   }
 });
+it('loading shows one status and no outline until the list arrives', async () => {
+  const { page, context, release } = await bucketPage(browser, app.origin, {
+    loadStatus: 0,
+  });
+  try {
+    await page.getByRole('status', { name: 'Loading buckets' }).waitFor();
+    expect(await page.getByRole('status').count()).toBe(1);
+    expect(await page.locator('[data-path]').count()).toBe(0);
+    expect(
+      await page
+        .getByRole('button', { name: 'Create', exact: true })
+        .isDisabled(),
+    ).toBe(true);
+  } finally {
+    release();
+    await closeBrowserPage(page, context);
+  }
+});
 it('a load failure offers a real retry and never enables create without an outline', async () => {
   const { page, context } = await bucketPage(browser, app.origin, {
     loadStatus: 503,
   });
   try {
+    await page.getByText("Couldn't load buckets", { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Try again' }).waitFor();
     expect(
       await page

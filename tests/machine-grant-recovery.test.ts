@@ -2,7 +2,9 @@ import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { bucketCheck, grantPage, selectDeep } from './support/grant-browser.ts';
+import { largeGrantPaths, seedGrantTree } from './support/grants.ts';
 import { deferred } from './support/machines.ts';
+import { expectNoOverflow } from './support/page-checks.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
@@ -23,6 +25,7 @@ it('E24/E33: the mobile transition preserves name focus and keeps the approval h
       .poll(() => page.evaluate(() => document.activeElement?.id))
       .toBe('machine-name');
     expect(await page.evaluate(() => scrollY)).toBe(0);
+    await expectNoOverflow(page);
     for (const locator of [
       page.getByRole('heading', { name: 'Approve this machine?' }),
       page.getByRole('heading', { name: 'Bucket access', exact: true }),
@@ -43,6 +46,43 @@ it('E24/E33: the mobile transition preserves name focus and keeps the approval h
         'Approval context remains visible after the natural transition',
       ).toBe(true);
     }
+  } finally {
+    await close();
+  }
+});
+it('E24/E33: a large deep tree on a phone keeps its deepest choice within the page width', async () => {
+  const deepest =
+    'work/acme/platform/services/notifications/push-delivery-retry-scheduler-v2';
+  const { page, reveal, close } = await grantPage(browser, {
+    viewport: { width: 390, height: 844 },
+    configure: (_page, app) => seedGrantTree(app, largeGrantPaths),
+  });
+  try {
+    await reveal();
+    const checkbox = page.getByRole('checkbox', { name: deepest, exact: true });
+    await checkbox.scrollIntoViewIfNeeded();
+    // The row itself always spans the list, and a shrunk label box hides the
+    // text spilling out of it, so measure the checkbox and the rendered text.
+    const clipped = await checkbox.evaluate((node) => {
+      const list = node.closest('fieldset')?.getBoundingClientRect();
+      const label = node.parentElement?.querySelector('label');
+      if (!list || !label) return ['the deepest choice is not in the list'];
+      const text = document.createRange();
+      text.selectNodeContents(label);
+      return [node.getBoundingClientRect(), text.getBoundingClientRect()]
+        .filter(
+          (box) =>
+            box.width === 0 ||
+            box.left < Math.max(0, list.left) ||
+            box.right > Math.min(innerWidth, list.right),
+        )
+        .map((box) => `${Math.round(box.left)}–${Math.round(box.right)}`);
+    });
+    expect(
+      clipped,
+      'The deepest choice fits the phone width instead of being clipped',
+    ).toEqual([]);
+    await expectNoOverflow(page);
   } finally {
     await close();
   }

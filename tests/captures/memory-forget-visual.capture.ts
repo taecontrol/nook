@@ -2,22 +2,22 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
-import { deferred } from './support/machines.ts';
+import { launchTestBrowser } from '../../scripts/lib/test-browser.ts';
+import { deferred } from '../support/machines.ts';
 import {
   memoryClient,
   memoryFixture,
   memoryId,
   typicalMemories,
-} from './support/memory.ts';
+} from '../support/memory.ts';
 import {
   confirmForget,
   forgetDialog,
   forgetPage,
   forgottenId,
   openForget,
-} from './support/memory-forget.ts';
-import type { TestRuntime } from './support/runtime.ts';
+} from '../support/memory-forget.ts';
+import type { TestRuntime } from '../support/runtime.ts';
 
 let browser: Browser;
 let closeBrowser: (() => Promise<void>) | undefined;

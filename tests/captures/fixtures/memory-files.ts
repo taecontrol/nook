@@ -1,6 +1,10 @@
-import { memoryFixture, seedMemories } from './memory.ts';
-import { fileBucket, pdfName, type seedFile } from './memory-files.ts';
-import type { FilesRuntime } from './memory-files-runtime.ts';
+import { memoryFixture, seedMemories } from '../../support/memory.ts';
+import {
+  fileBucket,
+  pdfName,
+  type seedFile,
+} from '../../support/memory-files.ts';
+import type { FilesRuntime } from '../../support/memory-files-runtime.ts';
 
 export const fileCaptureStates = [
   'one-pdf',
