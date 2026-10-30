@@ -1,8 +1,11 @@
 import timings from './test-timings.json' with { type: 'json' };
 
-// Seconds each test file took in CI. A file missing from the table counts as
-// the median measured file until the table is refreshed.
+// Seconds each test file took in CI, per platform: macOS-only suites take
+// minutes on macOS and nothing on Linux. A file missing from the table counts
+// as the median measured file until the table is refreshed.
 export type Timings = Record<string, number>;
+const measured: Timings =
+  process.platform === 'darwin' ? timings.darwin : timings.linux;
 
 function estimator(table: Timings) {
   const known = Object.values(table).sort((a, b) => a - b);
@@ -11,7 +14,7 @@ function estimator(table: Timings) {
 }
 
 // Slowest first; the path breaks ties so every shard job derives the same order.
-export function bySlowest(files: string[], table: Timings = timings) {
+export function bySlowest(files: string[], table: Timings = measured) {
   const estimate = estimator(table);
   return [...files].sort(
     (a, b) => estimate(b) - estimate(a) || (a < b ? -1 : a > b ? 1 : 0),
@@ -23,7 +26,7 @@ export function bySlowest(files: string[], table: Timings = timings) {
 export function assignShards(
   files: string[],
   count: number,
-  table: Timings = timings,
+  table: Timings = measured,
 ) {
   const estimate = estimator(table);
   const shards: string[][] = Array.from({ length: count }, () => []);

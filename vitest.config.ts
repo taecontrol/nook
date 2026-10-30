@@ -4,9 +4,8 @@ import { BaseSequencer, type TestSpecification } from 'vitest/node';
 import { coveragePlugin } from './scripts/lib/instrument.ts';
 import { assignShards, bySlowest } from './scripts/lib/test-shards.ts';
 
-// Shards files by their measured CI time instead of a path hash, and starts a
-// shard's slowest files first. Unsharded runs, such as the macOS groups, keep
-// vitest's order because the table holds Linux times.
+// Shards files by their measured CI time instead of a path hash, and starts the
+// slowest files first so a short file with a long runtime does not start last.
 class TimedSequencer extends BaseSequencer {
   private path(spec: TestSpecification) {
     return relative(this.ctx.config.root, spec.moduleId).replaceAll('\\', '/');
@@ -24,7 +23,6 @@ class TimedSequencer extends BaseSequencer {
   }
 
   async sort(files: TestSpecification[]) {
-    if (!this.ctx.config.shard) return super.sort(files);
     const rank = new Map(
       bySlowest(files.map((f) => this.path(f))).map((path, i) => [path, i]),
     );
