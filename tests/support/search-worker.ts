@@ -10,7 +10,7 @@ async function invoke(method: string, ...args: unknown[]) {
     `https://nook-search-fixture.invalid/${method}`,
     { method: 'POST', body: JSON.stringify(args) },
   );
-  if (!response.ok) throw new Error('Synthetic search failure.');
+  if (!response.ok) throw new Error(await response.text());
   return response.json();
 }
 function observedDatabase(db: D1Database): D1Database {

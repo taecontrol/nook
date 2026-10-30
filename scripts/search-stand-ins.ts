@@ -46,6 +46,16 @@ function cosine(a: number[], b: number[]) {
   }
   return dot / Math.sqrt(left * right);
 }
+// Vectorize answers larger id payloads with code 40007. The get limit was
+// observed through the REST API (#95) and the delete limit is reported by
+// other projects; Cloudflare's limits page lists neither.
+export const vectorizeIdLimits = { get: 20, delete: 100 } as const;
+function idPayload(ids: string[], max: number) {
+  if (ids.length > max)
+    throw new Error(
+      `too many ids in payload; max id count is ${max}, got ${ids.length} [code: 40007]`,
+    );
+}
 function validQuery(options: Query) {
   const cap =
     options.returnMetadata === 'all' || options.returnValues ? 50 : 100;
@@ -127,6 +137,7 @@ export class SearchStandIns {
     this.inspections.push(ids);
     if (this.failInspection || this.failIndex)
       throw new Error('Synthetic inspection failure.');
+    idPayload(ids, vectorizeIdLimits.get);
     return ids.flatMap((id) => {
       const vector = this.visible.get(id);
       return vector
@@ -138,7 +149,7 @@ export class SearchStandIns {
     this.deletions.push(ids);
     if (this.failDelete || this.failIndex)
       throw new Error('Synthetic delete failure.');
-    if (ids.length > 50) throw new Error('Too many removal ids.');
+    idPayload(ids, vectorizeIdLimits.delete);
     for (const id of ids) this.written.delete(id);
     if (this.autoAdvance) this.advance();
     return { mutationId: 'synthetic-delete' };
@@ -190,8 +201,12 @@ export class SearchStandIns {
       if (path === '/deleteByIds')
         return Response.json(this.deleteByIds(args[0] as string[]));
       return new Response('Unknown fixture call.', { status: 404 });
-    } catch {
-      return new Response('Synthetic search service failure.', { status: 503 });
+    } catch (error) {
+      // The message travels like a binding error's, so logs can be asserted.
+      return new Response(
+        error instanceof Error ? error.message : 'Synthetic search failure.',
+        { status: 503 },
+      );
     }
   }
 }

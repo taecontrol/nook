@@ -84,3 +84,15 @@ it('Vectorize evidence: dimensions, id/filter byte limits and all-metadata topK 
   ).toThrow();
   expect(services.query(values, { topK: 100 })).toMatchObject({ count: 0 });
 });
+it('Vectorize evidence: getByIds takes at most 20 ids and deleteByIds at most 100, rejected with code 40007', () => {
+  const services = new SearchStandIns();
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => `id-${i}`);
+  expect(services.getByIds(ids(20))).toEqual([]);
+  expect(() => services.getByIds(ids(21))).toThrow(
+    'too many ids in payload; max id count is 20, got 21 [code: 40007]',
+  );
+  expect(services.deleteByIds(ids(100))).toMatchObject({});
+  expect(() => services.deleteByIds(ids(101))).toThrow(
+    'max id count is 100, got 101 [code: 40007]',
+  );
+});
