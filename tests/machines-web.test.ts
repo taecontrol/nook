@@ -14,6 +14,7 @@ import {
   machineRow,
   machinesPage,
 } from './support/machines-browser.ts';
+import { expectNoOverflow } from './support/page-checks.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
@@ -23,6 +24,10 @@ beforeAll(async () => {
 afterAll(async () => {
   await closeBrowser?.();
 });
+const viewports = [
+  { width: 1440, height: 900 },
+  { width: 390, height: 844 },
+];
 
 it('E3: a never-used approval is rendered as Never used', async () => {
   const visit = await machinesPage(browser, { seeds: [typicalMachines[4]] });
@@ -244,6 +249,35 @@ it('E19: mobile rows expose all facts and wrap a full 64-character name without 
     await visit.close();
   }
 });
+it.each(viewports)(
+  'E19/E20/E21: many long approvals, the revoke confirmation and the revoked notice never overflow ($width)',
+  async (viewport) => {
+    const visit = await machinesPage(browser, {
+      seeds: manyMachines,
+      viewport,
+    });
+    const { page, machines } = visit;
+    try {
+      await machineRow(page, machines[0].id).waitFor();
+      await expectNoOverflow(page);
+      await machineRow(page, machines[2].id)
+        .getByRole('button', { name: /Revoke/ })
+        .click();
+      await page.getByRole('alertdialog').waitFor();
+      await expectNoOverflow(page);
+      await page
+        .getByRole('alertdialog')
+        .getByRole('button', { name: 'Revoke machine', exact: true })
+        .click();
+      await expect
+        .poll(() => page.getByRole('alert').innerText())
+        .toContain(`Revoked ${machines[2].name}`);
+      await expectNoOverflow(page);
+    } finally {
+      await visit.close();
+    }
+  },
+);
 it('E20: confirmation identifies the duplicate approval, explains irreversible deletion, and Cancel changes nothing', async () => {
   const visit = await machinesPage(browser);
   const { page, machines, requests } = visit;
@@ -383,78 +417,85 @@ it('E21: confirmed revoke removes a row while pending, claims success only after
     await visit.close();
   }
 });
-it('E22: a real D1 revoke failure restores the original group and Try again confirms a successful retry', async () => {
-  const gate = deferred();
-  const refresh = deferred();
-  const visit = await machinesPage(browser, {
-    configure: async (page, app) => {
-      let reads = 0;
-      await page.route('**/api/machines', async (route) => {
-        if (++reads > 1) await refresh.promise;
-        await route.continue();
-      });
-      const db = await app.mf.getD1Database('DB');
-      await db
-        .prepare(
-          "CREATE TRIGGER revoke_failure BEFORE DELETE ON machine_tokens BEGIN SELECT RAISE(ABORT, 'Synthetic private failure'); END",
-        )
+it.each(viewports)(
+  'E22: a real D1 revoke failure restores the original group and Try again confirms a successful retry ($width)',
+  async (viewport) => {
+    const gate = deferred();
+    const refresh = deferred();
+    const visit = await machinesPage(browser, {
+      viewport,
+      configure: async (page, app) => {
+        let reads = 0;
+        await page.route('**/api/machines', async (route) => {
+          if (++reads > 1) await refresh.promise;
+          await route.continue();
+        });
+        const db = await app.mf.getD1Database('DB');
+        await db
+          .prepare(
+            "CREATE TRIGGER revoke_failure BEFORE DELETE ON machine_tokens BEGIN SELECT RAISE(ABORT, 'Synthetic private failure'); END",
+          )
+          .run();
+        await page.route('**/api/machines/*', async (route) => {
+          await gate.promise;
+          await route.continue();
+        });
+      },
+    });
+    const { page, machines } = visit;
+    try {
+      await confirmRevoke(page, machines[2].id);
+      await expect.poll(() => machineRow(page, machines[2].id).count()).toBe(0);
+      expect(await page.getByRole('alert').innerText()).not.toContain(
+        'Revoked',
+      );
+      gate.resolve();
+      await expect
+        .poll(() => page.getByRole('alert').innerText())
+        .toContain("Couldn't confirm revocation of framework-13");
+      expect(await page.getByRole('alert').innerText()).toContain(
+        'The machine may already be revoked.',
+      );
+      expect(await page.getByRole('alert').innerText()).not.toContain(
+        'is still connected and its token still works',
+      );
+      await expectNoOverflow(page);
+      expect(
+        await page
+          .getByRole('region', { name: 'Not used in 30 days' })
+          .locator('[data-machine]')
+          .getAttribute('data-machine'),
+      ).toBe(machines[2].id);
+      expect(await listMachines(visit.app)).toHaveLength(5);
+      const reconciled = page.waitForResponse(
+        (response) =>
+          response.request().method() === 'GET' &&
+          new URL(response.url()).pathname === '/api/machines',
+      );
+      refresh.resolve();
+      expect((await reconciled).status()).toBe(200);
+      await (await visit.app.mf.getD1Database('DB'))
+        .prepare('DROP TRIGGER revoke_failure')
         .run();
-      await page.route('**/api/machines/*', async (route) => {
-        await gate.promise;
-        await route.continue();
-      });
-    },
-  });
-  const { page, machines } = visit;
-  try {
-    await confirmRevoke(page, machines[2].id);
-    await expect.poll(() => machineRow(page, machines[2].id).count()).toBe(0);
-    expect(await page.getByRole('alert').innerText()).not.toContain('Revoked');
-    gate.resolve();
-    await expect
-      .poll(() => page.getByRole('alert').innerText())
-      .toContain("Couldn't confirm revocation of framework-13");
-    expect(await page.getByRole('alert').innerText()).toContain(
-      'The machine may already be revoked.',
-    );
-    expect(await page.getByRole('alert').innerText()).not.toContain(
-      'is still connected and its token still works',
-    );
-    expect(
       await page
-        .getByRole('region', { name: 'Not used in 30 days' })
-        .locator('[data-machine]')
-        .getAttribute('data-machine'),
-    ).toBe(machines[2].id);
-    expect(await listMachines(visit.app)).toHaveLength(5);
-    const reconciled = page.waitForResponse(
-      (response) =>
-        response.request().method() === 'GET' &&
-        new URL(response.url()).pathname === '/api/machines',
-    );
-    refresh.resolve();
-    expect((await reconciled).status()).toBe(200);
-    await (await visit.app.mf.getD1Database('DB'))
-      .prepare('DROP TRIGGER revoke_failure')
-      .run();
-    await page
-      .getByRole('alert')
-      .getByRole('button', { name: 'Try again' })
-      .click();
-    await page
-      .getByRole('alertdialog')
-      .getByRole('button', { name: 'Revoke machine', exact: true })
-      .click();
-    await expect
-      .poll(() => page.getByRole('alert').innerText())
-      .toContain('Revoked framework-13');
-    expect(await machineRow(page, machines[2].id).count()).toBe(0);
-  } finally {
-    gate.resolve();
-    refresh.resolve();
-    await visit.close();
-  }
-});
+        .getByRole('alert')
+        .getByRole('button', { name: 'Try again' })
+        .click();
+      await page
+        .getByRole('alertdialog')
+        .getByRole('button', { name: 'Revoke machine', exact: true })
+        .click();
+      await expect
+        .poll(() => page.getByRole('alert').innerText())
+        .toContain('Revoked framework-13');
+      expect(await machineRow(page, machines[2].id).count()).toBe(0);
+    } finally {
+      gate.resolve();
+      refresh.resolve();
+      await visit.close();
+    }
+  },
+);
 it.each(['focus', 'intent'] as const)(
   'E23: a stale %s refetch already in flight never resurrects a pending revoke',
   async (trigger) => {
@@ -638,82 +679,99 @@ it('E21/E22: a lost response after committed revocation never claims the token s
     await visit.close();
   }
 });
-it('E24: the empty state teaches the installation reconnect command', async () => {
-  const visit = await machinesPage(browser, { seeds: [] });
-  try {
-    await visit.page
-      .getByText('No machines connected', { exact: true })
-      .waitFor();
-    expect(
-      await visit.page.locator('[data-slot="empty-description"]').innerText(),
-    ).toContain(
-      'To connect a machine, run this on it and approve the request that opens here.',
-    );
-    expect(await visit.page.locator('code').innerText()).toBe(
-      `nook login ${visit.app.origin}`,
-    );
-  } finally {
-    await visit.close();
-  }
-});
-it('E24: loading shows skeleton rows until the real list arrives', async () => {
-  const gate = deferred();
-  const visit = await machinesPage(browser, {
-    configure: async (page) => {
-      await page.route('**/api/machines', async (route) => {
-        await gate.promise;
-        await route.continue();
-      });
-    },
-  });
-  try {
-    const loading = visit.page.getByRole('status', {
-      name: 'Loading machines',
+it.each(viewports)(
+  'E24: the empty state teaches the installation reconnect command ($width)',
+  async (viewport) => {
+    const visit = await machinesPage(browser, {
+      viewport,
+      seeds: [],
     });
-    await loading.waitFor();
-    expect(
-      await loading.locator('[data-slot="skeleton"]').count(),
-    ).toBeGreaterThanOrEqual(9);
-    expect(await visit.page.locator('[data-machine]').count()).toBe(0);
-    gate.resolve();
-    await machineRow(visit.page, visit.machines[0].id).waitFor();
-    expect(await loading.count()).toBe(0);
-  } finally {
-    gate.resolve();
-    await visit.close();
-  }
-});
-it('E24: a real list failure offers Try again and recovers the existing approvals', async () => {
-  const visit = await machinesPage(browser, {
-    configure: async (_page, app) => {
-      await (await app.mf.getD1Database('DB'))
-        .prepare(
-          'ALTER TABLE machine_tokens RENAME TO unavailable_machine_tokens',
-        )
-        .run();
-    },
-  });
-  try {
-    await visit.page
-      .getByText("Couldn't load machines", { exact: true })
-      .waitFor();
-    expect(await visit.page.locator('[data-machine]').count()).toBe(0);
-    await (await visit.app.mf.getD1Database('DB'))
-      .prepare(
-        'ALTER TABLE unavailable_machine_tokens RENAME TO machine_tokens',
-      )
-      .run();
-    await visit.page.getByRole('button', { name: 'Try again' }).click();
-    await machineRow(visit.page, visit.machines[0].id).waitFor();
-    expect(
+    try {
+      await visit.page
+        .getByText('No machines connected', { exact: true })
+        .waitFor();
+      expect(
+        await visit.page.locator('[data-slot="empty-description"]').innerText(),
+      ).toContain(
+        'To connect a machine, run this on it and approve the request that opens here.',
+      );
+      expect(await visit.page.locator('code').innerText()).toBe(
+        `nook login ${visit.app.origin}`,
+      );
+      await expectNoOverflow(visit.page);
+    } finally {
+      await visit.close();
+    }
+  },
+);
+it.each(viewports)(
+  'E24: loading shows skeleton rows until the real list arrives ($width)',
+  async (viewport) => {
+    const gate = deferred();
+    const visit = await machinesPage(browser, {
+      viewport,
+      configure: async (page) => {
+        await page.route('**/api/machines', async (route) => {
+          await gate.promise;
+          await route.continue();
+        });
+      },
+    });
+    try {
+      const loading = visit.page.getByRole('status', {
+        name: 'Loading machines',
+      });
+      await loading.waitFor();
+      expect(
+        await loading.locator('[data-slot="skeleton"]').count(),
+      ).toBeGreaterThanOrEqual(9);
+      expect(await visit.page.locator('[data-machine]').count()).toBe(0);
+      await expectNoOverflow(visit.page);
+      gate.resolve();
+      await machineRow(visit.page, visit.machines[0].id).waitFor();
+      expect(await loading.count()).toBe(0);
+    } finally {
+      gate.resolve();
+      await visit.close();
+    }
+  },
+);
+it.each(viewports)(
+  'E24: a real list failure offers Try again and recovers the existing approvals ($width)',
+  async (viewport) => {
+    const visit = await machinesPage(browser, {
+      viewport,
+      configure: async (_page, app) => {
+        await (await app.mf.getD1Database('DB'))
+          .prepare(
+            'ALTER TABLE machine_tokens RENAME TO unavailable_machine_tokens',
+          )
+          .run();
+      },
+    });
+    try {
       await visit.page
         .getByText("Couldn't load machines", { exact: true })
-        .count(),
-    ).toBe(0);
-  } finally {
-    await visit.close();
-  }
-});
+        .waitFor();
+      expect(await visit.page.locator('[data-machine]').count()).toBe(0);
+      await expectNoOverflow(visit.page);
+      await (await visit.app.mf.getD1Database('DB'))
+        .prepare(
+          'ALTER TABLE unavailable_machine_tokens RENAME TO machine_tokens',
+        )
+        .run();
+      await visit.page.getByRole('button', { name: 'Try again' }).click();
+      await machineRow(visit.page, visit.machines[0].id).waitFor();
+      expect(
+        await visit.page
+          .getByText("Couldn't load machines", { exact: true })
+          .count(),
+      ).toBe(0);
+    } finally {
+      await visit.close();
+    }
+  },
+);
 it.each(['hover', 'focus'] as const)(
   'E25: %s preloads Machines code and one cached list reused by Home navigation',
   async (intent) => {

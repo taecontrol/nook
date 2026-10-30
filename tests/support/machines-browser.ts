@@ -7,6 +7,7 @@ import {
   seedMachines,
   typicalMachines,
 } from './machines.ts';
+import { watchPageErrors } from './page-checks.ts';
 import { runtime, type TestRuntime } from './runtime.ts';
 
 export const machineRow = (page: Page, id: string) =>
@@ -35,12 +36,14 @@ export async function machinesPage(
       path: new URL(request.url()).pathname,
     }),
   );
+  const expectNoPageErrors = watchPageErrors(page);
   const close = async () => {
     try {
       await closeBrowserPage(page, context);
     } finally {
       await app.close();
     }
+    expectNoPageErrors();
   };
   try {
     const machines = await seedMachines(app, options.seeds ?? typicalMachines);
