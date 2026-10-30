@@ -8,7 +8,10 @@ import {
   deepBuckets,
   typicalBuckets,
 } from './support/buckets-browser.ts';
-import { expectNoOverflow } from './support/page-checks.ts';
+import {
+  expectNoOverflow,
+  expectWithinViewport,
+} from './support/page-checks.ts';
 import { runtime, type TestRuntime } from './support/runtime.ts';
 
 function deferred() {
@@ -494,8 +497,7 @@ it.each([
         })
         .click();
       await page.getByRole('menuitem', { name: 'Delete bucket…' }).click();
-      await page.getByRole('alertdialog').waitFor();
-      await expectNoOverflow(page);
+      await expectWithinViewport(page.getByRole('alertdialog'));
     } finally {
       await closeBrowserPage(page, context);
     }
