@@ -1,176 +1,36 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import {
-  mkdir,
-  readFile,
-  realpath,
-  rm,
-  symlink,
-  writeFile,
-} from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
-import { createInterface } from 'node:readline';
-import { Log, LogLevel } from 'miniflare';
-import { beforeEach, expect, it } from 'vitest';
-import {
-  acmePath,
-  auditPageData,
-  auditRows,
-  runFixture,
-  useEntry,
-} from './support/audit.ts';
-import { privateKeyring } from './support/cli.ts';
+import { mkdir, rm, symlink } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { expect, it } from 'vitest';
+import { acmePath, auditPageData, useEntry } from './support/audit.ts';
 import { revokeMachine } from './support/machines.ts';
+import {
+  app,
+  auditPaths,
+  beforeAccess,
+  checkpoints,
+  childFile,
+  cli,
+  config,
+  expectPrivate,
+  file,
+  keyring,
+  mappings,
+  privateValues,
+  probe,
+  project,
+  requests,
+  runArgs,
+  setupNookJsonCli,
+  transcript,
+  usage,
+  values,
+} from './support/nook-json-cli.ts';
 import { expectOutput } from './support/private-assertions.ts';
-import { createSecret, expectNoValue, secretInput } from './support/vault.ts';
+import { createSecret, secretInput } from './support/vault.ts';
 
-let app: Awaited<ReturnType<typeof runFixture>>;
-let keyring: Awaited<ReturnType<typeof privateKeyring>>;
-let project: string;
-let file: string;
-let checkpoints: string[];
-let privateValues: string[];
-let outputs: string[];
-let values: Record<string, string>;
-const childFile = resolve('tests/support/run-child.ts');
-const mappings = { GH_TOKEN: acmePath, DB_URL: 'work/acme/DB_URL' };
-const usage =
-  'Usage: nook run --secret ENV=bucket/NAME --purpose "…" -- <command>';
-class PrivateLog extends Log {
-  messages: string[] = [];
-  constructor() {
-    super(LogLevel.VERBOSE);
-  }
-  protected log(message: string) {
-    this.messages.push(message);
-  }
-}
-function expectPrivate(text: string) {
-  expectNoValue(
-    text,
-    privateValues.flatMap((value) => [
-      value,
-      JSON.stringify(value).slice(1, -1),
-    ]),
-  );
-}
-async function transcript() {
-  return readFile(resolve(keyring.home, 'argv'), 'utf8').catch((error) => {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
-    throw error;
-  });
-}
-async function config(secrets: Record<string, unknown>, path = file) {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, JSON.stringify({ secrets }));
-}
-async function cli(args: string[], cwd = project) {
-  const result = await keyring.start(args, {}, '', cwd).done;
-  outputs.push(result.stdout + result.stderr);
-  expectPrivate(result.stdout + result.stderr);
-  return result;
-}
-function runArgs(command: string[], flags: string[] = []) {
-  return [
-    'run',
-    ...flags.flatMap((entry) => ['--secret', entry]),
-    '--purpose',
-    'dev server',
-    '--',
-    ...command,
-  ];
-}
-function probe(entries: Record<string, string | undefined>, exit = 0) {
-  return [
-    process.execPath,
-    childFile,
-    'mappings',
-    JSON.stringify(
-      Object.entries(entries).map(([name, value]) => [
-        name,
-        value === undefined
-          ? null
-          : createHash('sha256').update(value).digest('hex'),
-      ]),
-    ),
-    String(exit),
-  ];
-}
-const requests = (kind: 'value' | 'listing') =>
-  checkpoints.filter((label) => label === `/${kind}-request`).length;
-async function auditPaths() {
-  const rows = await auditRows(app);
-  expectPrivate(JSON.stringify(rows));
-  return rows.map((row) => String(row.path)).sort();
-}
-async function beforeAccess(args: string[], message: string) {
-  const before = await transcript();
-  checkpoints.length = 0;
-  const result = await cli(args);
-  expect(result.status).toBe(1);
-  expectOutput(result.stdout + result.stderr, message, true);
-  expect((await transcript()) === before).toBe(true);
-  expect(checkpoints).toEqual([]);
-  expect(await auditPaths()).toEqual([]);
-}
-beforeEach(async () => {
-  checkpoints = [];
-  outputs = [];
-  app = await runFixture(['work/acme'], async (label) => {
-    checkpoints.push(label);
-    return true;
-  });
-  keyring = await privateKeyring();
-  project = await realpath(keyring.home);
-  project = resolve(project, 'project');
-  file = resolve(project, 'nook.json');
-  await mkdir(project);
-  values = { GH_TOKEN: app.input.value };
-  for (const name of ['DB_URL', 'OTHER', 'EXTRA', 'X']) {
-    const input = secretInput({
-      name,
-      value: `\n${randomBytes(24).toString('base64')} 秘密\r\n\t `,
-    });
-    expect((await createSecret(app, input)).status).toBe(201);
-    values[name] = input.value;
-  }
-  privateValues = [...Object.values(values), app.token, app.key];
-  const log = new PrivateLog();
-  const workerOutput = ['', ''];
-  await app.setBindings(app.bindings, {
-    log,
-    handleRuntimeStdio: (stdout, stderr) => {
-      [stdout, stderr].forEach((input, index) => {
-        input.setEncoding('utf8');
-        input.on('data', (chunk) => {
-          workerOutput[index] += String(chunk);
-        });
-        createInterface({ input }).on('line', (line) =>
-          log.messages.push(line),
-        );
-      });
-    },
-  });
-  await mkdir(dirname(keyring.config), { recursive: true });
-  await writeFile(keyring.config, JSON.stringify({ url: app.origin }));
-  expect(await keyring.store(app.origin, app.token)).toBe(0);
-  checkpoints.length = 0;
-  return async () => {
-    try {
-      for (const text of [
-        ...outputs,
-        ...log.messages,
-        ...workerOutput,
-        JSON.stringify(await auditRows(app)),
-        await transcript(),
-      ])
-        expectPrivate(text);
-    } finally {
-      await keyring.close();
-      await app.close();
-    }
-  };
-});
+setupNookJsonCli();
 it('E1/E14: project mappings preserve both exact values, child exit 42 and silence', async () => {
   await config(mappings);
   let result = await cli(
@@ -320,108 +180,6 @@ it('E7: a denied mapped path stops the child and is the only audited path', asyn
   expect((await auditPageData(app)).entries[0].outcome).toBe('denied');
 });
 
-const invalidCases = [
-  'malformed JSON',
-  'null root',
-  'array root',
-  'string root',
-  'unknown secret key',
-  'unknown policy key',
-  'missing secrets',
-  'null secrets',
-  'array secrets',
-  'string secrets',
-  'invalid environment name',
-  'non-string path',
-  'invalid path',
-  'value-like path',
-  'too many paths',
-] as const;
-function invalidFile(kind: (typeof invalidCases)[number]) {
-  const pasted = `ghp_${randomBytes(20).toString('hex')}`;
-  privateValues.push(pasted);
-  const cases = {
-    'malformed JSON': {
-      content: `{"secrets":{"GH_TOKEN":"${pasted}",`,
-      message: 'malformed JSON.',
-    },
-    'null root': { content: 'null', message: 'expected an object.' },
-    'array root': { content: '[]', message: 'expected an object.' },
-    'string root': {
-      content: JSON.stringify(pasted),
-      message: 'expected an object.',
-    },
-    'unknown secret key': {
-      content: JSON.stringify({ secret: mappings }),
-      message: 'unknown key "secret".',
-    },
-    'unknown policy key': {
-      content: JSON.stringify({ secrets: mappings, policy: pasted }),
-      message: 'unknown key "policy".',
-    },
-    'missing secrets': { content: '{}', message: 'secrets must be an object.' },
-    'null secrets': {
-      content: '{"secrets":null}',
-      message: 'secrets must be an object.',
-    },
-    'array secrets': {
-      content: '{"secrets":[]}',
-      message: 'secrets must be an object.',
-    },
-    'string secrets': {
-      content: JSON.stringify({ secrets: pasted }),
-      message: 'secrets must be an object.',
-    },
-    'invalid environment name': {
-      content: JSON.stringify({ secrets: { '1BAD': acmePath } }),
-      message: 'invalid environment name "1BAD".',
-    },
-    'non-string path': {
-      content: '{"secrets":{"GH_TOKEN":123}}',
-      message: 'secret path for GH_TOKEN must be a string.',
-    },
-    'invalid path': {
-      content: '{"secrets":{"GH_TOKEN":"work/acme"}}',
-      message: 'invalid secret path for GH_TOKEN.',
-    },
-    'value-like path': {
-      content: JSON.stringify({ secrets: { GH_TOKEN: pasted } }),
-      message: 'invalid secret path for GH_TOKEN.',
-    },
-    'too many paths': {
-      content: JSON.stringify({
-        secrets: Object.fromEntries(
-          Array.from({ length: 21 }, (_, i) => [
-            `KEY_${i}`,
-            `work/acme/KEY_${i}`,
-          ]),
-        ),
-      }),
-      message: 'secrets must map at most 20 distinct paths.',
-    },
-  };
-  return cases[kind];
-}
-it.each(
-  invalidCases.flatMap((kind) =>
-    ['run', 'flags', 'check'].map((command) => ({ kind, command })),
-  ),
-)(
-  'E8/E13/E14: $command rejects $kind before keyring or network',
-  async ({ kind, command }) => {
-    const invalid = invalidFile(kind);
-    await writeFile(file, invalid.content);
-    const message = `Invalid ${file}: ${invalid.message}`;
-    const args =
-      command === 'check'
-        ? ['vault', 'check']
-        : runArgs(
-            ['/usr/bin/true'],
-            command === 'flags' ? [`GH_TOKEN=${acmePath}`] : [],
-          );
-    await beforeAccess(args, message);
-  },
-);
 it('E8: the twenty-path limit applies after merging with flags', async () => {
   await config(
     Object.fromEntries(
