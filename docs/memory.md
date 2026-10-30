@@ -4,8 +4,10 @@ The [README](../README.md#remember-and-read) describes the caller contract.
 [ADR-0012](adrs/0012-memory-retries-use-exact-content-and-request-provenance.md),
 [ADR-0013](adrs/0013-search-indexes-derive-from-d1-and-converge-eventually.md),
 [ADR-0014](adrs/0014-memory-updates-are-guarded-by-the-read-version-and-recognized-by-current-content.md)
-and [ADR-0015](adrs/0015-forgetting-is-version-guarded-and-vector-removal-settles-after-late-writers.md)
-record retry identity, provenance, derived indexes, guarded updates and forgetting.
+[ADR-0015](adrs/0015-forgetting-is-version-guarded-and-vector-removal-settles-after-late-writers.md)
+and [ADR-0017](adrs/0017-vectors-carry-their-embedding-model-and-unknown-models-are-re-embedded.md)
+record retry identity, provenance, derived indexes, guarded updates, forgetting
+and the model identity that index inspection checks.
 The former storage design brief is retired; these maintained sources, the
 contract, migrations and acceptance tests own its decisions.
 

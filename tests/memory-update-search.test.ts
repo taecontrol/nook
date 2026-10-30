@@ -139,7 +139,11 @@ it.each(['tags', 'model'] as const)(
       {
         id: memoryId(20),
         values,
-        metadata: { bucket: 'wrong', contentHash: hash(spanishRelease) },
+        metadata: {
+          bucket: 'wrong',
+          contentHash: hash(spanishRelease),
+          model: '@cf/baai/bge-m3',
+        },
       },
     ]);
     app.services.advance();
@@ -231,6 +235,7 @@ it('E18: rotating inspection visits a stale current marker amid a pending backlo
       metadata: {
         bucket: hash(target.bucket).slice(0, 32),
         contentHash: hash(spanishRelease),
+        model: '@cf/baai/bge-m3',
       },
     },
   ]);
@@ -304,6 +309,7 @@ it('E18: scheduled vector inspection converges without search within ceil(N/50) 
   const obsolete = app.services.run('@cf/baai/bge-m3', {
     text: [spanishRelease],
   }).data[0];
+  // The current model and bucket leave the content hash as the only mismatch.
   app.services.upsert(
     seeds.map((m) => ({
       id: m.id,
@@ -311,6 +317,7 @@ it('E18: scheduled vector inspection converges without search within ceil(N/50) 
       metadata: {
         bucket: hash(m.bucket).slice(0, 32),
         contentHash: hash(spanishRelease),
+        model: '@cf/baai/bge-m3',
       },
     })),
   );
@@ -413,11 +420,16 @@ it('E18: settle window, failed inspection, missing vectors and wrong bucket meta
   app.services.failInspection = false;
   const values = app.services.run('@cf/baai/bge-m3', { text: [spanishRelease] })
     .data[0];
+  // The current model and content hash leave the bucket as the only mismatch.
   app.services.upsert([
     {
       id: memoryId(20),
       values,
-      metadata: { contentHash: hash(spanishRelease), bucket: 'wrong' },
+      metadata: {
+        contentHash: hash(spanishRelease),
+        bucket: 'wrong',
+        model: '@cf/baai/bge-m3',
+      },
     },
   ]);
   app.services.advance();
