@@ -14,7 +14,10 @@ import {
   machineRow,
   machinesPage,
 } from './support/machines-browser.ts';
-import { expectNoOverflow } from './support/page-checks.ts';
+import {
+  expectNoOverflow,
+  expectWithinViewport,
+} from './support/page-checks.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
@@ -264,7 +267,7 @@ it.each(viewports)(
         .getByRole('button', { name: /Revoke/ })
         .click();
       await page.getByRole('alertdialog').waitFor();
-      await expectNoOverflow(page);
+      await expectWithinViewport(page.getByRole('alertdialog'));
       await page
         .getByRole('alertdialog')
         .getByRole('button', { name: 'Revoke machine', exact: true })

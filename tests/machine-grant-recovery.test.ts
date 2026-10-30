@@ -59,15 +59,29 @@ it('E24/E33: a large deep tree on a phone keeps its deepest choice within the pa
   });
   try {
     await reveal();
-    const row = page.locator(`[data-grant-path="${deepest}"] > div`);
-    await row.scrollIntoViewIfNeeded();
+    const checkbox = page.getByRole('checkbox', { name: deepest, exact: true });
+    await checkbox.scrollIntoViewIfNeeded();
+    // The row itself always spans the list, and a shrunk label box hides the
+    // text spilling out of it, so measure the checkbox and the rendered text.
+    const clipped = await checkbox.evaluate((node) => {
+      const list = node.closest('fieldset')?.getBoundingClientRect();
+      const label = node.parentElement?.querySelector('label');
+      if (!list || !label) return ['the deepest choice is not in the list'];
+      const text = document.createRange();
+      text.selectNodeContents(label);
+      return [node.getBoundingClientRect(), text.getBoundingClientRect()]
+        .filter(
+          (box) =>
+            box.width === 0 ||
+            box.left < Math.max(0, list.left) ||
+            box.right > Math.min(innerWidth, list.right),
+        )
+        .map((box) => `${Math.round(box.left)}–${Math.round(box.right)}`);
+    });
     expect(
-      await row.evaluate((node) => {
-        const box = node.getBoundingClientRect();
-        return box.left >= 0 && box.right <= innerWidth;
-      }),
+      clipped,
       'The deepest choice fits the phone width instead of being clipped',
-    ).toBe(true);
+    ).toEqual([]);
     await expectNoOverflow(page);
   } finally {
     await close();
