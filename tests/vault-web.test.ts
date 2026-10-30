@@ -182,7 +182,7 @@ it.each(viewports)(
   },
 );
 it.each(viewports)(
-  'E19: Vault screens, long metadata, the invalid create Sheet and Delete confirmation fit the $name viewport',
+  'E19: Vault screens, long metadata, the invalid and duplicate create Sheet, and the Replace and Delete confirmations fit the $name viewport',
   async (viewport) => {
     const longName = `LONG_${'N'.repeat(59)}`;
     const longPath = `work/acme/${longName}`;
@@ -220,6 +220,28 @@ it.each(viewports)(
       await expectWithinViewport(sheet);
       await page.keyboard.press('Escape');
       await sheet.waitFor({ state: 'detached' });
+      const duplicate = await createDraft(page, {
+        name: 'STRIPE_KEY',
+        description: 'Stripe live-mode secret key',
+      });
+      await duplicate
+        .getByRole('button', { name: 'Save secret', exact: true })
+        .click();
+      await duplicate
+        .getByText('work/acme/STRIPE_KEY already exists.', { exact: true })
+        .waitFor();
+      await expectWithinViewport(duplicate);
+      await page.keyboard.press('Escape');
+      await duplicate.waitFor({ state: 'detached' });
+      await replaceDraft(page);
+      const confirm = page.getByRole('alertdialog');
+      await expectWithinViewport(confirm);
+      await confirm.getByRole('button', { name: 'Back', exact: true }).click();
+      const replace = page.getByRole('dialog');
+      await replace
+        .getByRole('button', { name: 'Cancel', exact: true })
+        .click();
+      await replace.waitFor({ state: 'detached' });
       await openSecretMenu(page, longPath, 'Delete secret…');
       await expectWithinViewport(page.getByRole('alertdialog'));
       await expectNoOverflow(page);

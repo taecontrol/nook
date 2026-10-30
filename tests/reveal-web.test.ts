@@ -597,7 +597,10 @@ it.each([
       'audit-failure',
     ] as const
   ).map((kind) => ({ kind, viewport: desktop })),
-  { kind: 'missing-key' as const, viewport: phone },
+  ...(['missing-key', 'audit-failure'] as const).map((kind) => ({
+    kind,
+    viewport: phone,
+  })),
 ])(
   'E9–E12: $kind shows the safe error with Try again and disabled Copy, without a value or entry ($viewport.width)',
   async ({ kind, viewport }) => {
