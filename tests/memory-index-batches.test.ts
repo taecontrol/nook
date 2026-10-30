@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { vectorizeIdLimits } from '../scripts/search-stand-ins.ts';
 import {
   type MemoryFixture,
+  memoryClient,
   memoryFixture,
   seedMemories,
 } from './support/memory.ts';
@@ -11,9 +12,11 @@ import { type SearchRuntime, searchRuntime } from './support/search.ts';
 
 let app: SearchRuntime;
 let workerLogs: string[];
+let embeddingFailure: string;
 beforeEach(async () => {
   app = await searchRuntime();
   workerLogs = [];
+  embeddingFailure = 'Synthetic embedding failure.';
   await app.setBindings(
     {
       LOCAL_OWNER: 'synthetic-owner',
@@ -32,7 +35,7 @@ beforeEach(async () => {
         ];
         app.services.embeddingCalls.push({ model: requested, ...input });
         if (app.services.failEmbedding)
-          return new Response('Synthetic embedding failure.', { status: 503 });
+          return new Response(embeddingFailure, { status: 503 });
         const data = input.text.map(() => [1, ...Array<number>(1023).fill(0)]);
         return Response.json({ data, shape: [data.length, 1024] });
       },
@@ -83,14 +86,19 @@ function vectors(ids: string[]) {
     );
   return found;
 }
-async function failures() {
-  // Workerd may flush a line after the scheduled handler resolves.
-  await new Promise((resolve) => setTimeout(resolve, 100));
+// Only complete lines: stdio chunks can split one.
+function failures() {
   return workerLogs
     .join('')
     .split(/\r?\n/)
+    .slice(0, -1)
     .filter((line) => line.includes('memory-sync-failed'))
     .map((line) => JSON.parse(line.slice(line.indexOf('{'))));
+}
+// Workerd may flush a line after the scheduled handler resolves.
+async function noFailures() {
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  return failures();
 }
 
 it('#95: a model-less corpus larger than one Vectorize get is re-embedded within ceil(N/50) + 1 crons, fifty at a time', async () => {
@@ -123,7 +131,7 @@ it('#95: a model-less corpus larger than one Vectorize get is re-embedded within
     .bind(model)
     .all<{ n: number }>();
   expect(results[0].n).toBe(72);
-  expect(await failures()).toEqual([]);
+  expect(await noFailures()).toEqual([]);
 });
 
 it('#95: a sweep of more removals than one Vectorize get deletes every lingering vector', async () => {
@@ -141,7 +149,7 @@ it('#95: a sweep of more removals than one Vectorize get deletes every lingering
   expect(vectors(ids)).toEqual([]);
   await app.scheduled(new Date(forgottenAt + 35 * 60_000));
   expect(await removalRows(app)).toEqual([]);
-  expect(await failures()).toEqual([]);
+  expect(await noFailures()).toEqual([]);
 });
 
 it.each([
@@ -158,10 +166,52 @@ it.each([
     app.services[failure] = true;
 
     await app.scheduled(at(60 * 24 * 365));
-    expect(await failures()).toContainEqual({
+    await expect.poll(failures).toContainEqual({
       event: 'memory-sync-failed',
       stage,
       error,
     });
   },
 );
+
+it('#95: a failed embedding after remember leaves a log record', async () => {
+  app.services.failEmbedding = true;
+  const result = await memoryClient(app, '2026-07-28').call('remember', {
+    bucket: 'work/acme',
+    content: memoryFixture(1).content,
+  });
+  expect(result.structuredContent).toMatchObject({ created: true });
+  await expect.poll(failures).toContainEqual({
+    event: 'memory-sync-failed',
+    stage: 'embedding',
+    error: 'Synthetic embedding failure.',
+  });
+});
+
+it('#95: a D1 failure reading pending memories is logged, and inspection still runs', async () => {
+  const [kept] = corpus(1);
+  await indexed([kept], model);
+  const db = await app.mf.getD1Database('DB');
+  await db.exec('ALTER TABLE memory_versions RENAME TO versions_elsewhere');
+
+  await app.scheduled(at(60 * 24 * 365));
+  await expect.poll(failures).toContainEqual({
+    event: 'memory-sync-failed',
+    stage: 'embedding',
+    error: expect.stringContaining('no such table: memory_versions'),
+  });
+  expect(app.services.inspections.flat()).toContain(kept.id);
+});
+
+it('#95: a failure record keeps at most 300 characters of the service message', async () => {
+  await seedMemories(app, corpus(1));
+  app.services.failEmbedding = true;
+  embeddingFailure = `${'x'.repeat(300)}tail`;
+
+  await app.scheduled(at(60 * 24 * 365));
+  await expect.poll(failures).toContainEqual({
+    event: 'memory-sync-failed',
+    stage: 'embedding',
+    error: 'x'.repeat(300),
+  });
+});
