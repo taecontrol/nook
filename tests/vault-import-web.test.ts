@@ -830,7 +830,18 @@ it('E15: pending import locks writes, permits Reveal and navigation, shows progr
   }
 });
 
-it('E16: creation clears the paste immediately and Review, progress and results expose none of its actual values', async () => {
+async function expectImportPrivate(page: Page) {
+  await expect
+    .poll(() =>
+      privateClientState(page, importedValues, {
+        allowRedacted: true,
+        inspectReact: true,
+      }),
+    )
+    .toEqual({ found: true, absentFromCache: true, absentFromDom: true });
+}
+
+it('E16: Review, in-flight creation and results retain no plain imported values in React, DOM or caches', async () => {
   const visit = await importPage(browser);
   const { page } = visit;
   const pool = await holdImportCreates(page);
@@ -843,20 +854,21 @@ it('E16: creation clears the paste immediately and Review, progress and results 
     await importSheet(page)
       .getByRole('button', { name: 'Review keys', exact: true })
       .click();
-    await expectDomPrivate(page);
+    await expectImportPrivate(page);
+    await importSheet(page)
+      .getByRole('button', { name: 'Back', exact: true })
+      .click();
+    expect(await pasteField(page).inputValue()).toBe(mixedPaste);
+    await importSheet(page)
+      .getByRole('button', { name: 'Review keys', exact: true })
+      .click();
+    await expectImportPrivate(page);
     await createImport(page, 8);
     await expect.poll(() => pool.held.length).toBe(3);
-    expect(
-      await page
-        .locator('textarea')
-        .evaluateAll((fields) =>
-          fields.every((field) => (field as HTMLTextAreaElement).value === ''),
-        ),
-    ).toBe(true);
-    await expectDomPrivate(page);
+    await expectImportPrivate(page);
     pool.releaseAll();
     await importSettled(page);
-    await expectDomPrivate(page);
+    await expectImportPrivate(page);
     expect(
       await importSheet(page)
         .getByRole('button', { name: /Reveal|Copy value/ })

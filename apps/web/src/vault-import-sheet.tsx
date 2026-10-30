@@ -1,6 +1,6 @@
 import { secretLimits, validateSecretDescription } from '@nook/contract';
 import { cn } from 'cn';
-import type { Redacted } from 'effect';
+import { Redacted } from 'effect';
 import {
   Check,
   CircleAlert,
@@ -854,12 +854,20 @@ function useDraft(initialBucket: string, secrets: readonly Secret[]) {
   const [bucket, setBucket] = useState(initialBucket);
   const [rows, setRows] = useState<Row[]>([]);
   const [reviewing, setReviewing] = useState(false);
+  const paste = useRef<Redacted.Redacted<string> | null>(null);
   const values = useRef(new Map<string, Redacted.Redacted<string>>());
-  const parsed = useMemo(() => parseEnv(text), [text]);
+  const source = paste.current ?? text;
+  const parsed = useMemo(
+    () =>
+      parseEnv(Redacted.isRedacted(source) ? Redacted.value(source) : source),
+    [source],
+  );
   const checked = review(rows, values.current, namesIn(secrets, bucket));
   const onReview = () => {
     const result = rowsFrom(parsed);
     if ('tooMany' in result) return;
+    paste.current = Redacted.make(text);
+    setText('');
     values.current = new Map(
       result.rows.map((row, index) => [row.id, parsed.entries[index].value]),
     );
@@ -881,6 +889,7 @@ function useDraft(initialBucket: string, secrets: readonly Secret[]) {
     );
   };
   const reset = () => {
+    paste.current = null;
     values.current.clear();
     setText('');
     setRows([]);
@@ -908,7 +917,11 @@ function useDraft(initialBucket: string, secrets: readonly Secret[]) {
     reset,
     skipped,
     onText: setText,
-    onBack: () => setReviewing(false),
+    onBack: () => {
+      setText(paste.current ? Redacted.value(paste.current) : '');
+      paste.current = null;
+      setReviewing(false);
+    },
     onRow: (id: string, patch: Partial<Row>) =>
       setRows((current) =>
         current.map((row) => (row.id === id ? { ...row, ...patch } : row)),
