@@ -25,7 +25,13 @@ export async function expectWithinViewport(element: Locator) {
     await Promise.all(
       node
         .getAnimations({ subtree: true })
-        .map((animation) => animation.finished),
+        // A looping skeleton pulse never finishes; only open transitions settle.
+        // A cancelled animation rejects, and no longer moves anything.
+        .filter(
+          (animation) =>
+            animation.effect?.getComputedTiming().endTime !== Infinity,
+        )
+        .map((animation) => animation.finished.catch(() => {})),
     );
     const box = node.getBoundingClientRect();
     return {
