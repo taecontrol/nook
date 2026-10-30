@@ -1,7 +1,7 @@
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
-import { createdPath, machineCreate } from './support/agent-create.ts';
+import { machineCreate, machineCreateInput } from './support/agent-create.ts';
 import { auditNow, fetchValues } from './support/audit.ts';
 import {
   auditEntries,
@@ -9,6 +9,7 @@ import {
   visitAudit,
 } from './support/audit-browser.ts';
 import { issueGrant } from './support/grants.ts';
+import { expectNoOverflow } from './support/page-checks.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
@@ -18,6 +19,14 @@ beforeAll(async () => {
 afterAll(async () => {
   await closeBrowser?.();
 });
+const created = {
+  name: 'NEW_PROVIDER_TOKEN_FOR_BILLING_SERVICE_PRODUCTION_DEPLOYS',
+  purpose:
+    'token from provider setup for the billing-service production deploy pipeline '
+      .repeat(2)
+      .trim(),
+  workingDirectory: `/synthetic/projects/${'billing-service-production/'.repeat(45)}`,
+};
 it.each([
   { width: 390, height: 844 },
   { width: 1440, height: 900 },
@@ -28,7 +37,10 @@ it.each([
       count: 1,
       viewport,
       configure: async (_page, app, seeded) => {
-        expect((await machineCreate(app, seeded.token)).status).toBe(201);
+        expect(
+          (await machineCreate(app, seeded.token, machineCreateInput(created)))
+            .status,
+        ).toBe(201);
         const limited = await issueGrant(app, ['work/acme']);
         expect(
           (
@@ -58,14 +70,15 @@ it.each([
       const row = auditEntries(page).nth(1);
       await row.getByRole('button', { name: /Show details/ }).click();
       const details = await row.innerText();
+      await expectNoOverflow(page);
       for (const fact of [
         'Secret',
         'Recorded',
         'Machine',
         'Purpose',
         'Working directory',
-        createdPath,
-        '/synthetic/work/acme',
+        `work/acme/${created.name}`,
+        created.workingDirectory,
       ])
         expect(details).toContain(fact);
       expect(
@@ -80,7 +93,7 @@ it.each([
           .getByText('Purpose', { exact: true })
           .locator('..')
           .locator('dd')
-          .innerText()) === 'token from provider setup',
+          .innerText()) === created.purpose,
       ).toBe(true);
       expect(
         (await row.locator('dl time').getAttribute('datetime')) ===
@@ -98,9 +111,7 @@ it.each([
           text.includes('Created'),
         ),
       ).toBe(true);
-      expect(
-        await page.evaluate(() => document.documentElement.scrollWidth),
-      ).toBe(viewport.width);
+      await expectNoOverflow(page);
     } finally {
       await visit.close();
     }

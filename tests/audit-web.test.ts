@@ -1,4 +1,4 @@
-import type { Browser } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import {
@@ -16,6 +16,7 @@ import {
 import { jsonRequest } from './support/authorizations.ts';
 import { issueGrant } from './support/grants.ts';
 import { deferred, listMachines, revokeMachine } from './support/machines.ts';
+import { expectNoOverflow } from './support/page-checks.ts';
 import {
   createSecret,
   deleteSecret,
@@ -89,45 +90,49 @@ it('E17/E18/E28: chronological ledger, named facts, details and historical links
     await visit.close();
   }
 });
-it('E17/E18: long phone content truncates in rows, wraps in details, and never overflows', async () => {
-  const visit = await visitAudit(browser, {
-    viewport: { width: 390, height: 844 },
-    configure: async (_page, app, seeded) => {
-      expect(
-        (
-          await fetchValues(app, seeded.token, {
-            purpose: 'deployment '.repeat(18).trim(),
-            workingDirectory: '/synthetic/' + 'very-long-directory/'.repeat(90),
-            executable: 'long-command'.repeat(18),
-            secrets: [
-              'work/acme/billing-service/CLOUDFLARE_API_TOKEN_FOR_BILLING_SERVICE_PRODUCTION_DEPLOYS',
-            ],
-          })
-        ).status,
-      ).toBe(200);
-    },
-  });
-  try {
-    const { page } = visit;
-    await auditEntries(page).first().waitFor();
-    await auditEntries(page)
-      .first()
-      .getByRole('button', { name: /Show details/ })
-      .click();
-    expect(await auditEntries(page).first().innerText()).toContain(
-      'Working directory',
-    );
-    expect(
-      await page.evaluate(() => document.documentElement.scrollWidth),
-    ).toBe(390);
-    await selectAudit(page, 'Bucket', 'work/acme/billing-service');
-    expect(
-      await page.evaluate(() => document.documentElement.scrollWidth),
-    ).toBe(390);
-  } finally {
-    await visit.close();
-  }
-});
+const viewports = [
+  { width: 1440, height: 900 },
+  { width: 390, height: 844 },
+];
+it.each(viewports)(
+  'E17/E18: long content truncates in rows, wraps in details, and never overflows ($width)',
+  async (viewport) => {
+    const visit = await visitAudit(browser, {
+      viewport,
+      configure: async (_page, app, seeded) => {
+        expect(
+          (
+            await fetchValues(app, seeded.token, {
+              purpose: 'deployment '.repeat(18).trim(),
+              workingDirectory:
+                '/synthetic/' + 'very-long-directory/'.repeat(90),
+              executable: 'long-command'.repeat(18),
+              secrets: [
+                'work/acme/billing-service/CLOUDFLARE_API_TOKEN_FOR_BILLING_SERVICE_PRODUCTION_DEPLOYS',
+              ],
+            })
+          ).status,
+        ).toBe(200);
+      },
+    });
+    try {
+      const { page } = visit;
+      await auditEntries(page).first().waitFor();
+      await auditEntries(page)
+        .first()
+        .getByRole('button', { name: /Show details/ })
+        .click();
+      expect(await auditEntries(page).first().innerText()).toContain(
+        'Working directory',
+      );
+      await expectNoOverflow(page);
+      await selectAudit(page, 'Bucket', 'work/acme/billing-service');
+      await expectNoOverflow(page);
+    } finally {
+      await visit.close();
+    }
+  },
+);
 it('E19: subtree/exact filters, URL reload and Back, cleared stale secret and historical URLs', async () => {
   const visit = await visitAudit(browser);
   const { page } = visit;
@@ -287,6 +292,92 @@ it('E22: fresh and filtered-empty copy, clear filters and one skeleton status', 
   } finally {
     gate.resolve();
     await loading.close();
+  }
+});
+const auditStates: {
+  name: string;
+  count?: number;
+  start?: string;
+  configure?: NonNullable<Parameters<typeof visitAudit>[1]>['configure'];
+  shown: (page: Page) => Promise<void>;
+}[] = [
+  {
+    name: 'fresh',
+    count: 0,
+    shown: (page) =>
+      page.getByText('No secret activity yet', { exact: true }).waitFor(),
+  },
+  {
+    name: 'filter-empty',
+    start: '/audit?secret=work%2Facme%2FUNUSED',
+    shown: (page) =>
+      page
+        .getByText('No activity matches these filters', { exact: true })
+        .waitFor(),
+  },
+  {
+    name: 'loading',
+    configure: async (page) => {
+      await page.route('**/api/audit**', () => new Promise(() => {}));
+    },
+    shown: (page) =>
+      page.getByRole('status', { name: 'Loading audit entries' }).waitFor(),
+  },
+  {
+    name: 'load-error',
+    configure: async (_page, app) => {
+      await (await app.mf.getD1Database('DB'))
+        .prepare(
+          'ALTER TABLE audit_entries RENAME TO unavailable_audit_entries',
+        )
+        .run();
+    },
+    shown: (page) =>
+      page.getByText('Couldn’t load audit entries', { exact: true }).waitFor(),
+  },
+  {
+    name: 'many',
+    count: 76,
+    shown: (page) =>
+      page
+        .getByRole('button', { name: 'Load older entries', exact: true })
+        .waitFor(),
+  },
+  {
+    name: 'deleted-revoked',
+    configure: async (_page, app) => {
+      const [secret] = (await listSecrets(app)).filter(
+        (item) => item.path === acmePath,
+      );
+      await deleteSecret(app, acmePath, secret.version);
+      for (const machine of await listMachines(app))
+        await revokeMachine(app, machine.id);
+    },
+    shown: async (page) => {
+      const first = auditEntries(page).first();
+      await first.getByRole('button', { name: /Show details/ }).click();
+      await expect.poll(() => first.innerText()).toContain('Deleted');
+      await expect.poll(() => first.innerText()).toContain('Revoked');
+    },
+  },
+];
+it.each(
+  auditStates.flatMap((state) =>
+    viewports.map((viewport) => ({ ...state, viewport })),
+  ),
+)('E22: the $name state never overflows ($viewport.width)', async (state) => {
+  const visit = await visitAudit(browser, {
+    viewport: state.viewport,
+    count: state.count,
+    start: state.start,
+    configure: state.configure,
+  });
+  try {
+    await state.shown(visit.page);
+    await expectNoOverflow(visit.page);
+  } finally {
+    await visit.page.unrouteAll({ behavior: 'ignoreErrors' });
+    await visit.close();
   }
 });
 it('E22: genuine D1 load failure retries, and older-page failure keeps loaded entries', async () => {

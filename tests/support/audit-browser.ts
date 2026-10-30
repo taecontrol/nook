@@ -1,6 +1,7 @@
 import type { Browser, Page } from 'playwright';
 import { auditNow, seedAudit } from './audit.ts';
 import { closeBrowserPage } from './buckets-browser.ts';
+import { watchPageErrors } from './page-checks.ts';
 import { vaultRuntime } from './vault.ts';
 export async function visitAudit(
   browser: Browser,
@@ -33,12 +34,14 @@ export async function visitAudit(
         new URL(request.url()).pathname + new URL(request.url()).search,
       );
   });
+  const expectNoPageErrors = watchPageErrors(page);
   const close = async () => {
     try {
       await closeBrowserPage(page, context);
     } finally {
       await app.close();
     }
+    expectNoPageErrors();
   };
   try {
     const seeded = await seedAudit(app, options.count ?? 30);

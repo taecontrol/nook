@@ -18,6 +18,7 @@
     "test": "node scripts/test.ts",
     "test:coverage": "node scripts/coverage.ts",
     "test:journey": "node scripts/journey.ts",
+    "captures": "node scripts/test.ts --config vitest.captures.config.ts",
     "verify:crap": "node scripts/crap.ts",
     "coverage:merge": "node scripts/coverage-merge.ts",
     "verify:migrations": "node scripts/migrations.ts",

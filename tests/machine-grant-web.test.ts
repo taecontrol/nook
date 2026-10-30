@@ -4,6 +4,10 @@ import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { bucketCheck, grantPage, selectDeep } from './support/grant-browser.ts';
 import { grantTree, issueGrant, machineMcp } from './support/grants.ts';
 import { listMachines } from './support/machines.ts';
+import {
+  expectNoOverflow,
+  expectWithinViewport,
+} from './support/page-checks.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
@@ -13,6 +17,10 @@ beforeAll(async () => {
 afterAll(async () => {
   await closeBrowser?.();
 });
+const viewports = [
+  { width: 1440, height: 900 },
+  { width: 390, height: 844 },
+];
 it('E24: step two puts an expanded bounded checklist between code and name, defaulting only to me', async () => {
   const { page, approvals, reveal, close } = await grantPage(browser);
   try {
@@ -148,10 +156,16 @@ it('E27: All buckets explicitly covers everything and unchecking restores the pr
     await close();
   }
 });
-it.each(['click', 'Enter'])(
-  'E28: an empty selection blocks %s with the exact guidance and no request',
-  async (method) => {
-    const { page, reveal, approvals, close } = await grantPage(browser);
+it.each(
+  (['click', 'Enter'] as const).flatMap((method) =>
+    viewports.map((viewport) => ({ method, viewport })),
+  ),
+)(
+  'E28: an empty selection blocks $method with the exact guidance and no request at $viewport.width px',
+  async ({ method, viewport }) => {
+    const { page, reveal, approvals, close } = await grantPage(browser, {
+      viewport,
+    });
     try {
       await reveal();
       await bucketCheck(page, 'me').uncheck();
@@ -167,19 +181,25 @@ it.each(['click', 'Enter'])(
         .getByText('Choose at least one bucket.', { exact: true })
         .waitFor();
       expect(approvals).toEqual([]);
+      await expectNoOverflow(page);
     } finally {
       await close();
     }
   },
 );
-it.each(['loading', 'failed'])(
-  'E29: %s buckets disable limited approval including Enter, while All buckets and Deny remain explicit choices',
-  async (state) => {
+it.each(
+  (['loading', 'failed'] as const).flatMap((state) =>
+    viewports.map((viewport) => ({ state, viewport })),
+  ),
+)(
+  'E29: $state buckets disable limited approval including Enter, while All buckets and Deny remain explicit choices at $viewport.width px',
+  async ({ state, viewport }) => {
     let release = () => {};
     const held = new Promise<void>((accept) => {
       release = accept;
     });
     const { page, app, reveal, approvals, close } = await grantPage(browser, {
+      viewport,
       configure: async (page, app) => {
         if (state === 'failed')
           await (await app.mf.getD1Database('DB'))
@@ -194,10 +214,13 @@ it.each(['loading', 'failed'])(
     });
     try {
       await reveal();
-      if (state === 'failed')
-        await page
-          .getByText("Couldn't load buckets", { exact: true })
-          .waitFor();
+      // The bucket box clips its content, so the page width cannot see it.
+      await expectWithinViewport(
+        state === 'failed'
+          ? page.getByRole('alert').filter({ hasText: "Couldn't load buckets" })
+          : page.getByRole('status', { name: 'Loading buckets', exact: true }),
+      );
+      await expectNoOverflow(page);
       expect(
         await page
           .getByRole('button', { name: 'Approve', exact: true })
@@ -236,38 +259,49 @@ it.each(['loading', 'failed'])(
     }
   },
 );
-it('E30: failed approval preserves its grant on retry and repeats it in the result card', async () => {
-  const { page, app, reveal, approvals, close } = await grantPage(browser);
-  try {
-    await reveal();
-    await selectDeep(page);
-    await page.route('**/api/authorizations/*/approve', (route) =>
-      route.abort(),
-    );
-    await page.getByRole('button', { name: 'Approve', exact: true }).click();
-    await page.getByText("Couldn't reach Nook", { exact: true }).waitFor();
-    expect(await bucketCheck(page, 'work/acme').isChecked()).toBe(true);
-    await page.unroute('**/api/authorizations/*/approve');
-    await page.getByRole('button', { name: 'Try again', exact: true }).click();
-    await page.getByRole('heading', { name: 'Machine approved' }).waitFor();
-    expect(approvals).toEqual(
-      Array(2).fill({ machineName: 'omarchy', grant: ['work/acme'] }),
-    );
-    await page.getByText('Read only: me, work', { exact: true }).waitFor();
-    expect(await page.getByText('work/acme', { exact: true }).count()).toBe(1);
-    expect(
-      (
-        await (
-          await app.mf.getD1Database('DB')
-        )
-          .prepare('SELECT grant_json FROM authorizations')
-          .first()
-      )?.grant_json,
-    ).toBe('["work/acme"]');
-  } finally {
-    await close();
-  }
-});
+it.each(viewports)(
+  'E30: failed approval preserves its grant on retry and repeats it in the result card at $width px',
+  async (viewport) => {
+    const { page, app, reveal, approvals, close } = await grantPage(browser, {
+      viewport,
+    });
+    try {
+      await reveal();
+      await selectDeep(page);
+      await page.route('**/api/authorizations/*/approve', (route) =>
+        route.abort(),
+      );
+      await page.getByRole('button', { name: 'Approve', exact: true }).click();
+      await page.getByText("Couldn't reach Nook", { exact: true }).waitFor();
+      await expectNoOverflow(page);
+      expect(await bucketCheck(page, 'work/acme').isChecked()).toBe(true);
+      await page.unroute('**/api/authorizations/*/approve');
+      await page
+        .getByRole('button', { name: 'Try again', exact: true })
+        .click();
+      await page.getByRole('heading', { name: 'Machine approved' }).waitFor();
+      expect(approvals).toEqual(
+        Array(2).fill({ machineName: 'omarchy', grant: ['work/acme'] }),
+      );
+      await page.getByText('Read only: me, work', { exact: true }).waitFor();
+      await expectNoOverflow(page);
+      expect(await page.getByText('work/acme', { exact: true }).count()).toBe(
+        1,
+      );
+      expect(
+        (
+          await (
+            await app.mf.getD1Database('DB')
+          )
+            .prepare('SELECT grant_json FROM authorizations')
+            .first()
+        )?.grant_json,
+      ).toBe('["work/acme"]');
+    } finally {
+      await close();
+    }
+  },
+);
 it('E5: a deleted choice leaves approval pending and asks the owner to choose again from a refreshed tree', async () => {
   const { page, app, reveal, approvals, close } = await grantPage(browser);
   try {

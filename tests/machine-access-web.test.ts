@@ -15,6 +15,7 @@ import {
   revokeMachine,
 } from './support/machines.ts';
 import { machineRow } from './support/machines-browser.ts';
+import { expectNoOverflow } from './support/page-checks.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
@@ -457,42 +458,46 @@ it.each(sizes)(
   },
 );
 
-it('E12: a revoked machine disappears, leaves only an explanation and Close, and gives the actual reconnect command', async () => {
-  const visit = await accessPage(browser);
-  try {
-    const machine = visit.machines[0];
-    const sheet = await editAccess(visit.page, machine);
-    await sheet
-      .getByRole('checkbox', { name: 'work/beta', exact: true })
-      .check();
-    expect((await revokeMachine(visit.app, machine.id)).status).toBe(204);
-    await sheet
-      .getByRole('button', { name: 'Save access', exact: true })
-      .click();
-    const close = sheet
-      .locator('[data-slot="sheet-footer"]')
-      .getByRole('button', { name: 'Close', exact: true });
-    await close.waitFor();
-    expect(await sheet.getByRole('alert').innerText()).toContain(
-      'framework-13 was revoked',
-    );
-    expect(await sheet.getByRole('checkbox').count()).toBe(0);
-    expect(
-      await sheet.getByRole('button', { name: /Save access|Cancel/ }).count(),
-    ).toBe(0);
-    expect(await machineRow(visit.page, machine.id).count()).toBe(0);
-    await close.click();
-    await sheet.waitFor({ state: 'hidden' });
-    expect(await visit.page.getByRole('alert').innerText()).toContain(
-      `nook login ${visit.app.origin}`,
-    );
-    expect(await visit.page.getByRole('alert').innerText()).toContain(
-      'was revoked elsewhere',
-    );
-  } finally {
-    await visit.close();
-  }
-});
+it.each(sizes)(
+  'E12: at $width px a revoked machine disappears, leaves only an explanation and Close, and gives the actual reconnect command',
+  async (viewport) => {
+    const visit = await accessPage(browser, { viewport });
+    try {
+      const machine = visit.machines[0];
+      const sheet = await editAccess(visit.page, machine);
+      await sheet
+        .getByRole('checkbox', { name: 'work/beta', exact: true })
+        .check();
+      expect((await revokeMachine(visit.app, machine.id)).status).toBe(204);
+      await sheet
+        .getByRole('button', { name: 'Save access', exact: true })
+        .click();
+      const close = sheet
+        .locator('[data-slot="sheet-footer"]')
+        .getByRole('button', { name: 'Close', exact: true });
+      await close.waitFor();
+      expect(await sheet.getByRole('alert').innerText()).toContain(
+        'framework-13 was revoked',
+      );
+      expect(await sheet.getByRole('checkbox').count()).toBe(0);
+      expect(
+        await sheet.getByRole('button', { name: /Save access|Cancel/ }).count(),
+      ).toBe(0);
+      expect(await machineRow(visit.page, machine.id).count()).toBe(0);
+      await close.click();
+      await sheet.waitFor({ state: 'hidden' });
+      expect(await visit.page.getByRole('alert').innerText()).toContain(
+        `nook login ${visit.app.origin}`,
+      );
+      expect(await visit.page.getByRole('alert').innerText()).toContain(
+        'was revoked elsewhere',
+      );
+      await expectNoOverflow(visit.page);
+    } finally {
+      await visit.close();
+    }
+  },
+);
 
 it.each(sizes)(
   'E13: at $width px unchanged and empty drafts disable Save and All buckets restores limited picks',

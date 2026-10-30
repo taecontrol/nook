@@ -6,9 +6,14 @@ import {
   memoryId,
   typicalMemories,
 } from './fixtures/memories.ts';
-import { searchMemories } from './fixtures/search-corpus.ts';
+import {
+  deepBucket,
+  extremeMemories,
+  searchMemories,
+} from './fixtures/search-corpus.ts';
 import { deferred } from './support/machines.ts';
 import { memoryRows } from './support/memory.ts';
+import { expectNoOverflow, watchPageErrors } from './support/page-checks.ts';
 import { httpSearch, searchPage } from './support/search.ts';
 
 let browser: Browser;
@@ -65,6 +70,7 @@ it('E17: debounce and Enter put q in the URL; reload, selection, Back, scope and
     await page
       .getByRole('heading', { name: 'Proceso de release', exact: true })
       .waitFor();
+    await expectNoOverflow(page);
     expect(new URL(page.url()).searchParams.get('q')).toBe('how do we deploy');
     await page.goBack();
     await rows(page).first().waitFor();
@@ -76,6 +82,7 @@ it('E17: debounce and Enter put q in the URL; reload, selection, Back, scope and
     await expect
       .poll(() => new URL(page.url()).searchParams.get('scope'))
       .toBe('bucket');
+    await rows(page).first().waitFor();
     expect(new URL(page.url()).searchParams.get('q')).toBe('how do we deploy');
     await page.locator('[data-memory-buckets] [data-path="work"] a').click();
     await expect
@@ -171,18 +178,24 @@ it.each([
 ])(
   'E19: previous results dim during loading, real D1 error retries, and column positions stay fixed at $width×$height',
   async (viewport) => {
+    let expectNoPageErrors = () => {};
     const visit = await searchPage(browser, {
       seeds: searchMemories,
       viewport,
+      configure: async (_app, page) => {
+        expectNoPageErrors = watchPageErrors(page);
+      },
     });
     const gate = deferred();
     try {
       const { page, app } = visit;
       await memoryRows(page).first().waitFor();
+      await expectNoOverflow(page);
       const idle = await columnBoxes(page);
       await field(page).fill('how do we deploy');
       await field(page).press('Enter');
       await rows(page).first().waitFor();
+      await expectNoOverflow(page);
       expect(await columnBoxes(page)).toEqual(idle);
       const previous = await rows(page).allTextContents();
       await page.route('**/api/memories/search?*', async (route) => {
@@ -193,6 +206,7 @@ it.each([
       await field(page).fill('pnpm verify');
       await field(page).press('Enter');
       await page.getByText('Searching…', { exact: true }).waitFor();
+      await expectNoOverflow(page);
       expect(await rows(page).allTextContents()).toEqual(previous);
       expect(
         await page
@@ -220,6 +234,7 @@ it.each([
       await page
         .getByText('Could not search memories', { exact: true })
         .waitFor();
+      await expectNoOverflow(page);
       expect(await columnBoxes(page)).toEqual(idle);
       await db
         .prepare('ALTER TABLE unavailable_versions RENAME TO memory_versions')
@@ -228,8 +243,41 @@ it.each([
         .getByRole('button', { name: 'Try again', exact: true })
         .click();
       await rows(page).first().waitFor();
+      app.services.failEmbedding = true;
+      // A query not searched yet, so the result is not served from cache.
+      await field(page).fill('verification');
+      await field(page).press('Enter');
+      await page.getByRole('alert').waitFor();
+      await expect
+        .poll(() => rows(page).first().innerText())
+        .toContain('Required verification');
+      await expectNoOverflow(page);
+      await field(page).fill('kubernetes helm chart');
+      await field(page).press('Enter');
+      await page.getByText('No memories found', { exact: true }).waitFor();
+      await expectNoOverflow(page);
+      expectNoPageErrors();
     } finally {
       gate.resolve();
+      await visit.close();
+    }
+  },
+);
+it.each([
+  { width: 1440, height: 900 },
+  { width: 390, height: 844 },
+])(
+  'E19: results from deep buckets with long titles and many tags fit $width×$height',
+  async (viewport) => {
+    const visit = await searchPage(browser, {
+      seeds: extremeMemories,
+      viewport,
+      start: `/memory?bucket=${encodeURIComponent(deepBucket)}&q=publicar`,
+    });
+    try {
+      await rows(visit.page).first().waitFor();
+      await expectNoOverflow(visit.page);
+    } finally {
       await visit.close();
     }
   },
@@ -246,6 +294,7 @@ it('E19: meaning failures explain incomplete results, no matches clear, and a fr
     await field(page).fill('pnpm verify');
     await field(page).press('Enter');
     await page.getByRole('alert').waitFor();
+    await rows(page).first().waitFor();
     expect(await page.getByRole('alert').innerText()).toMatch(
       /exact words only|meaning.*unavailable/i,
     );
@@ -401,6 +450,7 @@ it('E17 phone: a result opens the reading pane and Results returns with q intact
     await visit.page
       .getByRole('heading', { name: 'Proceso de release', exact: true })
       .waitFor();
+    await expectNoOverflow(visit.page);
     await visit.page
       .getByRole('link', { name: 'Results', exact: true })
       .click();

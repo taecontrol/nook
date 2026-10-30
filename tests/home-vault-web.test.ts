@@ -1,6 +1,7 @@
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
+import { expectNoOverflow } from './support/page-checks.ts';
 import { vaultPage } from './support/vault-browser.ts';
 
 let browser: Browser;
@@ -47,6 +48,38 @@ it('Home does not describe Vault as unavailable when its tool link opens the rea
       session,
       'An available tool must not be described as unavailable',
     ).not.toMatch(/\bVault\b[^.]*\bnot available\b/i);
+  } finally {
+    await visit.close();
+  }
+});
+it('A fresh owner’s Home and empty Vault fit a phone', async () => {
+  const visit = await vaultPage(browser, {
+    fresh: true,
+    start: '/',
+    viewport: { width: 390, height: 844 },
+  });
+  try {
+    const { page } = visit;
+    await page
+      .getByRole('heading', { name: "You're signed in", exact: true })
+      .waitFor();
+    await expectNoOverflow(page);
+    await page
+      .getByRole('region', { name: 'Tools', exact: true })
+      .getByRole('link', { name: /Vault/ })
+      .click();
+    const bucket = page
+      .getByRole('list', { name: 'Buckets', exact: true })
+      .locator('[data-path="me"]')
+      .getByRole('link');
+    await bucket.waitFor();
+    await expectNoOverflow(page);
+    await bucket.click();
+    await page
+      .getByRole('region', { name: 'Secrets in me', exact: true })
+      .getByText('No secrets yet', { exact: true })
+      .waitFor();
+    await expectNoOverflow(page);
   } finally {
     await visit.close();
   }

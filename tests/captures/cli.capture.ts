@@ -2,14 +2,14 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
+import { launchTestBrowser } from '../../scripts/lib/test-browser.ts';
 import {
   approve,
   createAuthorization,
   ownerRuntime,
-} from './support/authorizations.ts';
-import { closeBrowserPage } from './support/buckets-browser.ts';
-import { runtime } from './support/runtime.ts';
+} from '../support/authorizations.ts';
+import { closeBrowserPage } from '../support/buckets-browser.ts';
+import { runtime } from '../support/runtime.ts';
 
 let browser: Browser;
 let closeBrowser: (() => Promise<void>) | undefined;

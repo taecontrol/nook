@@ -8,6 +8,10 @@ import {
   memories,
   seedHistory,
 } from './support/memory-history.ts';
+import {
+  expectNoOverflow,
+  expectWithinViewport,
+} from './support/page-checks.ts';
 
 let browser: Browser;
 let closeBrowser: (() => Promise<void>) | undefined;
@@ -22,6 +26,12 @@ const settleSheet = (page: Page) =>
       el.getAnimations().map((animation) => animation.finished.catch(() => {})),
     ),
   );
+// Neither the page nor the open sheet, down to its scrolled rows, reaches
+// past the viewport.
+const expectSheetFits = async (page: Page) => {
+  await expectNoOverflow(page);
+  await expectWithinViewport(sheet(page));
+};
 const history = (page: Page) =>
   page.getByRole('button', { name: /History.*versions?/ });
 describe.each([
@@ -190,6 +200,7 @@ describe.each([
       ).toBe(1);
       await sheet(page).getByRole('button', { name: 'Show changes' }).click();
       await sheet(page).locator('[data-memory-diff]').waitFor();
+      await expectSheetFits(page);
       expect(
         (
           await sheet(page).locator('[data-diff-row="add"]').allTextContents()
@@ -231,8 +242,15 @@ describe.each([
           .filter({ hasText: 'Added tag ' })
           .textContent(),
       ).toContain('staging');
-      await sheet(page).getByRole('button', { name: 'Older version' }).click();
-      await sheet(page).getByRole('button', { name: 'Older version' }).click();
+      await sheet(page).getByRole('button', { name: 'Newer version' }).click();
+      await sheet(page)
+        .getByRole('heading', { name: 'Version 4 of 4' })
+        .waitFor();
+      await sheet(page).locator('[data-memory-diff]').waitFor();
+      for (let step = 0; step < 3; step++)
+        await sheet(page)
+          .getByRole('button', { name: 'Older version' })
+          .click();
       await sheet(page)
         .getByText('First version, nothing to compare', { exact: true })
         .waitFor();
@@ -376,6 +394,7 @@ describe.each([
         .getByRole('status', { name: 'Loading history' })
         .waitFor();
       await settleSheet(page);
+      await expectSheetFits(page);
       const header = await sheet(page)
         .getByRole('heading', { name: 'History' })
         .boundingBox();
@@ -398,6 +417,7 @@ describe.each([
       await sheet(page)
         .getByText('Could not load history', { exact: true })
         .waitFor();
+      await expectSheetFits(page);
       fail = false;
       await sheet(page).getByRole('button', { name: 'Retry history' }).click();
       await page.locator('[data-version-row="4"]').waitFor();
@@ -406,7 +426,54 @@ describe.each([
       await visit.close();
     }
   });
-  it.each(['many', 'never-updated', 'inherited', 'long'] as const)(
+  it.each(['held', 'failed'] as const)(
+    'E27: a deep-linked version fits while its history request is %s',
+    async (request) => {
+      const gate = deferred();
+      const visit = await historyPage(browser, {
+        viewport,
+        state: '&history=1&version=2',
+        configure: async (page) => {
+          await page.route('**/api/memories/*/versions*', async (route) => {
+            if (request === 'failed')
+              return route.fulfill({
+                status: 503,
+                contentType: 'application/json',
+                body: '{"_tag":"ServiceUnavailable"}',
+              });
+            const response = await route.fetch();
+            await gate.promise;
+            await route.fulfill({ response }).catch(() => {});
+          });
+        },
+      });
+      try {
+        const { page } = visit;
+        await sheet(page)
+          .getByRole('button', { name: 'Show changes' })
+          .waitFor();
+        if (request === 'failed') {
+          await sheet(page)
+            .getByRole('button', { name: 'Retry history' })
+            .waitFor();
+          await expectSheetFits(page);
+          return;
+        }
+        await sheet(page)
+          .getByRole('status', { name: 'Loading version' })
+          .waitFor();
+        await expectSheetFits(page);
+        gate.resolve();
+        await sheet(page)
+          .getByRole('heading', { name: 'Version 2 of 4' })
+          .waitFor();
+      } finally {
+        gate.resolve();
+        await visit.close();
+      }
+    },
+  );
+  it.each(['typical', 'many', 'never-updated', 'inherited', 'long'] as const)(
     'E23/E27: %s history stays usable and has no horizontal overflow',
     async (scenario) => {
       const visit = await historyPage(browser, {
@@ -417,12 +484,7 @@ describe.each([
       try {
         const { page } = visit;
         await page.locator('[data-version-row]').last().waitFor();
-        expect(
-          await page.evaluate(() => document.documentElement.scrollWidth),
-        ).toBe(viewport.width);
-        expect(
-          await sheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth),
-        ).toBe(true);
+        await expectSheetFits(page);
         if (scenario === 'many') {
           await settleSheet(page);
           const header = await sheet(page)
@@ -522,21 +584,14 @@ it('E27: 16 KiB Unicode, six 32-character segments, long names and directories f
       `${visit.app.origin}/memory?bucket=${bucket}&memory=${fixture.id}&history=1&version=2&changes=1`,
     );
     await sheet(page).locator('[data-memory-diff]').waitFor();
-    expect(
-      await page.evaluate(() => document.documentElement.scrollWidth),
-    ).toBe(390);
-    expect(
-      await sheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth),
-    ).toBe(true);
+    await expectSheetFits(page);
     expect(await sheet(page).textContent()).toContain('Removed tag');
     expect(await sheet(page).textContent()).toContain('Added tag');
     await sheet(page).getByRole('button', { name: 'Older version' }).click();
     await sheet(page)
       .getByRole('heading', { name: 'Version 1 of 2' })
       .waitFor();
-    expect(
-      await sheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth),
-    ).toBe(true);
+    await expectSheetFits(page);
   } finally {
     await visit.close();
   }

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -113,11 +113,6 @@ describe.runIf(process.platform === 'darwin')(
         await page
           .getByRole('heading', { name: 'Machine approved', exact: true })
           .waitFor();
-        const screenshots = resolve('.local/verification/screenshots');
-        await mkdir(screenshots, { recursive: true });
-        await page.screenshot({
-          path: resolve(screenshots, 'macos-cli-approved.png'),
-        });
         const loggedIn = await child.done;
         expect(loggedIn.status).toBe(0);
         expectOutput(

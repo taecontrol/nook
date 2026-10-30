@@ -94,11 +94,13 @@ CI runs the five static commands, ten `pnpm test:coverage --shard=I/10` jobs, tw
 
 ## Browser evidence and budget
 
-The shell suite captures all five accepted states at 1440×900 and 390×844 in both light and dark. It checks horizontal overflow, card bounds, rendered email line breaks after allowed separators, the enabled Memory and Vault links, mobile Sheet behavior, and the full-email dropdown with the Access logout destination. The twenty base screenshots and six overlay screenshots appear in `.local/verification/screenshots/` and CI's `web-shell-I` artifact. Compare them with the chosen prototype when changing the shell.
+The shell suite renders all five accepted states at 1440×900 and 390×844 in both light and dark. It checks horizontal overflow, card bounds, rendered email line breaks after allowed separators, the enabled Memory and Vault links, mobile Sheet behavior, and the full-email dropdown with the Access logout destination.
+
+Screenshot captures are delivery evidence, not a check. Fidelity to a chosen prototype is judged once, when the change that implements it is delivered: run the matching suite, compare its PNGs with the reference named in that feature's section below, and attach them to the pull request. `pnpm captures` runs every `tests/captures/*.capture.ts` suite with the same build, host isolation, synthetic owner, and genuine Worker/D1 data as `pnpm test`; `pnpm captures tests/captures/vault.capture.ts` runs one. PNGs are written to `.local/verification/screenshots/`. Neither `pnpm verify` nor CI runs the captures, so a suite may need updating before it is used. Behavior that must not regress, such as horizontal overflow at both viewports, uncaught page errors, and loading or failure states, is asserted by the functional suites instead.
 
 The owner journey uses a recorded `agent.act` to create `work/acme`, followed by an exact locator proving nesting inside `work`. Local recording uses the owner's ChatGPT subscription through `e2e/oauth/chatgpt`; credentials are never copied. Committed `.e2e/cache/` recordings replay in CI with `e2e run --strict-cache` and zero retries or model calls. Reports, logs, videos, and failure artifacts stay ignored and are uploaded on CI failure.
 
-The bucket suite captures nine states at both viewport sizes, in light and dark: typical, fresh, deep-and-long, loading, load-error, ancestor preview, invalid path, delete confirmation, and after creating `work/acme`. The `buckets-*` PNGs share the screenshot artifact with shell evidence. Scenario controls and stubs are test fixtures and never enter the product.
+`tests/captures/buckets.capture.ts` captures nine states at both viewport sizes, in light and dark: typical, fresh, deep-and-long, loading, load-error, ancestor preview, invalid path, delete confirmation, and after creating `work/acme`. Scenario controls and stubs are test fixtures and never enter the product.
 
 Bucket observers in Buckets, Memory, Vault, and CLI authorization preserve the shared optimistic list while a bucket write is pending. Intent, remount, tab refocus, and authorization recovery defer server reads until the write settles. The Vault and authorization bucket-refresh regressions hold real POST and DELETE requests before they reach the Worker and use native tab visibility changes. Authorization recovery also proves that the Worker rejects a not-yet-created grant, the optimistic choice survives that rejection, and approval succeeds after the bucket is committed. Server-side grant validation remains mandatory.
 
@@ -106,13 +108,13 @@ Bucket observers in Buckets, Memory, Vault, and CLI authorization preserve the s
 
 The Machines browser tests seed real D1 approvals and fix Chromium's clock to `2026-10-05T15:00:00Z`. They prove activity grouping and ordering, the exact thirty-day boundary and idle-page regrouping, complete mobile names, confirmation and keyboard focus, truthful pending/success/failure feedback, rollback and retry, and cancellation of stale focus/intent reads across route remounts. Delayed network responses still come from the built Worker; failures use real aborting D1 triggers or an unavailable table. A committed DELETE followed by a lost response proves that an unconfirmed outcome never claims the token still works and can be resolved with an idempotent retry. Migration coverage also inserts using the previous Worker's four-column writer after applying 0004, proving that approvals issued during rollout still acquire independent public ids and remain revocable.
 
-`pnpm test tests/machines-captures.test.ts` captures forty viewport PNGs at 1440×900 and 390×844 in light and dark: typical, single-new, empty, many-long, loading, load-error, confirm, revoking, revoked, and revoke-failed (E26). Six supplementary full-page PNGs expose the entire typical mobile list and all many-long rows. The `machines-*` files live in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare layout, grouping, facts, and feedback with the accepted B “Stale first” reference; the reference's scenario selector is excluded from the product. All captures use the synthetic owner, a temporary browser profile, and genuine Worker/D1 data and writes. The reconnect command always uses the runtime's actual origin.
+`pnpm captures tests/captures/machines.capture.ts` captures forty viewport PNGs at 1440×900 and 390×844 in light and dark: typical, single-new, empty, many-long, loading, load-error, confirm, revoking, revoked, and revoke-failed (E26). Six supplementary full-page PNGs expose the entire typical mobile list and all many-long rows. The `machines-*` files live in `.local/verification/screenshots/`. Compare layout, grouping, facts, and feedback with the accepted B “Stale first” reference; the reference's scenario selector is excluded from the product. All captures use the synthetic owner, a temporary browser profile, and genuine Worker/D1 data and writes. The reconnect command always uses the runtime's actual origin.
 
 The load-time stage uses Chromium against the uninstrumented production build and the same local runtime with the synthetic owner. It emulates 9 Mbps down, 3 Mbps up, and 85 ms latency, with cache disabled and no CPU throttling. Each result is the median of five runs. A cold `/cli/authorize` must show the terminal-code field within 1000 ms. A cold `/` must show the signed-in owner's email within 1000 ms; a cold `/buckets` must show outline rows within 1000 ms; a cold `/machines` must show machine rows within 1000 ms. From Home, after hovering Buckets or Machines until intent preloading settles, each navigation must show its rows within 100 ms. The Machines measurements use a 390×844 viewport, one synthetic approval in D1, and the same fixed network profile. Missing, malformed, or over-budget machine samples fail independently. Constants live in `scripts/lib/load-time.ts`. `load-time.test.ts` drives every measured screen through one table: each accepts its exact budget, fails alone with its own label when over it, rejects missing samples, and prints its own median. Browser marks measure rendered screens across animation frames, excluding automation round trips. Medians, individual samples, and cold-open gzip bytes are printed; bytes are diagnostics and never gate.
 
 Intent navigation tracks requests from before Home loads through hover, then requires a fresh 500 ms without active requests before clicking. A previously reached document `networkidle` state cannot satisfy that wait. Completed and failed requests release the tracker, which has a bounded 15 s wait and removes its listeners on exit; the unfinished-preload test injects a 1 s bound. `load-time-browser.test.ts` holds the real bucket preload after Home is already idle and measures the interval from response completion to the navigation click. The 100 ms navigation budget begins at that click and remains unchanged.
 
-The CLI approval suite captures twelve states at 1440×900 and 390×844 in light, plus pending, approved, and expired in dark. Thirty `cli-authorize-*` PNGs and a mobile brand-focus capture share `.local/verification/screenshots/` and CI screenshot artifacts. The chosen Enter-the-code prototype is the fidelity reference. Checking stays on step one as recommended by the judge; the brand focus ring remains within the mobile viewport and long names wrap below the input. Focus captures disable animations so the ring has settled. `tests/cli-*.test.ts` proves accepted CLI login examples; local evidence does not establish hosted Access behavior.
+`tests/captures/cli.capture.ts` captures twelve states at 1440×900 and 390×844 in light, plus pending, approved, and expired in dark. Thirty `cli-authorize-*` PNGs and a mobile brand-focus capture are written to `.local/verification/screenshots/`. The chosen Enter-the-code prototype is the fidelity reference. Checking stays on step one as recommended by the judge; the brand focus ring remains within the mobile viewport and long names wrap below the input. Focus captures disable animations so the ring has settled. `tests/cli-*.test.ts` proves accepted CLI login examples; local evidence does not establish hosted Access behavior.
 
 Session concurrency tests run overlapping real login/logout processes against one private keyring, including different config directories and a held keyring deletion. A Linux abstract socket coordinates credential-changing commands for the same user and actual Secret Service bus ID, obtained by the real `dbus-send`; it carries no credential and disappears on process exit. Private-bus aliases omit guid, escape the path, use a symlink, or add a failed fallback address; each proves the same bus ID before running the CLI. On macOS, real CLI concurrency tests use an empty HOME-scoped `session.lock` opened with `O_EXLOCK | O_NONBLOCK`; another config directory shares that lock. SIGKILL and denied-login tests prove subsequent commands can proceed on both platforms. D1 failure tests use real aborting SQL triggers to prove rollback and retry of creation, approval, exchange, and revocation. Request-time assertions bracket the creation call so a shifted ten-minute deadline cannot pass by preserving only the difference between stored timestamps. Approval retries prove that retrying Deny never grants access, including with an empty machine name.
 
@@ -132,7 +134,7 @@ Real CLI processes use the private Secret Service fixture to prove the single JS
 
 The load-time stage adds five phone-network samples for code acceptance to the rendered, preloaded approval tree. Its median must be at most 100 ms. Step one requests buckets before lookup; step two uses the same cached query with no extra loading screen. Existing cold-open and navigation limits remain mandatory.
 
-`pnpm test tests/machine-grant-captures.test.ts` records the 12 accepted Inline tree scenarios at 1440×900 and 390×844 in light and dark. The `machine-grant-*` viewport and full-page PNGs live in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare them with reference A in `.work/prototypes/machine-grant/candidates/inline-tree/shots/`, accounting for DECISION.md's production corrections. Local synthetic-credential evidence does not establish hosted integration with both real clients.
+`pnpm captures tests/captures/machine-grant.capture.ts` records the 12 accepted Inline tree scenarios at 1440×900 and 390×844 in light and dark. The `machine-grant-*` viewport and full-page PNGs live in `.local/verification/screenshots/`. Compare them with reference A in `.work/prototypes/machine-grant/candidates/inline-tree/shots/`, accounting for DECISION.md's production corrections. Local synthetic-credential evidence does not establish hosted integration with both real clients.
 
 ## Editing machine access
 
@@ -152,11 +154,10 @@ ancestor when normalization collapses the stored grant.
 | E11–E15 | `machine-access-web.test.ts` covers optimistic rows and stable positions, keyboard focus, every save failure and recovery, disabled/empty drafts, deleted roots, loading retry, and approval/deployment guidance. |
 | E11–E12 cache races | `machine-access-cache.test.ts` holds genuine reads and writes to prove machine-action exclusivity, cancellation of stale reads, and immediate application of the successful machine response before recovery can conceal a cache defect. |
 | E11–E13, E17 editor recovery | `machine-access-editor.test.ts` proves keyboard intent, stacked phone actions, native body scrolling, All-to-limited and ancestor effects, usable pending focus, early native reopening, and fresh choices after real bucket failures. |
-| E16 | `machine-access-captures.test.ts` captures all eight accepted Side sheet scenarios at 1280×900 and 390×844, including pending writes, outcomes, retries, long names, and stacked phone actions. |
+| E16 | `tests/captures/machine-access.capture.ts` captures all eight accepted Side sheet scenarios at 1280×900 and 390×844, including pending writes, outcomes, retries, long names, and stacked phone actions. |
 | E17 | The Worker suite enforces one batch; the browser suite proves lazy intent preloading and write-gated refresh; `machine-access-load-time.test.ts` independently observes native frames and visibility to prove that timing waits for a rendered, checked tree and fresh intent-preload quiet. `load-time.test.ts` and `pnpm verify:load-time` enforce five-sample medians for cold Machines (1000 ms), intent navigation (100 ms), and the preloaded checked editor tree (100 ms). |
 
-The `machine-access-*` PNGs live in `.local/verification/screenshots/` and CI's
-`web-shell-<shard>` artifacts. Compare them with
+The `machine-access-*` PNGs live in `.local/verification/screenshots/`. Compare them with
 `.work/prototypes/machine-access/selected/screenshots/`; scenario controls and
 the prototype's save stub do not enter production. Every write and rejection
 comes from the built Worker and genuine D1, under the existing synthetic owner
@@ -183,12 +184,12 @@ The Vault acceptance suites exercise the built Worker, migrated D1, genuine Acce
 | E19–E22 | `vault-web.test.ts`, `vault-web-recovery.test.ts`, `vault-web-key-change.test.ts`, `vault-web-gc.test.ts`, and `vault-web-manual-refresh.test.ts`: outline and mobile navigation, optimistic confirmed writes, duplicate handling, destructive confirmation, no settled values in DOM/Query/mutation state, invalid drafts, definitive retries, unconfirmed reconciliation against concurrent writers and a disappearing key, cache retention across submissions and navigation, refresh ordering around pending writes, concurrency messages, and Buckets' secret blocker. |
 | E23 | `load-time.test.ts` and `pnpm verify:load-time`: mandatory five-sample medians, cold `/vault?bucket=work/acme` within 1000 ms and preloaded Home-to-Vault navigation within 100 ms. |
 | E24 | `tests/journeys/owner.e2e.ts`: deterministic locators create a secret and prove that only metadata remains. The existing `agent.act` recording still replays with strict cache and zero retries. |
-| E25 | `vault-captures.test.ts`: 52 viewport PNGs at 1440×900 and 390×844 in both themes, plus four full-page many-long PNGs. |
+| E25 | `tests/captures/vault.capture.ts`: 52 viewport PNGs at 1440×900 and 390×844 in both themes, plus four full-page many-long PNGs. |
 | E27–E28 | `vault-writes.test.ts`: stable-id replays, D1 failures before/after commit, concurrent writes, deleted-and-recreated names, bucket-delete races, one-batch budgets, and per-operation grant denials before SQL. |
 
 `vault-keyring.test.ts` additionally proves non-extractable keys, raw-byte fingerprints, exact UTF-8 opening, independent AES-GCM decryption, path binding, and fixed errors for unusable envelopes or keys.
 
-The `vault-*` PNGs live in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare them with the chosen A “The tree is the address” reference: typical, fresh, bucket-empty, many-long, loading, load-error, create, create-invalid, create-duplicate, created, replace-confirm, delete-confirm, and write-failed. Captures use genuine Worker/D1 metadata and writes; loading gates a genuine request and load-error uses an unavailable table. The definitive write-failed capture removes the synthetic encryption key and shows `VaultNotConfigured`, preserving the accepted distinction from an unconfirmed storage failure. No scenario selector enters the product, and write feedback has one live region.
+The `vault-*` PNGs live in `.local/verification/screenshots/`. Compare them with the chosen A “The tree is the address” reference: typical, fresh, bucket-empty, many-long, loading, load-error, create, create-invalid, create-duplicate, created, replace-confirm, delete-confirm, and write-failed. Captures use genuine Worker/D1 metadata and writes; loading gates a genuine request and load-error uses an unavailable table. The definitive write-failed capture removes the synthetic encryption key and shows `VaultNotConfigured`, preserving the accepted distinction from an unconfirmed storage failure. No scenario selector enters the product, and write feedback has one live region.
 
 After any unconfirmed attempt, every negative response keeps the submission pending until a successful list reconciles the write id against the current version. The key-change regression covers create and replace, both committed and unapplied, then removes the synthetic key before a genuine retry returns `VaultNotConfigured`. The list settles all four states without restoring the key. Genuine conflict and delete-404 retries also stay unconfirmed until listing; an initial definitive failure still rolls back immediately.
 
@@ -218,7 +219,7 @@ entry is introduced.
 | E15 | The browser suite holds requests through closing the Sheet and navigating to Memory and back. It verifies disabled writes, available Reveal, the progress notice and a native leave warning only while keys are pending. `vault-import-privacy-web.test.ts` observes every mutation transition to prove the gate has no gap between keys. |
 | E16–E17 | The browser suite inspects the active React fiber tree's hook state (including refs) and props, the DOM, Query cache and mutation state in Review, held in-flight creation and results. No plain imported value may remain; opaque Redacted values are allowed until Done. Back restores the paste, Review clears its plain state again, and Done drops even redacted references. Retry disappears and reopening starts empty. `vault-import-privacy-web.test.ts` proves the privacy probe detects retained text and exact private UUIDs while avoiding accidental matches inside unrelated metadata UUIDs. Negative controls cover text and live Redacted values under ordinary `child`, `alternate`, `return`, `sibling` and `stateNode` properties in refs and the Query cache, with and without React-state inspection; only identified React fibers skip those links. |
 | E18–E19 | The browser suite requires no requests before Create, only checked Ready keys in request bodies, no overwrite or delete, and unchanged Audit history. |
-| E20 | Delivery captures cover seven states at 1440×900 and 390×844 in light and dark, compared with the accepted Sheet design. This is delivery evidence, not a CI check; capture-suite upkeep is tracked in issue #84. |
+| E20 | Delivery captures cover seven states at 1440×900 and 390×844 in light and dark, compared with the accepted Sheet design. This is delivery evidence, not a CI check. |
 | E20a | `vault-import-web.test.ts` checks mixed review and partial results at both viewports for horizontal overflow, application console errors and page errors. Deliberately lost HTTP responses remain genuine network failures. |
 | E21 | `load-time.test.ts` and `pnpm verify:load-time` retain five-sample medians for cold `/vault` within 1000 ms and navigation after intent within 100 ms under the existing phone-network profile. |
 
@@ -242,10 +243,10 @@ The issue #5 acceptance suites run the production CLI with the private Linux/mac
 | E17–E24, E28 | `audit-web.test.ts`: ledger ordering and relative/exact times, disclosure links, phone wrapping, URL filters/reload/Back, historical deletion/revocation, loading/empty/error/retry states, pagination during new uses, intent prefetching, cached filters and background refresh. |
 | Shared write invariants | `audit-pending-writes.test.ts`: Audit intent, mounting, and focus defer metadata reads during real Vault create/replace/delete, Bucket create/delete, and Machine revocation. Lost Vault responses remain unconfirmed until a successful list reconciles the committed version. |
 | E25 | `load-time.test.ts` and `pnpm verify:load-time`: both required five-sample medians under the unchanged 4G profile at 390×844; cold `/audit` within 1000 ms and Home-to-Audit after intent within 100 ms. The stage seeds its entry through the genuine value endpoint. |
-| E26 | `audit-captures.test.ts`: the 11 accepted scenarios at 1440×900 and 390×844 in light and dark, 44 PNGs from genuine Worker/D1 records. |
+| E26 | `tests/captures/audit.capture.ts`: the 11 accepted scenarios at 1440×900 and 390×844 in light and dark, 44 PNGs from genuine Worker/D1 records. |
 | E27 | `tests/journeys/owner.e2e.ts`: a real `nook run` receives its value silently and the owner sees exactly one delivered entry. The entire journey runs with `--strict-cache` and zero retries. |
 
-The `audit-*` PNGs live in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare them with selected prototype A, “The chronological ledger”: typical, fresh, denied-recent, filter-secret, filter-bucket, filter-empty, long-content, many, deleted-revoked, loading, and load-error. Production has no scenario controls or mock API. Capture fixtures write entries through the machine endpoint and assign historical timestamps; loading holds a real request and failure makes the genuine audit table unavailable.
+The `audit-*` PNGs live in `.local/verification/screenshots/`. Compare them with selected prototype A, “The chronological ledger”: typical, fresh, denied-recent, filter-secret, filter-bucket, filter-empty, long-content, many, deleted-revoked, loading, and load-error. Production has no scenario controls or mock API. Capture fixtures write entries through the machine endpoint and assign historical timestamps; loading holds a real request and failure makes the genuine audit table unavailable.
 
 The statement decorator sends only fixed checkpoint labels. One authentication statement precedes at most one read batch and one atomic audit batch. A denied fetch performs no read batch; listing an audit page is one statement. Values remain redacted in the contract and CLI until the child environment is built. Audit rows have no foreign keys to mutable secrets or machines, so deletion and revocation preserve the recorded facts.
 
@@ -281,7 +282,7 @@ Issue #7 runs the built CLI with the existing private Linux/macOS keyring, the b
 | E1, E4–E7, E9, E11–E16, E20 | `agent-create-worker.test.ts`: public metadata with no version/value, independent envelope decryption, denied ancestors and unrelated subtrees before SQL, immutable duplicates, invalid payloads, owner-only mutations, machine capability type, atomic audit failures/replays, private errors/logs, and populated audit migration/index preservation. |
 | E20–E21 | `vault-mcp.test.ts` plus creation discovery in `agent-create-worker.test.ts`: names-only results, no secret write tool, and stdin creation guidance in `list_secrets`. |
 | E22–E23 | `agent-create-audit.test.ts`: ordered Created/Delivered/Denied entries at phone/desktop widths, creation-only facts, existing bucket/secret filters, activity links, and fresh-state copy. Existing Audit browser regressions remain mandatory. |
-| E24 | `audit-captures.test.ts`'s `created` scenario: phone/desktop in both themes, long row content and expanded wrapped details, without overflow. The eight `audit-created-*.png` captures live in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. |
+| E24 | `tests/captures/audit.capture.ts`'s `created` scenario: phone/desktop in both themes, long row content and expanded wrapped details, without overflow. The eight `audit-created-*.png` captures live in `.local/verification/screenshots/`. |
 
 The first acceptance commit ran against the previous production build: missing behavior failed at its public boundary; existing owner-only and discovery protections remained green. `pnpm verify:migrations` also replays the new table rebuild against the previous schema. All checks run through the unchanged `pnpm verify` gate.
 
@@ -299,11 +300,10 @@ HTTP case observes the request facts that Miniflare actually supplies; a fixed
 | E4, E9–E20, E23, E26 | `reveal-worker.test.ts`: genuine request facts, exactly one reveal entry, safe missing/key/storage failures, owner/Access/Origin/machine/MCP boundaries, subtree denial before SQL, no-store, log/error/audit/URL privacy, populated previous-schema upgrade, old filters/indexes, and one-read/one-insert budgets. Concurrent reveals and replacement between read and audit preserve the spec's state space. |
 | E9–E13 | `reveal-web.test.ts`: deleted secrets, missing/mismatched keys, genuine D1 read/audit failures, explicit retries, and a committed audit followed by a lost response. Each retry is one new request; the client never retries automatically. |
 | E24–E26 | `reveal-audit.test.ts`: Revealed/Created/Denied/Delivered chronology at phone and desktop widths, eye icon, Web app source, purpose, exact time, IP/country details, unknown/raw-code fallbacks, secret/bucket filters, and fresh Audit copy. Existing audit suites remain mandatory. |
-| E27 | `reveal-captures.test.ts`: eight states at 1440×900 and 390×844 in light and dark, 32 viewport PNGs and two full-page phone details captures, from genuine reveal requests and D1 audit rows. |
+| E27 | `tests/captures/reveal.capture.ts`: eight states at 1440×900 and 390×844 in light and dark, 32 viewport PNGs and two full-page phone details captures, from genuine reveal requests and D1 audit rows. |
 | Budgets | `pnpm verify:load-time` and `load-time.test.ts` retain the five-sample 4G medians: cold opens within 1000 ms and navigation after intent within 100 ms. Reveal code loads only when the owner selects the action. |
 
-The `reveal-*` PNGs live in `.local/verification/screenshots/` and CI's
-`web-shell-I` artifacts. Compare short, long multi-line, revealing, failed,
+The `reveal-*` PNGs live in `.local/verification/screenshots/`. Compare short, long multi-line, revealing, failed,
 key-missing, copied, audit-row, and audit-details captures with the chosen
 `.work/prototypes/reveal/shots/` reference. The prototype's request stub,
 fabricated audit entries, scenario selector, and insecure clipboard fallback
@@ -370,7 +370,7 @@ Issue #10 runs against the migrated production Worker in workerd and real local 
 | E29 | `memory-web.test.ts`, `web.test.ts`: enabled Home/sidebar link, active state and breadcrumb. |
 | E30 | `memory-web.test.ts`, `memory-refresh-web.test.ts`, `memory-reader-regressions.test.ts`: hover/focus detail prefetch, real-tab agent-write refresh and preservation of a pending optimistic bucket through refocus. |
 | E31 | `load-time.test.ts`, `memory-load-time.test.ts`, `pnpm verify:load-time`: mandatory five-sample Memory budgets, real measurement viewport/destination/first-screen checks, production 4G cold open and intent navigation, with 60 bucket memories. |
-| E32 | `memory-captures.test.ts`: seven states at 1440×900 and 390×844, light/dark, plus full phone detail; desktop detail is the auto-selected work-acme capture. |
+| E32 | `tests/captures/memory.capture.ts`: seven states at 1440×900 and 390×844, light/dark, plus full phone detail; desktop detail is the auto-selected work-acme capture. |
 | E33 | `memory-mcp.test.ts`, `memory-worker.test.ts`, `memory-web.test.ts`: private denials, failed writes, malformed array/object content under both protocols and endpoints, and console/network behavior. |
 
 `tests/journeys/owner.e2e.ts` additionally remembers through MCP and opens the stored memory using deterministic locators under strict cache replay and zero retries. `memory-worker.test.ts` observes real D1 calls through the existing test checkpoint wrapper: one three-statement batch for remember and duplicate retries, one statement for get, one two-statement batch per list page without per-item reads, and one aggregate statement for counts. Observations contain labels and batch sizes, never SQL, bindings or rows.
@@ -389,7 +389,7 @@ JSON Schema and identical missing-version wording for update and forget.
 HTTP list/search declare no unreachable InvalidMemory error. Grant-denial
 tests also omit the update version to prove authorization still comes first.
 
-The 26 viewport PNGs and two full phone detail PNGs are `memory-*` files in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. The selected hybrid's three independent desktop columns, shared Vault bucket tree, phone push flow, scope toggle, and nonclickable image chip are the visual reference. Captures omit the prototype scenario selector. A plain first heading already shown in full by the detail title is omitted from the body; long, multiline and formatted headings are retained. Long row titles remain available through the link's title attribute.
+The 26 viewport PNGs and two full phone detail PNGs are `memory-*` files in `.local/verification/screenshots/`. The selected hybrid's three independent desktop columns, shared Vault bucket tree, phone push flow, scope toggle, and nonclickable image chip are the visual reference. Captures omit the prototype scenario selector. A plain first heading already shown in full by the detail title is omitted from the body; long, multiline and formatted headings are retained. Long row titles remain available through the link's title attribute.
 
 The load-time stage uses the unchanged 9 Mbps down, 3 Mbps up, 85 ms latency profile at 390×844, cache disabled, without CPU throttling. Cold `/memory?bucket=work/acme` must show real memory rows within 1000 ms. Home-to-Memory navigation after settled hover preloading must show the bucket tree within 100 ms. Two additional reader measurements open memory 100 in `work/acme`, which holds a real attachment: a cold reader open must show its Files count within 1000 ms, and navigation from that memory's list link after settled intent preloading must show it within 100 ms. All four measurements use five animation-frame samples and fail independently when absent, malformed, or over budget. `memory-load-time.test.ts` uses the production harness to check the reader destination, phone viewport and visible Files count as well as the original list/tree screens.
 
@@ -405,7 +405,7 @@ Issue #11 uses the production Worker bundle, migrated D1, and its genuine schedu
 | E11–E16 | `memory-search-sync.test.ts`: immediate keyword visibility, controlled delayed vectors, failed post-write repair, previous-schema backfill, 50-row Cron budget, model changes, stale/orphan filtering, guarded late writes, and duplicate/concurrent remembers. Every migrated fixture is found by keyword and meaning. |
 | E17–E19 | `memory-search-web.test.ts`: exact 250 ms debounce and immediate Enter, URL reload/Back/bucket/scope retention, keyboard movement, reader preservation, highlights/badges, twenty-result cap, genuine loading/error/retry, incomplete/empty/fresh states, and stable column positions at both widths. Phone content flows vertically; desktop column sizes and each fixed header stay unchanged. |
 | E20 | The idle browser case observes the real HTTP boundary and requires zero search, embedding and vector requests. `load-time.test.ts` and `verify:load-time` retain the 1000 ms cold-open and 100 ms intent-navigation budgets; `memory-load-time.test.ts` proves the production measurement conditions. |
-| E21 | `memory-search-reference-captures.test.ts`: eleven states × two sizes × two themes, 44 genuine-product PNGs. |
+| E21 | `tests/captures/memory-search-reference.capture.ts`: eleven states × two sizes × two themes, 44 genuine-product PNGs. |
 | E22 | `tests/journeys/owner.e2e.ts`: deterministic strict-cache search and opening of the Spanish ancestor memory. |
 | E23 | `memory-search-deploy.test.ts`: the workflow's actual shell against a temporary command fixture, missing index/metadata combinations, idempotent reruns, delayed metadata readiness and timeout without deployment. |
 | E24 | Hosted search integration is outside local synthetic-index evidence. |
@@ -433,7 +433,7 @@ reader assertion continues to require the loaded-count wording.
 
 `pnpm dev` attaches these local services to Miniflare, using recorded vectors when available and deterministic non-semantic vectors for other text. The journey server passes `--strict-embeddings`. Neither local mode contacts Cloudflare; the decorator and stand-ins stay outside the deployed Worker bundle.
 
-The `memory-search-*.png` files live in `.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare them with the selected `inline` prototype: fixed list header/summary, three desktop columns, phone Results link, three-line snippets, highlighted exact words and quiet meaning badge. Captures use genuine ranks and counts rather than fabricated results. The degraded state uses `pnpm verify` for real keyword hits; the no-results state uses a not-yet-visible meaning index. Extremes use valid six-level, 32-character paths rather than the prototype's invalid 34-character segment. The scenario selector, request stubs and schema bypass do not enter production.
+The `memory-search-*.png` files live in `.local/verification/screenshots/`. Compare them with the selected `inline` prototype: fixed list header/summary, three desktop columns, phone Results link, three-line snippets, highlighted exact words and quiet meaning badge. Captures use genuine ranks and counts rather than fabricated results. The degraded state uses `pnpm verify` for real keyword hits; the no-results state uses a not-yet-visible meaning index. Extremes use valid six-level, 32-character paths rather than the prototype's invalid 34-character segment. The scenario selector, request stubs and schema bypass do not enter production.
 
 `scripts/load-time-browser.ts` owns the browser measurement functions used by the production timing command and the measurement-condition tests. The latter run those same functions against the built product, proving the phone viewport, destination URL and visible first screen rather than accepting a finite duration from the wrong route.
 
@@ -458,12 +458,12 @@ tripwire remain mandatory under `pnpm verify`.
 | E23–E25 | The same browser suite: shadcn Item rows, ordering, summaries including tag reorder, absolute times, writers, fixed header/internal scrolling, Markdown, arrows, directional source/word diffs and gutters, exactly three lines of fold context, tags-only copy, added/removed tags and disabled version-one comparison. It also covers a fresh history with cached detail; `memory-history-cache-race.test.ts` covers older cached history and held old responses after a newer detail, using genuine tab visibility changes. |
 | E26–E27 | The same suite: deep links, reload, Back, every dismissal (overlay at 1440 px, where it is reachable) and restored focus; real delayed reads, row-height skeletons, retry, inherited and version-one memories, and 16 KiB Unicode with six maximum-length segments and long provenance at 390 px. `memory-history-cache-race.test.ts` also jumps between open histories through genuine browser history and proves that local reconciliation belongs to the selected memory. |
 | E28 | `memory-history-web.test.ts` observes separate lazy sheet and diff script requests. Existing `memory-load-time.test.ts`, `load-time.test.ts` and `pnpm verify:load-time` retain the five-sample 4G budgets of 1000 ms cold and 100 ms after intent. |
-| E29 | `memory-history-captures.test.ts`: all seven chosen Sheet scenarios and reading/list/version/changes states at 1440×900 and 390×844 in both themes. Loading gates a genuine response; failure injects a service failure. |
+| E29 | `tests/captures/memory-history.capture.ts`: all seven chosen Sheet scenarios and reading/list/version/changes states at 1440×900 and 390×844 in both themes. Loading gates a genuine response; failure injects a service failure. |
 | E30 | `tests/journeys/owner.e2e.ts`: real MCP remember/update, current reading content, exactly two history versions with their writers, version-one text with disabled Show changes and "First version, nothing to compare", then the newer arrow to version two and its directional source diff. Deterministic locators run under `pnpm test:journey` after `pnpm test`, with mandatory strict cache replay and zero retries. |
 | E31 | Hosted metadata and freshness are outside local synthetic-index evidence. |
 
 The `memory-history-*.png` captures are in
-`.local/verification/screenshots/` and CI's `web-shell-I` artifacts. Compare
+`.local/verification/screenshots/`. Compare
 them with the chosen Sheet reference. The scenario picker, stub and LCS
 implementation stay outside production. Feed and history share a 25-item
 page size. History reads one extra row to detect another page; the contract client follows pages for the
@@ -519,12 +519,12 @@ profiles and the unchanged host-resource tripwire.
 | E18–E22, E24 | `memory-forget-web.test.ts`: row and pane menus, one shared versioned dialog, held real DELETE proving optimistic removal/counts/selection, adjacent focus without scrolling at 900/300px heights, list and search entry points, explicit 503 retry, exact detail/history rollback with recovery reads held, preservation of a neighbor history's authoritative 404 during another failed forget, first list/search/Back-detail reads resuming after settlement, real concurrent version four with refreshed History, lost successful responses, read-only recovery of still-live heads, unavailable confirmation reads, failed conflict refresh without offering a stale version, authoritative 404 eviction, inherited-scope transitions, last-memory empty states, keyboard focus/trap/Escape and the phone detail path. |
 | E18, E20, E24 cache races | `memory-forget-cache.test.ts`: cached infinite pages, both scopes, search and history, a held old read, browser Back to cached detail/history and real tab refocus during a held write, no guarded background reads, and exact success/rollback visibility. The newly selected neighbor can load while the forgotten id stays blocked. |
 | E18 journey | `tests/journeys/owner.e2e.ts`: real remember/update, history and comparison followed by web forgetting, summary, absent row after reopening and 404 history; deterministic locators, strict cache and zero retries. |
-| E23 | `memory-forget-visual-captures.test.ts`: ten accepted hybrid states at 1440×900 light/dark and 390×844 light, thirty production PNGs. |
+| E23 | `tests/captures/memory-forget-visual.capture.ts`: ten accepted hybrid states at 1440×900 light/dark and 390×844 light, thirty production PNGs. |
 | E24 load budgets | Unchanged `memory-load-time.test.ts`, `load-time.test.ts` and `pnpm verify:load-time` enforce five-sample 4G cold-open (1000 ms) and intent-navigation (100 ms) budgets. |
 | E25 | README, `docs/deployment.md` beside Vault's retention note, and ADR-0015 document permanent/version-guarded forgetting, the thirty-minute settle, D1 free pages without secure_delete, Paid/Free Time Travel retention and the limits of provider erasure. |
 
 The thirty `memory-forget-<state>--<size>-<theme>.png` captures live in
-`.local/verification/screenshots/` and CI's `web-shell-I` artifacts. States are
+`.local/verification/screenshots/`. States are
 pane-menu, row-menu, confirm, forgetting, forgotten, failed, changed, last,
 search and inherited. Compare them with the accepted hybrid B+C at prototype
 commit `e2f7a5e`, `.work/prototypes/forget-memory/hybrid/`. Production keeps its
@@ -551,13 +551,6 @@ includes the contract's non-content MemoryChanged message. The existing
 five-trip fifty-memory Cron backfill now includes one additional empty
 removal-sweep read; its maintained assertion requires exactly six trips and
 first proves that the removal table is empty.
-
-The first PR CI run (38614694459) reached the unchanged fifteen-minute job
-limit in Linux shard 2 while browser suites were still making progress; no
-assertion failed. Vitest's native filename-hash partition had placed both
-capture suites in that shard. The descriptive visual/reference filenames
-redistribute them using the existing sequencer. All cases, assertions, four
-Linux shards, coverage requirements and timeouts remain unchanged.
 
 Local synthetic-index evidence does not establish hosted deleteByIds call
 limits, unknown-id behavior, or propagation timing.
@@ -639,12 +632,12 @@ test wrapper.
 | E25 | The same suites: Unicode owner download and IP/country audit, pending peer locks, named 404 with fresh detail/removal, 503 retry, late results across navigation/remounts and coordination with pending forget. |
 | E26 | `memory-files-worker.test.ts`, `memory-files-web.test.ts`: attachment security headers for an HTML file, HEAD 405 without audit, owner/machine authentication boundaries and restricted-grant masking; owner downloads save a file without leaving the page. |
 | E27 | `memory-files-audit.test.ts`, `memory-files-migrations.test.ts`: all five outcomes in API/Chromium, descendant filter (API), mixed Vault/file pagination, retained Vault facts, correct actors and file/mixed labels. |
-| E28 | `memory-files-owner-captures.test.ts`: sixty production reader/sheet/Details/scroll-end PNGs for prototype C, described below. |
+| E28 | `tests/captures/memory-files-owner.capture.ts`: sixty production reader/sheet/Details/scroll-end PNGs for prototype C, described below. |
 | E29 | `memory-files-web.test.ts`: separate intent-loaded Files script. `memory-load-time.test.ts` proves the added production reader measurements open the memory holding the attachment and render its Files count. `load-time.test.ts` and `pnpm verify:load-time` require their five-sample 4G medians (1000 ms cold, 100 ms after intent), alongside all existing measurements. |
 | E30 | `memory-files-migrations.test.ts`, `pnpm verify:migrations`: empty/migrated/populated schema replay, complete Vault audit preservation and bucket backfill from the pre-file schema, previous-writer trigger, and actual previous-Worker forget refusing attached files with 503. |
 | E31 | Local evidence does not establish a hosted cross-machine 25 MiB digest match, real R2 provisioning, or edge-supplied download Audit IP/country. |
 
-`memory-files-owner-captures.test.ts` produces sixty production PNGs under
+`tests/captures/memory-files-owner.capture.ts` produces sixty production PNGs under
 `.local/verification/screenshots/memory-files-*.png`: reader and Files sheet
 for one-pdf, many-files, long-name, download-pending, download-missing and
 download-unavailable, at 1440×900 and 390×844 in light and dark. Many-files and
@@ -654,9 +647,7 @@ synthetic files with matching sizes and digests. Pending gates a real request,
 missing detaches through MCP, and unavailable removes only the R2 object.
 Compare each state, viewport and theme with the matching reader, files,
 Details or result screen in `.work/design/attachments/selected-c/screens/`.
-The prototype's scenario selector never enters production. The descriptive
-owner-capture filename places this suite in shard 2 with the current native
-sequencer. CI distributes the complete corpus across ten Linux shards, using
+The prototype's scenario selector never enters production. CI distributes the complete corpus across ten Linux shards, using
 Vitest's native filename-hash partition and three workers per runner. The
 six-shard run reached 918 s in shard 2, dominated by existing CLI and capture
 suites. Observed file durations predict a maximum of 457 s of ideal

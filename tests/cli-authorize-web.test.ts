@@ -7,6 +7,8 @@ import {
   ownerRuntime,
 } from './support/authorizations.ts';
 import { closeBrowserPage } from './support/buckets-browser.ts';
+import { deferred } from './support/machines.ts';
+import { expectNoOverflow } from './support/page-checks.ts';
 import { runtime, type TestRuntime } from './support/runtime.ts';
 
 let browser: Browser;
@@ -143,6 +145,103 @@ it.each(['expired', 'handled'])(
         })
         .waitFor();
       expect(await page.locator('form').count()).toBe(0);
+    } finally {
+      await closeBrowserPage(page, context);
+    }
+  },
+);
+it('E21: a held lookup shows a Loading spinner and disables Continue; a held approval shows Approving…', async () => {
+  const pending = await createAuthorization(app);
+  const lookup = deferred();
+  const approval = deferred();
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  page.setDefaultTimeout(5000);
+  try {
+    await page.route('**/api/authorizations/*', async (route) => {
+      await lookup.promise;
+      await route.continue().catch(() => {});
+    });
+    await page.route('**/api/authorizations/*/approve', async (route) => {
+      await approval.promise;
+      await route.continue().catch(() => {});
+    });
+    await page.goto(`${app.origin}/cli/authorize`);
+    await page
+      .getByRole('textbox', { name: 'Code from your terminal' })
+      .fill(pending.userCode);
+    // The busy spinner joins the button's accessible name.
+    const proceed = page.getByRole('button', { name: 'Continue' });
+    await proceed.click();
+    await page.getByRole('status', { name: 'Loading', exact: true }).waitFor();
+    expect(await proceed.isDisabled()).toBe(true);
+    lookup.resolve();
+    await page.getByRole('button', { name: 'Approve', exact: true }).click();
+    await page.getByRole('button', { name: 'Approving…' }).waitFor();
+    approval.resolve();
+    await page.getByRole('heading', { name: 'Machine approved' }).waitFor();
+  } finally {
+    lookup.resolve();
+    approval.resolve();
+    await closeBrowserPage(page, context);
+  }
+});
+it.each([
+  { name: 'desktop', width: 1440, height: 900 },
+  { name: 'phone', width: 390, height: 844 },
+])(
+  'E23: code entry and a long pending request fit the $name viewport with room for the brand focus ring',
+  async ({ width, height }) => {
+    const pending = await createAuthorization(
+      app,
+      'owner-laptop-with-a-deliberately-long-hostname',
+    );
+    const context = await browser.newContext({ viewport: { width, height } });
+    const page = await context.newPage();
+    const brand = page.getByRole('link', { name: 'Nook', exact: true });
+    const expectBrandRoom = async () => {
+      // The brand keeps its element across steps, so let transitions settle.
+      await brand.evaluate((element) =>
+        Promise.all(
+          element
+            .getAnimations()
+            .map((motion) => motion.finished.catch(() => {})),
+        ),
+      );
+      const bounds = await brand.boundingBox();
+      expect(
+        bounds && bounds.x >= 4 && bounds.x + bounds.width + 4 <= width,
+        'Brand focus ring fits the viewport',
+      ).toBe(true);
+    };
+    try {
+      await page.goto(`${app.origin}/cli/authorize`);
+      const code = page.getByRole('textbox', {
+        name: 'Code from your terminal',
+      });
+      await code.waitFor();
+      await expectNoOverflow(page);
+      await expectBrandRoom();
+      if (width === 390) {
+        await code.focus();
+        await page.keyboard.press('Shift+Tab');
+        await page.keyboard.press('Shift+Tab');
+        expect(
+          await brand.evaluate(
+            (element) =>
+              element === document.activeElement &&
+              element.matches(':focus-visible'),
+          ),
+          'Keyboard focus is visible on the brand',
+        ).toBe(true);
+      }
+      await code.fill(pending.userCode);
+      await page.getByRole('button', { name: 'Continue', exact: true }).click();
+      await page
+        .getByRole('textbox', { name: 'Machine name', exact: true })
+        .waitFor();
+      await expectNoOverflow(page);
+      await expectBrandRoom();
     } finally {
       await closeBrowserPage(page, context);
     }

@@ -2,14 +2,18 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
-import { deferred, manyMachines, typicalMachines } from './support/machines.ts';
+import { launchTestBrowser } from '../../scripts/lib/test-browser.ts';
+import {
+  deferred,
+  manyMachines,
+  typicalMachines,
+} from '../support/machines.ts';
 import {
   confirmRevoke,
   machineRow,
   machinesPage,
-} from './support/machines-browser.ts';
-import type { TestRuntime } from './support/runtime.ts';
+} from '../support/machines-browser.ts';
+import type { TestRuntime } from '../support/runtime.ts';
 
 const directory = resolve('.local/verification/screenshots');
 let browser: Browser;

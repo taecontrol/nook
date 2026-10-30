@@ -18,6 +18,10 @@ import {
   openForget,
   uniqueTerm,
 } from './support/memory-forget.ts';
+import {
+  expectNoOverflow,
+  expectWithinViewport,
+} from './support/page-checks.ts';
 
 let browser: Browser;
 let closeBrowser: (() => Promise<void>) | undefined;
@@ -30,10 +34,18 @@ const detail = (page: Page) =>
 const row = (page: Page, id = forgottenId) =>
   page.locator(`[data-memory-row="${id}"], [data-search-result="${id}"]`);
 const count = (page: Page) => page.locator('[data-path="work/acme"]');
-describe.each([
+const viewports = [
   { width: 1440, height: 900 },
   { width: 390, height: 844 },
-])('Forget #13 at $width px', (viewport) => {
+];
+// After a pane forget, focus moves to the neighbor row the pane now shows.
+const neighborFocused = (page: Page) =>
+  expect
+    .poll(() =>
+      row(page, memoryId(2)).evaluate((el) => document.activeElement === el),
+    )
+    .toBe(true);
+describe.each(viewports)('Forget #13 at $width px', (viewport) => {
   it('E18/E22/E24: confirmation removes optimistically, moves the pane, adjusts counts, and persists after reload', async () => {
     const gate = deferred();
     const arrived = deferred();
@@ -54,6 +66,11 @@ describe.each([
       const { page } = visit;
       await detail(page).waitFor();
       await openForget(page);
+      await expectNoOverflow(page);
+      await expectWithinViewport(forgetDialog(page));
+      expect(await forgetDialog(page).textContent()).toContain(
+        'What is deleted',
+      );
       expect(await forgetDialog(page).textContent()).toContain(
         'all 3 versions',
       );
@@ -72,17 +89,21 @@ describe.each([
       await page
         .getByText('Forgetting Release process…', { exact: true })
         .waitFor();
+      await expectNoOverflow(page);
       if (viewport.width > 1000) {
         expect(await count(page).innerText()).toContain('2 memories');
         await detail(page)
           .getByRole('heading', { name: 'Acme API deployment' })
           .waitFor();
+        await neighborFocused(page);
       } else expect(new URL(page.url()).searchParams.has('memory')).toBe(false);
       expect(await page.locator('body').textContent()).not.toContain(
         'Forgot Release process',
       );
       gate.resolve();
       await page.getByText('Forgot Release process', { exact: true }).waitFor();
+      await expectNoOverflow(page);
+      if (viewport.width > 1000) await neighborFocused(page);
       await page.reload();
       await memoryRows(page).first().waitFor();
       expect(await row(page).count()).toBe(0);
@@ -133,6 +154,7 @@ describe.each([
         .getByRole('alert')
         .filter({ hasText: 'Not forgotten' });
       await alert.waitFor();
+      await expectNoOverflow(page);
       expect(await alert.textContent()).toContain(
         'Release process was not forgotten',
       );
@@ -186,6 +208,7 @@ describe.each([
         .getByRole('alert')
         .filter({ hasText: 'Not forgotten: it changed' });
       await alert.getByRole('button', { name: 'Forget version 4…' }).waitFor();
+      await expectNoOverflow(page);
       expect(deletes).toBe(1);
       if (viewport.width < 1000) await row(page).click();
       const history = page.getByRole('button', { name: /History.*4 versions/ });
@@ -224,6 +247,7 @@ describe.each([
       await openForget(page);
       await confirmForget(page);
       await page.getByText('No memories left', { exact: true }).waitFor();
+      await expectNoOverflow(page);
       if (viewport.width > 1000) {
         await page.getByText('Nothing to read', { exact: true }).waitFor();
         expect(
@@ -245,9 +269,11 @@ describe.each([
       });
       await trigger.focus();
       await page.keyboard.press('Enter');
-      await page
-        .getByRole('menuitem', { name: 'Forget memory…' })
-        .press('Enter');
+      const forgetItem = page.getByRole('menuitem', { name: 'Forget memory…' });
+      await forgetItem.waitFor();
+      await expectNoOverflow(page);
+      await expectWithinViewport(page.getByRole('menu'));
+      await forgetItem.press('Enter');
       const cancel = forgetDialog(page).getByRole('button', { name: 'Cancel' });
       await expect
         .poll(() => cancel.evaluate((el) => document.activeElement === el))
@@ -277,6 +303,12 @@ describe.each([
           .getByRole('menuitem', { name: 'Forget memory…' })
           .press('Enter');
         await cancel.waitFor();
+      } else {
+        await page.getByRole('link', { name: 'Memories', exact: true }).click();
+        await page.locator(`[data-memory-actions="${memoryId(2)}"]`).click();
+        await forgetItem.waitFor();
+        await expectNoOverflow(page);
+        await expectWithinViewport(page.getByRole('menu'));
       }
     } finally {
       await visit.close();
@@ -342,49 +374,57 @@ it.each([
     }
   },
 );
-it('E19: a search confirmation waits for detail to obtain the displayed version', async () => {
-  const gate = deferred();
-  const visit = await forgetPage(browser, {
-    start: `/memory?bucket=work/acme&q=deploy&memory=${forgottenId}`,
-    configure: async (page) => {
-      await page.route(`**/api/memories/${memoryId(2)}`, async (route) => {
-        const response = await route.fetch();
-        await gate.promise;
-        await route.fulfill({ response }).catch(() => {});
-      });
-    },
-  });
-  try {
-    const { page } = visit;
-    await openForget(page, memoryId(2));
-    await expect
-      .poll(() =>
-        forgetDialog(page)
-          .getByRole('button', { name: 'Cancel', exact: true })
-          .evaluate((el) => document.activeElement === el),
-      )
-      .toBe(true);
-    expect(
-      await forgetDialog(page)
-        .getByRole('button', { name: 'Forget memory', exact: true })
-        .isDisabled(),
-    ).toBe(true);
-    gate.resolve();
-    await expect
-      .poll(() =>
-        forgetDialog(page)
+it.each(viewports)(
+  'E19: a search confirmation waits for detail to obtain the displayed version at $width px',
+  async (viewport) => {
+    const gate = deferred();
+    const visit = await forgetPage(browser, {
+      viewport,
+      start: `/memory?bucket=work/acme&q=deploy&memory=${forgottenId}`,
+      configure: async (page) => {
+        await page.route(`**/api/memories/${memoryId(2)}`, async (route) => {
+          const response = await route.fetch();
+          await gate.promise;
+          await route.fulfill({ response }).catch(() => {});
+        });
+      },
+    });
+    try {
+      const { page } = visit;
+      if (viewport.width < 1000)
+        await page.getByRole('link', { name: 'Results', exact: true }).click();
+      await openForget(page, memoryId(2));
+      await expectNoOverflow(page);
+      await expectWithinViewport(forgetDialog(page));
+      await expect
+        .poll(() =>
+          forgetDialog(page)
+            .getByRole('button', { name: 'Cancel', exact: true })
+            .evaluate((el) => document.activeElement === el),
+        )
+        .toBe(true);
+      expect(
+        await forgetDialog(page)
           .getByRole('button', { name: 'Forget memory', exact: true })
-          .isEnabled(),
-      )
-      .toBe(true);
-    expect(await forgetDialog(page).textContent()).toContain(
-      'You are forgetting version 1',
-    );
-  } finally {
-    gate.resolve();
-    await visit.close();
-  }
-});
+          .isDisabled(),
+      ).toBe(true);
+      gate.resolve();
+      await expect
+        .poll(() =>
+          forgetDialog(page)
+            .getByRole('button', { name: 'Forget memory', exact: true })
+            .isEnabled(),
+        )
+        .toBe(true);
+      expect(await forgetDialog(page).textContent()).toContain(
+        'You are forgetting version 1',
+      );
+    } finally {
+      gate.resolve();
+      await visit.close();
+    }
+  },
+);
 it('E20: exact cached detail and history return before held recovery reads', async () => {
   const recovery = deferred();
   const visit = await forgetPage(browser);

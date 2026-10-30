@@ -1,3 +1,4 @@
+import type { Page } from 'playwright';
 import { expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import {
@@ -7,6 +8,7 @@ import {
   ownerRuntime,
 } from './support/authorizations.ts';
 import { closeBrowserPage } from './support/buckets-browser.ts';
+import { expectNoOverflow } from './support/page-checks.ts';
 import { runtime } from './support/runtime.ts';
 
 async function fixture() {
@@ -30,10 +32,23 @@ async function fixture() {
     },
   };
 }
-async function reveal(
-  page: Awaited<ReturnType<typeof fixture>>['page'],
-  userCode: string,
-) {
+// The phone page never scrolls sideways and the brand keeps room for its
+// focus ring.
+async function expectFits(page: Page) {
+  await expectNoOverflow(page);
+  const brand = await page
+    .getByRole('link', { name: 'Nook', exact: true })
+    .boundingBox();
+  if (!brand) throw new Error('The Nook brand must be visible.');
+  expect(brand.x, 'Brand focus ring fits the left edge').toBeGreaterThanOrEqual(
+    4,
+  );
+  expect(
+    brand.x + brand.width + 4,
+    'Brand focus ring fits the right edge',
+  ).toBeLessThanOrEqual(390);
+}
+async function reveal(page: Page, userCode: string) {
   await page
     .getByRole('textbox', { name: 'Code from your terminal' })
     .fill(userCode);
@@ -62,6 +77,7 @@ it('Change rechecks a request resolved in another session', async () => {
         { timeout: 5000 },
       )
       .toBe(1);
+    await expectFits(page);
   } finally {
     await close();
   }
@@ -87,6 +103,7 @@ it('a revealed request expires automatically while the owner considers it', asyn
         { timeout: 5000 },
       )
       .toBe(1);
+    await expectFits(page);
     expect(await page.locator('form').count()).toBe(0);
   } finally {
     await close();
@@ -114,6 +131,7 @@ it('Change rechecks a request that expired in another session', async () => {
         { timeout: 5000 },
       )
       .toBe(1);
+    await expectFits(page);
     expect(await page.locator('form').count()).toBe(0);
   } finally {
     await close();
@@ -134,6 +152,7 @@ it('a lost approval response never claims that nothing was approved', async () =
     });
     await page.getByRole('button', { name: 'Approve', exact: true }).click();
     await page.getByText("Couldn't reach Nook", { exact: true }).waitFor();
+    await expectFits(page);
     const row = await (await app.mf.getD1Database('DB'))
       .prepare('SELECT status FROM authorizations')
       .first<{ status: string }>();
@@ -176,6 +195,7 @@ it('a request consumed in another session is not reported as a network failure',
         { timeout: 5000 },
       )
       .toBe(1);
+    await expectFits(page);
     expect(
       await page.getByText('No matching request', { exact: true }).count(),
     ).toBe(1);
@@ -196,6 +216,7 @@ it('returning to code entry after approval rechecks the handled request', async 
       .waitFor();
     await page.getByRole('button', { name: 'Approve', exact: true }).click();
     await page.getByRole('heading', { name: 'Machine approved' }).waitFor();
+    await expectFits(page);
     await page.getByRole('link', { name: 'Back to Nook', exact: true }).click();
     await page.getByRole('heading', { name: "You're signed in" }).waitFor();
     await page.goBack();
@@ -203,6 +224,7 @@ it('returning to code entry after approval rechecks the handled request', async 
     await page
       .getByRole('heading', { name: 'This request was already handled' })
       .waitFor();
+    await expectFits(page);
     expect(
       await page
         .getByRole('textbox', { name: 'Machine name', exact: true })
@@ -228,6 +250,7 @@ it('returning from Nook rechecks a request resolved while the approval page was 
     await page
       .getByRole('heading', { name: 'This request was already handled' })
       .waitFor();
+    await expectFits(page);
     expect(
       await page
         .getByRole('textbox', { name: 'Machine name', exact: true })
@@ -281,6 +304,7 @@ it('a new lookup never reuses a pending response from an abandoned attempt', asy
           .count(),
       )
       .toBe(1);
+    await expectFits(page);
     expect(lookups).toBe(2);
   } finally {
     release();
@@ -294,6 +318,7 @@ it('a failed lookup can retry without treating a connection failure as an unknow
     await page.route('**/api/authorizations/*', (route) => route.abort());
     await reveal(page, authorization.userCode);
     await page.getByText("Couldn't reach Nook", { exact: true }).waitFor();
+    await expectFits(page);
     expect(
       await page.getByText('No matching request', { exact: true }).count(),
     ).toBe(0);
@@ -323,6 +348,7 @@ it('an expired approved request makes no claim that approval never happened', as
     await page
       .getByRole('heading', { name: 'This request expired', exact: true })
       .waitFor();
+    await expectFits(page);
     expect(await page.getByText(/nothing was approved/i).count()).toBe(0);
   } finally {
     await close();
@@ -349,6 +375,7 @@ it.each(['approve', 'deny'] as const)(
         })
         .click();
       await page.getByText("Couldn't reach Nook", { exact: true }).waitFor();
+      await expectFits(page);
       await page.unroute(pattern);
       await page
         .getByRole('button', {
@@ -362,6 +389,7 @@ it.each(['approve', 'deny'] as const)(
           exact: true,
         })
         .waitFor();
+      await expectFits(page);
     } finally {
       await close();
     }
@@ -381,11 +409,13 @@ it('Try again after a failed denial repeats the rejection without granting acces
     );
     await page.getByRole('button', { name: 'Deny', exact: true }).click();
     await page.getByText("Couldn't reach Nook", { exact: true }).waitFor();
+    await expectFits(page);
     await page.unroute(pattern);
     await page.getByRole('button', { name: 'Try again', exact: true }).click();
     await page
       .getByRole('heading', { name: /Machine approved|Request denied/ })
       .waitFor();
+    await expectFits(page);
     const row = await (await app.mf.getD1Database('DB'))
       .prepare('SELECT status FROM authorizations')
       .first();
@@ -414,17 +444,20 @@ it('a failed denial retries with an empty name while explicit approval still req
     );
     await page.getByRole('button', { name: 'Deny', exact: true }).click();
     await page.getByText("Couldn't reach Nook", { exact: true }).waitFor();
+    await expectFits(page);
     await page.getByRole('button', { name: 'Approve', exact: true }).click();
     expect(
       await page
         .getByText('Enter a name for this machine.', { exact: true })
         .count(),
     ).toBe(1);
+    await expectFits(page);
     await page.unroute(pattern);
     await page.getByRole('button', { name: 'Try again', exact: true }).click();
     await page
       .getByRole('heading', { name: 'Request denied', exact: true })
       .waitFor();
+    await expectFits(page);
     const row = await (await app.mf.getD1Database('DB'))
       .prepare('SELECT status FROM authorizations')
       .first();
@@ -474,6 +507,7 @@ it.each([
       await page
         .getByRole('heading', { name: /Machine approved|Request denied/ })
         .waitFor();
+      await expectFits(page);
       const row = await (await app.mf.getD1Database('DB'))
         .prepare('SELECT status FROM authorizations')
         .first();

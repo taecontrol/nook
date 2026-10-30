@@ -2,6 +2,7 @@ import type { Browser, Page } from 'playwright';
 import { createAuthorization, ownerRuntime } from './authorizations.ts';
 import { closeBrowserPage } from './buckets-browser.ts';
 import { seedGrantTree } from './grants.ts';
+import { watchPageErrors } from './page-checks.ts';
 import { runtime, type TestRuntime } from './runtime.ts';
 
 export async function grantPage(
@@ -21,6 +22,7 @@ export async function grantPage(
   });
   const page = await context.newPage();
   page.setDefaultTimeout(3000);
+  const expectNoPageErrors = watchPageErrors(page);
   const approvals: unknown[] = [];
   page.on('request', (request) => {
     if (request.url().endsWith('/approve'))
@@ -32,6 +34,7 @@ export async function grantPage(
     } finally {
       await app.close();
     }
+    expectNoPageErrors();
   };
   try {
     await options.configure?.(page, app);
