@@ -66,14 +66,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: ignore
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ always() }}
-        with:
-          name: web-shell-${{ matrix.shard }}
-          path: .local/verification/screenshots
-          include-hidden-files: true
-          if-no-files-found: ignore
-          retention-days: 7
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-${{ matrix.shard }}
           path: .local/verification/coverage
@@ -108,10 +100,10 @@ jobs:
       - if: ${{ matrix.shard == 1 }}
         run: node scripts/release/binary.ts --output "$RUNNER_TEMP/nook"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ always() }}
+        if: ${{ failure() }}
         with:
-          name: macos-cli-evidence-${{ matrix.shard }}
-          path: .local/verification/screenshots
+          name: macos-cli-diagnostics-${{ matrix.shard }}
+          path: .local/verification/diagnostics
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7

@@ -243,7 +243,7 @@ async function buildWorkspace(home: string) {
 }
 
 async function recordDiagnostic(mode: Lifecycle, home: string, output: string) {
-  const directory = resolve('.local/verification/screenshots');
+  const directory = resolve('.local/verification/diagnostics');
   await mkdir(directory, { recursive: true });
   await writeFile(
     resolve(directory, `lifecycle-${mode}.log`),
