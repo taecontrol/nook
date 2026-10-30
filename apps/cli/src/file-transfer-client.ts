@@ -1,4 +1,8 @@
-import { request as httpRequest, type IncomingMessage } from 'node:http';
+import {
+  type ClientRequest,
+  request as httpRequest,
+  type IncomingMessage,
+} from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { Readable } from 'node:stream';
 import { Effect } from 'effect';
@@ -6,6 +10,8 @@ import { HttpClient, HttpClientError, HttpClientResponse } from 'effect/http';
 
 class TransferTimeout extends Error {}
 const transferInactivityMs = 10_000;
+// Small enough that a link sending 1.6 KB/s still completes one chunk per window.
+const uploadChunkBytes = 16 * 1024;
 export const transferTimeoutMessage = `The file transfer timed out after ${transferInactivityMs / 1000} seconds without progress. Try again.`;
 export function transferTimedOut(error: unknown) {
   return (
@@ -15,7 +21,9 @@ export function transferTimedOut(error: unknown) {
   );
 }
 
-function webResponse(source: IncomingMessage, timedOut: () => boolean) {
+type Inactivity = { progress: () => void; timedOut: () => boolean };
+
+function webResponse(source: IncomingMessage, inactivity: Inactivity) {
   const headers = new Headers();
   for (let index = 0; index < source.rawHeaders.length; index += 2)
     headers.append(source.rawHeaders[index], source.rawHeaders[index + 1]);
@@ -24,9 +32,12 @@ function webResponse(source: IncomingMessage, timedOut: () => boolean) {
   const body = Readable.from(
     (async function* () {
       try {
-        yield* source;
+        for await (const chunk of source) {
+          inactivity.progress();
+          yield chunk;
+        }
       } catch (error) {
-        throw timedOut() ? new TransferTimeout() : error;
+        throw inactivity.timedOut() ? new TransferTimeout() : error;
       }
     })(),
     { objectMode: false },
@@ -37,9 +48,30 @@ function webResponse(source: IncomingMessage, timedOut: () => boolean) {
   });
 }
 
-// File requests still come from HttpApi. Node's socket inactivity timer observes
-// actual network reads/writes, including an upload blocked by backpressure;
-// fetch exposes neither its socket nor upload progress. Other calls keep fetch.
+// Each completed write means the socket accepted that chunk, so a stalled
+// upload stops completing writes. A single write of the whole body would hide
+// that progress until the body was fully sent.
+async function upload(
+  outgoing: ClientRequest,
+  bytes: Uint8Array,
+  progress: () => void,
+) {
+  for (let offset = 0; offset < bytes.byteLength; offset += uploadChunkBytes) {
+    await new Promise<void>((accept, reject) =>
+      outgoing.write(
+        bytes.subarray(offset, offset + uploadChunkBytes),
+        (error) => (error ? reject(error) : accept()),
+      ),
+    );
+    progress();
+  }
+  outgoing.end();
+}
+
+// File requests still come from HttpApi because fetch exposes neither its
+// socket nor upload progress. Other calls keep fetch. The client times
+// inactivity itself: Node's socket timeout samples a blocked write only when
+// it expires, so it reports a stalled upload one or more windows late.
 export const fileTransferLayer = HttpClient.layerMergedContext(
   Effect.succeed(
     HttpClient.make((request, url, signal) =>
@@ -50,30 +82,44 @@ export const fileTransferLayer = HttpClient.layerMergedContext(
               const body = request.body;
               if (body._tag !== 'Empty' && body._tag !== 'Uint8Array')
                 throw new Error('Unsupported file request body.');
-              let timedOut = false;
               const send =
                 url.protocol === 'https:' ? httpsRequest : httpRequest;
+              const bytes = body._tag === 'Uint8Array' ? body.body : undefined;
               const outgoing = send(url, {
                 method: request.method,
-                headers: request.headers,
+                // Written in chunks, a body would otherwise be sent chunked.
+                headers: bytes
+                  ? {
+                      ...request.headers,
+                      'content-length': String(bytes.byteLength),
+                    }
+                  : request.headers,
                 signal,
                 agent: false,
-                timeout: transferInactivityMs,
               });
-              outgoing.once('timeout', () => {
+              let timedOut = false;
+              const timer = setTimeout(() => {
                 timedOut = true;
                 outgoing.destroy(new TransferTimeout());
-              });
+              }, transferInactivityMs).unref();
+              const inactivity: Inactivity = {
+                progress: () => timer.refresh(),
+                timedOut: () => timedOut,
+              };
+              outgoing.once('close', () => clearTimeout(timer));
               outgoing.once('error', reject);
               outgoing.once('response', (source) => {
+                inactivity.progress();
                 accept(
                   HttpClientResponse.fromWeb(
                     request,
-                    webResponse(source, () => timedOut),
+                    webResponse(source, inactivity),
                   ),
                 );
               });
-              outgoing.end(body._tag === 'Uint8Array' ? body.body : undefined);
+              if (!bytes) outgoing.end();
+              // A failed write also emits 'error' on the request.
+              else upload(outgoing, bytes, inactivity.progress).catch(() => {});
             },
           ),
         catch: (cause) =>
