@@ -1,5 +1,3 @@
-import { mkdir } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
@@ -38,9 +36,7 @@ import { vaultCheckpoints } from './support/vault-checkpoints.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
-const screenshots = resolve('.local/verification/screenshots');
 beforeAll(async () => {
-  await mkdir(screenshots, { recursive: true });
   ({ browser, close: closeBrowser } = await launchTestBrowser());
 });
 afterAll(async () => {
@@ -178,21 +174,6 @@ it.each([
     try {
       const { page } = visit;
       await secretRow(page, path).getByRole('button').waitFor();
-      await page.screenshot({
-        path: resolve(
-          screenshots,
-          `vault-max-path-${width}-${colorScheme}.png`,
-        ),
-        animations: 'disabled',
-      });
-      await page.screenshot({
-        path: resolve(
-          screenshots,
-          `vault-max-inherited-path-${width}-${colorScheme}.png`,
-        ),
-        fullPage: true,
-        animations: 'disabled',
-      });
       const inheritedCount = page
         .getByRole('link', { name: parent, exact: true })
         .locator('..')
@@ -217,13 +198,14 @@ it.each([
       const field = valueField(page);
       await field.waitFor();
       expect((await field.inputValue()) === value).toBe(true);
-      await page.screenshot({
-        path: resolve(
-          screenshots,
-          `reveal-max-path-${width}-${colorScheme}.png`,
+      // Let the open animation settle before measuring the dialog.
+      await dialog.evaluate((element) =>
+        Promise.all(
+          element
+            .getAnimations({ subtree: true })
+            .map((animation) => animation.finished.catch(() => {})),
         ),
-        animations: 'disabled',
-      });
+      );
       expect(
         await dialog.locator('[data-slot="dialog-description"]').innerText(),
       ).toContain(`${path} · Updated `);
