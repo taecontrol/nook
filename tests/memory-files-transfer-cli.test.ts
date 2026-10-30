@@ -276,4 +276,4 @@ it('a real upload that stops accepting bytes reports an idle timeout', async () 
   const result = await keyring.start(['memory', 'attach', fileMemory, path])
     .done;
   failure(result, timedOut);
-}, 30_000);
+}, 20_000);
