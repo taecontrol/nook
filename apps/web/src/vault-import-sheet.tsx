@@ -270,6 +270,15 @@ function reasonFor(
   };
   return { tone: 'muted', text: skipped[status] };
 }
+// Rows sharing a name need their line to tell their checkboxes apart.
+function includeLabel(row: Row, rows: readonly Row[]) {
+  const shared = rows.some(
+    (other) => other.id !== row.id && other.name === row.name,
+  );
+  return shared
+    ? `Include ${row.name} from line ${row.line}`
+    : `Include ${row.name}`;
+}
 function ReviewCheckbox({
   row,
   rows,
@@ -302,7 +311,7 @@ function ReviewCheckbox({
     return (
       <Checkbox
         checked={row.included}
-        aria-label={`Include ${row.name}`}
+        aria-label={includeLabel(row, rows)}
         onCheckedChange={(checked) => onRow({ included: checked === true })}
       />
     );

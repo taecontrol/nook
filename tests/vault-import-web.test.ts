@@ -345,13 +345,24 @@ it.each([
           .isEnabled(),
       ).toBe(false);
       expect(traffic.posts).toHaveLength(0);
-      const checkbox = blocked.getByRole('checkbox', {
-        name: 'Include DATABASE_URL',
-        exact: true,
-      });
+      const include = (line: number) =>
+        importSheet(page).getByRole('checkbox', {
+          name: `Include DATABASE_URL from line ${line}`,
+          exact: true,
+        });
+      expect(await include(1).count()).toBe(1);
+      const checkbox = include(2);
       expect(await checkbox.count()).toBe(1);
+      expect(await blocked.getByRole('checkbox').count()).toBe(1);
       expect(await checkbox.isChecked()).toBe(true);
-      await checkbox.uncheck();
+      await checkbox.focus();
+      await page.keyboard.press('Space');
+      expect(await checkbox.isChecked()).toBe(false);
+      expect(await valid.innerText()).toContain('Ready.');
+      await page.keyboard.press('Space');
+      expect(await checkbox.isChecked()).toBe(true);
+      expect(await valid.innerText()).toContain('Duplicate.');
+      await page.keyboard.press('Space');
       expect(await checkbox.isChecked()).toBe(false);
       expect(await blocked.innerText()).toContain(reason);
       expect(await valid.innerText()).toContain('Ready.');
