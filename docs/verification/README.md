@@ -92,6 +92,8 @@ CRAP rejects a missing baseline or seam, empty or unexecuted seam observations, 
 
 CI runs the five static commands, ten `pnpm test:coverage --shard=I/10` jobs, two macOS CLI coverage jobs, and a final job. Each platform job uploads its manifest and artifacts; the final job requires the distinct indexes `1/10` through `10/10`, `macos-1/2` and `macos-2/2`, identical source identities and baselines, and intact artifact hashes before CRAP, build, and the load-time check. Every coverage job retains its fifteen-minute timeout. The timing stage runs alone after test jobs finish. It needs no Cloudflare secrets.
 
+Vitest assigns Linux shards from measured suite times, not its filename hash, which let two slow CLI suites share a shard while others idled ([#93](https://github.com/taecontrol/nook/issues/93)). `vitest.config.ts` gives each file to the shard with the least estimated work, longest first, and every job starts its slowest files first; the macOS groups use the same order. `scripts/lib/test-timings.json` holds each suite's median CI seconds per platform, because macOS-only suites take minutes on macOS and nothing on Linux. A suite missing from the table counts as the median suite, so a new file never breaks sharding; refresh the table after suites grow or split with `node scripts/test-timings.ts <run-id> ...`, using green Verify runs. `tests/test-shards.test.ts` proves every test file lands in exactly one shard.
+
 ## Browser evidence and budget
 
 The shell suite renders all five accepted states at 1440×900 and 390×844 in both light and dark. It checks horizontal overflow, card bounds, rendered email line breaks after allowed separators, the enabled Memory and Vault links, mobile Sheet behavior, and the full-email dropdown with the Access logout destination.
@@ -647,14 +649,9 @@ synthetic files with matching sizes and digests. Pending gates a real request,
 missing detaches through MCP, and unavailable removes only the R2 object.
 Compare each state, viewport and theme with the matching reader, files,
 Details or result screen in `.work/design/attachments/selected-c/screens/`.
-The prototype's scenario selector never enters production. CI distributes the complete corpus across ten Linux shards, using
-Vitest's native filename-hash partition and three workers per runner. The
-six-shard run reached 918 s in shard 2, dominated by existing CLI and capture
-suites. Observed file durations predict a maximum of 457 s of ideal
-three-worker work with ten shards, versus 849 s with six and 669 s with eight;
-file-size scheduling estimates 502 s before setup, imports and journey work.
-Ten uses four additional Linux runners to leave margin inside the unchanged
-fifteen-minute limit without a custom sequencer or maintained duration table.
+The prototype's scenario selector never enters production. CI distributes the complete corpus across ten Linux shards with three workers per runner.
+The six-shard run reached 918 s in shard 2, dominated by existing CLI and capture
+suites, so ten shards leave margin inside the unchanged fifteen-minute limit.
 Coverage merging requires all ten Linux manifests plus macOS, with distinct
 indexes and the same source. All checks and timeouts remain in force.
 
