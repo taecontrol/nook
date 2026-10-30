@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Browser } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { deferred } from './support/machines.ts';
@@ -13,6 +13,7 @@ import {
   tenTags,
   typicalMemories,
 } from './support/memory.ts';
+import { expectNoOverflow } from './support/page-checks.ts';
 
 let browser: Browser;
 let closeBrowser: (() => Promise<void>) | undefined;
@@ -165,6 +166,75 @@ it('E23: a phone starts with the list, pushes detail and returns to the same buc
     await visit.close();
   }
 });
+const phoneListStates = [
+  {
+    state: 'many',
+    bucket: 'work/acme',
+    seeds: manyMemories,
+    ready: (page: Page) => memoryRows(page).first(),
+  },
+  {
+    state: 'empty-here',
+    bucket: 'personal',
+    seeds: typicalMemories.filter((m) => m.bucket === 'me'),
+    ready: (page: Page) => memoryRows(page).first(),
+  },
+  {
+    state: 'first-run',
+    bucket: 'me',
+    seeds: [],
+    ready: (page: Page) =>
+      page.getByText('Agents have not stored any memories yet.', {
+        exact: true,
+      }),
+  },
+  {
+    state: 'loading',
+    bucket: 'work/acme',
+    seeds: typicalMemories,
+    ready: (page: Page) =>
+      page.getByRole('status', { name: 'Loading memories' }),
+  },
+  {
+    state: 'error',
+    bucket: 'work/acme',
+    seeds: typicalMemories,
+    ready: (page: Page) =>
+      page.getByText('Could not load memories', { exact: true }),
+  },
+];
+it.each(phoneListStates)(
+  'E23: a phone shows the $state list state without overflow',
+  async ({ state, bucket, seeds, ready }) => {
+    const gate = deferred();
+    const visit = await memoryPage(browser, {
+      viewport: { width: 390, height: 844 },
+      seeds,
+      start: `/memory?bucket=${bucket}`,
+      configure: async (page, app) => {
+        if (state === 'loading')
+          await page.route('**/api/memories?*', async (route) => {
+            const response = await route.fetch();
+            await gate.promise;
+            await route.fulfill({ response }).catch(() => {});
+          });
+        if (state === 'error')
+          await (await app.mf.getD1Database('DB'))
+            .prepare(
+              'ALTER TABLE memory_versions RENAME TO unavailable_versions',
+            )
+            .run();
+      },
+    });
+    try {
+      await ready(visit.page).waitFor();
+      await expectNoOverflow(visit.page);
+    } finally {
+      gate.resolve();
+      await visit.close();
+    }
+  },
+);
 it('E24/E33: untrusted Markdown remains inert, image URLs are nonclickable and no external request is made', async () => {
   const requests: string[] = [];
   const errors: string[] = [];
@@ -214,6 +284,7 @@ it('E24/E33: untrusted Markdown remains inert, image URLs are nonclickable and n
     expect(requests.every((url) => new URL(url).origin === app.origin)).toBe(
       true,
     );
+    await expectNoOverflow(page);
     expect(errors).toEqual([]);
     expect(dialogs).toEqual([]);
   } finally {
@@ -315,6 +386,7 @@ it('E28: a pending genuine list shows skeletons until it settles', async () => {
         .locator('[aria-label="Loading memories"] [data-slot="skeleton"]')
         .count(),
     ).toBeGreaterThan(0);
+    await expectNoOverflow(visit.page);
     gate.resolve();
     await expect.poll(() => memoryRows(visit.page).count()).toBe(7);
   } finally {
@@ -329,6 +401,8 @@ it('E28: inherited-only buckets show ancestors and the bucket-only empty state',
   });
   try {
     await expect.poll(() => memoryRows(visit.page).count()).toBe(2);
+    await visit.page.getByRole('article', { name: 'Memory detail' }).waitFor();
+    await expectNoOverflow(visit.page);
     await visit.page.getByRole('button', { name: 'Only this bucket' }).click();
     await visit.page
       .getByText('No memories yet', { exact: true })
@@ -348,6 +422,7 @@ it('E28: the first-run empty state explains MCP remember', async () => {
     await visit.page
       .getByText('Agents have not stored any memories yet.', { exact: true })
       .waitFor();
+    await expectNoOverflow(visit.page);
     expect(await visit.page.locator('main').innerText()).toMatch(
       /MCP.*remember|remember.*MCP/,
     );
@@ -449,6 +524,7 @@ it('paging: 90 memories load in four real pages and retain long title access', a
         .getByRole('button', { name: 'Load more', exact: true })
         .count(),
     ).toBe(0);
+    await expectNoOverflow(page);
   } finally {
     await visit.close();
   }
