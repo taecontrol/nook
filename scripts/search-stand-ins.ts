@@ -203,10 +203,7 @@ export class SearchStandIns {
       return new Response('Unknown fixture call.', { status: 404 });
     } catch (error) {
       // The message travels like a binding error's, so logs can be asserted.
-      return new Response(
-        error instanceof Error ? error.message : 'Synthetic search failure.',
-        { status: 503 },
-      );
+      return new Response((error as Error).message, { status: 503 });
     }
   }
 }

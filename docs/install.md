@@ -381,6 +381,12 @@ recording query strings. Nook's custom rejection logs remain available.
 Never add assertion headers, verifier errors, claim values, configured
 values, or query strings to diagnostics. See [Workers Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/).
 
+The five-minute Cron retries memory indexing on its own, so a failed run
+does not stop Nook. To see why meaning search lags behind D1, filter
+`event` equal to `memory-sync-failed`. The `stage` field names the work
+that failed (`sweep`, `embedding`, or `inspection`), and `error` holds the
+failing service's message.
+
 | `reason` | What to check |
 | --- | --- |
 | `missing-config` | Set the secret names in `settings`: `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, and/or `OWNER_EMAIL`, then apply the dashboard changes. |
