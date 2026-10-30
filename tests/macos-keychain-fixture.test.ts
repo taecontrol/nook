@@ -525,7 +525,7 @@ it.runIf(process.platform === 'darwin')(
     syncBuiltinESMExports();
     try {
       await expect(privateMacKeychain()).rejects.toThrow(
-        'https://github.com/taecontrol/nook/issues/22',
+        'https://github.com/taecontrol/nook/issues/87',
       );
       expect(launch).not.toHaveBeenCalled();
     } finally {
