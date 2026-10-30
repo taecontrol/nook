@@ -195,11 +195,19 @@ export async function privateClientState(
         'alternate',
         'stateNode',
       ]);
+      const isFiber = (value: object) =>
+        'tag' in value &&
+        typeof value.tag === 'number' &&
+        'memoizedState' in value &&
+        'memoizedProps' in value &&
+        'return' in value;
       const children = (value: object): unknown[] => {
         if (value instanceof Map) return Array.from(value.entries());
         if (value instanceof Set) return Array.from(value.values());
+        // Only React fibers own links to skip; ordinary data can use any key.
+        const skipLinks = isFiber(value);
         return Object.getOwnPropertyNames(value)
-          .filter((key) => !fiberLinks.has(key))
+          .filter((key) => !skipLinks || !fiberLinks.has(key))
           .map((key) => (value as Record<string, unknown>)[key]);
       };
       const containsValue = (value: unknown): boolean => {
