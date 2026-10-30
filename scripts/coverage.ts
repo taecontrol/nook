@@ -8,6 +8,7 @@ import { digest, files, sourceIdentity } from './lib/identity.ts';
 import { evidenceRoot, prepare } from './lib/instrument.ts';
 import { macosCliGroups, macosShards } from './lib/macos-cli-suites.ts';
 import { testEnvironment } from './lib/test-environment.ts';
+import { requireVerificationPlatform } from './lib/verification-platform.ts';
 import { buildTest } from './test-build.ts';
 
 const option = (name: string) =>
@@ -34,6 +35,11 @@ if (
   throw new Error(
     `--macos-cli=I/${macosShards} requires macOS without a Linux shard.`,
   );
+requireVerificationPlatform(
+  process.platform,
+  'pnpm test:coverage',
+  macos !== undefined,
+);
 const isolation = await startHostIsolation();
 try {
   await rm(evidenceRoot, { recursive: true, force: true });

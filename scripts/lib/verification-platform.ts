@@ -1,7 +1,10 @@
 export function requireVerificationPlatform(
-  _platform: NodeJS.Platform,
-  _command: 'pnpm verify' | 'pnpm test:coverage',
-  _macosCli = false,
+  platform: NodeJS.Platform,
+  command: 'pnpm verify' | 'pnpm test:coverage',
+  macosCli = false,
 ) {
-  // Acceptance scaffold: keep missing behavior separate from import failures.
+  if (platform === 'darwin' && !macosCli)
+    throw new Error(
+      `${command} runs on Linux. On macOS, CI's macos-cli job runs the macOS suites; run the full check on Linux or push and let CI decide.`,
+    );
 }
