@@ -1,8 +1,14 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { relative, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { build } from 'esbuild';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import worker from '../apps/worker/src/index.ts';
 import type { SearchBindings } from '../apps/worker/src/memory-index.ts';
-import { spanishRelease } from './fixtures/search-corpus.ts';
+import { testEnvironment } from '../scripts/lib/test-environment.ts';
+import { searchMemories, spanishRelease } from './fixtures/search-corpus.ts';
 import { deferred } from './support/machines.ts';
 import { memoryClient, memoryFixture } from './support/memory.ts';
 import {
@@ -246,4 +252,120 @@ it('E18: a vector without model identity, from before model metadata or an old W
   expect(app.services.inspections.flat()).toContain(memory.id);
   expect(app.services.embeddingCalls).toEqual([]);
   expect(await marker()).toBe(`${model}:${contentHash}`);
+});
+
+// The accepted base before vectors carried a model: the previous Worker that
+// runs alongside the new one during deployment, not a reimplementation of it.
+async function previousWorker(): Promise<typeof worker> {
+  await mkdir('.local', { recursive: true });
+  const directory = await mkdtemp(resolve('.local', 'model-previous-worker-'));
+  try {
+    const outfile = resolve(directory, 'worker.mjs');
+    await build({
+      entryPoints: ['apps/worker/src/index.ts'],
+      outfile,
+      bundle: true,
+      format: 'esm',
+      platform: 'node',
+      target: 'es2023',
+      plugins: [
+        {
+          name: 'accepted-previous-worker',
+          setup(builder) {
+            builder.onLoad(
+              { filter: /\/(?:apps\/worker|packages\/contract)\/src\/.*\.ts$/ },
+              (args) => ({
+                contents: execFileSync(
+                  'git',
+                  ['show', `ed1f52b:${relative(process.cwd(), args.path)}`],
+                  { encoding: 'utf8', env: testEnvironment(process.env.HOME) },
+                ),
+                loader: 'ts',
+                resolveDir: resolve(args.path, '..'),
+              }),
+            );
+          },
+        },
+      ],
+    });
+    return (await import(pathToFileURL(outfile).href)).default;
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+it('E18: mid-deploy, the previous Worker keeps model-carrying vectors, and its model-less writes are re-embedded by the new Worker', async () => {
+  const previous = await previousWorker();
+  const kept = memoryFixture(20, { content: spanishRelease });
+  const lost = memoryFixture(23, { content: searchMemories[3].content });
+  await indexMemories(app, [kept, lost]);
+  const model = '@cf/baai/bge-m3';
+  const db = await app.mf.getD1Database('DB');
+  const marker = async (id: string) =>
+    (
+      await db
+        .prepare('SELECT embedding_marker FROM memories WHERE id=?')
+        .bind(id)
+        .first()
+    )?.embedding_marker;
+  const invoke = async <T>(method: string, args: unknown[]): Promise<T> => {
+    const reply = await app.services.fetch(
+      new Request(`https://nook-search-fixture.invalid/${method}`, {
+        method: 'POST',
+        body: JSON.stringify(args),
+      }),
+    );
+    if (!reply.ok) throw new Error('Synthetic search transport failure.');
+    return (await reply.json()) as T;
+  };
+  const bindings: SearchBindings = {
+    AI: { run: (...args) => invoke('run', args) },
+    MEMORY_INDEX: {
+      query: (...args) => invoke('query', args),
+      upsert: (...args) => invoke('upsert', args),
+      getByIds: (...args) => invoke('getByIds', args),
+      deleteByIds: (...args) => invoke('deleteByIds', args),
+    },
+  };
+  const runPrevious = (scheduledTime: number) =>
+    previous.scheduled(
+      { cron: '*/5 * * * *', scheduledTime, noRetry() {} },
+      { ...bindings, DB: db },
+    );
+  app.services.deleteByIds([lost.id]);
+  app.services.advance();
+  app.services.resetCalls();
+
+  // The previous Worker still inspects: it repairs the missing vector but
+  // keeps the vector that carries the model it does not know about.
+  await runPrevious(Date.UTC(2030, 0, 1, 0, 0));
+  expect(app.services.inspections.flat()).toEqual(
+    expect.arrayContaining([kept.id, lost.id]),
+  );
+  expect(await marker(kept.id)).toBe(`${model}:${contentHash}`);
+  expect(await marker(lost.id)).toBeNull();
+  await runPrevious(Date.UTC(2030, 0, 1, 0, 5));
+  app.services.advance();
+  const lostHash = hash(searchMemories[3].content);
+  const metadata = {
+    bucket: hash(lost.bucket).slice(0, 32),
+    contentHash: lostHash,
+  };
+  expect(app.services.getByIds([lost.id])[0].metadata).toEqual(metadata);
+  expect(await marker(lost.id)).toBe(`${model}:${lostHash}`);
+
+  app.services.resetCalls();
+  for (const minutes of [10, 15]) {
+    await app.scheduled(new Date(Date.UTC(2030, 0, 1, 0, minutes)));
+    app.services.advance();
+  }
+  expect(app.services.embeddingCalls.flatMap((c) => c.text)).toEqual([
+    searchMemories[3].content,
+  ]);
+  expect(app.services.getByIds([lost.id])[0].metadata).toEqual({
+    ...metadata,
+    model,
+  });
+  expect(await marker(lost.id)).toBe(`${model}:${lostHash}`);
+  expect(await marker(kept.id)).toBe(`${model}:${contentHash}`);
 });
