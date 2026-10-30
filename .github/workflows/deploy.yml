@@ -118,8 +118,8 @@ jobs:
               console.log(required.filter(name => !secrets.some(secret => secret.name === name)).join(", "));
             ' 2>/dev/null); then
             if [ -n "$missing" ]; then
-              printf 'Missing Worker secrets: %s. See [Set the Worker secrets](%s).\n' "$missing" "$guide" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+              printf 'Missing Worker secrets: %s. See [Set the Worker secrets](%s).\n' "$missing" "$guide" >> "${GITHUB_STEP_SUMMARY:-/dev/null}" || true
             fi
           else
-            printf 'The Worker secret check could not run. See [Set the Worker secrets](%s).\n' "$guide" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            printf 'The Worker secret check could not run. See [Set the Worker secrets](%s).\n' "$guide" >> "${GITHUB_STEP_SUMMARY:-/dev/null}" || true
           fi

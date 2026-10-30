@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
+import type { Readable } from 'node:stream';
 import { isDeepStrictEqual } from 'node:util';
 import { decodeJwt, generateKeyPair } from 'jose';
 import { Log, LogLevel } from 'miniflare';
@@ -17,6 +18,7 @@ async function loggedRuntime(options: Parameters<typeof runtime>[0] = {}) {
   const app = await runtime({ ...options, bindings });
   const logs: string[] = [];
   const workerLogs: string[] = [];
+  const workerStdio: Readable[] = [];
   class AuthLog extends Log {
     override log(message: string) {
       logs.push(message);
@@ -25,6 +27,7 @@ async function loggedRuntime(options: Parameters<typeof runtime>[0] = {}) {
   await app.setBindings(bindings, {
     log: new AuthLog(LogLevel.VERBOSE),
     handleRuntimeStdio(stdout, stderr) {
+      workerStdio.splice(0, workerStdio.length, stdout, stderr);
       for (const stream of [stdout, stderr])
         stream.on('data', (chunk) => {
           logs.push(chunk.toString());
@@ -32,7 +35,7 @@ async function loggedRuntime(options: Parameters<typeof runtime>[0] = {}) {
         });
     },
   });
-  return { ...app, logs, workerLogs };
+  return { ...app, logs, workerLogs, workerStdio };
 }
 
 // Stdout chunks can split a line, and workerd may flush it after the response.
@@ -76,7 +79,8 @@ async function expectRejection(
     headers: token ? { 'Cf-Access-Jwt-Assertion': token } : {},
   });
   expect(response.status).toBe(status);
-  expect(await response.text()).toBe(
+  const body = await response.text();
+  expect(body).toBe(
     status === 401 ? '{"_tag":"Unauthorized"}' : '{"_tag":"Forbidden"}',
   );
   const output = await completeWorkerOutput(target);
@@ -126,6 +130,7 @@ async function expectRejection(
     }),
     'E5: the rejection line contains exactly the public fields',
   ).toBe(true);
+  return body;
 }
 
 beforeAll(async () => {
@@ -196,7 +201,7 @@ describe('E1 / installation E5: Access identity through HTTP to the built Worker
   });
   it('denies another identity without naming either email in the body', async () => {
     const other = 'other@nook.test';
-    await expectRejection(
+    const body = await expectRejection(
       app,
       await issuer.assertion({ email: other }),
       'not-owner',
@@ -204,18 +209,15 @@ describe('E1 / installation E5: Access identity through HTTP to the built Worker
         status: 403,
       },
     );
-    const response = await request(
-      '/api/whoami',
-      await issuer.assertion({ email: other }),
-    );
-    expect(response.status).toBe(403);
-    const body = await response.text();
+    // Keep unconsumed denial output pending across E7's log-buffer reset.
+    for (const stream of app.workerStdio) stream.pause();
     expect(body).not.toContain('@');
     expect(body).not.toContain(access.OWNER_EMAIL);
     expect(body).not.toContain(other);
   });
   it('E7: returns exactly the verified owner email without a rejection log', async () => {
     app.logs.length = 0;
+    for (const stream of app.workerStdio) stream.resume();
     const response = await request('/api/whoami', await issuer.assertion());
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ email: access.OWNER_EMAIL });
