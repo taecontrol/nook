@@ -640,7 +640,7 @@ function RunStep({ run }: { run: Run }) {
 
 /* ---------- the sheet ---------- */
 
-export type ImportSheetProps = {
+type ImportSheetProps = {
   open: boolean;
   step: Step;
   bucket: string;
