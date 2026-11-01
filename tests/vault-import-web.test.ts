@@ -496,7 +496,6 @@ it.each([
       expect(traffic.listReads() - reads).toBe(1);
       await expectLossStorage(visit, state);
       if (state === 'absent') {
-        await shortFailure(runRow(page, lostName));
         await restoreImportStorage(app);
         loss.allowRetry();
         await importSheet(page)
@@ -815,6 +814,7 @@ it('E17: Done drops every imported value from DOM, Query cache and mutation stat
     await createImport(page, 8);
     await importSettled(page);
     await expectOutcome(page, 'STRIPE_WEBHOOK_SECRET', 'Failed');
+    await shortFailure(runRow(page, 'STRIPE_WEBHOOK_SECRET'));
     expect(
       await importSheet(page)
         .getByRole('button', { name: 'Retry failed', exact: true })
@@ -1045,6 +1045,9 @@ it('E2/E7/E9: 101 keys stay on Paste with trim guidance; exactly 100 keys round-
     await importSheet(page)
       .getByRole('button', { name: 'Review keys', exact: true })
       .click();
+    await importSheet(page)
+      .getByText(/Step 2 of 2\./)
+      .waitFor();
     expect(
       await importSheet(page)
         .getByRole('textbox', { name: /^Name from line / })
