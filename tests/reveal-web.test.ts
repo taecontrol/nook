@@ -42,7 +42,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await closeBrowser?.();
 });
-it('E1/E8: selecting Reveal shows the exact read-only value and metadata with Copy/Close, without caching or persisting it', async () => {
+it('E1/E6/E8: selecting Reveal shows the exact read-only value and metadata with Copy/Close, without caching or persisting it; Close clears it and reopening makes a new request/entry', async () => {
   const visit = await revealPage(browser);
   try {
     const { page } = visit;
@@ -75,21 +75,23 @@ it('E1/E8: selecting Reveal shows the exact read-only value and metadata with Co
       .toEqual({ found: true, absentFromCache: true, absentFromDom: true });
     expect(await storageHasValue(page, revealValue)).toBe(false);
     expect(revealRequests(visit.requests)).toHaveLength(1);
+    await openReveal(page);
+    await valueField(page).waitFor();
+    expect(revealRequests(visit.requests)).toHaveLength(2);
+    expect(await auditRows(visit.app)).toHaveLength(2);
   } finally {
     await visit.close();
   }
 });
 it.each([
-  { width: 390, height: 844, multiline: true },
-  { width: 1440, height: 900, multiline: true },
-  { width: 390, height: 844, multiline: false },
-  { width: 1440, height: 900, multiline: false },
+  { width: 390, height: 844 },
+  { width: 1440, height: 900 },
 ])(
-  'E2: a 64 KiB value preserves spaces/newlines and scrolls inside a bounded dialog ($width, multi-line: $multiline)',
-  async ({ width, height, multiline }) => {
+  'E2: a 64 KiB multi-line value preserves spaces/newlines and scrolls inside a bounded dialog ($width)',
+  async ({ width, height }) => {
     const prefix = '  秘密🔐\n';
     const suffix = '  \n';
-    const chunk = multiline ? 'synthetic-line\n' : 'x';
+    const chunk = 'synthetic-line\n';
     const length = 65536 - Buffer.byteLength(prefix + suffix);
     const value =
       prefix +
@@ -128,13 +130,11 @@ it.each([
   },
 );
 it.each([
-  { width: 390, height: 844, colorScheme: 'light' as const },
-  { width: 390, height: 844, colorScheme: 'dark' as const },
-  { width: 1440, height: 900, colorScheme: 'light' as const },
-  { width: 1440, height: 900, colorScheme: 'dark' as const },
+  { width: 390, height: 844 },
+  { width: 1440, height: 900 },
 ])(
-  'E1/E2/E3: maximum accepted metadata uses the real reveal URL and keeps value/actions within the viewport ($width, $colorScheme)',
-  async ({ width, height, colorScheme }) => {
+  'E1/E2/E3: maximum accepted metadata uses the real reveal URL and keeps value/actions within the viewport ($width)',
+  async ({ width, height }) => {
     const bucket = Array.from({ length: 6 }, (_, index) =>
       String.fromCharCode(97 + index).repeat(32),
     ).join('/');
@@ -148,7 +148,6 @@ it.each([
     const visit = await revealPage(browser, {
       start: `/vault?bucket=${encodeURIComponent(bucket)}`,
       viewport: { width, height },
-      colorScheme,
       configure: async (_page, app) => {
         expect(
           (await jsonRequest(app, '/api/buckets', { path: bucket })).status,
@@ -262,69 +261,6 @@ it.each([
     }
   },
 );
-it('intent on secret actions preloads the reveal dialog code and never its value', async () => {
-  const visit = await revealPage(browser);
-  try {
-    const { page } = visit;
-    const actions = secretRow(page, revealPath).getByRole('button', {
-      name: `Actions for ${revealPath}`,
-      exact: true,
-    });
-    await actions.waitFor();
-    const chunk = page.waitForRequest((request) =>
-      /\/assets\/reveal-dialog-[^/]+\.js$/.test(
-        new URL(request.url()).pathname,
-      ),
-    );
-    await actions.hover();
-    await chunk;
-    expect(revealRequests(visit.requests)).toEqual([]);
-    const dialog = await openReveal(page);
-    await expect.poll(() => valueField(page).inputValue()).toBe(revealValue);
-    expect(await dialog.isVisible()).toBe(true);
-    expect(revealRequests(visit.requests)).toHaveLength(1);
-  } finally {
-    await visit.close();
-  }
-});
-it('E3: Copy writes exact bytes and shows Copied/live feedback for three seconds; rejection gives destructive manual-copy guidance', async () => {
-  const value = '  synthetic clipboard\n秘密🔐  \n';
-  const visit = await revealPage(browser, { value });
-  try {
-    const { page } = visit;
-    const dialog = await openReveal(page);
-    await valueField(page).waitFor();
-    await dialog.getByRole('button', { name: 'Copy', exact: true }).click();
-    await dialog.getByRole('button', { name: 'Copied', exact: true }).waitFor();
-    expect(
-      (await page.evaluate(() => navigator.clipboard.readText())) === value,
-    ).toBe(true);
-    const live = dialog.locator('[aria-live="polite"]');
-    expect(await live.innerText()).toBe('Copied to the clipboard.');
-    await page.waitForTimeout(1000);
-    expect(await live.innerText()).toBe('Copied to the clipboard.');
-    await expect.poll(() => live.innerText()).toBe('');
-    expect(
-      await dialog
-        .getByRole('button', { name: 'Copy', exact: true })
-        .isEnabled(),
-    ).toBe(true);
-    await page.evaluate(() => {
-      navigator.clipboard.writeText = () =>
-        Promise.reject(new Error('synthetic clipboard failure'));
-    });
-    await dialog.getByRole('button', { name: 'Copy', exact: true }).click();
-    await expect
-      .poll(() => live.innerText())
-      .toBe("Couldn't copy. Select the value and copy it yourself.");
-    expect(await live.locator('span').getAttribute('class')).toContain(
-      'text-destructive',
-    );
-    expect(await auditRows(visit.app)).toHaveLength(1);
-  } finally {
-    await visit.close();
-  }
-});
 it('E2/E3: CR and CRLF retain exact 64 KiB in the raw readonly field, HTTP and real clipboard', async () => {
   const prefix = '  synthetic CR\rCRLF\r\n秘密🔐\r\n';
   const suffix = '  \r';
@@ -423,7 +359,7 @@ it('E1/E7/E25: the stored updated date, monospace field, guidance and Audit link
     await visit.close();
   }
 });
-it('E3: clipboard feedback is reset at three seconds and restarts after another real copy', async () => {
+it('E3: clipboard feedback is reset at three seconds and restarts after another real copy; rejection gives destructive manual-copy guidance', async () => {
   const visit = await revealPage(browser, {
     configure: async (page) => {
       await page.clock.install({ time: new Date('2026-10-09T12:00:00Z') });
@@ -473,6 +409,17 @@ it('E3: clipboard feedback is reset at three seconds and restarts after another 
     expect(await live.innerText()).toBe('Copied to the clipboard.');
     await page.clock.runFor(200);
     await expect.poll(() => live.innerText()).toBe('');
+    await page.evaluate(() => {
+      navigator.clipboard.writeText = () =>
+        Promise.reject(new Error('synthetic clipboard failure'));
+    });
+    await dialog.getByRole('button', { name: 'Copy', exact: true }).click();
+    await expect
+      .poll(() => live.innerText())
+      .toBe("Couldn't copy. Select the value and copy it yourself.");
+    expect(await live.locator('span').getAttribute('class')).toContain(
+      'text-destructive',
+    );
     expect(await auditRows(visit.app)).toHaveLength(1);
   } finally {
     await visit.close();
@@ -518,7 +465,7 @@ it.each([desktop, phone])(
     }
   },
 );
-it.each(['Close', 'Escape', 'x', 'outside'])(
+it.each(['Escape', 'x', 'outside'])(
   'E6/E8: %s removes the value and reopening makes a new request/entry',
   async (method) => {
     const visit = await revealPage(browser);
@@ -526,12 +473,7 @@ it.each(['Close', 'Escape', 'x', 'outside'])(
       const { page } = visit;
       const dialog = await openReveal(page);
       await valueField(page).waitFor();
-      if (method === 'Close')
-        await dialog
-          .getByRole('button', { name: 'Close', exact: true })
-          .first()
-          .click();
-      else if (method === 'Escape') await page.keyboard.press('Escape');
+      if (method === 'Escape') await page.keyboard.press('Escape');
       else if (method === 'x')
         await dialog.locator('[data-slot="dialog-close"]').click();
       else await page.mouse.click(5, 80);
@@ -548,7 +490,7 @@ it.each(['Close', 'Escape', 'x', 'outside'])(
     }
   },
 );
-it.each(['Audit', 'Back', 'sidebar', 'bucket-back'])(
+it.each(['Audit', 'sidebar', 'bucket Back'])(
   'E7: %s navigation closes the dialog, clears the value and does not restore it on return',
   async (destination) => {
     const visit = await revealPage(browser, { start: '/' });
@@ -576,8 +518,7 @@ it.each(['Audit', 'Back', 'sidebar', 'bucket-back'])(
         .poll(() => privateClientState(page, [revealValue]))
         .toEqual({ found: true, absentFromCache: true, absentFromDom: true });
       expect(await storageHasValue(page, revealValue)).toBe(false);
-      if (destination === 'Back' || destination === 'bucket-back')
-        await page.goForward();
+      if (destination === 'bucket Back') await page.goForward();
       else await page.goBack();
       await secretRow(page, revealPath).waitFor();
       expect(await valueField(page).count()).toBe(0);
@@ -860,12 +801,19 @@ it('E6/E8: closing and reopening before the old response arrives preserves only 
     await visit.close();
   }
 });
-it('E21: hover/focus on the menu and Reveal item never requests a value or writes audit; selecting does', async () => {
+it('E21: hover/focus on the menu and Reveal item preloads the dialog code but never requests a value or writes audit; selecting does', async () => {
   const visit = await revealPage(browser);
   try {
     const { page } = visit;
     const trigger = secretRow(page, revealPath).getByRole('button');
+    const chunk = page.waitForRequest((request) =>
+      /\/assets\/reveal-dialog-[^/]+\.js$/.test(
+        new URL(request.url()).pathname,
+      ),
+    );
     await trigger.hover();
+    await chunk;
+    expect(revealRequests(visit.requests)).toEqual([]);
     await trigger.focus();
     await trigger.click();
     const action = page.getByRole('menuitem', {

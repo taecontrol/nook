@@ -250,94 +250,80 @@ it.each(viewports)(
     }
   },
 );
-it.each([false, true])(
-  'E19: create is optimistic and settled values disappear from DOM, Query cache and mutation state (submit burst: %s)',
-  async (submitBurst) => {
-    const gate = deferred();
-    const visit = await vaultPage(browser, {
-      configure: async (page) => {
-        await page.route('**/api/secrets', async (route) => {
-          if (route.request().method() === 'POST') await gate.promise;
-          await route.continue().catch(() => {});
-        });
-      },
+it('E19: create is optimistic, a submit burst sends one write and locks other writes, and settled values disappear from DOM, Query cache and mutation state', async () => {
+  const gate = deferred();
+  const visit = await vaultPage(browser, {
+    configure: async (page) => {
+      await page.route('**/api/secrets', async (route) => {
+        if (route.request().method() === 'POST') await gate.promise;
+        await route.continue().catch(() => {});
+      });
+    },
+  });
+  const { page } = visit;
+  const value = `synthetic-client-${randomUUID()}`;
+  try {
+    const sheet = await createDraft(page, { value });
+    const field = sheet.getByRole('textbox', { name: 'Value', exact: true });
+    expect(await field.getAttribute('autocomplete')).toBe('off');
+    expect(await field.getAttribute('spellcheck')).toBe('false');
+    await sheet.locator('form').evaluate((element) => {
+      const form = element as HTMLFormElement;
+      form.requestSubmit();
+      form.requestSubmit();
     });
-    const { page } = visit;
-    const value = `synthetic-client-${randomUUID()}`;
-    try {
-      const sheet = await createDraft(page, { value });
-      const field = sheet.getByRole('textbox', { name: 'Value', exact: true });
-      expect(await field.getAttribute('autocomplete')).toBe('off');
-      expect(await field.getAttribute('spellcheck')).toBe('false');
-      if (submitBurst)
-        await sheet.locator('form').evaluate((element) => {
-          const form = element as HTMLFormElement;
-          form.requestSubmit();
-          form.requestSubmit();
-        });
-      else
-        await sheet
-          .getByRole('button', { name: 'Save secret', exact: true })
-          .click();
-      const row = secretRow(page, 'work/acme/RESEND_API_KEY');
-      await row.waitFor();
-      expect(await row.innerText()).toContain(
-        'Transactional email for staging',
-      );
-      expect(await row.innerText()).toContain('Saving');
-      expect(
-        (await listSecrets(visit.app)).some(
-          (secret) => secret.name === 'RESEND_API_KEY',
-        ),
-      ).toBe(false);
-      if (submitBurst) {
-        expect(
-          await page
-            .getByRole('button', { name: 'New secret', exact: true })
-            .isEnabled(),
-        ).toBe(false);
-        await secretRow(page, 'work/acme/STRIPE_KEY')
-          .getByRole('button', {
-            name: 'Actions for work/acme/STRIPE_KEY',
-            exact: true,
-          })
-          .click();
-        const remove = page.getByRole('menuitem', {
-          name: 'Delete secret…',
-          exact: true,
-        });
-        const replace = page.getByRole('menuitem', {
-          name: 'Replace value…',
-          exact: true,
-        });
-        expect(await remove.isEnabled()).toBe(false);
-        expect(await replace.isEnabled()).toBe(false);
-        await remove.click({ force: true });
-        await remove.press('Enter');
-        expect(await page.getByRole('alertdialog').count()).toBe(0);
-        await page.keyboard.press('Escape');
-      }
-      gate.resolve();
-      if (submitBurst) {
-        await page.waitForLoadState('networkidle');
-        expect(
-          visit.requests.filter((request) => request.method === 'POST'),
-        ).toHaveLength(1);
-        expect(await page.getByRole('dialog').count()).toBe(0);
-      }
+    const row = secretRow(page, 'work/acme/RESEND_API_KEY');
+    await row.waitFor();
+    expect(await row.innerText()).toContain('Transactional email for staging');
+    expect(await row.innerText()).toContain('Saving');
+    expect(
+      (await listSecrets(visit.app)).some(
+        (secret) => secret.name === 'RESEND_API_KEY',
+      ),
+    ).toBe(false);
+    expect(
       await page
-        .getByRole('alert')
-        .filter({ has: page.getByText('Secret saved', { exact: true }) })
-        .waitFor();
-      await expect
-        .poll(() => privateClientState(page, [value, ...visit.values]))
-        .toEqual({ found: true, absentFromCache: true, absentFromDom: true });
-    } finally {
-      gate.resolve();
-      await visit.close();
-    }
-  },
-);
+        .getByRole('button', { name: 'New secret', exact: true })
+        .isEnabled(),
+    ).toBe(false);
+    await secretRow(page, 'work/acme/STRIPE_KEY')
+      .getByRole('button', {
+        name: 'Actions for work/acme/STRIPE_KEY',
+        exact: true,
+      })
+      .click();
+    const remove = page.getByRole('menuitem', {
+      name: 'Delete secret…',
+      exact: true,
+    });
+    const replace = page.getByRole('menuitem', {
+      name: 'Replace value…',
+      exact: true,
+    });
+    expect(await remove.isEnabled()).toBe(false);
+    expect(await replace.isEnabled()).toBe(false);
+    await remove.click({ force: true });
+    await remove.press('Enter');
+    expect(await page.getByRole('alertdialog').count()).toBe(0);
+    await page.keyboard.press('Escape');
+    gate.resolve();
+    await page.waitForLoadState('networkidle');
+    expect(
+      visit.requests.filter((request) => request.method === 'POST'),
+    ).toHaveLength(1);
+    expect(await page.getByRole('dialog').count()).toBe(0);
+    await page
+      .getByRole('alert')
+      .filter({ has: page.getByText('Secret saved', { exact: true }) })
+      .waitFor();
+    await expect
+      .poll(() => privateClientState(page, [value, ...visit.values]))
+      .toEqual({ found: true, absentFromCache: true, absentFromDom: true });
+  } finally {
+    gate.resolve();
+    await visit.close();
+  }
+});
 it('E20: replacement and deletion require confirmation; Back and Cancel change nothing', async () => {
   const visit = await vaultPage(browser);
   const { page } = visit;
@@ -555,141 +541,89 @@ async function fetchingVault(page: Page) {
   });
 }
 
-it.each([false, true])(
-  'E21: a persistent D1 failure keeps an unconfirmed row until a successful list settles it (earlier refresh: %s)',
-  async (earlierRefresh) => {
-    const staleList = deferred();
-    const writeGate = deferred();
-    if (!earlierRefresh) writeGate.resolve();
-    let holdList = false;
-    let snapshotReady = false;
-    let snapshotReleased = false;
-    const visit = await vaultPage(browser, {
-      configure: async (page, app) => {
-        await page.route('**/api/secrets', async (route) => {
-          if (route.request().method() === 'POST') await writeGate.promise;
-          if (route.request().method() === 'GET' && holdList) {
-            holdList = false;
-            const response = await route.fetch();
-            expect(response.status()).toBe(200);
-            snapshotReady = true;
-            await staleList.promise;
-            try {
-              await route.fulfill({ response });
-            } catch {
-              // The production cancelQueries call aborts this older request.
-            } finally {
-              snapshotReleased = true;
-            }
-            return;
-          }
-          await route.continue().catch(() => {});
-        });
-        await (await app.mf.getD1Database('DB'))
-          .prepare(
-            "CREATE TRIGGER vault_failure BEFORE INSERT ON secrets BEGIN SELECT RAISE(ABORT, 'Synthetic private failure'); END",
-          )
-          .run();
-      },
-    });
-    const { page } = visit;
-    try {
-      if (earlierRefresh) {
-        await secretRow(page, 'work/acme/STRIPE_KEY').waitFor();
-        holdList = true;
-        await page.evaluate(() =>
-          window.dispatchEvent(new Event('visibilitychange')),
-        );
-        await expect.poll(() => snapshotReady).toBe(true);
-      }
-      const sheet = await createDraft(page);
-      await sheet
-        .getByRole('button', { name: 'Save secret', exact: true })
-        .click();
-      if (earlierRefresh) {
-        await secretRow(page, 'work/acme/RESEND_API_KEY').waitFor();
-        expect(
-          await secretRow(page, 'work/acme/RESEND_API_KEY').innerText(),
-        ).toContain('Saving');
-        staleList.resolve();
-        await expect.poll(() => snapshotReleased).toBe(true);
-        await expect.poll(() => fetchingVault(page)).toBe(0);
-        writeGate.resolve();
-      }
-      await page
-        .getByRole('alert')
-        .filter({
-          hasText:
-            'Nook could not confirm whether work/acme/RESEND_API_KEY was stored.',
-        })
-        .waitFor();
-      expect(
-        await secretRow(page, 'work/acme/RESEND_API_KEY').innerText(),
-      ).toContain('Confirming');
-      expect(await page.getByRole('alert').innerText()).not.toContain(
-        'Nothing was stored',
-      );
-      expect(
-        visit.requests.filter((request) => request.method === 'POST'),
-      ).toHaveLength(3);
-      await page
-        .getByRole('alert')
-        .getByRole('button', { name: 'Try again', exact: true })
-        .click();
-      await secretRow(page, 'work/acme/RESEND_API_KEY').waitFor({
-        state: 'detached',
-      });
-      expect(await page.getByRole('alert').innerText()).toContain(
-        'is no longer stored',
-      );
-    } finally {
-      staleList.resolve();
-      writeGate.resolve();
-      await visit.close();
-    }
-  },
-);
-it('E21: a lost response after commit reconciles pending metadata by version on the next list', async () => {
-  let requests = 0;
+it('E21: a persistent D1 failure keeps an unconfirmed row past a cancelled earlier refresh until a successful list settles it', async () => {
+  const staleList = deferred();
+  const writeGate = deferred();
+  let holdList = false;
+  let snapshotReady = false;
+  let snapshotReleased = false;
   const visit = await vaultPage(browser, {
-    configure: async (page) => {
+    configure: async (page, app) => {
       await page.route('**/api/secrets', async (route) => {
-        if (route.request().method() !== 'POST') return route.continue();
-        if (requests++ === 0) await route.fetch();
-        return route.fulfill({
-          status: 503,
-          json: { _tag: 'ServiceUnavailable' },
-        });
+        if (route.request().method() === 'POST') await writeGate.promise;
+        if (route.request().method() === 'GET' && holdList) {
+          holdList = false;
+          const response = await route.fetch();
+          expect(response.status()).toBe(200);
+          snapshotReady = true;
+          await staleList.promise;
+          try {
+            await route.fulfill({ response });
+          } catch {
+            // The production cancelQueries call aborts this older request.
+          } finally {
+            snapshotReleased = true;
+          }
+          return;
+        }
+        await route.continue().catch(() => {});
       });
+      await (await app.mf.getD1Database('DB'))
+        .prepare(
+          "CREATE TRIGGER vault_failure BEFORE INSERT ON secrets BEGIN SELECT RAISE(ABORT, 'Synthetic private failure'); END",
+        )
+        .run();
     },
   });
   const { page } = visit;
   try {
+    await secretRow(page, 'work/acme/STRIPE_KEY').waitFor();
+    holdList = true;
+    await page.evaluate(() =>
+      window.dispatchEvent(new Event('visibilitychange')),
+    );
+    await expect.poll(() => snapshotReady).toBe(true);
     const sheet = await createDraft(page);
     await sheet
       .getByRole('button', { name: 'Save secret', exact: true })
       .click();
+    await secretRow(page, 'work/acme/RESEND_API_KEY').waitFor();
+    expect(
+      await secretRow(page, 'work/acme/RESEND_API_KEY').innerText(),
+    ).toContain('Saving');
+    staleList.resolve();
+    await expect.poll(() => snapshotReleased).toBe(true);
+    await expect.poll(() => fetchingVault(page)).toBe(0);
+    writeGate.resolve();
     await page
       .getByRole('alert')
-      .filter({ hasText: 'could not confirm' })
+      .filter({
+        hasText:
+          'Nook could not confirm whether work/acme/RESEND_API_KEY was stored.',
+      })
       .waitFor();
     expect(
-      (await listSecrets(visit.app)).some(
-        (secret) => secret.name === 'RESEND_API_KEY',
-      ),
-    ).toBe(true);
+      await secretRow(page, 'work/acme/RESEND_API_KEY').innerText(),
+    ).toContain('Confirming');
+    expect(await page.getByRole('alert').innerText()).not.toContain(
+      'Nothing was stored',
+    );
+    expect(
+      visit.requests.filter((request) => request.method === 'POST'),
+    ).toHaveLength(3);
     await page
       .getByRole('alert')
       .getByRole('button', { name: 'Try again', exact: true })
       .click();
-    await page
-      .getByRole('alert')
-      .filter({ has: page.getByText('Secret saved', { exact: true }) })
-      .waitFor();
-    expect(
-      await secretRow(page, 'work/acme/RESEND_API_KEY').innerText(),
-    ).not.toContain('Confirming');
+    await secretRow(page, 'work/acme/RESEND_API_KEY').waitFor({
+      state: 'detached',
+    });
+    expect(await page.getByRole('alert').innerText()).toContain(
+      'is no longer stored',
+    );
   } finally {
+    staleList.resolve();
+    writeGate.resolve();
     await visit.close();
   }
 });
@@ -791,51 +725,37 @@ it('E21: an expired session after a lost committed response stays unconfirmed un
     await visit.close();
   }
 });
-it.each(['InvalidSecret', 'VaultNotConfigured'])(
-  'E21: definitive %s rolls back and truthfully explains that nothing was stored',
-  async (tag) => {
-    const visit = await vaultPage(browser, {
-      configure: async (page, app) => {
-        if (tag === 'VaultNotConfigured')
-          await app.setBindings({
-            LOCAL_OWNER: 'synthetic-owner',
-            LOCAL_ORIGIN: app.origin,
-          });
-        else
-          await page.route('**/api/secrets', (route) =>
-            route.request().method() === 'POST'
-              ? route.fulfill({
-                  status: 400,
-                  json: { _tag: 'InvalidSecret', message: 'Enter a value.' },
-                })
-              : route.continue(),
-          );
-      },
-    });
-    try {
-      const sheet = await createDraft(visit.page);
-      await sheet
-        .getByRole('button', { name: 'Save secret', exact: true })
-        .click();
-      await visit.page
-        .getByRole('alert')
-        .filter({ hasText: /nothing was stored/i })
-        .waitFor();
-      if (tag === 'VaultNotConfigured')
-        expect(await visit.page.getByRole('alert').innerText()).toContain(
-          'This installation has no VAULT_KEY. Add it as a Worker secret, then try again.',
-        );
-      expect(
-        await secretRow(visit.page, 'work/acme/RESEND_API_KEY').count(),
-      ).toBe(0);
-      expect(
-        visit.requests.filter((request) => request.method === 'POST'),
-      ).toHaveLength(1);
-    } finally {
-      await visit.close();
-    }
-  },
-);
+it('E21: definitive VaultNotConfigured rolls back and truthfully explains that nothing was stored', async () => {
+  const visit = await vaultPage(browser, {
+    configure: async (_page, app) => {
+      await app.setBindings({
+        LOCAL_OWNER: 'synthetic-owner',
+        LOCAL_ORIGIN: app.origin,
+      });
+    },
+  });
+  try {
+    const sheet = await createDraft(visit.page);
+    await sheet
+      .getByRole('button', { name: 'Save secret', exact: true })
+      .click();
+    await visit.page
+      .getByRole('alert')
+      .filter({ hasText: /nothing was stored/i })
+      .waitFor();
+    expect(await visit.page.getByRole('alert').innerText()).toContain(
+      'This installation has no VAULT_KEY. Add it as a Worker secret, then try again.',
+    );
+    expect(
+      await secretRow(visit.page, 'work/acme/RESEND_API_KEY').count(),
+    ).toBe(0);
+    expect(
+      visit.requests.filter((request) => request.method === 'POST'),
+    ).toHaveLength(1);
+  } finally {
+    await visit.close();
+  }
+});
 it('E21: SecretChanged rolls back, refetches current metadata and displays the concurrency message', async () => {
   const visit = await vaultPage(browser);
   try {

@@ -1,4 +1,3 @@
-import { secretPath } from '@nook/contract';
 import { type QueryClient, useQueryClient } from '@tanstack/react-query';
 import type { Redacted } from 'effect';
 import { useSyncExternalStore } from 'react';
@@ -10,10 +9,11 @@ import {
   readVaultWrites,
   refreshVault,
   type SecretWrite,
+  secretWrite,
   unconfirmed,
   vaultGate,
 } from './vault-api';
-import type { ImportRow, ImportSelection } from './vault-import-model';
+import type { ImportSelection } from './vault-import-model';
 
 export type ImportOutcome =
   | 'queued'
@@ -37,6 +37,19 @@ export type ImportRun = {
   unreadable: readonly number[];
 };
 type ImportDetails = Pick<ImportRun, 'skipped' | 'unreadable'>;
+
+export const importPausedMessage =
+  'New secret, Replace and Delete are paused until it finishes.';
+
+export function importing(run: ImportRun | null) {
+  return run !== null && !run.settled;
+}
+export function importSummary(run: ImportRun) {
+  return {
+    created: run.keys.filter((key) => key.outcome === 'created').length,
+    retry: run.keys.filter(retryable),
+  };
+}
 
 function successOutcome(write: ObservedWrite): ImportOutcome {
   if (!write.result?.secret) return 'failed';
@@ -83,23 +96,6 @@ export function retryable(key: ImportKey) {
 }
 function pending(key: ImportKey) {
   return key.outcome === 'queued' || key.outcome === 'creating';
-}
-function fromRow(bucket: string, batch: string, row: ImportRow): SecretWrite {
-  const writeId = crypto.randomUUID();
-  return {
-    op: 'create',
-    batch,
-    writeId,
-    expectedVersion: writeId,
-    secret: {
-      bucket,
-      name: row.name,
-      description: row.description,
-      path: secretPath({ bucket, name: row.name }),
-      version: writeId,
-      updatedAt: new Date().toISOString(),
-    },
-  };
 }
 function requestPool() {
   let active = 0;
@@ -148,7 +144,7 @@ function createSession(queries: QueryClient) {
           settled: !keys.some(pending),
         }
       : null;
-    const warning = snapshot !== null && !snapshot.settled;
+    const warning = importing(snapshot);
     if (warning !== warned) {
       window[warning ? 'addEventListener' : 'removeEventListener'](
         'beforeunload',
@@ -207,7 +203,14 @@ function createSession(queries: QueryClient) {
         const batch = crypto.randomUUID();
         details = metadata;
         inputs = selection.map(({ row, value }) => {
-          const input = fromRow(bucket, batch, row);
+          const input = {
+            ...secretWrite('create', {
+              bucket,
+              name: row.name,
+              description: row.description,
+            }),
+            batch,
+          };
           values.set(input.writeId, value);
           return input;
         });
@@ -245,6 +248,7 @@ export function useVaultImport() {
   const run = useSyncExternalStore(session.subscribe, session.getSnapshot);
   return {
     run,
+    importing: importing(run),
     start: session.start,
     retryFailed: session.retryFailed,
     dismiss: session.dismiss,

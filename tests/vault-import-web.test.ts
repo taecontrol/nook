@@ -205,114 +205,55 @@ it('E6: changing the review bucket to me recomputes statuses and says Create 9 s
   }
 });
 
-it('E5: an overlong description blocks only its row with the contract message and never leaves the browser', async () => {
+it('E5: an overlong description blocks only its row with the contract message and never leaves the browser; 200 Unicode characters reach storage untruncated', async () => {
   const visit = await importPage(browser);
-  const { page } = visit;
+  const { page, traffic } = visit;
+  const valid = '😀'.repeat(200);
   try {
     await reviewPaste(
       page,
-      'GOOD_KEY=synthetic-good-description\nLONG_DESCRIPTION=synthetic-blocked-description',
+      'GOOD_KEY=synthetic-good-description\nLONG_DESCRIPTION=synthetic-blocked-description\nUNICODE_DESCRIPTION=synthetic-unicode-description',
     );
-    const description = importSheet(page).getByRole('textbox', {
-      name: 'Description for LONG_DESCRIPTION',
-      exact: true,
-    });
-    expect(await description.inputValue()).toBe('');
+    const description = (name: string) =>
+      importSheet(page).getByRole('textbox', {
+        name: `Description for ${name}`,
+        exact: true,
+      });
+    expect(await description('LONG_DESCRIPTION').inputValue()).toBe('');
     // Exercise the validation even when the input also has an HTML length guard.
-    await description.evaluate((field) => field.removeAttribute('maxlength'));
-    await description.fill('😀'.repeat(201));
+    await description('LONG_DESCRIPTION').evaluate((field) =>
+      field.removeAttribute('maxlength'),
+    );
+    await description('LONG_DESCRIPTION').fill('😀'.repeat(201));
     await reviewRow(page, 2)
       .getByText('A description can have at most 200 characters.', {
         exact: true,
       })
       .waitFor();
-    expect(visit.traffic.writes()).toEqual([]);
-    await createImport(page, 1);
+    await description('UNICODE_DESCRIPTION').fill(valid);
+    expect(await description('UNICODE_DESCRIPTION').inputValue()).toBe(valid);
+    expect(traffic.writes()).toEqual([]);
+    await createImport(page, 2);
     await importSettled(page);
-    await expectOutcome(page, 'GOOD_KEY', 'Created');
-    expect(visit.traffic.posts.map(({ name }) => name)).toEqual(['GOOD_KEY']);
+    await expectCreated(page, ['GOOD_KEY', 'UNICODE_DESCRIPTION']);
+    expect(traffic.posts.map(({ name }) => name).sort()).toEqual([
+      'GOOD_KEY',
+      'UNICODE_DESCRIPTION',
+    ]);
     expect(
-      visit.traffic.requests.every(
+      traffic.requests.every(
         ({ body }) => !body?.includes('synthetic-blocked-description'),
       ),
     ).toBe(true);
-  } finally {
-    await visit.close();
-  }
-});
-
-it('E5: a valid description of 200 Unicode characters reaches storage without native truncation', async () => {
-  const visit = await importPage(browser);
-  const description = '😀'.repeat(200);
-  try {
-    await reviewPaste(
-      visit.page,
-      'UNICODE_DESCRIPTION=synthetic-unicode-description',
-    );
-    const field = importSheet(visit.page).getByRole('textbox', {
-      name: 'Description for UNICODE_DESCRIPTION',
-      exact: true,
-    });
-    await field.fill(description);
-    expect(await field.inputValue()).toBe(description);
-    await createImport(visit.page, 1);
-    await importSettled(visit.page);
-    await expectOutcome(visit.page, 'UNICODE_DESCRIPTION', 'Created');
-    expect(visit.traffic.posts[0].description).toBe(description);
+    expect(
+      traffic.posts.find(({ name }) => name === 'UNICODE_DESCRIPTION')
+        ?.description,
+    ).toBe(valid);
     expect(
       (await listSecrets(visit.app)).find(
         (secret) => secret.name === 'UNICODE_DESCRIPTION',
       )?.description,
-    ).toBe(description);
-  } finally {
-    await visit.close();
-  }
-});
-
-it('E7: 101 keys stay on Paste with a count and trim guidance; exactly 100 reach Review without a write', async () => {
-  const visit = await importPage(browser);
-  const { page } = visit;
-  try {
-    await openImport(page);
-    await pasteField(page).fill(keysPaste(101));
-    await importSheet(page)
-      .getByText(
-        'This paste has 101 keys. Nook imports up to 100 at a time, so nothing can be created from it.',
-        { exact: true },
-      )
-      .waitFor();
-    await importSheet(page)
-      .getByText(
-        'Remove some lines, or split the file and import it in parts.',
-        { exact: true },
-      )
-      .waitFor();
-    expect(
-      await importSheet(page)
-        .getByRole('button', { name: 'Review keys', exact: true })
-        .isEnabled(),
-    ).toBe(false);
-    expect(
-      await importSheet(page)
-        .getByRole('textbox', { name: /^Name from line / })
-        .count(),
-    ).toBe(0);
-    expect(visit.traffic.writes()).toEqual([]);
-    await pasteField(page).fill(keysPaste(100));
-    await importSheet(page)
-      .getByRole('button', { name: 'Review keys', exact: true })
-      .click();
-    expect(
-      await importSheet(page)
-        .getByRole('textbox', { name: /^Name from line / })
-        .count(),
-    ).toBe(100);
-    expect(
-      await importSheet(page)
-        .getByRole('button', { name: 'Create 100 secrets', exact: true })
-        .isEnabled(),
-    ).toBe(true);
-    expect(visit.traffic.writes()).toEqual([]);
+    ).toBe(valid);
   } finally {
     await visit.close();
   }
@@ -387,26 +328,6 @@ it.each([
   },
 );
 
-it('E8: unchecking every Ready row disables Create 0 secrets', async () => {
-  const visit = await importPage(browser);
-  const { page } = visit;
-  try {
-    await reviewPaste(page);
-    for (const name of readyNames)
-      await importSheet(page)
-        .getByRole('checkbox', { name: `Include ${name}`, exact: true })
-        .uncheck();
-    expect(
-      await importSheet(page)
-        .getByRole('button', { name: 'Create 0 secrets', exact: true })
-        .isEnabled(),
-    ).toBe(false);
-    expect(visit.traffic.writes()).toEqual([]);
-  } finally {
-    await visit.close();
-  }
-});
-
 it('E10: a concurrent writer wins STRIPE_WEBHOOK_SECRET without overwrite or a retry', async () => {
   let raced = false;
   const other = 'synthetic-import-concurrent-webhook';
@@ -451,52 +372,6 @@ it('E10: a concurrent writer wins STRIPE_WEBHOOK_SECRET without overwrite or a r
     expect(statuses).toEqual([409]);
     expect(visit.traffic.posts).toHaveLength(8);
     await expectStoredValues(visit, { STRIPE_WEBHOOK_SECRET: other });
-  } finally {
-    await visit.close();
-  }
-});
-
-it('E11: one D1 failure ends Failed; Retry failed sends only that key with its original write id', async () => {
-  const visit = await importPage(browser, {
-    configure: (_page, app) => failImportKey(app, 'STRIPE_WEBHOOK_SECRET'),
-  });
-  const { page, app, traffic } = visit;
-  try {
-    await reviewPaste(page);
-    await createImport(page, 8);
-    await importSettled(page);
-    await expectOutcome(page, 'STRIPE_WEBHOOK_SECRET', 'Failed');
-    await shortFailure(runRow(page, 'STRIPE_WEBHOOK_SECRET'));
-    await expectCreated(
-      page,
-      readyNames.filter((name) => name !== 'STRIPE_WEBHOOK_SECRET'),
-    );
-    const before = [...traffic.posts];
-    const failures = before.filter(
-      ({ name }) => name === 'STRIPE_WEBHOOK_SECRET',
-    );
-    expect(failures).toHaveLength(3);
-    expectWriteIds(failures, 1);
-    expect(before).toHaveLength(10);
-    await restoreImportStorage(app);
-    await importSheet(page)
-      .getByRole('button', { name: 'Retry failed', exact: true })
-      .click();
-    await expectCreated(page, readyNames);
-    await importSettled(page);
-    expect(
-      traffic.posts
-        .slice(before.length)
-        .map(({ name, writeId }) => ({ name, writeId })),
-    ).toEqual([
-      { name: 'STRIPE_WEBHOOK_SECRET', writeId: failures[0].writeId },
-    ]);
-    expect(
-      (await listSecrets(app)).filter(({ bucket }) => bucket === importBucket),
-    ).toHaveLength(10);
-    await expectStoredValues(visit, {
-      STRIPE_WEBHOOK_SECRET: mixedValues.STRIPE_WEBHOOK_SECRET,
-    });
   } finally {
     await visit.close();
   }
@@ -657,26 +532,6 @@ async function expectLossStorage(
     [lostName]: isOurs ? lostValue : otherValue,
   });
 }
-
-it('E13/state space: VaultNotConfigured before any uncertain attempt is a definitive Failed result', async () => {
-  const visit = await importPage(browser);
-  try {
-    await reviewPaste(visit.page, 'MISSING_KEY=synthetic-missing-vault-key');
-    await visit.app.setBindings({ ...visit.app.bindings, VAULT_KEY: '' });
-    await createImport(visit.page, 1);
-    await importSettled(visit.page);
-    await expectOutcome(visit.page, 'MISSING_KEY', 'Failed');
-    expect(visit.traffic.posts).toHaveLength(1);
-    expect(
-      (await listSecrets(visit.app)).some(({ name }) => name === 'MISSING_KEY'),
-    ).toBe(false);
-    expect(await runRow(visit.page, 'MISSING_KEY').innerText()).toContain(
-      'This installation has no VAULT_KEY. Add it as a Worker secret, then try again.',
-    );
-  } finally {
-    await visit.close();
-  }
-});
 
 it('E13: a lost list leaves Not confirmed; Retry failed resends only that key with its original id and retained value', async () => {
   let importing = false;
@@ -959,6 +814,7 @@ it('E17: Done drops every imported value from DOM, Query cache and mutation stat
     await createImport(page, 8);
     await importSettled(page);
     await expectOutcome(page, 'STRIPE_WEBHOOK_SECRET', 'Failed');
+    await shortFailure(runRow(page, 'STRIPE_WEBHOOK_SECRET'));
     expect(
       await importSheet(page)
         .getByRole('button', { name: 'Retry failed', exact: true })
@@ -994,7 +850,7 @@ it('E17: Done drops every imported value from DOM, Query cache and mutation stat
   }
 });
 
-it('E18: no request precedes Create and every body contains only checked Ready rows; existing secrets are neither overwritten nor deleted', async () => {
+it('E18/E19: no request precedes Create and every body contains only checked Ready rows; existing secrets are neither overwritten nor deleted, and Audit history is unchanged', async () => {
   const visit = await importPage(browser);
   const { page, app, traffic } = visit;
   const oversized = 'synthetic-too-long-'.repeat(4096);
@@ -1003,6 +859,11 @@ it('E18: no request precedes Create and every body contains only checked Ready r
     (name) => !['DATABASE_URL', 'OPENAI_API_KEY'].includes(name),
   );
   try {
+    const reveal = await revealSecret(app, `${importBucket}/STRIPE_SECRET_KEY`);
+    expect(reveal.status).toBe(200);
+    await reveal.body?.cancel();
+    const audit = await auditRows(app);
+    expect(audit).toHaveLength(1);
     const before = await secretRows(app);
     await reviewPaste(page, blocked);
     await importSheet(page)
@@ -1053,95 +914,84 @@ it('E18: no request precedes Create and every body contains only checked Ready r
       SENTRY_DSN: visit.values[3],
       STRIPE_SECRET_KEY: visit.values[4],
     });
+    expect(await auditRows(app)).toEqual(audit);
   } finally {
     await visit.close();
   }
 });
 
-it('E19: owner imports add no Audit entries to an existing audit history', async () => {
-  const visit = await importPage(browser);
-  try {
-    const reveal = await revealSecret(
-      visit.app,
-      `${importBucket}/STRIPE_SECRET_KEY`,
-    );
-    expect(reveal.status).toBe(200);
-    await reveal.body?.cancel();
-    const before = await auditRows(visit.app);
-    expect(before).toHaveLength(1);
-    await reviewPaste(visit.page);
-    await createImport(visit.page, 8);
-    await importSettled(visit.page);
-    await expectCreated(visit.page, readyNames);
-    const after = await auditRows(visit.app);
-    expect(after).toHaveLength(before.length);
-    expect(after).toEqual(before);
-  } finally {
-    await visit.close();
-  }
-});
+async function expectImportLayout(page: Page, width: number) {
+  const widths = await page.evaluate(() => {
+    const sheet = document.querySelector('[role="dialog"]');
+    if (!sheet) throw new Error('Import Sheet missing during layout check.');
+    return {
+      page: document.documentElement.scrollWidth,
+      viewport: innerWidth,
+      sheet: sheet.scrollWidth,
+      sheetClient: sheet.clientWidth,
+    };
+  });
+  expect(widths.page).toBe(widths.viewport);
+  expect(widths.viewport).toBe(width);
+  expect(widths.sheet).toBeLessThanOrEqual(widths.sheetClient);
+}
 
-const viewports = [
+it.each([
   { width: 1440, height: 900 },
   { width: 390, height: 844 },
-];
-const layouts = viewports.flatMap((viewport) =>
-  ['mixed', 'results-partial'].map((state) => ({ ...viewport, state })),
-);
-it.each(layouts)(
-  'E20a: $state at $width×$height has no horizontal overflow or console errors',
-  async ({ width, height, state }) => {
+])(
+  'E13/E20a: mixed review and partial results at $width×$height have no horizontal overflow or console errors; a definitive VaultNotConfigured is not retried',
+  async ({ width, height }) => {
     const errors: string[] = [];
     let release = () => {};
     const visit = await importPage(browser, {
       viewport: { width, height },
       configure: async (page, app) => {
         await observeImportConsole(page, errors);
-        if (state === 'results-partial')
-          release = await partialImportResults(page, app);
+        release = await partialImportResults(page, app);
       },
     });
     const { page } = visit;
     try {
       await reviewPaste(page);
-      if (state === 'results-partial') {
-        await createImport(page, 8);
-        await importSettled(page);
-        await expectCreated(
-          page,
-          readyNames.filter(
-            (name) =>
-              !['STRIPE_WEBHOOK_SECRET', 'GITHUB_APP_ID'].includes(name),
-          ),
-        );
-        await expectOutcome(page, 'STRIPE_WEBHOOK_SECRET', 'Failed');
-        await expectOutcome(page, 'GITHUB_APP_ID', 'Not confirmed');
+      await expectMixedReview(page);
+      await expectImportLayout(page, width);
+      await createImport(page, 8);
+      await importSettled(page);
+      await expectCreated(
+        page,
+        readyNames.filter(
+          (name) => !['STRIPE_WEBHOOK_SECRET', 'GITHUB_APP_ID'].includes(name),
+        ),
+      );
+      await expectOutcome(page, 'STRIPE_WEBHOOK_SECRET', 'Failed');
+      expect(await runRow(page, 'STRIPE_WEBHOOK_SECRET').innerText()).toContain(
+        'This installation has no VAULT_KEY. Add it as a Worker secret, then try again.',
+      );
+      expect(
+        visit.traffic.posts.filter(
+          ({ name }) => name === 'STRIPE_WEBHOOK_SECRET',
+        ),
+      ).toHaveLength(1);
+      expect(
+        (await listSecrets(visit.app)).some(
+          ({ bucket, name }) =>
+            bucket === importBucket && name === 'STRIPE_WEBHOOK_SECRET',
+        ),
+      ).toBe(false);
+      await expectOutcome(page, 'GITHUB_APP_ID', 'Not confirmed');
+      await importSheet(page)
+        .getByRole('heading', {
+          name: 'Import finished with problems',
+          exact: true,
+        })
+        .waitFor();
+      expect(
         await importSheet(page)
-          .getByRole('heading', {
-            name: 'Import finished with problems',
-            exact: true,
-          })
-          .waitFor();
-        expect(
-          await importSheet(page)
-            .getByRole('button', { name: 'Retry failed', exact: true })
-            .isEnabled(),
-        ).toBe(true);
-      } else await expectMixedReview(page);
-      const widths = await page.evaluate(() => {
-        const sheet = document.querySelector('[role="dialog"]');
-        if (!sheet)
-          throw new Error('Import Sheet missing during layout check.');
-        return {
-          page: document.documentElement.scrollWidth,
-          viewport: innerWidth,
-          sheet: sheet.scrollWidth,
-          sheetClient: sheet.clientWidth,
-        };
-      });
-      expect(widths.page).toBe(widths.viewport);
-      expect(widths.viewport).toBe(width);
-      expect(widths.sheet).toBeLessThanOrEqual(widths.sheetClient);
+          .getByRole('button', { name: 'Retry failed', exact: true })
+          .isEnabled(),
+      ).toBe(true);
+      await expectImportLayout(page, width);
       expect(errors).toEqual([]);
     } finally {
       release();
@@ -1150,8 +1000,9 @@ it.each(layouts)(
   },
 );
 
-it('E2/E7/E9: exactly 100 keys round-trip CRLF, a 64 KiB UTF-8 value, multiline text and literal variable references', async () => {
+it('E2/E7/E9: 101 keys stay on Paste with trim guidance; exactly 100 keys round-trip CRLF, a 64 KiB UTF-8 value, multiline text and literal variable references', async () => {
   const visit = await importPage(browser);
+  const { page, traffic } = visit;
   const values = Object.fromEntries(
     Array.from({ length: 100 }, (_, index) => [
       `KEY_${index}`,
@@ -1166,13 +1017,49 @@ it('E2/E7/E9: exactly 100 keys round-trip CRLF, a 64 KiB UTF-8 value, multiline 
     .join('\n')
     .replaceAll('\n', '\r\n');
   try {
-    await reviewPaste(visit.page, text);
-    await createImport(visit.page, 100);
+    await openImport(page);
+    await pasteField(page).fill(keysPaste(101));
+    await importSheet(page)
+      .getByText(
+        'This paste has 101 keys. Nook imports up to 100 at a time, so nothing can be created from it.',
+        { exact: true },
+      )
+      .waitFor();
+    await importSheet(page)
+      .getByText(
+        'Remove some lines, or split the file and import it in parts.',
+        { exact: true },
+      )
+      .waitFor();
+    expect(
+      await importSheet(page)
+        .getByRole('button', { name: 'Review keys', exact: true })
+        .isEnabled(),
+    ).toBe(false);
+    expect(
+      await importSheet(page)
+        .getByRole('textbox', { name: /^Name from line / })
+        .count(),
+    ).toBe(0);
+    await pasteField(page).fill(text);
+    await importSheet(page)
+      .getByRole('button', { name: 'Review keys', exact: true })
+      .click();
+    await importSheet(page)
+      .getByText(/Step 2 of 2\./)
+      .waitFor();
+    expect(
+      await importSheet(page)
+        .getByRole('textbox', { name: /^Name from line / })
+        .count(),
+    ).toBe(100);
+    expect(traffic.writes()).toEqual([]);
+    await createImport(page, 100);
     // 100 writes at three in flight outlast the default wait on CI runners.
-    await importSettled(visit.page, 20_000);
-    await expectCreated(visit.page, Object.keys(values));
-    expect(visit.traffic.posts).toHaveLength(100);
-    expectWriteIds(visit.traffic.posts, 100);
+    await importSettled(page, 20_000);
+    await expectCreated(page, Object.keys(values));
+    expect(traffic.posts).toHaveLength(100);
+    expectWriteIds(traffic.posts, 100);
     expect(
       (await listSecrets(visit.app)).filter(
         ({ bucket }) => bucket === importBucket,

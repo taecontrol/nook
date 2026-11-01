@@ -5,6 +5,11 @@ export const secretLimits = {
   description: 200,
   valueBytes: 64 * 1024,
 } as const;
+export const secretValueLimit = `${secretLimits.valueBytes / 1024} KiB`;
+export const secretValueLimitMessage = `A value can be at most ${secretValueLimit}.`;
+export function secretValueTooLong(value: string) {
+  return new TextEncoder().encode(value).length > secretLimits.valueBytes;
+}
 export function validateSecretName(name: string): string | undefined {
   if (name === '') return 'Enter a name.';
   if (!/^[A-Z_][A-Z0-9_]*$/.test(name))
@@ -24,8 +29,7 @@ export function validateSecretValue(value: string): string | undefined {
   if (value === '') return 'Enter a value.';
   if (value.includes('\0')) return 'A value cannot contain NUL.';
   if (/[\uD800-\uDFFF]/u.test(value)) return 'Use valid Unicode for the value.';
-  if (new TextEncoder().encode(value).length > secretLimits.valueBytes)
-    return `A value can be at most ${secretLimits.valueBytes / 1024} KiB.`;
+  if (secretValueTooLong(value)) return secretValueLimitMessage;
 }
 export function secretPath(secret: { bucket: string; name: string }) {
   return `${secret.bucket}/${secret.name}`;

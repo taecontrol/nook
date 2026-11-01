@@ -1,5 +1,5 @@
 import {
-  secretLimits,
+  secretValueTooLong,
   validateSecretDescription,
   validateSecretName,
 } from '@nook/contract';
@@ -47,9 +47,7 @@ export function rowsFrom(
 function valueStatus(value: Redacted.Redacted<string>): ImportRow['value'] {
   const text = Redacted.value(value);
   if (text === '') return 'empty';
-  return new TextEncoder().encode(text).length > secretLimits.valueBytes
-    ? 'too-long'
-    : 'present';
+  return secretValueTooLong(text) ? 'too-long' : 'present';
 }
 function baseStatus(row: ImportRow, existing: ReadonlySet<string>): RowStatus {
   if (row.value !== 'present') return row.value;

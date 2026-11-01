@@ -1,4 +1,8 @@
-import { secretLimits, validateSecretDescription } from '@nook/contract';
+import {
+  secretLimits,
+  secretValueLimit,
+  validateSecretDescription,
+} from '@nook/contract';
 import { cn } from 'cn';
 import { Redacted } from 'effect';
 import {
@@ -46,6 +50,9 @@ import { noAutofill } from '@/no-autofill';
 import { Path } from '@/path-text';
 import { type ParsedEnv as Parsed, parseEnv } from './env-parse';
 import {
+  importing,
+  importPausedMessage,
+  importSummary,
   type ImportOutcome as Outcome,
   type ImportRun as Run,
   type ImportKey as RunItem,
@@ -61,19 +68,13 @@ import {
   type RowStatus as Status,
 } from './vault-import-model';
 import { plural, type Secret } from './vault-model';
+import { sectionLabel } from './vault-styles';
 
 type Group = 'fix' | 'ready' | 'skip';
 type Row = ImportRow & { group: Group };
 type Skipped = Run['skipped'][number];
 type Step = 'paste' | 'review' | 'run';
 const NAME_MAX = secretLimits.name;
-
-export const sectionLabel =
-  'text-xs font-medium tracking-wider text-muted-foreground uppercase';
-
-function pending(run: Run | null) {
-  return run !== null && !run.settled;
-}
 
 /* ---------- shared pieces ---------- */
 
@@ -260,7 +261,7 @@ function reasonFor(
   if (status === 'ready') return readyReason(row);
   const skipped = {
     empty: 'Empty value. Skipped.',
-    'too-long': 'Value is over 64 KiB. Skipped.',
+    'too-long': `Value is over ${secretValueLimit}. Skipped.`,
     exists: (
       <>
         Already in <Path>{bucket}</Path>. Skipped; the stored value stays as it
@@ -599,9 +600,8 @@ function SkippedList({ skipped }: { skipped: readonly Skipped[] }) {
 
 function RunStep({ run }: { run: Run }) {
   const total = run.keys.length;
-  const created = run.keys.filter((item) => item.outcome === 'created').length;
-  const running = pending(run);
-  const retry = run.keys.filter(retryable);
+  const { created, retry } = importSummary(run);
+  const running = importing(run);
   const settled = run.keys.filter((item) => !retryable(item));
   return (
     <>
@@ -620,8 +620,7 @@ function RunStep({ run }: { run: Run }) {
         />
         {running && (
           <p className="text-sm text-muted-foreground">
-            Closing this or opening another page doesn’t stop the import. New
-            secret, Replace and Delete are paused until it finishes.
+            {`Closing this or opening another page doesn’t stop the import. ${importPausedMessage}`}
           </p>
         )}
       </div>
@@ -641,7 +640,7 @@ function RunStep({ run }: { run: Run }) {
 
 /* ---------- the sheet ---------- */
 
-export type ImportSheetProps = {
+type ImportSheetProps = {
   open: boolean;
   step: Step;
   bucket: string;
@@ -666,7 +665,7 @@ export type ImportSheetProps = {
 };
 
 function runHeader(run: Run) {
-  if (!run.settled)
+  if (importing(run))
     return {
       title: 'Importing…',
       description: (
@@ -677,8 +676,8 @@ function runHeader(run: Run) {
         </>
       ),
     };
-  const failed = run.keys.filter(retryable).length;
-  const created = run.keys.filter((item) => item.outcome === 'created').length;
+  const { created, retry } = importSummary(run);
+  const failed = retry.length;
   return {
     title: failed ? 'Import finished with problems' : 'Import finished',
     description: (
@@ -743,8 +742,8 @@ function ReviewFooter(props: ImportSheetProps) {
   );
 }
 function RunFooter(props: ImportSheetProps) {
-  const running = pending(props.run);
-  const retry = props.run?.keys.some(retryable) ?? false;
+  const running = importing(props.run);
+  const retry = props.run ? importSummary(props.run).retry.length > 0 : false;
   return (
     <>
       <Button
@@ -856,7 +855,7 @@ const skipWhy: Record<Status, (bucket: string) => string> = {
   'invalid-description': () => 'Invalid description; not created.',
   duplicate: () => 'Duplicate name; not created.',
   empty: () => 'Empty value; not created.',
-  'too-long': () => 'Value over 64 KiB; not created.',
+  'too-long': () => `Value over ${secretValueLimit}; not created.`,
   ready: () => 'Unchecked; not created.',
 };
 type SheetProps = {

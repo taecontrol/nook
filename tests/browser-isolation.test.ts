@@ -22,7 +22,7 @@ const directoryNames = [
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 it.each(['visibility', 'Playwright'] as const)(
-  'the %s browser owns a temporary HOME and uses the basic password store without the owner session bus',
+  'the %s browser owns a temporary HOME, uses the basic password store, and loads no host extensions or owner session bus',
   async (name) => {
     const owner = await temporaryTestHome('/tmp/nook-synthetic-browser-owner-');
     const report = resolve(owner, 'launch.json');
@@ -35,7 +35,7 @@ it.each(['visibility', 'Playwright'] as const)(
       [
         "import {writeFileSync} from 'node:fs';",
         'const home = process.env.HOME; const args = process.argv.slice(2);',
-        `writeFileSync(${JSON.stringify(report)}, JSON.stringify({home, directories:${JSON.stringify(directoryNames)}.map(name=>process.env[name]), bus:process.env.DBUS_SESSION_BUS_ADDRESS, basic:args.includes("--password-store=basic"), mock:args.includes("--use-mock-keychain"), profile:args.find(arg=>arg.startsWith("--user-data-dir="))?.slice(16), leaked:"NOOK_LEAK_SENTINEL" in process.env}));`,
+        `writeFileSync(${JSON.stringify(report)}, JSON.stringify({home, directories:${JSON.stringify(directoryNames)}.map(name=>process.env[name]), bus:process.env.DBUS_SESSION_BUS_ADDRESS, basic:args.includes("--password-store=basic"), mock:args.includes("--use-mock-keychain"), extensions:!args.includes("--disable-extensions"), profile:args.find(arg=>arg.startsWith("--user-data-dir="))?.slice(16), leaked:"NOOK_LEAK_SENTINEL" in process.env}));`,
       ].join('\n'),
     );
     await writeFile(
@@ -69,6 +69,7 @@ it.each(['visibility', 'Playwright'] as const)(
       home = observed.home;
       expect(observed.basic).toBe(true);
       expect(observed.mock).toBe(true);
+      expect(observed.extensions).toBe(false);
       expect(home === owner).toBe(false);
       expect(home?.startsWith('/tmp/nook-test-run-')).toBe(true);
       expect(observed.profile?.startsWith('/tmp/')).toBe(true);

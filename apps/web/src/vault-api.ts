@@ -1,4 +1,4 @@
-import type { OwnerSecret } from '@nook/contract';
+import { type OwnerSecret, secretPath } from '@nook/contract';
 import {
   type Mutation,
   type QueryClient,
@@ -35,6 +35,27 @@ export type SecretWrite = {
   expectedVersion: string;
   batch?: string;
 };
+export function secretWrite(
+  op: Exclude<WriteOp, 'delete'>,
+  input: Pick<OwnerSecret, 'bucket' | 'name' | 'description'> & {
+    expectedVersion?: string;
+  },
+): SecretWrite {
+  const writeId = crypto.randomUUID();
+  return {
+    op,
+    writeId,
+    expectedVersion: input.expectedVersion ?? writeId,
+    secret: {
+      bucket: input.bucket,
+      name: input.name,
+      path: secretPath(input),
+      description: input.description,
+      version: writeId,
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
 type WriteResult = { secret: OwnerSecret | null; message?: string };
 export type ObservedWrite = {
   id: number;
