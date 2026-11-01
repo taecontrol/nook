@@ -12,7 +12,12 @@ import { parentBuckets } from './bucket-tree';
 import { useBucketList } from './buckets-api';
 import { useDesktop } from './hooks/use-desktop';
 import { useReturnFocus } from './use-confirm-target';
-import { type SecretWrite, unconfirmed, useVault } from './vault-api';
+import {
+  type SecretWrite,
+  secretWrite,
+  unconfirmed,
+  useVault,
+} from './vault-api';
 import { feedbackFor } from './vault-feedback';
 import { useVaultImport } from './vault-import';
 import { countByBucket, type Secret } from './vault-model';
@@ -35,22 +40,6 @@ function replacement(secret: Secret): Draft {
     description: secret.description,
     expectedVersion: secret.version,
     value: '',
-  };
-}
-function fromDraft(draft: Draft): SecretWrite {
-  const writeId = crypto.randomUUID();
-  return {
-    op: draft.mode,
-    writeId,
-    expectedVersion: draft.expectedVersion ?? writeId,
-    secret: {
-      bucket: draft.bucket,
-      name: draft.name,
-      path: secretPath(draft),
-      description: draft.description,
-      version: writeId,
-      updatedAt: new Date().toISOString(),
-    },
   };
 }
 function invalidDraft(draft: Draft) {
@@ -159,10 +148,13 @@ export function useVaultPage() {
       patch({ sheet: { ...sheet, submitted: true, confirming: true } });
       return;
     }
-    if (run(fromDraft(draft), draft)) void show(draft.bucket);
+    if (run(secretWrite(draft.mode, draft), draft)) void show(draft.bucket);
   };
   const confirmReplace = () => {
-    if (state.sheet) run(fromDraft(state.sheet.draft), state.sheet.draft);
+    if (state.sheet) {
+      const { draft } = state.sheet;
+      run(secretWrite(draft.mode, draft), draft);
+    }
   };
   const openCreate = (bucket?: string) => {
     if (busy) return;
