@@ -1,10 +1,14 @@
 import { createInterface } from 'node:readline';
 import { Writable } from 'node:stream';
-import { secretLimits, validateSecretValue } from '@nook/contract';
+import {
+  secretLimits,
+  secretValueLimitMessage,
+  validateSecretValue,
+} from '@nook/contract';
 import { Effect, Redacted } from 'effect';
 import { CliFailure } from './errors.ts';
 
-const tooLarge = () => new CliFailure('A value can be at most 64 KiB.');
+const tooLarge = () => new CliFailure(secretValueLimitMessage);
 const utf8 = () => new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 async function pipedValue() {
   const chunks: Buffer[] = [];

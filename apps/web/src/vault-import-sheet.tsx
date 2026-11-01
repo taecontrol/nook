@@ -1,4 +1,8 @@
-import { secretLimits, validateSecretDescription } from '@nook/contract';
+import {
+  secretLimits,
+  secretValueLimit,
+  validateSecretDescription,
+} from '@nook/contract';
 import { cn } from 'cn';
 import { Redacted } from 'effect';
 import {
@@ -259,7 +263,7 @@ function reasonFor(
   if (status === 'ready') return readyReason(row);
   const skipped = {
     empty: 'Empty value. Skipped.',
-    'too-long': 'Value is over 64 KiB. Skipped.',
+    'too-long': `Value is over ${secretValueLimit}. Skipped.`,
     exists: (
       <>
         Already in <Path>{bucket}</Path>. Skipped; the stored value stays as it
@@ -853,7 +857,7 @@ const skipWhy: Record<Status, (bucket: string) => string> = {
   'invalid-description': () => 'Invalid description; not created.',
   duplicate: () => 'Duplicate name; not created.',
   empty: () => 'Empty value; not created.',
-  'too-long': () => 'Value over 64 KiB; not created.',
+  'too-long': () => `Value over ${secretValueLimit}; not created.`,
   ready: () => 'Unchecked; not created.',
 };
 type SheetProps = {

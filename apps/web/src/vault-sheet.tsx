@@ -1,6 +1,6 @@
 import {
-  secretLimits,
   secretPath,
+  secretValueLimit,
   validateSecretDescription,
   validateSecretName,
   validateSecretValue,
@@ -194,7 +194,7 @@ function ValueField({
           <FieldDescription>
             {replacing
               ? 'Overwrites the current value. '
-              : `Up to ${secretLimits.valueBytes / 1024} KiB, several lines are fine. `}
+              : `Up to ${secretValueLimit}, several lines are fine. `}
             Once saved, it is encrypted; reveal it from the list when you need
             it.
           </FieldDescription>
