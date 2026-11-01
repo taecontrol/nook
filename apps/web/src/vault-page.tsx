@@ -61,15 +61,13 @@ import { useVaultPage } from './use-vault-page';
 import { ImportNotice, WriteFeedback } from './vault-feedback';
 import { ancestorsOf, plural, type Secret, secretsIn } from './vault-model';
 import { SecretSheet } from './vault-sheet';
+import { sectionLabel } from './vault-styles';
 
 // Intent loads only the dialog's code; the value is fetched, and audited, on open.
 const loadRevealDialog = () => import('./reveal-dialog');
 const RevealDialog = lazy(loadRevealDialog);
 const loadImportSheet = () => import('./vault-import-sheet');
 const VaultImportSheet = lazy(loadImportSheet);
-
-const sectionLabel =
-  'text-xs font-medium tracking-wider text-muted-foreground uppercase';
 
 /* ---------- secret rows ---------- */
 
@@ -759,9 +757,7 @@ function VaultDialogs({ page }: { page: Page }) {
         <Suspense fallback={null}>
           <VaultImportSheet
             open={page.importOpen}
-            initialBucket={
-              page.buckets.includes(page.selected) ? page.selected : 'me'
-            }
+            initialBucket={page.defaultBucket}
             buckets={page.buckets}
             parents={page.parents}
             secrets={page.list ?? []}

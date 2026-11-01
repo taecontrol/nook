@@ -68,15 +68,13 @@ import {
   type RowStatus as Status,
 } from './vault-import-model';
 import { plural, type Secret } from './vault-model';
+import { sectionLabel } from './vault-styles';
 
 type Group = 'fix' | 'ready' | 'skip';
 type Row = ImportRow & { group: Group };
 type Skipped = Run['skipped'][number];
 type Step = 'paste' | 'review' | 'run';
 const NAME_MAX = secretLimits.name;
-
-export const sectionLabel =
-  'text-xs font-medium tracking-wider text-muted-foreground uppercase';
 
 /* ---------- shared pieces ---------- */
 

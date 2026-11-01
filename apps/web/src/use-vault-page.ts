@@ -115,6 +115,7 @@ export function useVaultPage() {
   );
   const list = secrets.data;
   const selected = search.bucket ?? RESERVED_BUCKET;
+  const defaultBucket = buckets.includes(selected) ? selected : RESERVED_BUCKET;
   const drilled = search.bucket !== undefined;
   const parents = useMemo(() => parentBuckets(buckets), [buckets]);
   const counts = useMemo(() => (list ? countByBucket(list) : null), [list]);
@@ -159,11 +160,7 @@ export function useVaultPage() {
   const openCreate = (bucket?: string) => {
     if (busy) return;
     patch({
-      sheet: openSheet(
-        blankDraft(
-          bucket ?? (buckets.includes(selected) ? selected : RESERVED_BUCKET),
-        ),
-      ),
+      sheet: openSheet(blankDraft(bucket ?? defaultBucket)),
     });
   };
   const openReplace = (secret: Secret) => {
@@ -248,6 +245,7 @@ export function useVaultPage() {
     confirming: vault.confirming,
     drilled,
     selected,
+    defaultBucket,
     parents,
     counts,
     highlighted,
