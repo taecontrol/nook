@@ -38,6 +38,19 @@ export type ImportRun = {
 };
 type ImportDetails = Pick<ImportRun, 'skipped' | 'unreadable'>;
 
+export const importPausedMessage =
+  'New secret, Replace and Delete are paused until it finishes.';
+
+export function importing(run: ImportRun | null) {
+  return run !== null && !run.settled;
+}
+export function importSummary(run: ImportRun) {
+  return {
+    created: run.keys.filter((key) => key.outcome === 'created').length,
+    retry: run.keys.filter(retryable),
+  };
+}
+
 function successOutcome(write: ObservedWrite): ImportOutcome {
   if (!write.result?.secret) return 'failed';
   return write.result.secret.version === write.input.writeId
@@ -148,7 +161,7 @@ function createSession(queries: QueryClient) {
           settled: !keys.some(pending),
         }
       : null;
-    const warning = snapshot !== null && !snapshot.settled;
+    const warning = importing(snapshot);
     if (warning !== warned) {
       window[warning ? 'addEventListener' : 'removeEventListener'](
         'beforeunload',
@@ -245,6 +258,7 @@ export function useVaultImport() {
   const run = useSyncExternalStore(session.subscribe, session.getSnapshot);
   return {
     run,
+    importing: importing(run),
     start: session.start,
     retryFailed: session.retryFailed,
     dismiss: session.dismiss,

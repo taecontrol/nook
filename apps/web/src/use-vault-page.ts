@@ -238,7 +238,7 @@ export function useVaultPage() {
     },
     revealing: reveal?.href === location.href ? reveal.secret : null,
     openReveal: (secret: Secret) => {
-      if (!busy || (importer.run && !importer.run.settled))
+      if (!busy || importer.importing)
         setReveal({ href: location.href, secret });
     },
     closeReveal: () => setReveal(null),

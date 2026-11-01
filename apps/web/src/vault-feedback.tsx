@@ -5,7 +5,12 @@ import { type ApiError, describeFailure } from './api-client';
 import { DismissibleAlert } from './failure';
 import { Path } from './path-text';
 import { failureMessage, type ObservedWrite, unconfirmed } from './vault-api';
-import { type ImportRun, retryable } from './vault-import';
+import {
+  type ImportRun,
+  importing,
+  importPausedMessage,
+  importSummary,
+} from './vault-import';
 import { plural } from './vault-model';
 import type { Feedback, WriteOp } from './vault-state';
 
@@ -80,14 +85,14 @@ export function ImportNotice({
   onShow: () => void;
   onDismiss: () => void;
 }) {
-  const created = run.keys.filter((key) => key.outcome === 'created').length;
-  const failed = run.keys.filter(retryable).length;
-  if (!run.settled)
+  const { created, retry } = importSummary(run);
+  const failed = retry.length;
+  if (importing(run))
     return (
       <DismissibleAlert icon={<Spinner />} title="Importing secrets…">
         <p>
-          {created} of {run.keys.length} created in <Path>{run.bucket}</Path>.
-          New secret, Replace and Delete are paused until it finishes.
+          {created} of {run.keys.length} created in <Path>{run.bucket}</Path>
+          {`. ${importPausedMessage}`}
         </p>
         <Button variant="outline" size="sm" className="mt-1" onClick={onShow}>
           Show progress

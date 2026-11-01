@@ -539,9 +539,7 @@ function StoredSecrets({
                   <SecretMenu
                     secret={secret}
                     busy={busy}
-                    allowReveal={
-                      page.importer.run !== null && !page.importer.run.settled
-                    }
+                    allowReveal={page.importer.importing}
                     onReveal={page.openReveal}
                     onReplace={page.openReplace}
                     onDelete={page.requestDelete}
