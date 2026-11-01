@@ -9,7 +9,13 @@ export async function browserEnvironment() {
     options: {
       // Pin the browser's local time so dates render the same on every host.
       env: testEnvironment(home, { TZ: 'UTC' }),
-      args: ['--password-store=basic', '--use-mock-keychain'],
+      // Host extensions installed system-wide (such as
+      // /usr/share/chromium/extensions) must not open tabs in a test browser.
+      args: [
+        '--password-store=basic',
+        '--use-mock-keychain',
+        '--disable-extensions',
+      ],
     },
     close: () => rm(home, { recursive: true, force: true }),
   };
