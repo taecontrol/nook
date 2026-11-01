@@ -5,12 +5,7 @@ import { deferred } from './machines.ts';
 import { createSecret, secretInput, type vaultRuntime } from './vault.ts';
 import { failImportKey, restoreImportStorage } from './vault-import-browser.ts';
 
-export type LossState =
-  | 'committed'
-  | 'other'
-  | 'absent'
-  | 'negative'
-  | 'key-missing';
+type LossState = 'committed' | 'other' | 'absent' | 'negative' | 'key-missing';
 export const lostName = 'LOST_KEY';
 export const lostValue = 'synthetic-import-lost-value';
 export const otherValue = 'synthetic-import-other-session';

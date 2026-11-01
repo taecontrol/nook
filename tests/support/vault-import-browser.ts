@@ -12,8 +12,8 @@ import type { TestRuntime } from './runtime.ts';
 import { decryptRow, secretRows, vaultRuntime } from './vault.ts';
 import { secretRow, vaultPage } from './vault-browser.ts';
 
-export type ImportVisit = Awaited<ReturnType<typeof importPage>>;
-export type CreateAttempt = {
+type ImportVisit = Awaited<ReturnType<typeof importPage>>;
+type CreateAttempt = {
   bucket: string;
   name: string;
   description?: string;
@@ -22,7 +22,7 @@ export type CreateAttempt = {
 };
 type RecordedRequest = { method: string; path: string; body: string | null };
 
-export function recordImportRequests(page: Page) {
+function recordImportRequests(page: Page) {
   const requests: RecordedRequest[] = [];
   const posts: CreateAttempt[] = [];
   page.on('request', (request: Request) => {
