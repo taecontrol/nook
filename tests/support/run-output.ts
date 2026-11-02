@@ -8,8 +8,8 @@ const [mode, entry, ...args] = process.argv.slice(2);
 const home = process.env.HOME;
 if (!home) throw new Error('The output fixture requires a private HOME.');
 const file = resolve(home, 'output');
-const fd =
-  mode === 'shared' || mode === 'background' ? openSync(file, 'w') : undefined;
+const shared = ['shared', 'background', 'continuous-background'].includes(mode);
+const fd = shared ? openSync(file, 'w') : undefined;
 const child = spawn(process.execPath, [entry, ...args], {
   stdio: ['ignore', fd ?? 'pipe', fd ?? 'pipe'],
 });
@@ -39,7 +39,7 @@ if (mode === 'head') {
       ]);
   });
 const [status] = await exited;
-if (mode === 'background') {
+if (mode === 'background' || mode === 'continuous-background') {
   // The test releases the writer only after examining this exit-time snapshot.
   writeFileSync(resolve(home, 'exit-snapshot'), readFileSync(file));
   process.stdout.write(JSON.stringify({ status }) + '\n');

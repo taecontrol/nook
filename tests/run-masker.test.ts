@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { maskedValues, masker } from '../apps/cli/src/masker.ts';
 
 const path = 'work/acme/TOKEN';
@@ -94,4 +94,36 @@ it('EOF masks a complete shorter value held for a possible longer value', () => 
     { path: 'work/acme/LONG', value: 'abcdefghijkl' },
   ];
   expect(replaced([Buffer.from('abcdefgh')], entries).toString()).toBe(marker);
+});
+it('adversarial long prefixes stay within a linear bulk-comparison budget', () => {
+  const entries = Array.from({ length: 20 }, (_, i) => ({
+    path: `work/acme/VALUE_${i}`,
+    value: 'a'.repeat(65_534) + String.fromCharCode(66 + i),
+  }));
+  const stream = masker(maskedValues(entries));
+  const chunk = Buffer.from('a'.repeat(65_535) + '!');
+  // Every failed equals() in the old suffix search scans to the final byte.
+  // Count that work instead of imposing a machine-dependent time budget.
+  const budget = 4 * entries.length * chunk.length;
+  let compared = 0;
+  const equals = Buffer.prototype.equals;
+  const bulk = vi
+    .spyOn(Buffer.prototype, 'equals')
+    .mockImplementation(function (this: Buffer, ...args: unknown[]) {
+      const other = args[0] as Uint8Array;
+      compared += Math.min(this.length, other.length);
+      if (compared > budget)
+        throw new Error(
+          'Prefix search exceeded a linear byte-comparison budget.',
+        );
+      return equals.call(this, other);
+    });
+  let output: Uint8Array;
+  try {
+    output = stream.push(chunk);
+  } finally {
+    bulk.mockRestore();
+  }
+  expect(Buffer.from(output).equals(chunk)).toBe(true);
+  expect(stream.end().length).toBe(0);
 });

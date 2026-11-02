@@ -12,16 +12,21 @@ children.spawn = ((file: string, args: string[], options: SpawnOptions) => {
     return original(file, args, options);
   if (existsSync(resolve(home, 'refuse-relay')))
     throw new Error('fixture-start-failure');
+  const refill = new URL('./run-relay-refill.ts', import.meta.url);
+  refill.searchParams.set('home', home);
+  const relayArgs = existsSync(resolve(home, 'continuous-output'))
+    ? [`--import=${refill.href}`, ...args]
+    : args;
   const child = original(
     existsSync(resolve(home, 'unavailable-relay'))
       ? '/nook-fixture-absent-relay'
       : file,
-    args,
+    relayArgs,
     options,
   );
   writeFileSync(
     resolve(home, 'relay-launch'),
-    JSON.stringify({ args, env: options.env, pid: child.pid }),
+    JSON.stringify({ args: relayArgs, env: options.env, pid: child.pid }),
   );
   if (existsSync(resolve(home, 'break-delivery'))) {
     const control = child.stdio[3];

@@ -69,6 +69,62 @@ if (mode === 'print-value') {
       Buffer.from(value()),
     ]),
   );
+} else if (mode === 'continuous-background') {
+  spawn(process.execPath, [process.argv[1], 'continuous-writer', expected], {
+    detached: true,
+    stdio: 'inherit',
+  }).unref();
+  readSync(
+    openSync(resolve(expected, 'writer-ready'), 'r'),
+    Buffer.alloc(1),
+    0,
+    1,
+    null,
+  );
+  writeFileSync(1, 'before:' + value() + '\n');
+  process.exitCode = 3;
+} else if (mode === 'continuous-writer') {
+  writeFileSync(resolve(expected, 'writer-pid'), String(process.pid));
+  const requests = openSync(resolve(expected, 'refill-requests'), 'r');
+  const replies = openSync(resolve(expected, 'refill-replies'), 'w');
+  writeFileSync(resolve(expected, 'writer-ready'), 'x');
+  const record = Buffer.alloc(512, 46);
+  Buffer.from(value()).copy(record);
+  let offset = 0;
+  const next = (size: number) => {
+    const bytes = Buffer.alloc(size + record.length);
+    bytes.fill(record);
+    const chunk = bytes.subarray(offset, offset + size);
+    offset = (offset + size) % record.length;
+    return chunk;
+  };
+  let flowing = false;
+  while (!flowing) {
+    const header = Buffer.alloc(4);
+    let received = 0;
+    while (received < 4)
+      received += readSync(requests, header, received, 4 - received, null);
+    const size = header.readUInt32BE();
+    if (size === 0xffffffff) {
+      writeSync(replies, 'x');
+      process.exit(0);
+    }
+    if (size) writeFileSync(2, next(size));
+    else {
+      flowing = true;
+      writeFileSync(resolve(expected, 'writer-flowing'), 'x');
+    }
+    writeSync(replies, 'x');
+  }
+  let stopped = false;
+  process.on('SIGTERM', () => {
+    stopped = true;
+  });
+  const pump = () => {
+    if (stopped) writeSync(2, 'after:' + value());
+    else process.stdout.write(next(64 * 1024), pump);
+  };
+  pump();
 } else if (mode === 'background') {
   spawn(process.execPath, [process.argv[1], 'background-writer', expected], {
     detached: true,
@@ -90,8 +146,9 @@ if (mode === 'print-value') {
   const launches = JSON.parse(
     readFileSync(resolve(expected, 'relay-launch'), 'utf8'),
   ) as { args: string[]; env: NodeJS.ProcessEnv };
+  const values = [value(), process.env.NOOK_TEST_INHERITED ?? value()];
   const exposed = [...launches.args, ...Object.values(launches.env)].some(
-    (entry) => entry?.includes(value()),
+    (entry) => values.some((value) => entry?.includes(value)),
   );
   writeSync(1, String(!exposed));
 } else if (mode === 'signal-status') {

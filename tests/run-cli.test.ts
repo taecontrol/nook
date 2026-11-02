@@ -1209,6 +1209,64 @@ it('Masking E16: run flushes and exits while a FIFO-gated background writer stay
     )
     .not.toBe(0);
 });
+it('Masking E16: flush has a finite byte boundary while a continuous background writer stays masked', async () => {
+  await writeFile(resolve(keyring.home, 'continuous-output'), '');
+  expect(
+    (
+      await keyring.command(
+        '/usr/bin/mkfifo',
+        ['refill-requests', 'refill-replies', 'writer-ready'].map((name) =>
+          resolve(keyring.home, name),
+        ),
+      ).done
+    ).status,
+  ).toBe(0);
+  const result = await outputProbe(
+    'continuous-background',
+    maskingArgs('continuous-background', [keyring.home]),
+  );
+  const writer = (
+    await readFile(resolve(keyring.home, 'writer-pid'), 'utf8')
+  ).trim();
+  const relay = JSON.parse(
+    await readFile(resolve(keyring.home, 'relay-launch'), 'utf8'),
+  ) as { pid: number };
+  try {
+    expect(result.status).toBe(3);
+    expect(
+      existsSync(resolve(keyring.home, 'flush-overrun')),
+      'Flush must acknowledge a finite FIFO byte boundary.',
+    ).toBe(false);
+    expect(existsSync(resolve(keyring.home, 'writer-flowing'))).toBe(true);
+    expect(
+      (await keyring.command('/bin/kill', ['-0', writer]).done).status,
+    ).toBe(0);
+    const snapshot = await readFile(
+      resolve(keyring.home, 'exit-snapshot'),
+      'utf8',
+    );
+    expect(snapshot.startsWith(`before:${marker}\n`)).toBe(true);
+    expectNoValue(snapshot, [app.input.value]);
+  } finally {
+    await keyring.command('/bin/kill', ['-TERM', writer]).done;
+  }
+  await expect
+    .poll(
+      async () =>
+        (await keyring.command('/bin/kill', ['-0', String(relay.pid)]).done)
+          .status,
+    )
+    .not.toBe(0);
+  await expect
+    .poll(
+      async () =>
+        (await keyring.command('/bin/kill', ['-0', writer]).done).status,
+    )
+    .not.toBe(0);
+  const output = await readFile(resolve(keyring.home, 'output'), 'utf8');
+  expect(output.endsWith(`after:${marker}`)).toBe(true);
+  expectNoValue(output, [app.input.value]);
+});
 it('Masking E17: the complete MiB including its final value is delivered before run exits', async () => {
   const result = await outputProbe('binary', maskingArgs('large'));
   expect(result.status).toBe(0);
@@ -1289,10 +1347,14 @@ it.each(['refuse-relay', 'unavailable-relay'])(
     }
   },
 );
-it('Masking E20: relay argv and environment never carry an injected value', async () => {
+it('Masking E20: relay argv and environment exclude new and already inherited values', async () => {
   const result = await keyring.start(
     maskingArgs('relay-private', [keyring.home]),
-    relaySeam(),
+    {
+      ...relaySeam(),
+      GH_TOKEN: app.input.value,
+      NOOK_TEST_INHERITED: randomBytes(24).toString('hex'),
+    },
   ).done;
   expect(result.status).toBe(0);
   expectOutput(result.stdout, 'true', true);
