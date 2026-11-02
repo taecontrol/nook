@@ -1,8 +1,8 @@
 import { parse } from 'dotenv';
 import { Redacted } from 'effect';
 import { expect, it } from 'vitest';
-import { parseEnv } from '../apps/web/src/env-parse.ts';
-import * as contract from '../packages/contract/src/index.ts';
+import { parseEnv } from '../packages/contract/src/env-import.ts';
+import { envKeyStatuses as sharedStatuses } from '../packages/contract/src/index.ts';
 import { validateSecretName } from '../packages/contract/src/vault.ts';
 import { mixedPaste, mixedValues } from './fixtures/vault-import.ts';
 
@@ -120,31 +120,6 @@ it('E2: repeated keys preserve both entries and values instead of dotenv last-wi
   expect(parse(text).DATABASE_URL).toBe('synthetic-second');
   expect(parsed.unreadable).toEqual([]);
 });
-
-// Until the implementation adds the shared seam, fail on the missing behavior
-// rather than failing module loading before the examples can run.
-function sharedStatuses(
-  keys: readonly {
-    name: string;
-    value: Redacted.Redacted<string>;
-    counted: boolean;
-  }[],
-  existing: ReadonlySet<string>,
-): string[] {
-  const classifier = (
-    contract as unknown as {
-      envKeyStatuses?: (
-        entries: typeof keys,
-        existing: ReadonlySet<string>,
-      ) => string[];
-    }
-  ).envKeyStatuses;
-  expect(
-    typeof classifier,
-    'The contract supplies shared import key classification',
-  ).toBe('function');
-  return classifier!(keys, existing);
-}
 
 it('CLI E7/E16: shared statuses preserve value, name, existing and counted-duplicate precedence', () => {
   const keys = [

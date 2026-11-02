@@ -1,12 +1,15 @@
 import { Redacted } from 'effect';
 import { expect, it } from 'vitest';
-import { type EnvEntry, parseEnv } from '../apps/web/src/env-parse.ts';
 import {
   IMPORT_KEYS_MAX,
   type ImportRow,
   review,
   rowsFrom,
 } from '../apps/web/src/vault-import-model.ts';
+import {
+  type EnvEntry,
+  parseEnv,
+} from '../packages/contract/src/env-import.ts';
 import {
   validateSecretDescription,
   validateSecretName,

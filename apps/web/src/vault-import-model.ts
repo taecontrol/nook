@@ -1,13 +1,15 @@
 import {
+  type EnvKeyStatus,
+  envKeyStatuses,
+  IMPORT_KEYS_MAX,
+  type ParsedEnv,
   type SecretValueIssue,
   secretValueIssue,
   validateSecretDescription,
-  validateSecretName,
 } from '@nook/contract';
 import { Redacted } from 'effect';
-import type { ParsedEnv } from './env-parse';
 
-export const IMPORT_KEYS_MAX = 100;
+export { IMPORT_KEYS_MAX } from '@nook/contract';
 export type ImportRow = {
   id: string;
   line: number;
@@ -16,13 +18,7 @@ export type ImportRow = {
   included: boolean;
   value: 'present' | SecretValueIssue;
 };
-export type RowStatus =
-  | 'ready'
-  | 'exists'
-  | 'invalid-name'
-  | 'invalid-description'
-  | 'duplicate'
-  | SecretValueIssue;
+export type RowStatus = EnvKeyStatus | 'invalid-description';
 export type ImportSelection = readonly {
   row: ImportRow;
   value: Redacted.Redacted<string>;
@@ -47,25 +43,12 @@ export function rowsFrom(
 function valueStatus(value: Redacted.Redacted<string>): ImportRow['value'] {
   return secretValueIssue(Redacted.value(value)) ?? 'present';
 }
-function baseStatus(row: ImportRow, existing: ReadonlySet<string>): RowStatus {
-  if (row.value !== 'present') return row.value;
-  if (validateSecretName(row.name)) return 'invalid-name';
-  if (validateSecretDescription(row.description)) return 'invalid-description';
-  return existing.has(row.name) ? 'exists' : 'ready';
-}
 export function needsFix(status: RowStatus, included: boolean) {
   return (
     status === 'invalid-name' ||
     status === 'invalid-description' ||
     (status === 'duplicate' && included)
   );
-}
-function duplicateCounts(rows: readonly ImportRow[]) {
-  const counts = new Map<string, number>();
-  for (const row of rows) {
-    if (row.included) counts.set(row.name, (counts.get(row.name) ?? 0) + 1);
-  }
-  return counts;
 }
 export function review(
   rows: readonly ImportRow[],
@@ -76,16 +59,29 @@ export function review(
   selection: ImportSelection;
   toFix: number;
 } {
-  const status = new Map(
-    rows.map((row) => [row.id, baseStatus(row, existing)]),
+  const keyStatuses = envKeyStatuses(
+    rows.map((row) => ({
+      name: row.name,
+      value: values.get(row.id) ?? Redacted.make(''),
+      counted: row.included,
+    })),
+    existing,
   );
-  const counts = duplicateCounts(rows);
+  const status = new Map<string, RowStatus>(
+    rows.map((row, index) => {
+      const key = keyStatuses[index];
+      const descriptionApplies =
+        key === 'ready' || key === 'exists' || key === 'duplicate';
+      return [
+        row.id,
+        descriptionApplies && validateSecretDescription(row.description)
+          ? 'invalid-description'
+          : key,
+      ];
+    }),
+  );
   const selection: { row: ImportRow; value: Redacted.Redacted<string> }[] = [];
   for (const row of rows) {
-    // Keep a row's own blocking reason; otherwise a repeated included name
-    // takes precedence over Ready, regardless of the other rows' validity.
-    if (status.get(row.id) === 'ready' && (counts.get(row.name) ?? 0) > 1)
-      status.set(row.id, 'duplicate');
     const value = values.get(row.id);
     if (row.included && status.get(row.id) === 'ready' && value)
       selection.push({ row, value });
