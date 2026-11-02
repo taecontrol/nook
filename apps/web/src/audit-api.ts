@@ -25,9 +25,7 @@ export function auditOptions(filters: AuditFilters) {
             query: {
               ...(filters.bucket ? { bucket: filters.bucket } : {}),
               ...(filters.secret ? { secret: filters.secret } : {}),
-              ...(filters.session !== undefined
-                ? { session: filters.session }
-                : {}),
+              ...(filters.session ? { session: filters.session } : {}),
               ...(pageParam ? { cursor: pageParam } : {}),
             },
           }),

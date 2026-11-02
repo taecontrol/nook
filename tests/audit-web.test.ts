@@ -997,3 +997,40 @@ it.each(viewports)(
     }
   },
 );
+
+it('session E18/E19: claimless lists keep the old source header and an empty session filter shows all activity', async () => {
+  const visit = await visitAudit(browser, {
+    count: 2,
+    start: '/audit?session=',
+  });
+  try {
+    const { page } = visit;
+    await expect.poll(() => auditEntries(page).count()).toBe(2);
+    const header = (text: string) =>
+      page.getByText(text, { exact: true }).count();
+    expect(await header('Machine / executable')).toBe(1);
+    expect(await header('Machine / executable · agent')).toBe(0);
+    expect(
+      await page
+        .getByRole('link', { name: 'Clear session', exact: true })
+        .count(),
+    ).toBe(0);
+    expect(
+      visit.requests.filter((request) => request.includes('session=')),
+    ).toEqual([]);
+    expect(
+      (
+        await fetchValues(visit.app, visit.token, {
+          secrets: [acmePath],
+          purpose: 'claimed activity',
+          agentSession: { agent: 'claude-code', session: 'header-session' },
+        })
+      ).status,
+    ).toBe(200);
+    await page.goto(visit.app.origin + '/audit');
+    await expect.poll(() => auditEntries(page).count()).toBe(3);
+    expect(await header('Machine / executable · agent')).toBe(1);
+  } finally {
+    await visit.close();
+  }
+});
