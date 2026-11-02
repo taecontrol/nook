@@ -231,7 +231,8 @@ mutations hold the existing write gate continuously while three request slots
 advance. Batch writes skip per-key feedback and invalidation; one final metadata
 read also reconciles Not confirmed rows through the existing version logic.
 The Sheet loads on import intent. Its Progress primitive comes from the official
-shadcn new-york-v4 registry and is recorded in the generated-component inventory.
+shadcn new-york-v4 registry. It forwards its value to Radix so `aria-valuenow`
+tracks the created percentage, and is maintained in authored coverage.
 
 ## Audited command delivery
 
