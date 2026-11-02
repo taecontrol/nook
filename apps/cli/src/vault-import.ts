@@ -24,7 +24,7 @@ import { parseImport } from './vault-import-arguments.ts';
 type KeyResult =
   | { status: 'created' | 'exists' | 'not tried' }
   | { status: 'skipped' | 'failed' | 'unconfirmed'; reason: string };
-type ImportedKey = { line: number; name: string; result: KeyResult };
+export type ImportedKey = { line: number; name: string; result: KeyResult };
 type Request = Effect.Success<ReturnType<typeof createSession>>['request'];
 const valueReasons: Record<SecretValueIssue, string> = {
   empty: 'empty value',
@@ -103,7 +103,7 @@ function keyResult(outcome: CreateOutcome): KeyResult {
       };
   }
 }
-function writeKeys(
+export function writeKeys(
   request: Request,
   entries: readonly EnvEntry[],
   keys: ImportedKey[],
