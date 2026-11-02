@@ -960,6 +960,11 @@ it('Masking E2: a shared regular file retains all 2000 alternating writes in ord
   ).join('');
   expect(result.stdout.equals(Buffer.from(expected))).toBe(true);
 });
+it('Masking E2: both child streams share one real FIFO for a shared destination', async () => {
+  const result = await outputProbe('shared', maskingArgs('shared-fifo'));
+  expect(result.status).toBe(0);
+  expect(result.stdout.equals(Buffer.from('true'))).toBe(true);
+});
 it('Masking E3: separate pipes retain their stream and plain bytes', async () => {
   const result = await keyring.start(maskingArgs('separate')).done;
   expect(result.status).toBe(0);
@@ -1197,6 +1202,12 @@ it('Masking E16: run flushes and exits while a FIFO-gated background writer stay
           .status,
     )
     .not.toBe(0);
+  await expect
+    .poll(
+      async () =>
+        (await keyring.command('/bin/kill', ['-0', writer]).done).status,
+    )
+    .not.toBe(0);
 });
 it('Masking E17: the complete MiB including its final value is delivered before run exits', async () => {
   const result = await outputProbe('binary', maskingArgs('large'));
@@ -1248,33 +1259,36 @@ it('Masking E18: a relay lost during value delivery refuses the child with fixed
     app.token,
   ]);
 });
-it('Masking E19: relay startup failure precedes the value request and Audit', async () => {
-  await writeFile(resolve(keyring.home, 'refuse-relay'), '');
-  const transport = await valueTransport();
-  try {
-    const started = resolve(keyring.home, 'started');
-    const result = await keyring.start(
-      maskingArgs('mark', [started]),
-      relaySeam(),
-    ).done;
-    expect(result.status).toBe(1);
-    expectOutput(
-      result.stdout + result.stderr,
-      'Nook could not start output masking. Try again.',
-      true,
-    );
-    expect(transport.counts).toEqual([]);
-    expect(await auditRows(app)).toEqual([]);
-    expect(existsSync(started)).toBe(false);
-    expectNoValue(result.stdout + result.stderr, [
-      app.input.value,
-      app.key,
-      app.token,
-    ]);
-  } finally {
-    await transport.close();
-  }
-});
+it.each(['refuse-relay', 'unavailable-relay'])(
+  'Masking E19: relay startup failure precedes the value request and Audit (%s)',
+  async (seam) => {
+    await writeFile(resolve(keyring.home, seam), '');
+    const transport = await valueTransport();
+    try {
+      const started = resolve(keyring.home, 'started');
+      const result = await keyring.start(
+        maskingArgs('mark', [started]),
+        relaySeam(),
+      ).done;
+      expect(result.status).toBe(1);
+      expectOutput(
+        result.stdout + result.stderr,
+        'Nook could not start output masking. Try again.',
+        true,
+      );
+      expect(transport.counts).toEqual([]);
+      expect(await auditRows(app)).toEqual([]);
+      expect(existsSync(started)).toBe(false);
+      expectNoValue(result.stdout + result.stderr, [
+        app.input.value,
+        app.key,
+        app.token,
+      ]);
+    } finally {
+      await transport.close();
+    }
+  },
+);
 it('Masking E20: relay argv and environment never carry an injected value', async () => {
   const result = await keyring.start(
     maskingArgs('relay-private', [keyring.home]),
@@ -1307,6 +1321,27 @@ it('Masking E18: the relay itself reports a fixed failure without protocol value
     'Nook could not deliver values to output masking. Try again.',
     true,
   );
+  expectNoValue(result.stdout + result.stderr, [
+    app.input.value,
+    app.key,
+    app.token,
+  ]);
+});
+it('Masking E19: an unusable FIFO directory fails privately before requesting values', async () => {
+  const invalid = resolve(keyring.home, 'runtime/not-directory');
+  await writeFile(invalid, 'fixture');
+  const started = resolve(keyring.home, 'started');
+  const result = await keyring.start(maskingArgs('mark', [started]), {
+    TMPDIR: invalid,
+  }).done;
+  expect(result.status).toBe(1);
+  expectOutput(
+    result.stdout + result.stderr,
+    'Nook could not start output masking. Try again.',
+    true,
+  );
+  expect(await auditRows(app)).toEqual([]);
+  expect(existsSync(started)).toBe(false);
   expectNoValue(result.stdout + result.stderr, [
     app.input.value,
     app.key,

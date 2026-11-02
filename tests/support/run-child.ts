@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+  fstatSync,
   openSync,
   readFileSync,
   readSync,
@@ -16,6 +17,18 @@ const value = () => process.env.GH_TOKEN ?? '';
 if (mode === 'print-value') {
   writeSync(1, 'token=' + value() + '\n');
   process.exitCode = Number(expected ?? 0);
+} else if (mode === 'shared-fifo') {
+  const stdout = fstatSync(1);
+  const stderr = fstatSync(2);
+  writeSync(
+    1,
+    String(
+      stdout.isFIFO() &&
+        stderr.isFIFO() &&
+        stdout.dev === stderr.dev &&
+        stdout.ino === stderr.ino,
+    ),
+  );
 } else if (mode === 'alternate') {
   for (let i = 0; i < 2000; i++)
     writeSync(i % 2 ? 2 : 1, `${i}:${i % 10 === 0 ? value() : 'plain'}\n`);

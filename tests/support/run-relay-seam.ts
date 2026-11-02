@@ -12,7 +12,13 @@ children.spawn = ((file: string, args: string[], options: SpawnOptions) => {
     return original(file, args, options);
   if (existsSync(resolve(home, 'refuse-relay')))
     throw new Error('fixture-start-failure');
-  const child = original(file, args, options);
+  const child = original(
+    existsSync(resolve(home, 'unavailable-relay'))
+      ? '/nook-fixture-absent-relay'
+      : file,
+    args,
+    options,
+  );
   writeFileSync(
     resolve(home, 'relay-launch'),
     JSON.stringify({ args, env: options.env, pid: child.pid }),

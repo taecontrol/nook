@@ -316,7 +316,7 @@ Only the util-linux PTY examples are Linux-only. Every value is synthetic.
 | Examples | Evidence |
 | --- | --- |
 | E1 | `run-cli.test.ts`, “Masking E1”: piped exact replacement and exit 42, including a real SEA executable spawning its own relay. |
-| E2 | “Masking E2”: one regular file receives all 2,000 alternating stdout/stderr writes in their original order. |
+| E2 | “Masking E2”: one regular file receives all 2,000 alternating stdout/stderr writes in their original order; child fstat also proves both slots share one real FIFO. |
 | E3 | “Masking E3”: separate pipes retain plain stdout and masked stderr. |
 | E4 | “Masking E4”: two writes 200 ms apart produce one marker. `run-masker.test.ts` checks every byte split, including UTF-8 boundaries. |
 | E5 | “Masking E5” and the masker overlap tests: containing values and longer values split after a complete shorter match stay whole. |
@@ -333,7 +333,7 @@ Only the util-linux PTY examples are Linux-only. Every value is synthetic.
 | E16 | “Masking E16”: a test-controlled FIFO holds a background writer across run's exit; an exit-time file snapshot proves the flush, later writes stay masked, and the relay exits after EOF. No sleep synchronizes this example. |
 | E17 | “Masking E17”: the reader's exit-time snapshot already contains the complete MiB, including its final masked value. |
 | E18 | “Masking E18”: private spawn failures with and without opt-out, lost relay delivery, and the relay's own fixed protocol-failure diagnostic. |
-| E19 | “Masking E19”: a Node preload refuses only relay startup; the value-request observer and Audit both remain empty and no child starts. |
+| E19 | “Masking E19”: a Node preload refuses only relay startup, either synchronously or through a real failed spawn; the value-request observer and Audit both remain empty and no child starts. An unusable FIFO directory proves the same private, unaudited refusal. |
 | E20 | “Masking E20”: a preload observes the real relay's argv and environment; the injected child checks both without printing the value. The SEA round trip also exercises the same-executable entry point. |
 
 The relay receives values and flush requests only over fd 3. FIFO readers are

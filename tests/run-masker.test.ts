@@ -88,3 +88,10 @@ it('plain binary bytes, repeated matches, and marker-looking output stay byte ex
     actual.equals(Buffer.concat([binary, Buffer.from(marker.repeat(3))])),
   ).toBe(true);
 });
+it('EOF masks a complete shorter value held for a possible longer value', () => {
+  const entries = [
+    { path, value: 'abcdefgh' },
+    { path: 'work/acme/LONG', value: 'abcdefghijkl' },
+  ];
+  expect(replaced([Buffer.from('abcdefgh')], entries).toString()).toBe(marker);
+});
