@@ -280,7 +280,7 @@ The issue #5 acceptance suites run the production CLI with the private Linux/mac
 
 The `audit-*` PNGs live in `.local/verification/screenshots/`. Compare them with selected prototype A, “The chronological ledger”: typical, fresh, denied-recent, filter-secret, filter-bucket, filter-empty, long-content, many, deleted-revoked, loading, and load-error. Production has no scenario controls or mock API. Capture fixtures write entries through the machine endpoint and assign historical timestamps; loading holds a real request and failure makes the genuine audit table unavailable.
 
-The statement decorator sends only fixed checkpoint labels. One authentication statement precedes at most one read batch and one atomic audit batch. A denied fetch performs no read batch; listing an audit page is one statement. Values remain redacted in the contract and CLI until the child environment is built. Audit rows have no foreign keys to mutable secrets or machines, so deletion and revocation preserve the recorded facts.
+The statement decorator sends only fixed checkpoint labels. One authentication statement precedes at most one read batch and one atomic audit batch. A denied fetch performs no read batch; listing an audit page is one statement. Values remain redacted in the contract and CLI until delivery to the output relay and the child environment. Audit rows have no foreign keys to mutable secrets or machines, so deletion and revocation preserve the recorded facts.
 
 Audit consumes the same guarded metadata hooks as Vault, Buckets, and Machines. The pending-write regressions hold genuine writes before commit, advance the browser clock beyond cache freshness, navigate to Audit, and trigger focus. They require no extra metadata read before settlement. Vault cases then commit and lose all responses, fail metadata refresh, and return to Vault with the submission still unconfirmed; only a successful list may confirm it.
 
@@ -306,6 +306,43 @@ the new CLI against it, and checks generated claims against the D1 constraints.
 The session E18 cases in `audit-web.test.ts` exercise intent prefetching,
 cached session navigation within 100 ms, bucket preservation, clearing,
 empty states and claimless details at phone and desktop sizes.
+
+### Non-terminal run output masking
+
+Issue #80 runs the built CLI against `runFixture`, with the existing private
+Linux/macOS keyrings and real child processes, pipes, regular files and FIFOs.
+Only the util-linux PTY examples are Linux-only. Every value is synthetic.
+
+| Examples | Evidence |
+| --- | --- |
+| E1 | `run-cli.test.ts`, “Masking E1”: piped exact replacement and exit 42, including a real SEA executable spawning its own relay. |
+| E2 | “Masking E2”: one regular file receives all 2,000 alternating stdout/stderr writes in their original order. |
+| E3 | “Masking E3”: separate pipes retain plain stdout and masked stderr. |
+| E4 | “Masking E4”: two writes 200 ms apart produce one marker. `run-masker.test.ts` checks every byte split, including UTF-8 boundaries. |
+| E5 | “Masking E5” and the masker overlap tests: containing values and longer values split after a complete shorter match stay whole. |
+| E6 | “Masking E6”: duplicate values select the first sorted path, including aliases of one path. |
+| E7 | “Masking E7”: seven Unicode code points pass unchanged; eight are masked. |
+| E8 | “Masking E8”: whole multiline bytes are replaced; separately labelled lines remain unchanged. |
+| E9 | “Masking E9” and the unchanged inherited-PTY test: three TTYs and unmodified values, with relay startup deliberately refused. |
+| E10 | “Masking E10”: a real TTY remains unchanged while redirected stderr is masked. |
+| E11 | “Masking E11”: transparent opt-out; repeated flags, a separate value and an equals value fail before keyring, HTTP, Audit or child startup. |
+| E12 | “Masking E12”: a real FIFO releases the writer only after the reader receives the unterminated prompt. |
+| E13 | “Masking E13”: a binary pipe carries all 256 byte values exactly. |
+| E14 | “Masking E14”: a real `yes`/`head -1` pipe closes, the child receives SIGPIPE and run returns 141. |
+| E15 | “Masking E15” and existing native-signal tests: SIGTERM/SIGHUP forwarding, ignored parent SIGINT and preserved child status. |
+| E16 | “Masking E16”: a test-controlled FIFO holds a background writer across run's exit; an exit-time file snapshot proves the flush, later writes stay masked, and the relay exits after EOF. No sleep synchronizes this example. |
+| E17 | “Masking E17”: the reader's exit-time snapshot already contains the complete MiB, including its final masked value. |
+| E18 | “Masking E18”: private spawn failures with and without opt-out, lost relay delivery, and the relay's own fixed protocol-failure diagnostic. |
+| E19 | “Masking E19”: a Node preload refuses only relay startup; the value-request observer and Audit both remain empty and no child starts. |
+| E20 | “Masking E20”: a preload observes the real relay's argv and environment; the injected child checks both without printing the value. The SEA round trip also exercises the same-executable entry point. |
+
+The relay receives values and flush requests only over fd 3. FIFO readers are
+passed on later descriptors, and a shared destination uses the same writer in
+both child slots. Flush pauses normal reads, drains buffered and kernel bytes
+until EAGAIN/EOF, releases the held prefix and acknowledges completed writes.
+The detached relay keeps forwarding background output after its control channel
+closes. Coverage uses the existing `NOOK_CLI_COVERAGE` exit hook with a distinct
+`-relay.json` filename, so relay counters cannot overwrite the parent's evidence.
 
 ### Project secret mappings
 

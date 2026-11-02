@@ -111,6 +111,10 @@ The CLI searches from the real working directory up to the filesystem root and u
 
 `--secret` adds a variable or overrides the same environment name from the file. You can also use flags without a file:
 
+```text
+nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] -- <command>
+```
+
 ```sh
 nook run --secret GH_TOKEN=work/acme/GH_TOKEN --purpose "open the release PR" -- gh pr create
 ```
@@ -128,7 +132,9 @@ Declared → Codex → Claude Code → Cursor. A declared session comes from
 contain 1–200 ASCII letters, digits, `.`, `_`, `:`, `~`, or `-`; invalid values
 are ignored. Audit marks these claims as unverified and can filter by session.
 
-The purpose is required and must be one line of 1 to 200 characters. Nook resolves the command before contacting the keyring or server. For unmarked secrets it sends one value request and fetches each distinct path once. It injects values only into the child's environment, and preserves stdin, stdout, stderr, TTYs, and the child's exit status. Any denied, missing, or undecryptable path prevents the command from starting; missing-path errors name every missing path. Values never appear in Nook's own output; the child controls its output.
+The purpose is required and must be one line of 1 to 200 characters. Nook resolves the command before contacting the keyring or server. For unmarked secrets it sends one value request and fetches each distinct path once. It injects values only into the child's environment, and preserves stdin, TTYs, the order of stdout and stderr, and the child's exit status. Any denied, missing, or undecryptable path prevents the command from starting; missing-path errors name every missing path. Values never appear in Nook's own output.
+
+When stdout or stderr is not a terminal, as when an agent captures the output, Nook replaces each exact occurrence of an injected value of 8 or more characters with its path, such as `<nook:work/acme/GH_TOKEN>`. A terminal receives the output unchanged. Masking is best effort, not a security boundary: it misses shorter values and transformed ones, such as base64 or URL-encoded, and a command can still send a value elsewhere. If the command leaves background processes writing to its output, Nook returns when the command exits and keeps masking their output until they close it. Pass `--no-masking` to receive the output unchanged.
 
 When the owner has marked a bucket or secret as Ask first, `nook run` prints the secret paths, an approval URL and the remaining time on stderr, then waits for up to ten minutes. The owner can approve only this attempt, remember approval for 1 hour or 12 hours on the same machine, or deny. Remembered approval covers the same or fewer marked secrets across agent sessions; it never widens the machine's bucket grant. Denial exits 77 with ‘Nothing was delivered.’ Expiry, an exhausted wait or the pending-request limit exits 75; run again to ask again. SIGINT and SIGTERM withdraw a waiting request best effort and exit 130 and 143. Update older CLIs to use covered secrets: released versions that cannot wait receive an update message and no value. The CLI still propagates the child's exit code once the command starts.
 
