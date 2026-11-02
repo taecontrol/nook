@@ -358,14 +358,20 @@ chunk. Each value caches its next match or miss for that chunk, caps native
 searches at 16 per replace call and switches to a forward-only KMP scan when
 overlaps keep invalidating its cached match. An overlapping-match guard checks
 `indexOf` calls against 17 times the value count and prefix-table reads against
-four times the value count times the combined buffer length. Fixed-seed random
-chunk splits compare the result with an independent whole-buffer earliest/longest
-matcher, including cap crossings and held tails. The tail-search guard bounds
-KMP failure-link reads and bulk-comparison bytes for 20 values of 65,535 bytes
-and a 65,536-byte mismatching chunk. All search counters must record work;
-no guard times the search. Precomputed KMP failure links keep tail scanning
-linear per value and let replacements discard consumed prefixes without
-rescanning the chunk.
+four times the value count times the combined buffer length. An overlapping
+full-match regression checks the fallback's failure-link seed across chunk
+partitions and when all input stays held until final. Fixed-seed random chunk
+splits, including 1–3-byte writes, compare the result with an independent
+whole-buffer earliest/longest matcher, including cap crossings and held tails.
+The tail-search guards bound KMP failure-link reads and bulk-comparison bytes
+for 20 values of 65,535 bytes and a 65,536-byte mismatching chunk, and byte and
+prefix-table reads against four times the value count times new input bytes
+for 20 values sharing a 2,048-byte prefix delivered one byte at a time. All
+search counters must record work; no guard times the search. Each masker
+retains its KMP tail states across pushes and advances them only over new
+bytes. Replacements use failure links to discard consumed prefixes without
+rescanning held bytes; final resets every state. Held buffers are still copied
+when concatenating each chunk.
 
 ### Project secret mappings
 

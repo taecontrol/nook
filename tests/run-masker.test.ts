@@ -337,7 +337,7 @@ it('single-byte writes advance long shared prefixes within a linear tail budget'
   const search = vi
     .spyOn(Buffer.prototype, 'indexOf')
     .mockImplementation(function (this: Buffer, needle, ...args) {
-      if (typeof needle !== 'string' && typeof needle !== 'number')
+      if (needle instanceof Uint8Array)
         needle = originals.get(needle) ?? needle;
       return indexOf.call(this, needle, ...args);
     });

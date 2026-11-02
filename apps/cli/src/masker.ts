@@ -4,7 +4,7 @@ type MaskedValue = {
   readonly prefixes: Uint32Array;
 };
 type Value = { readonly path: string; readonly value: string };
-type PendingPrefix = { length: number; readonly prefixes: Uint32Array };
+type PendingPrefix = { length: number; readonly value: MaskedValue };
 type MatchCandidate = {
   at: number;
   searches: number;
@@ -82,18 +82,15 @@ function nextMatch(
   }
   return match;
 }
-function tailLength(data: Buffer, value: MaskedValue) {
-  const { bytes, prefixes } = value;
-  let length = 0;
-  // Only a proper prefix can need more bytes. KMP's failure links avoid
-  // rescanning long, nearly identical suffixes after each mismatch.
-  for (
-    let at = Math.max(0, data.length - bytes.length + 1);
-    at < data.length;
-    at++
-  )
-    length = extendPrefix(bytes, prefixes, length, data[at]);
-  return length;
+function advanceTail(chunk: Uint8Array, tail: PendingPrefix) {
+  const { bytes, prefixes } = tail.value;
+  let length = tail.length;
+  for (const byte of chunk) {
+    length = extendPrefix(bytes, prefixes, length, byte);
+    // Only a proper prefix can need more bytes, even after a full match.
+    if (length === bytes.length) length = prefixes[length - 1];
+  }
+  tail.length = length;
 }
 function pendingStart(
   data: Buffer,
@@ -103,26 +100,26 @@ function pendingStart(
   let start = data.length;
   for (const tail of tails) {
     // A replacement can consume part of a candidate prefix. Reuse its failure
-    // links instead of rescanning the chunk after every complete match.
+    // links to retain the longest prefix within the unconsumed suffix. These
+    // constrained lengths are also the starting states for the next push.
     while (tail.length > data.length - from)
-      tail.length = tail.prefixes[tail.length - 1];
+      tail.length = tail.value.prefixes[tail.length - 1];
     start = Math.min(start, data.length - tail.length);
   }
   return start;
 }
-function replace(data: Buffer, values: readonly MaskedValue[], final: boolean) {
+function replace(
+  data: Buffer,
+  values: readonly MaskedValue[],
+  tails: readonly PendingPrefix[],
+  final: boolean,
+) {
   const output: Buffer[] = [];
   const candidates = values.map((value) => ({
     at: data.indexOf(value.bytes),
     searches: 1,
     value,
   }));
-  const tails = final
-    ? []
-    : values.map((value) => ({
-        length: tailLength(data, value),
-        prefixes: value.prefixes,
-      }));
   let from = 0;
   while (from < data.length) {
     const match = nextMatch(data, candidates, from);
@@ -134,22 +131,32 @@ function replace(data: Buffer, values: readonly MaskedValue[], final: boolean) {
     output.push(data.subarray(from, match.at), match.value.marker);
     from = match.at + match.value.bytes.length;
   }
+  for (const tail of tails) tail.length = 0;
   return { output: Buffer.concat(output), held: Buffer.alloc(0) };
 }
 export function masker(values: readonly MaskedValue[]) {
   let held: Buffer = Buffer.alloc(0);
+  const tails = values.map((value) => ({ length: 0, value }));
   return {
     get pendingBytes(): number {
       return held.length;
     },
     push(chunk: Uint8Array): Uint8Array {
-      const result = replace(Buffer.concat([held, chunk]), values, false);
+      // The held bytes have already advanced each tail's automaton.
+      for (const tail of tails) advanceTail(chunk, tail);
+      const result = replace(
+        Buffer.concat([held, chunk]),
+        values,
+        tails,
+        false,
+      );
       held = result.held;
       return result.output;
     },
     end(): Uint8Array {
-      const result = replace(held, values, true);
+      const result = replace(held, values, tails, true);
       held = Buffer.alloc(0);
+      for (const tail of tails) tail.length = 0;
       return result.output;
     },
   };
