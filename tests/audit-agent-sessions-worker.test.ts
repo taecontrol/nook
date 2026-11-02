@@ -168,13 +168,14 @@ it('E14: a machine cannot list session activity', async () => {
     { ...access, VAULT_KEY: app.key },
     { outboundService: issuer.outboundService },
   );
+  // Preserve the existing Access-auth behavior for a bearer on an owner route.
   expect(
     (
       await fetch(`${app.origin}/api/audit?session=${codexSession}`, {
         headers: { Authorization: `Bearer ${app.token}` },
       })
     ).status,
-  ).toBe(403);
+  ).toBe(401);
 });
 it('E14: an owner principal with a limited grant cannot list session activity', async () => {
   const limited = await filesRuntime({ principalGrant: ['work/acme'] });
