@@ -7,12 +7,13 @@ import {
   envKeyStatuses,
   IMPORT_KEYS_MAX,
   parseEnv,
+  RUN_PATHS_MAX,
   type SecretValueIssue,
   validateSecretName,
   validateWorkingDirectory,
 } from '@nook/contract';
 import { Effect } from 'effect';
-import { resolveAgentSession } from './agent-session.ts';
+import { isClaimVariable, resolveAgentSession } from './agent-session.ts';
 import { CliFailure, type RequestFailure, tryCli } from './errors.ts';
 import type { Host } from './host.ts';
 import { currentDirectory } from './project-secrets.ts';
@@ -175,15 +176,26 @@ function report(
       `Lines ${unreadable.join(', ')} are not KEY=value; not imported.`,
     );
   lines.push(summary(keys));
+  const stored = keys
+    .filter(
+      (key) =>
+        key.result.status === 'created' || key.result.status === 'exists',
+    )
+    .map((key) => key.name);
+  // nook run refuses reserved names and more than RUN_PATHS_MAX paths.
+  for (const name of stored.filter(isClaimVariable))
+    lines.push(
+      `${name} is reserved for agent session claims; map it in nook.json under another name.`,
+    );
+  const mapped = stored.filter((name) => !isClaimVariable(name));
+  if (mapped.length > RUN_PATHS_MAX)
+    lines.push(
+      `nook run uses at most ${RUN_PATHS_MAX} secrets; keep only the ones this project needs.`,
+    );
   const secrets = Object.fromEntries(
-    keys
-      .filter(
-        (key) =>
-          key.result.status === 'created' || key.result.status === 'exists',
-      )
-      .map((key) => [key.name, `${bucket}/${key.name}`]),
+    mapped.map((name) => [name, `${bucket}/${name}`]),
   );
-  if (Object.keys(secrets).length)
+  if (mapped.length)
     lines.push('', 'nook.json:', JSON.stringify({ secrets }, null, 2));
   return lines.join('\n');
 }

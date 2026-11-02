@@ -499,6 +499,73 @@ it.each([
     }
   },
 );
+it('session: a reserved claim name is imported but left out of nook.json, and the printed block runs', async () => {
+  const value = privateValue();
+  await envFile(
+    `GH_TOKEN=${value}\nCLAUDE_CODE_SESSION_ID=${privateValue()}\n`,
+  );
+  const transport = await proxy();
+  try {
+    const result = await importFile();
+    expect(result.status).toBe(0);
+    expectOutput(result.stdout, '2 created.');
+    expectOutput(
+      result.stdout,
+      'CLAUDE_CODE_SESSION_ID is reserved for agent session claims; map it in nook.json under another name.',
+    );
+    const block = mapping(result.stdout);
+    expect(block).toEqual({ secrets: { GH_TOKEN: 'work/acme/GH_TOKEN' } });
+    await writeFile(
+      resolve(keyring.home, 'source', 'nook.json'),
+      JSON.stringify(block),
+    );
+    await configure(app.origin);
+    const run = record(
+      await keyring.start(
+        [
+          'run',
+          '--purpose',
+          'use imported mapping',
+          '--',
+          process.execPath,
+          '-e',
+          'process.stdout.write(String(process.env.GH_TOKEN.length))',
+        ],
+        {},
+        '',
+        resolve(keyring.home, 'source'),
+      ).done,
+    );
+    expect(run.status).toBe(0);
+    expect(run.stdout).toBe(String(value.length));
+  } finally {
+    await transport.close();
+  }
+});
+it.each([20, 21])(
+  'session: %i stored keys print the full block and note nook run limit only above 20',
+  async (count) => {
+    await envFile(
+      Array.from(
+        { length: count },
+        (_, i) => `KEY_${i}=${privateValue()}`,
+      ).join('\n'),
+    );
+    const transport = await proxy();
+    try {
+      const result = await importFile();
+      expect(result.status).toBe(0);
+      expect(Object.keys(mapping(result.stdout).secrets)).toHaveLength(count);
+      expect(
+        result.stdout.includes(
+          'nook run uses at most 20 secrets; keep only the ones this project needs.',
+        ),
+      ).toBe(count > 20);
+    } finally {
+      await transport.close();
+    }
+  },
+);
 it('E11: lost committed response retries the same write id and creates only one audit', async () => {
   await envFile(`KEY=${privateValue()}`);
   const transport = await proxy(

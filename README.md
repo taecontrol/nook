@@ -139,7 +139,7 @@ Import a local `.env` without reading its values into the conversation:
 nook vault import work/acme .env --purpose "migrate acme env"
 ```
 
-The CLI parses dotenv syntax locally, imports up to 100 keys and never changes the file. Invalid names and duplicate new names block the import before any write. Empty values, values over 64 KiB and values containing NUL are skipped. Existing names in that bucket are left unchanged. The report names each result and prints a `nook.json` block for created and existing keys without writing it to disk. A failed or unconfirmed write exits with status 1; rerunning safely skips names already stored.
+The CLI parses dotenv syntax locally, imports up to 100 keys and never changes the file. Invalid names and duplicate new names block the import before any write. Empty values, values over 64 KiB and values containing NUL are skipped. Existing names in that bucket are left unchanged. The report names each result and prints a `nook.json` block for created and existing keys without writing it to disk. Keys named like an agent session variable are left out of the block with a note to map them under another name, and a block of more than 20 keys notes that `nook run` uses at most 20. A failed or unconfirmed write exits with status 1; rerunning safely skips names already stored.
 
 In the Vault web app, choose **Import .env**, paste your file and select a bucket. Review the names, fix problems and create the checked keys together. Existing secrets are skipped. Values stay hidden after review; use **Retry failed** for any remaining keys, then **Done** to discard the import.
 
