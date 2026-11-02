@@ -1359,6 +1359,24 @@ it('Masking E20: relay argv and environment exclude new and already inherited va
   expect(result.status).toBe(0);
   expectOutput(result.stdout, 'true', true);
   expect(result.stderr).toBe('');
+  if (process.env.COVERAGE_RUN) {
+    const launch = JSON.parse(
+      await readFile(resolve(keyring.home, 'relay-launch'), 'utf8'),
+    ) as { env: NodeJS.ProcessEnv };
+    const file = launch.env.NOOK_CLI_COVERAGE ?? '';
+    expect(file.endsWith('-relay.json')).toBe(true);
+    await expect.poll(() => existsSync(file)).toBe(true);
+    const coverage = JSON.parse(await readFile(file, 'utf8')) as {
+      seam: string;
+      counters: Record<string, { f: Record<string, number> }>;
+    };
+    expect(coverage.seam).toBe('cli');
+    expect(
+      Object.values(coverage.counters['apps/cli/src/relay.ts'].f).some(
+        (count) => count > 0,
+      ),
+    ).toBe(true);
+  }
 });
 it('Masking E1/E20: the SEA executable starts its own relay and masks pipe output', async () => {
   const directory = resolve(keyring.home, 'sea');

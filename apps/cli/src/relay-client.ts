@@ -42,13 +42,13 @@ function replies(control: Duplex) {
   };
 }
 function relayEnvironment() {
-  const env = { ...process.env };
-  if (env.NOOK_CLI_COVERAGE)
-    env.NOOK_CLI_COVERAGE = env.NOOK_CLI_COVERAGE.replace(
-      /\.json$/,
-      '-relay.json',
-    );
-  return env;
+  // The executable and bundle paths are explicit; the relay needs no caller
+  // environment (which can already contain values from an outer nook run).
+  // The instrumented bundle writes coverage directly to this absolute path.
+  const coverage = process.env.NOOK_CLI_COVERAGE;
+  return coverage
+    ? { NOOK_CLI_COVERAGE: coverage.replace(/\.json$/, '-relay.json') }
+    : {};
 }
 async function launch(plan: MaskedPlan) {
   const args = [
