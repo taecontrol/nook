@@ -136,15 +136,15 @@ No MCP tool and no machine route reads or writes marks or decisions.
 5. Look for the attempt's own row and for a matching remembered approval. A remembered approval matches when it has the same machine, `approved` status, has not expired, and every covered path is in its covered set. The agent session plays no part. *Only this time* matches only its own attempt.
 6. Decide:
    - A payload that differs from the attempt's own row is `InvalidRun`.
-   - Denied is `ApprovalDenied`.
+   - Denied is `ApprovalDenied`; withdrawn is `ApprovalExpired` with reason `withdrawn`. Both are terminal, including after the last mark is removed or another approval matches.
    - If nothing is covered any more, or a remembered approval matches, deliver (this includes an attempt whose own row is `settled`, or approved but past `valid_until`).
-   - Otherwise, a pending row past `expires_at`, a withdrawn or settled row, or an approved row past `valid_until` is `ApprovalExpired`.
+   - Otherwise, a pending row past `expires_at`, a settled row, or an approved row past `valid_until` is `ApprovalExpired`.
    - On a match, deliver.
    - If the attempt's own row is pending, return pending.
    - Otherwise, insert the request (bounded per machine and in total) and return pending.
-7. Delivery is one batch. It inserts the `delivered` audit rows only `WHERE` the approval is still valid and the marks are unchanged, and returns values only if every row was inserted. A mark change or a narrowed grant that commits first wins.
+7. Delivery is one batch. It inserts the `delivered` audit rows only `WHERE` the attempt is neither denied nor withdrawn, the approval is still valid, and the marks are unchanged, and returns values only if every row was inserted. A mark change, a narrowed grant, or an attempt withdrawal that commits first wins.
 
-The owner's decision is a conditional `UPDATE … WHERE status='pending' AND expires_at > now`, with its audit row in the same batch. The first decision wins. Repeating the same decision succeeds, and a different decision gets `AlreadyHandled {status, remember}`.
+The owner's decision is a conditional `UPDATE … WHERE status='pending' AND expires_at > now`, with its audit row in the same batch. The first decision wins. Repeating the same approval succeeds only while `valid_until > now`; at or after that boundary it gets `AlreadyHandled {status, remember}`. Repeating a denial succeeds. A different decision gets `AlreadyHandled {status, remember}`.
 
 **Agent session.** The approval logic ignores it. The claim that #117 resolves is stored on the request and shown to the owner as unverified context (ADR-0019).
 
@@ -281,8 +281,9 @@ already names the memory creation payload. The approvals module keeps its
 local `Remember` name.
 
 A capable run reads its own attempt in the existing ciphertext/marks batch,
-including when no mark remains. This preserves payload equality and a prior
-denial after the last mark is removed; skipping all approval reads on that
-path would bypass both. There is no additional round trip or approval row
-for a new unmarked run. Successful unmarked or remembered delivery settles
-a pending attempt in the delivery batch, after the guarded audit insert.
+including when no mark remains. This preserves payload equality and terminal
+denials or withdrawals after the last mark is removed; skipping all approval
+reads on that path would bypass these checks. There is no additional round
+trip or approval row for a new unmarked run. Successful unmarked or remembered
+delivery settles a pending attempt in the delivery batch, after the guarded
+audit insert.

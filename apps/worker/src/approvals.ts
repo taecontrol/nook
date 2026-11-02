@@ -252,7 +252,7 @@ export const machineApprovals = Effect.gen(function* () {
         ? sql`EXISTS(SELECT 1 FROM approval_requests a WHERE a.id=${approval.id} AND a.machine_id=${machine.id} AND a.status='approved' AND a.remember=${approval.remember} AND a.valid_until>unixepoch('subsec')*1000)`
         : sql`1`;
       const attemptAllowed = input.approval
-        ? sql`NOT EXISTS(SELECT 1 FROM approval_requests WHERE machine_id=${machine.id} AND attempt_id=${input.approval.attemptId} AND status='denied')`
+        ? sql`NOT EXISTS(SELECT 1 FROM approval_requests WHERE machine_id=${machine.id} AND attempt_id=${input.approval.attemptId} AND status IN ('denied','withdrawn'))`
         : sql`1`;
       const access = sql`(${attemptAllowed}) AND EXISTS(SELECT 1 FROM machine_tokens WHERE id=${machine.id} AND grant_json=${machine.grantJson}) AND (${guard}) AND (${approvalGuard})`;
       const statements = [

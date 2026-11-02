@@ -76,6 +76,8 @@ export function ownTerminal(
     });
   if (own.status === 'denied')
     return new ApprovalDenied({ paths: own.covered_json });
+  if (own.status === 'withdrawn')
+    return new ApprovalExpired({ reason: 'withdrawn' });
 }
 function ownWaiting(
   own: StoredRequest,
@@ -96,9 +98,7 @@ function ownWaiting(
     };
   return {
     kind: 'refuse',
-    error: new ApprovalExpired({
-      reason: own.status === 'withdrawn' ? 'withdrawn' : 'expired',
-    }),
+    error: new ApprovalExpired({ reason: 'expired' }),
   };
 }
 export function decideValues(input: {
@@ -129,11 +129,12 @@ export function decisionOutcome(
   choice: OwnerChoice,
   updated: boolean,
   row: StoredRequest | undefined,
-  _now: number,
+  now: number,
 ) {
   if (!row)
     return { kind: 'fail', error: new HttpApiError.NotFound() } as const;
-  if (updated || sameChoice(choice, row)) return { kind: 'ok', row } as const;
+  if (updated || sameChoice(choice, row, now))
+    return { kind: 'ok', row } as const;
   if (row.status === 'pending')
     return { kind: 'fail', error: new Expired() } as const;
   return {
@@ -144,10 +145,12 @@ export function decisionOutcome(
     }),
   } as const;
 }
-function sameChoice(choice: OwnerChoice, row: StoredRequest) {
+function sameChoice(choice: OwnerChoice, row: StoredRequest, now: number) {
   return choice.kind === 'deny'
     ? row.status === 'denied'
-    : row.status === 'approved' && row.remember === choice.remember;
+    : row.status === 'approved' &&
+        row.remember === choice.remember &&
+        row.valid_until > now;
 }
 type UndecidedRequest = Exclude<
   StoredRequest,

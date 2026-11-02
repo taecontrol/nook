@@ -94,22 +94,20 @@ export function awaitApproval(first: ApprovalPending['approval'], io: WaitIo) {
       yield* Effect.sleep(first.expiresIn * 1000);
       return yield* Effect.fail(expired());
     });
-    const cancelled = Effect.gen(function* () {
-      const signal = yield* io.signal;
-      yield* io.withdraw(first.id).pipe(
-        Effect.timeout('3 seconds'),
-        Effect.catchCause(() => Effect.void),
-      );
-      return yield* Effect.fail(
-        new ApprovalStopped(
-          'The approval request was withdrawn. Nothing was delivered.',
-          signal === 'SIGINT' ? 130 : 143,
-        ),
-      );
-    });
-    return yield* Effect.raceFirst(
+    const result = yield* Effect.raceFirst(
       Effect.raceFirst(waitLoop(first, io), timeout),
-      cancelled,
+      io.signal,
+    );
+    if (typeof result !== 'string') return result;
+    yield* io.withdraw(first.id).pipe(
+      Effect.timeout('3 seconds'),
+      Effect.catchCause(() => Effect.void),
+    );
+    return yield* Effect.fail(
+      new ApprovalStopped(
+        'The approval request was withdrawn. Nothing was delivered.',
+        result === 'SIGINT' ? 130 : 143,
+      ),
     );
   });
 }
