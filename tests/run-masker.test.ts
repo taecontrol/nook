@@ -124,27 +124,66 @@ it('EOF masks a complete shorter value held for a possible longer value', () => 
   ];
   expect(replaced([Buffer.from('abcdefgh')], entries).toString()).toBe(marker);
 });
-it('adversarial long prefixes stay within a linear bulk-comparison budget', () => {
+it('repeated matches search absent values only once per chunk', () => {
+  const entries = Array.from({ length: 20 }, (_, i) => ({
+    path: `work/acme/VALUE_${i}`,
+    value: 'a'.repeat(8) + (i ? String.fromCharCode(65 + i) : ''),
+  }));
+  const stream = masker(maskedValues(entries));
+  const chunk = Buffer.alloc(65_536, 'a');
+  const matches = chunk.length / 8;
+  const budget = matches + entries.length;
+  let calls = 0;
+  const indexOf = Buffer.prototype.indexOf;
+  const search = vi
+    .spyOn(Buffer.prototype, 'indexOf')
+    .mockImplementation(function (this: Buffer, ...args) {
+      if (++calls > budget)
+        throw new Error('Full-match search exceeded its indexOf call budget.');
+      return indexOf.apply(this, args);
+    });
+  let output: Uint8Array;
+  try {
+    output = stream.push(chunk);
+  } finally {
+    search.mockRestore();
+  }
+  expect(calls).toBeGreaterThanOrEqual(entries.length);
+  expect(Buffer.concat([output, stream.end()]).toString()).toBe(
+    '<nook:work/acme/VALUE_0>'.repeat(matches),
+  );
+});
+it('adversarial long prefixes stay within a linear tail-search budget', () => {
   const entries = Array.from({ length: 20 }, (_, i) => ({
     path: `work/acme/VALUE_${i}`,
     value: 'a'.repeat(65_534) + String.fromCharCode(66 + i),
   }));
-  const stream = masker(maskedValues(entries));
   const chunk = Buffer.from('a'.repeat(65_535) + '!');
-  // Every failed equals() in the old suffix search scans to the final byte.
-  // Count that work instead of imposing a machine-dependent time budget.
+  // Count KMP failure-link reads and bulk-comparison bytes, including the
+  // old suffix search's repeated equals() scans, without timing the search.
   const budget = 4 * entries.length * chunk.length;
-  let compared = 0;
+  let work = 0;
+  function count(amount: number) {
+    work += amount;
+    if (work > budget)
+      throw new Error('Prefix search exceeded a linear tail-search budget.');
+  }
+  const values = maskedValues(entries).map((value) => ({
+    ...value,
+    prefixes: new Proxy(value.prefixes, {
+      get(table, key) {
+        count(1);
+        return Reflect.get(table, key, table);
+      },
+    }),
+  }));
+  const stream = masker(values);
   const equals = Buffer.prototype.equals;
   const bulk = vi
     .spyOn(Buffer.prototype, 'equals')
     .mockImplementation(function (this: Buffer, ...args: unknown[]) {
       const other = args[0] as Uint8Array;
-      compared += Math.min(this.length, other.length);
-      if (compared > budget)
-        throw new Error(
-          'Prefix search exceeded a linear byte-comparison budget.',
-        );
+      count(Math.min(this.length, other.length));
       return equals.call(this, other);
     });
   let output: Uint8Array;
@@ -153,6 +192,7 @@ it('adversarial long prefixes stay within a linear bulk-comparison budget', () =
   } finally {
     bulk.mockRestore();
   }
+  expect(work).toBeGreaterThan(0);
   expect(Buffer.from(output).equals(chunk)).toBe(true);
   expect(stream.end().length).toBe(0);
 });

@@ -930,6 +930,7 @@ it('CLI help lists the installed audited run command', async () => {
 });
 it('E1: the resolved command keeps argv0 and forwards arguments literally', async () => {
   await symlink(process.execPath, resolve(keyring.shim, 'node'));
+  await symlink('/usr/bin/mkfifo', resolve(keyring.shim, 'mkfifo'));
   const probe = resolve(keyring.home, 'arguments.js');
   await writeFile(
     probe,
@@ -1416,6 +1417,54 @@ it('Masking E18: the relay itself reports a fixed failure without protocol value
     app.token,
   ]);
 });
+it('Masking E1/E20: FIFO creation uses PATH before receiving injected values', async () => {
+  await writeFile(
+    resolve(keyring.shim, 'mkfifo'),
+    '#!/bin/sh\nif [ "$#" -ne 3 ] || [ "$1" != "-m" ] || [ "$2" != "600" ] || [ -n "$GH_TOKEN" ]; then exit 1; fi\nprintf "private\\n" >> "$HOME/fifo-calls"\nexec /usr/bin/mkfifo "$@"\n',
+    { mode: 0o700 },
+  );
+  const result = await keyring.start(maskingArgs('print-value', ['42'])).done;
+  expect(result.status).toBe(42);
+  expectOutput(result.stdout, `token=${marker}`, true);
+  expect(result.stderr).toBe('');
+  expect(await readFile(resolve(keyring.home, 'fifo-calls'), 'utf8')).toBe(
+    'private\nprivate\n',
+  );
+});
+it.each(['missing', 'refused'])(
+  'Masking E19: a %s FIFO command fails privately before requesting values',
+  async (failure) => {
+    if (failure === 'refused')
+      await writeFile(
+        resolve(keyring.shim, 'mkfifo'),
+        '#!/bin/sh\nprintf "fixture-mkfifo-failure\\n"\nprintf "fixture-mkfifo-failure\\n" >&2\nexit 1\n',
+        { mode: 0o700 },
+      );
+    const transport = await valueTransport();
+    try {
+      const started = resolve(keyring.home, 'started');
+      const result = await keyring.start(maskingArgs('mark', [started]), {
+        PATH: keyring.shim,
+      }).done;
+      expect(result.status).toBe(1);
+      expectOutput(
+        result.stdout + result.stderr,
+        'Nook could not start output masking. Try again.',
+        true,
+      );
+      expect(transport.counts).toEqual([]);
+      expect(await auditRows(app)).toEqual([]);
+      expect(existsSync(started)).toBe(false);
+      expectNoValue(result.stdout + result.stderr, [
+        app.input.value,
+        app.key,
+        app.token,
+      ]);
+    } finally {
+      await transport.close();
+    }
+  },
+);
 it('Masking E19: an unusable FIFO directory fails privately before requesting values', async () => {
   const invalid = resolve(keyring.home, 'runtime/not-directory');
   await writeFile(invalid, 'fixture');
