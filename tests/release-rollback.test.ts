@@ -40,6 +40,7 @@ async function runStep(
   name: string,
   fail = '',
   extra: NodeJS.ProcessEnv = {},
+  files: Record<string, string> = {},
 ) {
   const steps: { name?: string; uses?: string; run?: string }[] =
     release.jobs[job].steps;
@@ -53,6 +54,10 @@ async function runStep(
       .some((step) => step.uses?.startsWith('actions/checkout@'))
   )
     git(workspace, 'clone', '-q', remote, '.');
+  for (const [path, content] of Object.entries(files)) {
+    await mkdir(resolve(workspace, path, '..'), { recursive: true });
+    await writeFile(resolve(workspace, path), content);
+  }
   if (job === 'publish') {
     const assets = resolve(workspace, 'release-assets');
     await mkdir(assets);
@@ -61,12 +66,14 @@ async function runStep(
       'synthetic release asset',
     );
   }
+  // GitHub gives every job an existing, empty RUNNER_TEMP.
+  const runnerTemp = await mkdtemp(resolve(directory, `${job}-temp-`));
   return spawnSync(
     'bash',
     ['--noprofile', '--norc', '-eo', 'pipefail', '-c', steps[index].run ?? ''],
     {
       cwd: workspace,
-      env: { ...env, RELEASE_FAIL: fail, ...extra },
+      env: { ...env, RUNNER_TEMP: runnerTemp, RELEASE_FAIL: fail, ...extra },
       encoding: 'utf8',
       timeout: 20_000,
     },
@@ -90,8 +97,11 @@ printf 'gh %s\\n' "$*" >> "$RELEASE_LOG"
 fail_upload() {
   if [ "$RELEASE_FAIL" != asset-upload ]; then return 0; fi
   has_asset=false
+  previous=''
   for argument; do
-    if [ -f "$argument" ]; then has_asset=true; fi
+    # The notes file is not a release asset.
+    if [ -f "$argument" ] && [ "$previous" != --notes-file ]; then has_asset=true; fi
+    previous=$argument
   done
   if [ "$has_asset" != true ] || [ ! -f "$RELEASE_LOG.draft" ]; then return 0; fi
   printf 'draft exists; asset upload attempted\\n' > "$RELEASE_LOG.upload-failure"
@@ -103,6 +113,11 @@ case "$1 $2" in
   "release $RELEASE_FAIL") exit 1 ;;
   'release create')
     touch "$RELEASE_LOG.draft"
+    previous=''
+    for argument; do
+      if [ "$previous" = --notes-file ]; then cp "$argument" "$RELEASE_LOG.notes"; fi
+      previous=$argument
+    done
     if ! fail_upload "$@"; then
       explicit_draft=false
       for argument; do
@@ -175,6 +190,35 @@ it('publish pushes the tag for the dispatched commit and publishes the draft rel
   expect(calls).toContain('release-assets/nook-0.1.0-fixture.tar.gz');
   expect(calls).toContain('gh release edit v0.1.0 --draft=false');
   expect(calls).not.toContain('gh release delete');
+});
+
+const standardNotes =
+  'MIT source release with attested Node single-executable CLI binaries for Linux and macOS on x64 and arm64, for mise. The macOS Homebrew formula builds the CLI from source.\n';
+
+it('publish puts the version notes from docs/releases before the standard notes', async () => {
+  const result = await runStep(
+    'publish',
+    'Tag and publish, deleting both if either fails',
+    '',
+    {},
+    { 'docs/releases/0.1.0.md': 'Update nook on every machine first.\n' },
+  );
+  expect(result.status, result.stderr).toBe(0);
+  expect(await readFile(`${log}.notes`, 'utf8')).toBe(
+    `Update nook on every machine first.\n\n${standardNotes}`,
+  );
+});
+
+it('publish uses only the standard notes when the version has no notes file', async () => {
+  const result = await runStep(
+    'publish',
+    'Tag and publish, deleting both if either fails',
+    '',
+    {},
+    { 'docs/releases/0.0.9.md': 'Notes for another version.\n' },
+  );
+  expect(result.status, result.stderr).toBe(0);
+  expect(await readFile(`${log}.notes`, 'utf8')).toBe(standardNotes);
 });
 
 it.each([
