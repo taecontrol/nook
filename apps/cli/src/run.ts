@@ -111,12 +111,12 @@ export function run(
           : ['inherit', 'inherit', 'inherit'],
       ).pipe(
         Effect.ensuring(
-          Effect.sync(() => {
+          Effect.gen(function* () {
             if (plan.kind === 'masked') plan.closeWriters();
+            if (relay) yield* relay.flushed();
           }),
         ),
       );
-      if (relay) yield* relay.flushed();
       return status;
     }).pipe(
       Effect.scoped,

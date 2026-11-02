@@ -40,11 +40,11 @@ children.spawn = ((file: string, args: string[], options: SpawnOptions) => {
     const control = child.stdio[3];
     if (control && 'write' in control) {
       const write = control.write.bind(control);
-      control.write = (...parameters: Parameters<typeof control.write>) => {
-        if (String(parameters[0]).includes('"type":"flush"'))
+      control.write = ((...parameters: Parameters<typeof control.write>) => {
+        if (JSON.parse(String(parameters[0])).type === 'flush')
           writeFileSync(resolve(home, 'flush-requested'), 'x');
         return write(...parameters);
-      };
+      }) as typeof control.write;
     }
   }
   if (existsSync(resolve(home, 'break-delivery'))) {

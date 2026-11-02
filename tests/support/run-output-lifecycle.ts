@@ -20,7 +20,6 @@ if (!home) throw new Error('The lifecycle fixture requires a private HOME.');
 const path = (name: string) => resolve(home, name);
 assert.equal(
   spawnSync('/usr/bin/mkfifo', [
-    path('lifecycle-output'),
     path('lifecycle-events'),
     path('lifecycle-commands'),
   ]).status,
@@ -48,14 +47,23 @@ const waitFor = (name: string) =>
     else waiting.set(name, accept);
   });
 const commands = openSync(path('lifecycle-commands'), constants.O_RDWR);
-const output = new Socket({
-  fd: openSync(
-    path('lifecycle-output'),
-    constants.O_RDONLY | constants.O_NONBLOCK,
-  ),
-  readable: true,
-  writable: false,
-});
+// Writer cases use exec to preserve the started PID for SIGKILL and give both
+// CLI streams the same anonymous pipe, which reports EOF on macOS. Spawn
+// failures keep two independent pipes so both must close.
+const child = spawn(
+  mode === 'spawn-failure' ? process.execPath : '/bin/sh',
+  mode === 'spawn-failure'
+    ? [entry, ...args]
+    : ['-c', 'exec "$@" 2>&1', 'fixture', process.execPath, entry, ...args],
+  {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  },
+);
+const exited = once(child, 'exit');
+const output = child.stdout;
+const stderrClosed = once(child.stderr, 'close');
+const errors: Buffer[] = [];
+child.stderr.on('data', (chunk: Buffer) => errors.push(chunk));
 const outputClosed = once(output, 'close');
 const chunks: Buffer[] = [];
 let outputReady: (() => void) | undefined;
@@ -71,12 +79,6 @@ const prefixFlushed = () =>
     outputReady = accept;
     if (Buffer.concat(chunks).length >= beforeBytes) accept();
   });
-const destination = openSync(path('lifecycle-output'), 'w');
-const child = spawn(process.execPath, [entry, ...args], {
-  stdio: ['ignore', destination, destination],
-});
-const exited = once(child, 'exit');
-closeSync(destination);
 if (mode === 'killed') {
   await waitFor('child-ready');
   assert.equal(child.kill('SIGKILL'), true);
@@ -106,6 +108,7 @@ if (mode === 'epipe') {
   await outputClosed;
   if (!args.includes('--no-masking')) await waitFor('relay-exit');
 }
+await stderrClosed;
 lines.close();
 events.destroy();
 closeSync(commands);
@@ -114,8 +117,11 @@ process.stdout.write(
     status,
     signal,
     stdout: Buffer.concat(chunks).toString('base64'),
+    stderr: Buffer.concat(errors).toString('base64'),
     atExit: atExit.toString('base64'),
     outputClosed: output.destroyed,
+    stdoutClosed: output.readableEnded,
+    stderrClosed: child.stderr.readableEnded,
     relayExited: received.has('relay-exit'),
     secondWrite,
   }) + '\n',

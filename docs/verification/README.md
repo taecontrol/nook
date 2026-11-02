@@ -328,11 +328,11 @@ Only the util-linux PTY examples are Linux-only. Every value is synthetic.
 | E11 | “Masking E11”: transparent opt-out; repeated flags, a separate value and an equals value fail before keyring, HTTP, Audit or child startup. |
 | E12 | “Masking E12”: a real FIFO releases the writer only after the reader receives the unterminated prompt. |
 | E13 | “Masking E13”: a binary pipe carries all 256 byte values exactly. |
-| E14 | “Masking E14”: a real `yes`/`head -1` pipe closes, the child receives SIGPIPE and run returns 141. |
+| E14 | “Masking E14”: a real `yes`/`head -1` pipe closes, the child receives SIGPIPE and run returns 141. “Masking E14/E16” closes the output reader after run exits and the relay switches readers; after the relay observes EPIPE, the background writer's next write must also receive EPIPE, and the relay must exit while that writer remains idle with its fds open. |
 | E15 | “Masking E15” and existing native-signal tests: SIGTERM/SIGHUP forwarding, ignored parent SIGINT and preserved child status. |
 | E16 | “Masking E16”: a test-controlled FIFO holds a background writer across run's exit, with shared and separate destinations; an exit-time file snapshot proves the flush, later writes stay masked, and the relay exits after EOF on every stream. A second writer refills every synchronous drain read through control FIFOs, then writes continuously across run's exit, with both padded records and unpadded values. The unpadded case guards values split by the flush boundary. An OS-derived byte ceiling plus at most one longest value detects an unbounded flush without a timeout or a repetition budget. |
 | E17 | “Masking E17”: the reader's exit-time snapshot already contains the complete MiB, including its final masked value. |
-| E18 | “Masking E18”: private spawn failures with and without opt-out, lost relay delivery, and the relay's own fixed protocol-failure diagnostic. |
+| E18 | “Masking E18”: private missing-interpreter spawn failures preserve exit 127 and the diagnostic, with and without opt-out; masked failures must request flush, close output and exit the relay. Lost relay delivery and the relay's own fixed protocol-failure diagnostic also exclude values. |
 | E19 | “Masking E19”: a Node preload refuses only relay startup, either synchronously or through a real failed spawn; the value-request observer and Audit both remain empty and no child starts. An unusable FIFO directory proves the same private, unaudited refusal. |
 | E20 | “Masking E20”: a preload observes the real relay's argv and environment; the injected child checks both, including values already in its parent's environment, without printing a value. Coverage runs also require separate relay execution counters. The SEA round trip exercises the same-executable entry point. |
 
@@ -351,16 +351,30 @@ This uses read(2)'s EOF even when macOS kqueue never ends the FIFO Socket.
 EAGAIN also releases any prefix still crossing the boundary and acknowledges
 completed writes; a background writer pausing mid-value at that point is a
 best-effort gap. After EAGAIN or quota exhaustion, the relay consumes any bytes
-already buffered by the Socket, destroys it and starts `fs.createReadStream`
+already buffered by the Socket, destroys it and starts a manual `fs.read` loop
 on the blocking reader. The two paths never read concurrently and share the
-same masker and output backpressure. The blocking stream reports EOF after
-the remaining writers close, on Linux and macOS. Stopping after EPIPE destroys
-the active reader and closes an idle blocking reader too, preserving SIGPIPE.
+same masker. Exactly one blocking read is in flight per FIFO; its masked output
+must finish writing (the write callback) before the next read starts, providing
+backpressure without reading ahead of a possible output error. EOF releases the
+held tail and explicitly closes the blocking fd. EPIPE or any other output error
+closes it immediately when no read is pending, preserving SIGPIPE. A blocked read
+cannot be cancelled; if stopped during one, its callback closes the fd without
+starting another read. An idle writer learns that its reader closed only on its
+next write, and the relay can learn of EPIPE only when it writes output.
 Each pending blocking read uses one libuv threadpool thread, at most two.
 Linux uses `fs.pipe-max-size` (and
 the initial 16-page capacity); macOS FIFO sockets use `kern.ipc.maxsockbuf`.
-The detached relay keeps forwarding background output after its control channel
-closes. Its explicit environment contains only the optional `NOOK_CLI_COVERAGE`
+Run's finalizer closes its writers and requests flush even when the command
+fails to spawn, preserving its failure and status. Control-channel EOF without
+an explicit request also flushes every stream: drain to EOF or switch to the
+blocking loop while writers remain. The detached relay then keeps masking until
+those writers close, without relying on Socket EOF. “Masking E16: killing run”
+uses SIGKILL on the test's own run process after its child signals readiness;
+the implicit flush must release a held prefix before the test allows the child
+to write again and close. The caller observes output EOF on its anonymous pipe;
+a FIFO reports the relay's natural exit. No sleeps or per-test time budgets
+drive these lifecycle checks.
+Its explicit environment contains only the optional `NOOK_CLI_COVERAGE`
 exit-hook path, with a distinct
 `-relay.json` filename, so relay counters cannot overwrite the parent's evidence.
 

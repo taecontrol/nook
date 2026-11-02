@@ -128,8 +128,11 @@ async function lifecycleProbe(
     status: number | null;
     signal: NodeJS.Signals | null;
     stdout: string;
+    stderr: string;
     atExit: string;
     outputClosed: boolean;
+    stdoutClosed: boolean;
+    stderrClosed: boolean;
     relayExited: boolean;
     secondWrite?: string;
   };
@@ -1385,11 +1388,15 @@ it.each([false, true])(
     const result = await lifecycleProbe('spawn-failure', args, 0);
     expect(result.status).toBe(127);
     expect(result.outputClosed).toBe(true);
+    expect(result.stdoutClosed).toBe(true);
+    expect(result.stderrClosed).toBe(true);
     expect(result.relayExited).toBe(!disabled);
     expect(existsSync(resolve(keyring.home, 'flush-requested'))).toBe(
       !disabled,
     );
-    const output = Buffer.from(result.stdout, 'base64').toString();
+    const output =
+      Buffer.from(result.stdout, 'base64').toString() +
+      Buffer.from(result.stderr, 'base64').toString();
     expectOutput(output, `Command not found: ${command}`, true);
     expectNoValue(output, [app.input.value, app.key, app.token]);
   },
