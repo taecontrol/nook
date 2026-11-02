@@ -352,11 +352,14 @@ closes. Its explicit environment contains only the optional `NOOK_CLI_COVERAGE`
 exit-hook path, with a distinct
 `-relay.json` filename, so relay counters cannot overwrite the parent's evidence.
 
-`run-masker.test.ts` also guards adversarial long prefixes with 20 values of
-65,535 bytes and a 65,536-byte mismatching chunk. It counts bulk-comparison bytes
-instead of timing the search. Precomputed KMP failure links keep tail scanning
-linear per value and let replacements discard consumed prefixes without
-rescanning the chunk.
+`run-masker.test.ts` bounds complete-match `Buffer.indexOf` calls by matches
+plus values, with one repeated 8-byte value, 19 absent extensions and a 64 KiB
+chunk. Each value caches its next match or miss for that chunk. A second guard
+bounds KMP failure-link reads and bulk-comparison bytes for 20 values of
+65,535 bytes and a 65,536-byte mismatching chunk. Both counters must record
+work; neither guard times the search. Precomputed KMP failure links keep tail
+scanning linear per value and let replacements discard consumed prefixes
+without rescanning the chunk.
 
 ### Project secret mappings
 

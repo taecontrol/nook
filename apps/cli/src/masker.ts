@@ -5,6 +5,7 @@ type MaskedValue = {
 };
 type Value = { readonly path: string; readonly value: string };
 type PendingPrefix = { length: number; readonly prefixes: Uint32Array };
+type MatchCandidate = { at: number; readonly value: MaskedValue };
 
 function extendPrefix(
   bytes: Buffer,
@@ -36,11 +37,19 @@ export function maskedValues(values: readonly Value[]): MaskedValue[] {
   }
   return [...distinct.values()].sort((a, b) => b.bytes.length - a.bytes.length);
 }
-function nextMatch(data: Buffer, values: readonly MaskedValue[], from: number) {
-  let match: { at: number; value: MaskedValue } | undefined;
-  for (const value of values) {
-    const at = data.indexOf(value.bytes, from);
-    if (at !== -1 && (!match || at < match.at)) match = { at, value };
+function nextMatch(
+  data: Buffer,
+  candidates: readonly MatchCandidate[],
+  from: number,
+) {
+  let match: MatchCandidate | undefined;
+  for (const candidate of candidates) {
+    // Keep misses and future matches. Only consumed or overlapping matches
+    // need another search in this chunk.
+    if (candidate.at !== -1 && candidate.at < from)
+      candidate.at = data.indexOf(candidate.value.bytes, from);
+    if (candidate.at !== -1 && (!match || candidate.at < match.at))
+      match = candidate;
   }
   return match;
 }
@@ -74,6 +83,10 @@ function pendingStart(
 }
 function replace(data: Buffer, values: readonly MaskedValue[], final: boolean) {
   const output: Buffer[] = [];
+  const candidates = values.map((value) => ({
+    at: data.indexOf(value.bytes),
+    value,
+  }));
   const tails = final
     ? []
     : values.map((value) => ({
@@ -82,7 +95,7 @@ function replace(data: Buffer, values: readonly MaskedValue[], final: boolean) {
       }));
   let from = 0;
   while (from < data.length) {
-    const match = nextMatch(data, values, from);
+    const match = nextMatch(data, candidates, from);
     const pending = final ? data.length : pendingStart(data, tails, from);
     if (!match || match.at >= pending) {
       output.push(data.subarray(from, pending));
