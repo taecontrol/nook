@@ -115,7 +115,7 @@ export async function withPageEvidence<T>(
     // V8 formats the stack lazily: read it before the message changes.
     const { message, stack } = error;
     error.message = `${message}\n\n${await describePage(page, record)}`;
-    error.stack = stack?.replace(message, error.message);
+    error.stack = stack?.replace(message, () => error.message);
     throw error;
   }
 }

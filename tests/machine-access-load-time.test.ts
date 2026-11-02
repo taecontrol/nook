@@ -248,6 +248,7 @@ it('#100: a measurement that fails before the click fails the test at once with 
   try {
     await page.addInitScript(() => {
       console.error('synthetic console error');
+      console.error('synthetic replacement text: $& $$');
       setTimeout(() => {
         throw new Error('synthetic page error');
       });
@@ -284,6 +285,9 @@ it('#100: a measurement that fails before the click fails the test at once with 
     expect(message).toContain('#root: rendered');
     expect(message).toContain('synthetic console error');
     expect(message).toContain('synthetic page error');
+    expect(failure instanceof Error ? failure.stack : '').toContain(
+      'synthetic replacement text: $& $$',
+    );
   } finally {
     preload.resolve();
     await context.close();
