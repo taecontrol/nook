@@ -73,6 +73,7 @@ it('E1/E4/E20: create returns public metadata, encrypted storage and one private
     workingDirectory: input.workingDirectory,
   });
   expect(Object.keys(entries[0]).sort()).toEqual([
+    'agentSession',
     'at',
     'bucket',
     'id',
@@ -374,7 +375,7 @@ it('Migration preserves populated use rows and chronology/path indexes while all
     db.prepare('DROP TABLE audit_entries'),
     ...old.map((sql) => db.prepare(sql)),
     db.prepare(
-      "DELETE FROM d1_migrations WHERE name IN ('0007_secret_creations.sql', '0008_secret_reveals.sql', '0013_audit_file_entries.sql')",
+      "DELETE FROM d1_migrations WHERE name IN ('0007_secret_creations.sql', '0008_secret_reveals.sql', '0013_audit_file_entries.sql', '0014_audit_agent_sessions.sql')",
     ),
   ]);
   const id = randomUUID();
@@ -419,7 +420,10 @@ it('Migration preserves populated use rows and chronology/path indexes while all
     'audit_entries_secret',
     'sqlite_autoindex_audit_entries_1',
   ]);
-  expect(await applyMigrations(db)).toEqual(['0013_audit_file_entries.sql']);
+  expect(await applyMigrations(db)).toEqual([
+    '0013_audit_file_entries.sql',
+    '0014_audit_agent_sessions.sql',
+  ]);
   const { token } = await issueGrant(app, ['work/acme']);
   expect((await machineCreate(app, token)).status).toBe(201);
   expect(
@@ -435,7 +439,7 @@ it('Migration preserves denied use history with all recorded facts', async () =>
     db.prepare('DROP TABLE audit_entries'),
     ...old.map((sql) => db.prepare(sql)),
     db.prepare(
-      "DELETE FROM d1_migrations WHERE name IN ('0007_secret_creations.sql', '0008_secret_reveals.sql', '0013_audit_file_entries.sql')",
+      "DELETE FROM d1_migrations WHERE name IN ('0007_secret_creations.sql', '0008_secret_reveals.sql', '0013_audit_file_entries.sql', '0014_audit_agent_sessions.sql')",
     ),
   ]);
   await db
@@ -467,7 +471,10 @@ it('Migration preserves denied use history with all recorded facts', async () =>
   expect(after.every((row) => row.ip === null && row.country === null)).toBe(
     true,
   );
-  expect(await applyMigrations(db)).toEqual(['0013_audit_file_entries.sql']);
+  expect(await applyMigrations(db)).toEqual([
+    '0013_audit_file_entries.sql',
+    '0014_audit_agent_sessions.sql',
+  ]);
   expect(
     (await auditPageData(app)).entries.map((entry) => entry.outcome),
   ).toEqual(['denied']);
