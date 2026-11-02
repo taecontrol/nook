@@ -1,41 +1,15 @@
-import { execFileSync } from 'node:child_process';
 import {
   closeSync,
   createWriteStream,
   fstatSync,
   read,
-  readFileSync,
-  readSync,
   writeSync,
 } from 'node:fs';
 import { Socket } from 'node:net';
 import { createInterface } from 'node:readline';
+import { splitFlushToken } from './flush-token.ts';
 import { maskedValues, masker } from './masker.ts';
 
-function fifoCapacityBound() {
-  // Node exposes neither F_GETPIPE_SZ nor FIONREAD. Use the OS's allocation
-  // ceiling, not the default capacity: Linux FIFOs can grow, and macOS FIFOs
-  // use local sockets (fifo_vnops.c), not BIG_PIPE_SIZE anonymous pipes.
-  const limit = Number(
-    process.platform === 'linux'
-      ? readFileSync('/proc/sys/fs/pipe-max-size', 'utf8')
-      : execFileSync('/usr/sbin/sysctl', ['-n', 'kern.ipc.maxsockbuf'], {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'ignore'],
-        }),
-  );
-  if (!Number.isSafeInteger(limit) || limit <= 0)
-    throw new Error('Cannot determine the FIFO capacity bound.');
-  return limit;
-}
-function readAvailable(fd: number, bytes: Buffer, length: number) {
-  try {
-    return readSync(fd, bytes, 0, length, null);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EAGAIN') return undefined;
-    throw error;
-  }
-}
 function failure() {
   // Avoid platform errors: their text can include arbitrary output bytes.
   try {
@@ -44,172 +18,109 @@ function failure() {
     /* The reader may have closed stderr too. */
   }
 }
+function outputStream(target: number) {
+  const destination = fstatSync(target);
+  // fs.WriteStream retries EAGAIN only five times. Pipes/sockets need libuv's
+  // writable readiness under backpressure; this Socket never reads a FIFO.
+  return destination.isFIFO() || destination.isSocket()
+    ? new Socket({ fd: target, readable: false, writable: true })
+    : createWriteStream('', { fd: target, autoClose: false });
+}
 function forwarder(
   fd: number,
-  blockingFd: number,
   target: number,
   values: ReturnType<typeof maskedValues>,
-  capacity: number,
+  token: Buffer,
 ) {
-  const socket = new Socket({ fd, readable: true, writable: false });
-  let blockingReader: number | undefined = blockingFd;
+  let reader: number | undefined = fd;
   let reading = false;
-  let following = false;
-  const output = createWriteStream('', { fd: target, autoClose: false });
-  const masking = masker(values);
-  // Also cover Linux's initial 16-page capacity if its sysctl was lowered.
-  const bound = Math.max(capacity, 16 * fstatSync(fd).blksize);
   let stopped = false;
-  let flushing = false;
-  const closeInputs = () => {
-    socket.destroy();
-    // A blocked fs.read cannot be cancelled. If stop arrives during a read,
-    // its callback closes the fd before any further read or write can start.
-    if (blockingReader !== undefined && !reading) {
-      closeSync(blockingReader);
-      blockingReader = undefined;
+  let markFlushed: () => void;
+  const flushed = new Promise<void>((accept) => {
+    markFlushed = accept;
+  });
+  const output = outputStream(target);
+  const masking = masker(values);
+  const splitter = splitFlushToken(token);
+  const closeInput = () => {
+    // A blocked fs.read cannot be cancelled. Its callback closes the fd if
+    // stop arrived during that read, without starting another read or write.
+    if (reader !== undefined && !reading) {
+      closeSync(reader);
+      reader = undefined;
     }
   };
   const stop = (error?: Error) => {
     stopped = true;
-    closeInputs();
+    closeInput();
     output.destroy(error);
+    markFlushed();
   };
-  const write = (chunk: Uint8Array) => {
-    if (!stopped && chunk.length && !output.write(chunk)) socket.pause();
-  };
-  const end = () => {
-    if (stopped || output.writableEnded) return;
-    write(masking.end());
-    output.end();
-    closeInputs();
-  };
-  socket.on('data', (chunk: Buffer) => write(masking.push(chunk)));
-  socket.on('error', () => {
-    failure();
-    stop();
-  });
-  socket.on('end', end);
-  output.on('drain', () => {
-    if (!flushing && !following && !stopped) socket.resume();
-  });
   output.on('error', (error: NodeJS.ErrnoException) => {
     if (error.code !== 'EPIPE') failure();
     stop();
   });
-  output.on('finish', () => {
-    stopped = true;
-  });
   function written(chunk: Uint8Array) {
     return new Promise<void>((accept) => {
-      if (stopped || output.writableFinished) return accept();
-      const complete = (error?: Error | null) => {
+      if (stopped || !chunk.length) return accept();
+      output.write(chunk, (error) => {
         if (error) stop(error);
-        output.off('error', complete);
-        output.off('finish', complete);
         accept();
-      };
-      output.once('error', complete);
-      if (output.writableEnded) output.once('finish', complete);
-      else output.write(chunk, complete);
+      });
     });
-  }
-  async function drainChunk(bytes: Buffer, length: number) {
-    if (socket.readableLength) {
-      // read() emits data synchronously through the normal masking handler.
-      // libuv may have buffered more bytes while a previous write completed;
-      // consume those before reading the fd directly to preserve byte order.
-      const chunk = socket.read(
-        Math.min(socket.readableLength, length),
-      ) as Buffer;
-      await written(Buffer.alloc(0));
-      return chunk.length;
-    }
-    if (socket.destroyed) return 0;
-    const size = readAvailable(fd, bytes, length);
-    // Wait for each write, including backpressure, before taking more data.
-    if (size) await written(masking.push(bytes.subarray(0, size)));
-    return size;
-  }
-  async function drain(remaining: number) {
-    const bytes = Buffer.alloc(64 * 1024);
-    const longest = values[0]?.bytes.length ?? 0;
-    // A held tail starts before the boundary while it exceeds the bytes read
-    // past it. At most one longest value of lookahead resolves those bytes.
-    while (!stopped && remaining + masking.pendingBytes > 0) {
-      const length = remaining > 0 ? remaining : longest + remaining;
-      const size = await drainChunk(bytes, Math.min(bytes.length, length));
-      if (size === 0) {
-        // read(2) sees FIFO EOF even when macOS kqueue never ends the Socket.
-        end();
-        await written(Buffer.alloc(0));
-        return;
-      }
-      if (size === undefined) {
-        // EAGAIN confirms the flush. A background writer pausing mid-value
-        // exactly here is the accepted best-effort gap: release its held tail.
-        await written(masking.end());
-        return;
-      }
-      remaining -= size;
-    }
   }
   function readBlocking(bytes: Buffer) {
     return new Promise<number>((accept, reject) => {
       reading = true;
-      read(blockingFd, bytes, 0, bytes.length, null, (error, size) => {
+      read(fd, bytes, 0, bytes.length, null, (error, size) => {
         reading = false;
         if (stopped) {
-          closeInputs();
+          closeInput();
           accept(0);
         } else if (error) reject(error);
         else accept(size);
       });
     });
   }
+  async function forward(chunk: Uint8Array) {
+    const { before, after } = splitter.push(chunk);
+    await written(masking.push(before));
+    if (after !== undefined) {
+      await written(masking.end());
+      // Confirm only the completed writes before the token. Background output
+      // in this same read must not extend the boundary or delay the caller.
+      markFlushed();
+      await written(masking.push(after));
+    }
+  }
   async function followWriters() {
-    following = true;
-    // Preserve any bytes libuv buffered during the flush's awaited writes.
-    // read() emits them through the same masker before the reader changes.
-    if (socket.readableLength) socket.read();
-    socket.destroy();
     const bytes = Buffer.alloc(64 * 1024);
     try {
-      await written(Buffer.alloc(0));
-      // Only one read is in flight, and each output write finishes before the
-      // next read starts. EPIPE can therefore close the FIFO immediately.
-      // An idle background writer learns the reader closed only on its next
-      // write; likewise the relay learns of EPIPE only when it writes output.
+      // One blocking read per FIFO, from the start: kqueue cannot reliably
+      // signal either data from a blocked large FIFO write or FIFO EOF.
+      // Each write finishes before the next read, so EPIPE closes the reader
+      // immediately. At most two operations occupy libuv's four pool threads.
       while (!stopped) {
         const size = await readBlocking(bytes);
         if (stopped) return;
-        if (size === 0) return end();
-        await written(masking.push(bytes.subarray(0, size)));
+        if (size === 0) break;
+        await forward(bytes.subarray(0, size));
       }
+      await written(masking.push(splitter.end()));
+      await written(masking.end());
+      // Close only the relay's copy. Socket.end() would shutdown the caller's
+      // shared socket too, preventing Nook's own post-flush diagnostics.
+      if (output instanceof Socket) output.destroy();
+      else output.end();
+      closeInput();
+      markFlushed();
     } catch {
       failure();
       stop();
     }
   }
-  return {
-    stop,
-    async flush() {
-      if (stopped || output.writableEnded || following) {
-        await written(Buffer.alloc(0));
-        return;
-      }
-      flushing = true;
-      socket.pause();
-      // Pending bytes fit in the JS buffer plus one FIFO capacity. Even if
-      // control was lost with the child alive, later writes cannot extend
-      // this finite boundary.
-      const remaining = socket.readableLength + bound;
-      await written(Buffer.alloc(0));
-      await drain(remaining);
-      if (!stopped && !output.writableEnded) void followWriters();
-      flushing = false;
-    },
-  };
+  void followWriters();
+  return { stop, flushed };
 }
 export async function relayMain() {
   const control = new Socket({ fd: 3, readable: true, writable: true });
@@ -218,35 +129,24 @@ export async function relayMain() {
   control.on('error', () => {});
   try {
     const targets = JSON.parse(process.argv.at(-1) ?? '[]') as number[];
-    const capacity = fifoCapacityBound();
     control.write('ready\n');
     for await (const line of lines) {
       const message = JSON.parse(line) as {
-        type: string;
         values: { path: string; value: string }[];
+        token: string;
       };
-      if (message.type === 'values') {
-        const values = maskedValues(message.values);
-        targets.forEach((target, index) => {
-          streams.push(
-            forwarder(
-              index + 4,
-              index + 4 + targets.length,
-              target,
-              values,
-              capacity,
-            ),
-          );
-        });
-        control.write('values\n');
-      } else if (message.type === 'flush') {
-        await Promise.all(streams.map((stream) => stream.flush()));
-        control.write('flushed\n');
-      }
+      const values = maskedValues(message.values);
+      const token = Buffer.from(message.token);
+      targets.forEach((target, index) => {
+        streams.push(forwarder(index + 4, target, values, token));
+      });
+      control.write('values\n');
+      void Promise.all(streams.map((stream) => stream.flushed)).then(() => {
+        if (!control.destroyed) control.write('flushed\n');
+      });
     }
-    // A killed or crashed caller cannot request flush. Drain or switch every
-    // FIFO anyway: macOS Socket EOF is not a reliable termination signal.
-    await Promise.all(streams.map((stream) => stream.flush()));
+    // Lost control sends no implicit flush: blocking reads keep masking until
+    // all writers close, and EOF releases the remaining token/value prefixes.
   } catch {
     failure();
     for (const stream of streams) stream.stop();

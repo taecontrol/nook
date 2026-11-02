@@ -132,7 +132,7 @@ async function lifecycleProbe(
 ) {
   await writeFile(
     resolve(keyring.home, 'observe-lifecycle'),
-    JSON.stringify({ beforeBytes }),
+    JSON.stringify({ beforeBytes, backpressure: mode === 'backpressure' }),
   );
   const result = await keyring.command(
     process.execPath,
@@ -157,7 +157,22 @@ async function lifecycleProbe(
     stderrClosed: boolean;
     relayExited: boolean;
     secondWrite?: string;
+    backpressured: boolean;
+    outputErrors: string[];
   };
+}
+async function flushTokens() {
+  const file = resolve(keyring.home, 'flush-tokens');
+  if (!existsSync(file)) return [];
+  const writes = (await readFile(file, 'utf8'))
+    .trimEnd()
+    .split('\n')
+    .map((line) => JSON.parse(line) as { fd: number; token: string });
+  expect(new Set(writes.map(({ fd }) => fd)).size).toBe(writes.length);
+  expect(new Set(writes.map(({ token }) => token)).size).toBe(1);
+  expect(writes[0].token).toMatch(/^\0nook-flush:[a-f0-9]{64}\0$/);
+  expect(Buffer.byteLength(writes[0].token)).toBe(77);
+  return writes;
 }
 async function addValue(name: string, value: string) {
   expect((await createSecret(app, secretInput({ name, value }))).status).toBe(
@@ -185,7 +200,6 @@ async function keyringTranscript() {
 beforeEach(async () => {
   app = await runFixture();
   keyring = withRelaySeam(await privateKeyring());
-  await writeFile(resolve(keyring.home, 'suppress-fifo-eof'), '');
   await mkdir(dirname(keyring.config), { recursive: true });
   await writeFile(keyring.config, JSON.stringify({ url: app.origin }));
   expect(await keyring.store(app.origin, app.token)).toBe(0);
@@ -868,22 +882,27 @@ it('E5: alias mappings send one path in the real value request', async () => {
 it('E9: an incomplete successful value response fails privately before spawning', async () => {
   const transport = await valueTransport('incomplete');
   try {
-    const result = await keyring.start(
+    const result = await lifecycleProbe(
+      'spawn-failure',
       runArgs([process.execPath, childFile, 'tty']),
-    ).done;
+      0,
+    );
+    const output =
+      Buffer.from(result.stdout, 'base64').toString() +
+      Buffer.from(result.stderr, 'base64').toString();
+    expect(result.stdoutClosed).toBe(true);
+    expect(result.stderrClosed).toBe(true);
+    expect(result.relayExited).toBe(true);
+    expect(await flushTokens()).toHaveLength(2);
     expect(result.status).toBe(1);
     expectOutput(
-      result.stdout + result.stderr,
+      output,
       `Could not reach ${transport.origin}. Try again.`,
       true,
     );
     expect(transport.counts).toEqual([1]);
     expect(await auditRows(app)).toHaveLength(1);
-    expectNoValue(result.stdout + result.stderr, [
-      app.input.value,
-      app.token,
-      app.key,
-    ]);
+    expectNoValue(output, [app.input.value, app.token, app.key]);
   } finally {
     await transport.close();
   }
@@ -891,22 +910,27 @@ it('E9: an incomplete successful value response fails privately before spawning'
 it('E11: the CLI does not retry a lost value response after the Worker audited delivery', async () => {
   const transport = await valueTransport('lost');
   try {
-    const result = await keyring.start(
+    const result = await lifecycleProbe(
+      'spawn-failure',
       runArgs([process.execPath, childFile, 'tty']),
-    ).done;
+      0,
+    );
+    const output =
+      Buffer.from(result.stdout, 'base64').toString() +
+      Buffer.from(result.stderr, 'base64').toString();
+    expect(result.stdoutClosed).toBe(true);
+    expect(result.stderrClosed).toBe(true);
+    expect(result.relayExited).toBe(true);
+    expect(await flushTokens()).toHaveLength(0);
     expect(result.status).toBe(1);
     expectOutput(
-      result.stdout + result.stderr,
+      output,
       `Could not reach ${transport.origin}. Try again.`,
       true,
     );
     expect(transport.counts).toEqual([1]);
     expect(await auditRows(app)).toHaveLength(1);
-    expectNoValue(result.stdout + result.stderr, [
-      app.input.value,
-      app.token,
-      app.key,
-    ]);
+    expectNoValue(output, [app.input.value, app.token, app.key]);
   } finally {
     await transport.close();
   }
@@ -1041,12 +1065,22 @@ it('Masking E2: both child streams share one real FIFO for a shared destination'
   const result = await outputProbe('shared', maskingArgs('shared-fifo'));
   expect(result.status).toBe(0);
   expect(result.stdout.equals(Buffer.from('true'))).toBe(true);
+  const launch = JSON.parse(
+    await readFile(resolve(keyring.home, 'relay-launch'), 'utf8'),
+  ) as { readers: number };
+  expect(launch.readers).toBe(1);
+  expect(await flushTokens()).toHaveLength(1);
 });
 it('Masking E3: separate pipes retain their stream and plain bytes', async () => {
   const result = await keyring.start(maskingArgs('separate')).done;
   expect(result.status).toBe(0);
   expectOutput(result.stdout, 'plain', true);
   expectOutput(result.stderr, marker, true);
+  const launch = JSON.parse(
+    await readFile(resolve(keyring.home, 'relay-launch'), 'utf8'),
+  ) as { readers: number };
+  expect(launch.readers).toBe(2);
+  expect(await flushTokens()).toHaveLength(2);
 });
 it('Masking E4: writes 200 ms apart never expose a value fragment', async () => {
   const result = await keyring.start(maskingArgs('split-value')).done;
@@ -1208,7 +1242,7 @@ it('Masking E14: head closes its pipe, yes gets SIGPIPE and run exits 141', asyn
   expect(result.stdout.equals(Buffer.from('y\n'))).toBe(true);
   expect(result.stderr.length).toBe(0);
 });
-it('Masking E14/E16: EPIPE after the blocking-reader switch closes the FIFO and exits with an idle writer', async () => {
+it('Masking E14/E16: EPIPE after the token flush closes the FIFO and exits with an idle writer', async () => {
   const before = `before:${marker}:tail${app.input.value.slice(0, 8)}`;
   const result = await lifecycleProbe(
     'epipe',
@@ -1221,7 +1255,7 @@ it('Masking E14/E16: EPIPE after the blocking-reader switch closes the FIFO and 
   expect(result.outputClosed).toBe(true);
   expect(result.relayExited).toBe(true);
 });
-it('Masking E16: killing run implicitly flushes a held prefix and exits the relay after the child closes', async () => {
+it('Masking E16: killing run keeps masking until EOF and releases the held tail before relay exit', async () => {
   const before = `before:${marker}:tail${app.input.value.slice(0, 8)}`;
   const result = await lifecycleProbe(
     'killed',
@@ -1230,9 +1264,8 @@ it('Masking E16: killing run implicitly flushes a held prefix and exits the rela
   );
   expect(result.status).toBeNull();
   expect(result.signal).toBe('SIGKILL');
-  expect(Buffer.from(result.atExit, 'base64').toString()).toBe(before);
   expect(Buffer.from(result.stdout, 'base64').toString()).toBe(
-    before + `after:${marker}`,
+    before + `after:${marker}:tail${app.input.value.slice(0, 8)}`,
   );
   expect(result.outputClosed).toBe(true);
   expect(result.relayExited).toBe(true);
@@ -1240,26 +1273,29 @@ it('Masking E16: killing run implicitly flushes a held prefix and exits the rela
 it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
   'Masking E15: %s keeps forwarding and the child status',
   async (signal) => {
-    const running = keyring.start(maskingArgs('signal-status'));
-    await expect
-      .poll(() => running.output().includes('child-ready'))
-      .toBe(true);
-    await nativeSignal(running, signal);
-    if (signal === 'SIGINT') await nativeSignal(running, 'SIGTERM');
-    const result = await running.done;
+    const result = await lifecycleProbe(
+      signal,
+      maskingArgs('signal-status'),
+      0,
+    );
     expect(result.status).toBe(143);
     expectOutput(
-      result.stdout,
-      'child-ready\n' + (signal === 'SIGINT' ? 'SIGTERM' : signal),
+      Buffer.from(result.stdout, 'base64').toString(),
+      'child-ready\n' +
+        (signal === 'SIGINT' ? 'SIGTERM' : signal) +
+        `:${marker}:tail${app.input.value.slice(0, 8)}`,
       true,
     );
+    expect(result.stdoutClosed).toBe(true);
+    expect(result.relayExited).toBe(true);
+    expect((await flushTokens()).length).toBe(1);
   },
 );
 it.each(['background', 'background-separate'])(
   'Masking E16: run flushes and exits while a FIFO-gated background writer stays masked (%s)',
   async (destination) => {
     const before = `before:${marker}:tail${app.input.value.slice(0, 8)}`;
-    const after = `after:${marker}`;
+    const after = `\0nook-flush:near-match:${marker}\0nook-flush:`;
     const release = resolve(keyring.home, 'release');
     expect(
       (await keyring.command('/usr/bin/mkfifo', [release]).done).status,
@@ -1326,22 +1362,17 @@ it.each(['background', 'background-separate'])(
   },
 );
 it.each(['padded', 'unpadded'])(
-  'Masking E16: flush has a finite byte boundary while a continuous background writer stays masked (%s)',
+  'Masking E16: the token confirms flush while a continuous background writer stays masked (%s)',
   async (record) => {
     await writeFile(
       resolve(keyring.home, 'continuous-output'),
-      JSON.stringify({
-        record,
-        maximumTailBytes: Buffer.byteLength(app.input.value),
-      }),
+      JSON.stringify({ record }),
     );
     expect(
       (
         await keyring.command(
           '/usr/bin/mkfifo',
-          ['refill-requests', 'refill-replies', 'writer-ready'].map((name) =>
-            resolve(keyring.home, name),
-          ),
+          ['writer-ready'].map((name) => resolve(keyring.home, name)),
         ).done
       ).status,
     ).toBe(0);
@@ -1357,10 +1388,7 @@ it.each(['padded', 'unpadded'])(
     ) as { pid: number };
     try {
       expect(result.status).toBe(3);
-      expect(
-        existsSync(resolve(keyring.home, 'flush-overrun')),
-        'Flush must acknowledge a finite FIFO byte boundary.',
-      ).toBe(false);
+      expect(await flushTokens()).toHaveLength(1);
       expect(existsSync(resolve(keyring.home, 'writer-flowing'))).toBe(true);
       expect(
         (await keyring.command('/bin/kill', ['-0', writer]).done).status,
@@ -1392,24 +1420,34 @@ it.each(['padded', 'unpadded'])(
     expectNoValue(output, [app.input.value]);
   },
 );
-it.each(['native EOF', 'suppressed FIFO Socket EOF'])(
+it.each(['binary', 'backpressure'])(
   'Masking E17: the complete MiB including its final value is delivered before run exits (%s)',
-  async (eof) => {
-    if (eof === 'native EOF')
-      await rm(resolve(keyring.home, 'suppress-fifo-eof'));
+  async (mode) => {
     await writeFile(resolve(keyring.home, 'observe-lifecycle'), '{}');
-    const result = await outputProbe('binary', maskingArgs('large'));
-    expect(result.status).toBe(0);
     const expected = Buffer.concat([
       Buffer.alloc(1024 * 1024 - Buffer.byteLength(app.input.value), 120),
       Buffer.from(marker),
     ]);
-    expect(result.stdout.equals(expected)).toBe(true);
-    expect(result.stdoutClosed).toBe(true);
-    expect(result.stderrClosed).toBe(true);
-    expect(
-      await readFile(resolve(keyring.home, 'lifecycle-events'), 'utf8'),
-    ).toBe('relay-exit\n');
+    if (mode === 'backpressure') {
+      const result = await lifecycleProbe(mode, maskingArgs('large'), 0);
+      expect(result.status).toBe(0);
+      expect(Buffer.from(result.atExit, 'base64').equals(expected)).toBe(true);
+      expect(result.backpressured).toBe(true);
+      expect(result.outputErrors).toEqual([]);
+      expect(result.stdoutClosed).toBe(true);
+      expect(result.stderrClosed).toBe(true);
+      expect(result.relayExited).toBe(true);
+    } else {
+      const result = await outputProbe(mode, maskingArgs('large'));
+      expect(result.status).toBe(0);
+      expect(result.stdout.equals(expected)).toBe(true);
+      expect(result.stdoutClosed).toBe(true);
+      expect(result.stderrClosed).toBe(true);
+      expect(
+        await readFile(resolve(keyring.home, 'lifecycle-events'), 'utf8'),
+      ).toBe('relay-exit\n');
+    }
+    expect(await flushTokens()).toHaveLength(mode === 'backpressure' ? 1 : 2);
   },
 );
 it.each([false, true])(
@@ -1425,9 +1463,7 @@ it.each([false, true])(
     expect(result.stdoutClosed).toBe(true);
     expect(result.stderrClosed).toBe(true);
     expect(result.relayExited).toBe(!disabled);
-    expect(existsSync(resolve(keyring.home, 'flush-requested'))).toBe(
-      !disabled,
-    );
+    expect(await flushTokens()).toHaveLength(disabled ? 0 : 2);
     const output =
       Buffer.from(result.stdout, 'base64').toString() +
       Buffer.from(result.stderr, 'base64').toString();
@@ -1503,7 +1539,7 @@ it('Masking E20: relay argv and environment exclude new and already inherited va
   expect(Object.keys(launch.env)).toEqual(
     process.env.COVERAGE_RUN ? ['NOOK_CLI_COVERAGE'] : [],
   );
-  expect(launch.args.some((arg) => arg.includes('run-relay-no-eof.ts'))).toBe(
+  expect(launch.args.some((arg) => arg.includes('run-relay-fs-only.ts'))).toBe(
     true,
   );
   if (process.env.COVERAGE_RUN) {

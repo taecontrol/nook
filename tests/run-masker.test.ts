@@ -1,9 +1,69 @@
 import { expect, it, vi } from 'vitest';
+import { splitFlushToken } from '../apps/cli/src/flush-token.ts';
 import { maskedValues, masker } from '../apps/cli/src/masker.ts';
 
 const path = 'work/acme/TOKEN';
 const value = 'abcdabcdefgh';
 const marker = `<nook:${path}>`;
+const token = Buffer.from(`\0nook-flush:${'0123456789abcdef'.repeat(4)}\0`);
+it('the flush token is removed at every byte split, with one boundary and all surrounding bytes intact', () => {
+  const input = Buffer.concat([
+    Buffer.from('before'),
+    token,
+    Buffer.from('after'),
+  ]);
+  for (let at = 0; at <= input.length; at++) {
+    const splitter = splitFlushToken(token);
+    const parts = [input.subarray(0, at), input.subarray(at)].map((chunk) =>
+      splitter.push(chunk),
+    );
+    expect(parts.filter(({ after }) => after !== undefined)).toHaveLength(1);
+    expect(
+      Buffer.concat([
+        ...parts.flatMap(({ before, after }) => [
+          before,
+          after ?? Buffer.alloc(0),
+        ]),
+        splitter.end(),
+      ]).toString(),
+    ).toBe('beforeafter');
+    // Once flushed, even the full token is ordinary background output.
+    expect(splitter.push(token)).toEqual({ before: token });
+  }
+});
+it('token prefixes pass on mismatch or EOF and retain at most token length minus one bytes', () => {
+  const splitter = splitFlushToken(token);
+  expect(
+    Buffer.from(splitter.push(Buffer.from('Password: ')).before).toString(),
+  ).toBe('Password: ');
+  const prefix = token.subarray(0, token.length - 1);
+  expect(splitter.push(prefix).before.length).toBe(0);
+  const mismatch = Buffer.concat([Buffer.from('!'), prefix]);
+  expect(
+    Buffer.from(splitter.push(mismatch).before).equals(
+      Buffer.concat([prefix, Buffer.from('!')]),
+    ),
+  ).toBe(true);
+  expect(Buffer.from(splitter.end()).equals(prefix)).toBe(true);
+  expect(splitter.end().length).toBe(0);
+});
+it('a token releases the masker tail before the boundary and starts fresh masking after it', () => {
+  const splitter = splitFlushToken(token);
+  const stream = masker(maskedValues([{ path, value }]));
+  const { before, after } = splitter.push(
+    Buffer.concat([Buffer.from(value + ':abc'), token, Buffer.from(value)]),
+  );
+  expect(after).toBeDefined();
+  expect(Buffer.concat([stream.push(before), stream.end()]).toString()).toBe(
+    marker + ':abc',
+  );
+  expect(
+    Buffer.concat([
+      stream.push(after ?? Buffer.alloc(0)),
+      stream.end(),
+    ]).toString(),
+  ).toBe(marker);
+});
 function referenceMask(
   data: Buffer,
   entries: { path: string; value: string }[],

@@ -70,6 +70,7 @@ if (mode === 'print-value') {
     ]),
   );
 } else if (mode === 'continuous-background') {
+  writeFileSync(1, 'before:' + value() + '\n');
   spawn(process.execPath, [process.argv[1], 'continuous-writer', expected], {
     detached: true,
     stdio: 'inherit',
@@ -81,13 +82,9 @@ if (mode === 'print-value') {
     1,
     null,
   );
-  writeFileSync(1, 'before:' + value() + '\n');
   process.exitCode = 3;
 } else if (mode === 'continuous-writer') {
   writeFileSync(resolve(expected, 'writer-pid'), String(process.pid));
-  const requests = openSync(resolve(expected, 'refill-requests'), 'r');
-  const replies = openSync(resolve(expected, 'refill-replies'), 'w');
-  writeFileSync(resolve(expected, 'writer-ready'), 'x');
   const configuration = JSON.parse(
     readFileSync(resolve(expected, 'continuous-output'), 'utf8'),
   ) as { record: string };
@@ -96,41 +93,19 @@ if (mode === 'print-value') {
       ? Buffer.from(value())
       : Buffer.alloc(512, 46);
   Buffer.from(value()).copy(record);
-  let offset = 0;
-  const next = (size: number) => {
-    const bytes = Buffer.alloc(size + record.length);
-    bytes.fill(record);
-    const chunk = bytes.subarray(offset, offset + size);
-    offset = (offset + size) % record.length;
-    return chunk;
-  };
-  let flowing = false;
-  while (!flowing) {
-    const header = Buffer.alloc(4);
-    let received = 0;
-    while (received < 4)
-      received += readSync(requests, header, received, 4 - received, null);
-    const size = header.readUInt32BE();
-    if (size === 0xffffffff) {
-      writeSync(replies, 'x');
-      process.exit(0);
-    }
-    if (size) writeFileSync(2, next(size));
-    else {
-      flowing = true;
-      writeFileSync(resolve(expected, 'writer-flowing'), 'x');
-    }
-    writeSync(replies, 'x');
-  }
   let stopped = false;
   process.on('SIGTERM', () => {
     stopped = true;
   });
   const pump = () => {
     if (stopped) process.stdout.write('after:' + value());
-    // Small writes can complete synchronously: let SIGTERM reach its handler.
-    else process.stdout.write(next(record.length), () => setImmediate(pump));
+    // Complete records fit PIPE_BUF; the token can fall only between values.
+    // Yield so the test's SIGTERM can stop this otherwise continuous writer.
+    else process.stdout.write(record, () => setImmediate(pump));
   };
+  writeFileSync(2, record);
+  writeFileSync(resolve(expected, 'writer-flowing'), 'x');
+  writeFileSync(resolve(expected, 'writer-ready'), 'x');
   pump();
 } else if (mode === 'background' || mode === 'background-epipe') {
   spawn(
@@ -168,7 +143,8 @@ if (mode === 'print-value') {
       writeSync(events, 'second-write\n');
     }
   }
-  if (mode === 'killed-parent') writeSync(2, 'after:' + value());
+  if (mode === 'killed-parent')
+    writeSync(2, 'after:' + value() + ':tail' + value().slice(0, 8));
   writeSync(events, 'writer-done\n');
 } else if (mode === 'background-writer') {
   writeFileSync(resolve(expected, 'writer-pid'), String(process.pid));
@@ -179,12 +155,18 @@ if (mode === 'print-value') {
     1,
     null,
   );
-  writeSync(2, 'after:' + value());
+  writeSync(2, '\0nook-flush:near-match:' + value() + '\0nook-flush:');
 } else if (mode === 'relay-private') {
   const launches = JSON.parse(
     readFileSync(resolve(expected, 'relay-launch'), 'utf8'),
   ) as { args: string[]; env: NodeJS.ProcessEnv };
-  const values = [value(), process.env.NOOK_TEST_INHERITED ?? value()];
+  const token = readFileSync(resolve(expected, 'flush-token'), 'utf8');
+  const values = [
+    value(),
+    process.env.NOOK_TEST_INHERITED ?? value(),
+    token,
+    token.slice('\0nook-flush:'.length, -1),
+  ];
   const exposed = [...launches.args, ...Object.values(launches.env)].some(
     (entry) => values.some((value) => entry?.includes(value)),
   );
@@ -192,7 +174,7 @@ if (mode === 'print-value') {
 } else if (mode === 'signal-status') {
   for (const signal of ['SIGTERM', 'SIGHUP'] as const)
     process.on(signal, () => {
-      writeSync(1, signal);
+      writeSync(1, signal + ':' + value() + ':tail' + value().slice(0, 8));
       process.exit(143);
     });
   writeSync(1, 'child-ready\n');

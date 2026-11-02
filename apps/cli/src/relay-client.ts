@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { writeSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { isSea } from 'node:sea';
 import type { Duplex } from 'node:stream';
@@ -31,6 +33,7 @@ function replies(control: Duplex) {
   });
   lines.on('close', end);
   control.on('error', end);
+  control.on('close', end);
   return {
     end,
     next: () =>
@@ -50,6 +53,17 @@ function relayEnvironment() {
     ? { NOOK_CLI_COVERAGE: coverage.replace(/\.json$/, '-relay.json') }
     : {};
 }
+function writeTokens(plan: MaskedPlan, token: Buffer) {
+  for (const fd of new Set(plan.child)) {
+    if (fd === 'inherit') continue;
+    try {
+      writeSync(fd, token);
+    } catch (error) {
+      // EPIPE means the forwarder stopped or died; it can no longer flush.
+      if ((error as NodeJS.ErrnoException).code !== 'EPIPE') throw error;
+    }
+  }
+}
 async function launch(plan: MaskedPlan) {
   const args = [
     ...(isSea() ? [] : [process.argv[1]]),
@@ -59,15 +73,8 @@ async function launch(plan: MaskedPlan) {
   const child = spawn(process.execPath, args, {
     detached: true,
     env: relayEnvironment(),
-    // fd 3 is control, followed by N nonblocking and N blocking FIFO readers.
-    stdio: [
-      'ignore',
-      1,
-      2,
-      'pipe',
-      ...plan.relay.map(({ read }) => read),
-      ...plan.relay.map(({ blockingRead }) => blockingRead),
-    ],
+    // fd 3 is control; each remaining fd is the sole blocking FIFO reader.
+    stdio: ['ignore', 1, 2, 'pipe', ...plan.relay.map(({ read }) => read)],
   });
   child.on('error', () => {});
   child.unref();
@@ -81,14 +88,22 @@ async function launch(plan: MaskedPlan) {
     close();
     throw maskingStartFailure();
   }
+  // 77 bytes, below the portable 512-byte PIPE_BUF: one write cannot be
+  // interleaved with background output. NUL also avoids holding plain prompts.
+  const token = Buffer.from(
+    `\0nook-flush:${randomBytes(32).toString('hex')}\0`,
+  );
+  let sent = false;
   return {
     close,
     send: (values: Delivered) =>
       Effect.tryPromise({
         try: async () => {
+          sent = true;
           control.write(
             JSON.stringify({
               type: 'values',
+              token: token.toString(),
               values: values.map(({ path, value }) => ({
                 path,
                 value: Redacted.value(value),
@@ -101,17 +116,21 @@ async function launch(plan: MaskedPlan) {
       }),
     flushed: () =>
       Effect.promise(async () => {
-        if (!control.destroyed) control.write('{"type":"flush"}\n');
-        await response.next();
+        try {
+          if (sent) writeTokens(plan, token);
+        } catch {
+          // If a token cannot be sent, do not await an unreachable boundary.
+          close();
+        } finally {
+          plan.closeWriters();
+        }
+        if (sent) await response.next();
       }),
   };
 }
 export function startRelay(plan: MaskedPlan) {
   return Effect.acquireRelease(
     Effect.tryPromise({ try: () => launch(plan), catch: maskingStartFailure }),
-    (relay) =>
-      Effect.sync(() => {
-        relay.close();
-      }),
+    (relay) => relay.flushed().pipe(Effect.ensuring(Effect.sync(relay.close))),
   );
 }

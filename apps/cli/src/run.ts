@@ -102,22 +102,14 @@ export function run(
         if (!value) return yield* Effect.fail(networkError(url));
         env[name] = Redacted.value(value);
       }
-      const status = yield* runCommand(
+      return yield* runCommand(
         file,
         parsed.command,
         env,
         plan.kind === 'masked'
           ? ['inherit', ...plan.child]
           : ['inherit', 'inherit', 'inherit'],
-      ).pipe(
-        Effect.ensuring(
-          Effect.gen(function* () {
-            if (plan.kind === 'masked') plan.closeWriters();
-            if (relay) yield* relay.flushed();
-          }),
-        ),
       );
-      return status;
     }).pipe(
       Effect.scoped,
       Effect.provide(NodeServices.layer),
