@@ -1,10 +1,92 @@
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import {
+  openSync,
+  readFileSync,
+  readSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs';
+import { resolve } from 'node:path';
 
 const [mode, expected, exit] = process.argv.slice(2);
 const hash = (value: string) =>
   createHash('sha256').update(value).digest('hex');
-if (mode === 'streams') {
+const value = () => process.env.GH_TOKEN ?? '';
+if (mode === 'print-value') {
+  writeSync(1, 'token=' + value() + '\n');
+  process.exitCode = Number(expected ?? 0);
+} else if (mode === 'alternate') {
+  for (let i = 0; i < 2000; i++)
+    writeSync(i % 2 ? 2 : 1, `${i}:${i % 10 === 0 ? value() : 'plain'}\n`);
+} else if (mode === 'separate') {
+  writeSync(1, 'plain\n');
+  writeSync(2, value());
+} else if (mode === 'split-value') {
+  const bytes = Buffer.from(value());
+  writeSync(1, bytes.subarray(0, 8));
+  setTimeout(() => writeSync(1, bytes.subarray(8)), 200);
+} else if (mode === 'all-values') {
+  for (const name of expected.split(',')) writeSync(1, process.env[name] + '|');
+} else if (mode === 'multiline') {
+  writeSync(1, value() + '|');
+  for (const line of value().split('\n')) writeSync(1, '[' + line + ']\n');
+} else if (mode === 'tty-value') {
+  writeSync(
+    1,
+    JSON.stringify([
+      !!process.stdin.isTTY,
+      !!process.stdout.isTTY,
+      !!process.stderr.isTTY,
+    ]) + '\n',
+  );
+  writeSync(1, value());
+  writeSync(2, value());
+} else if (mode === 'prompt') {
+  writeSync(1, 'Password: ');
+  readSync(openSync(expected, 'r'), Buffer.alloc(1), 0, 1, null);
+  writeSync(1, value());
+} else if (mode === 'bytes') {
+  writeSync(1, Buffer.from(Array.from({ length: 256 }, (_, i) => i)));
+} else if (mode === 'large') {
+  writeFileSync(
+    1,
+    Buffer.concat([
+      Buffer.alloc(1024 * 1024 - Buffer.byteLength(value()), 120),
+      Buffer.from(value()),
+    ]),
+  );
+} else if (mode === 'background') {
+  spawn(process.execPath, [process.argv[1], 'background-writer', expected], {
+    detached: true,
+    stdio: 'inherit',
+  }).unref();
+  writeSync(1, 'before:' + value() + ':tail');
+  process.exitCode = 3;
+} else if (mode === 'background-writer') {
+  writeFileSync(resolve(expected, 'writer-pid'), String(process.pid));
+  readSync(
+    openSync(resolve(expected, 'release'), 'r'),
+    Buffer.alloc(1),
+    0,
+    1,
+    null,
+  );
+  writeSync(2, 'after:' + value());
+} else if (mode === 'relay-private') {
+  const launches = JSON.parse(
+    readFileSync(resolve(expected, 'relay-launch'), 'utf8'),
+  ) as { args: string[]; env: NodeJS.ProcessEnv };
+  writeSync(1, String(!JSON.stringify(launches).includes(value())));
+} else if (mode === 'signal-status') {
+  for (const signal of ['SIGTERM', 'SIGHUP'] as const)
+    process.on(signal, () => {
+      writeSync(1, signal);
+      process.exit(143);
+    });
+  writeSync(1, 'child-ready\n');
+  setInterval(() => {}, 1000);
+} else if (mode === 'streams') {
   const report = {
     valueMatches: hash(process.env.GH_TOKEN ?? '') === expected,
     aliasMatches:
