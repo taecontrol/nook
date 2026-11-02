@@ -52,6 +52,8 @@ if (mode === 'background' || mode === 'continuous-background') {
       status,
       stdout: atExit.toString('base64'),
       stderr: Buffer.concat(stderr).toString('base64'),
+      stdoutClosed: child.stdout?.readableEnded,
+      stderrClosed: child.stderr?.readableEnded,
     }) + '\n',
   );
 }

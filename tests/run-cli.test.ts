@@ -92,11 +92,15 @@ async function outputProbe(mode: string, args: string[]) {
     status: number;
     stdout: string;
     stderr: string;
+    stdoutClosed: boolean;
+    stderrClosed: boolean;
   };
   return {
     status: report.status,
     stdout: Buffer.from(report.stdout ?? '', 'base64'),
     stderr: Buffer.from(report.stderr ?? '', 'base64'),
+    stdoutClosed: report.stdoutClosed,
+    stderrClosed: report.stderrClosed,
   };
 }
 async function addValue(name: string, value: string) {
@@ -946,11 +950,23 @@ it('E1: the resolved command keeps argv0 and forwards arguments literally', asyn
   expect(await auditRows(app)).toHaveLength(1);
 });
 
-it('Masking E1: a pipe replaces the value and preserves exit 42', async () => {
-  const result = await keyring.start(maskingArgs('print-value', ['42'])).done;
+it('Masking E1: piped output closes and the relay exits after preserving masked output and exit 42', async () => {
+  const result = await outputProbe('binary', maskingArgs('print-value', ['42']));
   expect(result.status).toBe(42);
-  expectOutput(result.stdout, `token=${marker}`, true);
-  expect(result.stderr).toBe('');
+  expect(result.stdout.equals(Buffer.from(`token=${marker}\n`))).toBe(true);
+  expect(result.stderr.length).toBe(0);
+  expect(result.stdoutClosed).toBe(true);
+  expect(result.stderrClosed).toBe(true);
+  const relay = JSON.parse(
+    await readFile(resolve(keyring.home, 'relay-launch'), 'utf8'),
+  ) as { pid: number };
+  await expect
+    .poll(
+      async () =>
+        (await keyring.command('/bin/kill', ['-0', String(relay.pid)]).done)
+          .status,
+    )
+    .not.toBe(0);
 });
 it('Masking E2: a shared regular file retains all 2000 alternating writes in order', async () => {
   const result = await outputProbe('shared', maskingArgs('alternate'));
