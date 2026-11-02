@@ -21,7 +21,10 @@ async function waitUntil(time: number, signal: AbortSignal) {
 // bound buffering and let concurrent connections share the link without bursts.
 class Bandwidth {
   private available = 0;
-  constructor(private readonly bytesPerSecond: number) {}
+  private readonly bytesPerSecond: number;
+  constructor(bytesPerSecond: number) {
+    this.bytesPerSecond = bytesPerSecond;
+  }
 
   async *transfer(source: AsyncIterable<Buffer>, signal: AbortSignal) {
     for await (const chunk of source) {
