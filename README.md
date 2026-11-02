@@ -122,6 +122,14 @@ Before delivering values, the Worker records one entry per secret, including the
 provider-cli new-token | nook vault create work/acme/NEW_TOKEN --purpose "token from provider setup" --description "Provider API token"
 ```
 
+Import a local `.env` without reading its values into the conversation:
+
+```sh
+nook vault import work/acme .env --purpose "migrate acme env"
+```
+
+The CLI parses dotenv syntax locally, imports up to 100 keys and never changes the file. Invalid names and duplicate new names block the import before any write. Empty values, values over 64 KiB and values containing NUL are skipped. Existing names in that bucket are left unchanged. The report names each result and prints a `nook.json` block for created and existing keys without writing it to disk. A failed or unconfirmed write exits with status 1; rerunning safely skips names already stored.
+
 In the Vault web app, choose **Import .env**, paste your file and select a bucket. Review the names, fix problems and create the checked keys together. Existing secrets are skipped. Values stay hidden after review; use **Retry failed** for any remaining keys, then **Done** to discard the import.
 
 The value travels directly from stdin to Vault. Nook removes exactly one trailing LF or CRLF, preserves other whitespace, and accepts at most 64 KiB of valid UTF-8 without NUL. From a terminal it asks for a hidden value. A purpose is required; the description is optional. Values cannot be passed as arguments. Existing names are never overwritten, and machines cannot replace or delete secrets.

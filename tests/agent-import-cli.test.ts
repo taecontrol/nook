@@ -1,4 +1,10 @@
-import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  writeFile,
+} from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parse } from 'dotenv';
 import { expect, it } from 'vitest';
@@ -22,6 +28,7 @@ import {
 } from './support/agent-import-cli.ts';
 import { auditRows } from './support/audit.ts';
 import { filesContain } from './support/cli.ts';
+import { deferred } from './support/machines.ts';
 import { expectOutput } from './support/private-assertions.ts';
 import { testBuild } from './support/runtime.ts';
 import {
@@ -95,6 +102,7 @@ it('E1/E2: imports dotenv bytes and provenance once, in file order, with one lis
     ]);
     expect(names(transport).sort()).toEqual(['CERT', 'DB_URL', 'GH_TOKEN']);
     expect(transport.maxActive).toBeLessThanOrEqual(3);
+    expect(await readdir(resolve(keyring.home, 'source'))).toEqual(['.env']);
     expect(
       (await readFile(resolve(keyring.home, 'cli-argv'), 'utf8')).includes(
         'vault',
@@ -319,7 +327,7 @@ it('E8/budget: 100 keys finish with one listing, one create each and at most thr
       '\n',
     ),
   );
-  const held = Promise.withResolvers<void>();
+  const held = deferred();
   const transport = await proxy(
     () => undefined,
     async (attempt) => {
@@ -412,7 +420,7 @@ it('E10: read-only ancestor refusal settles the pool, starts no more creates and
       '\n',
     ),
   );
-  const held = Promise.withResolvers<void>();
+  const held = deferred();
   const transport = await proxy(
     () => undefined,
     async () => {
@@ -507,8 +515,8 @@ it.each(['SIGINT', 'SIGTERM'] as const)(
   'E13: %s after a committed write leaves a safe rerun without duplicate audit',
   async (signal) => {
     await envFile(`KEY=${privateValue()}`);
-    const committed = Promise.withResolvers<void>();
-    const held = Promise.withResolvers<void>();
+    const committed = deferred();
+    const held = deferred();
     const transport = await proxy(
       () => undefined,
       async () => {

@@ -324,7 +324,7 @@ export function mcpHandler(
       'list_secrets',
       {
         description:
-          'List names and descriptions of secrets in the bucket and its ancestors, never values. Use nook run --secret ENV=bucket/NAME --purpose "…" -- <command> instead of asking the owner for a value. When the project has a nook.json, its mapped secrets are injected without --secret. Store a new value with nook vault create <bucket>/<NAME> --purpose "…", piped on stdin instead of pasting it into the conversation. Existing names cannot be overwritten.',
+          'List names and descriptions of secrets in the bucket and its ancestors, never values. Use nook run --secret ENV=bucket/NAME --purpose "…" -- <command> instead of asking the owner for a value. When the project has a nook.json, its mapped secrets are injected without --secret. Store a new value with nook vault create <bucket>/<NAME> --purpose "…", piped on stdin instead of pasting it into the conversation. Existing names cannot be overwritten. Move a .env file with nook vault import <bucket> <file> --purpose "…" without reading it into the conversation.',
         inputSchema: SecretInput,
         outputSchema: SecretsOutput,
         annotations: { readOnlyHint: true },

@@ -75,7 +75,7 @@ it('E18: real CLI denial, missing bucket and usage each emit one line and exit o
   }
 });
 const vaultUsage =
-  'nook vault check | nook vault list <bucket> | nook vault create <bucket>/<NAME> --purpose "…" [--description "…"]';
+  'nook vault check | nook vault list <bucket> | nook vault create <bucket>/<NAME> --purpose "…" [--description "…"] | nook vault import <bucket> <file> --purpose "…"';
 const memoryUsage =
   'nook memory attach <id> <path> | nook memory download <id> <name> [--output <path>]';
 it.each([
