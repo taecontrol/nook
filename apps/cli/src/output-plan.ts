@@ -48,7 +48,11 @@ function fifo(
   writers: ReturnType<typeof descriptors>,
 ) {
   const path = join(directory, 'output');
-  execFileSync('/usr/bin/mkfifo', ['-m', '600', path], { stdio: 'ignore' });
+  // Resolve the tool through PATH without forwarding inherited values.
+  execFileSync('mkfifo', ['-m', '600', path], {
+    env: { PATH: process.env.PATH },
+    stdio: 'ignore',
+  });
   try {
     const read = readers.add(
       openSync(path, constants.O_RDONLY | constants.O_NONBLOCK),

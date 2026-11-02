@@ -1417,13 +1417,15 @@ it('Masking E18: the relay itself reports a fixed failure without protocol value
     app.token,
   ]);
 });
-it('Masking E1/E20: FIFO creation uses PATH before receiving injected values', async () => {
+it('Masking E1/E20: FIFO creation uses PATH without inherited or injected values', async () => {
   await writeFile(
     resolve(keyring.shim, 'mkfifo'),
-    '#!/bin/sh\nif [ "$#" -ne 3 ] || [ "$1" != "-m" ] || [ "$2" != "600" ] || [ -n "$GH_TOKEN" ]; then exit 1; fi\nprintf "private\\n" >> "$HOME/fifo-calls"\nexec /usr/bin/mkfifo "$@"\n',
+    '#!/bin/sh\nif [ "$#" -ne 3 ] || [ "$1" != "-m" ] || [ "$2" != "600" ] || [ -n "$GH_TOKEN" ]; then exit 1; fi\nprintf "private\\n" >> fifo-calls\nexec /usr/bin/mkfifo "$@"\n',
     { mode: 0o700 },
   );
-  const result = await keyring.start(maskingArgs('print-value', ['42'])).done;
+  const result = await keyring.start(maskingArgs('print-value', ['42']), {
+    GH_TOKEN: app.input.value,
+  }).done;
   expect(result.status).toBe(42);
   expectOutput(result.stdout, `token=${marker}`, true);
   expect(result.stderr).toBe('');
