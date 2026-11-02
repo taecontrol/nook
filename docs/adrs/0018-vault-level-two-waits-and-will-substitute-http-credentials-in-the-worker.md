@@ -54,8 +54,8 @@ depends on the proxy.
 When the owner decides a concrete secret justifies it, level 2 takes this
 shape: the Nook Worker is the substituting proxy, because Cloudflare is
 already outside the agent's trust domain and needs nothing installed on the
-machine. Nook never delivers the value of a secret placed behind it to a
-machine. The command receives a placeholder and a proxy base URL instead,
+machine. Nook never exposes the value of a secret placed behind it through
+an interface an agent can reach, including `nook run`. The command receives a placeholder and a proxy base URL instead,
 and the Worker substitutes the value only for destinations the owner
 approved and only until the placeholder expires. Whether the owner can
 still reveal such a value in the web app, and which request locations and
@@ -67,7 +67,7 @@ Nothing changes for agents or the owner now. A prompt-injected agent can
 still exfiltrate any secret its grant covers; bucket grants and
 development-scoped credentials remain the limit.
 
-Future level 2 work starts from settled ground: the value stays in
+Future level 2 work starts from settled ground: substitution happens in
 Cloudflare, no local CA, privileged service or egress sandbox is needed,
 and placing a secret behind the proxy means giving up `nook run` delivery
 for it. That work still has to verify in production whether destination
