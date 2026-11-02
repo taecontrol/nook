@@ -218,7 +218,7 @@ it('E19: mobile rows expose all facts and wrap a full 64-character name without 
       'Last used 52 days ago · Aug 14, 2026',
     );
     expect(await stale.innerText()).toContain(
-      'Approved Jul 28, 2026 · Access: All buckets',
+      'Approved Jul 28, 2026 · No expiration · Access: All buckets',
     );
     for (const machine of visit.machines)
       expect(

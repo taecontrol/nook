@@ -138,6 +138,8 @@ it('Expiry E4/E18: every expired route rejects without last use, audit, credenti
   for (const route of machinePaths(input.value)) {
     const response = await machineRequest(app, issued.token, route);
     const text = await response.text();
+    expectPrivate(text, [issued.token, hash]);
+    expectNoValue(text, [input.value]);
     expect(response.status, route.name).toBe(401);
     expect(text, route.name).toBe(
       JSON.stringify({
@@ -145,9 +147,10 @@ it('Expiry E4/E18: every expired route rejects without last use, audit, credenti
         expiredAt: new Date(expired!).toISOString(),
       }),
     );
-    expectPrivate(text, [issued.token, hash]);
-    expectNoValue(text, [input.value]);
-    expect(await tokenSnapshot(app), route.name).toBe(before);
+    expect(
+      (await tokenSnapshot(app)) === before,
+      `${route.name} preserves the token row`,
+    ).toBe(true);
     expect(await auditRows(app), route.name).toEqual(audit);
   }
   expect(await listMachines(app)).toHaveLength(1);

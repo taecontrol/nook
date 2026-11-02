@@ -159,7 +159,8 @@ it.each([
     const result = await keyring.start(['whoami']).done;
     expect(result.status).toBe(0);
     expect(
-      result.stdout === `work-laptop at ${app.origin}\n${access}\n`,
+      result.stdout ===
+        `work-laptop at ${app.origin}\n${access}\nExpires: never\n`,
       'Exact public identity without private output',
     ).toBe(true);
     expectPrivate(result.stdout + result.stderr, [
@@ -211,7 +212,7 @@ it('Access E1: the next real whoami reports an added sibling without another log
   expect(result.status).toBe(0);
   expectOutput(
     result.stdout,
-    `framework-13 at ${app.origin}\nAccess: work/acme, work/beta (read/write, including current and future descendants)\nRead only: me, work\nAll other buckets: hidden`,
+    `framework-13 at ${app.origin}\nAccess: work/acme, work/beta (read/write, including current and future descendants)\nRead only: me, work\nAll other buckets: hidden\nExpires: never`,
     true,
   );
   expect(result.stderr).toBe('');

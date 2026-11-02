@@ -1,14 +1,11 @@
 import type { Browser, Page } from 'playwright';
-import { dayMs, expiryColumns } from './access-expiry.ts';
+import { d1Now, dayMs, expiryColumns } from './access-expiry.ts';
 import { machinesPage } from './machines-browser.ts';
 import type { TestRuntime } from './runtime.ts';
 
 export async function expiryFixtures(page: Page, app: TestRuntime) {
   const db = await app.mf.getD1Database('DB');
   await expiryColumns(db);
-  const now = (await db
-    .prepare("SELECT CAST(unixepoch('subsec')*1000 AS INTEGER) AS now")
-    .first<{ now: number }>())!.now;
   await db
     .prepare(
       "UPDATE machine_tokens SET created_at=CAST(unixepoch('subsec')*1000 AS INTEGER)-86400000*5, last_used_at=CAST(unixepoch('subsec')*1000 AS INTEGER)-600000",
@@ -26,8 +23,9 @@ export async function expiryFixtures(page: Page, app: TestRuntime) {
       )
       .bind(offset, name)
       .run();
-  await page.clock.setFixedTime(new Date(now));
-  return now;
+  const current = await d1Now(app);
+  await page.clock.setFixedTime(new Date(current));
+  return current;
 }
 export function expiryPage(
   browser: Browser,

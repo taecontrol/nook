@@ -2,19 +2,14 @@ import type { Machine } from '@nook/contract';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
+  CalendarX,
   CircleAlert,
   CircleCheck,
   CircleDashed,
   Hourglass,
   MonitorSmartphone,
 } from 'lucide-react';
-import {
-  type ComponentProps,
-  Fragment,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { type ComponentProps, Fragment, useRef, useState } from 'react';
 import { Alert, AlertTitle } from '@/components/ui/alert';
 import {
   AlertDialog,
@@ -51,11 +46,24 @@ import { preloadBuckets } from './buckets-api';
 import { DismissibleAlert, LoadFailure } from './failure';
 import { MachineAccess } from './grant-summary';
 import { type MachineRevoke, useMachines } from './machines-api';
-import { approvedText, groupMachines, lastUsedParts } from './machines-model';
+import {
+  activityParts,
+  approvalParts,
+  approvedText,
+  groupMachines,
+  isExpired,
+  lastUsedParts,
+} from './machines-model';
 import { formatDate } from './time';
 import { useConfirmTarget } from './use-confirm-target';
+import { useMachineClock } from './use-machine-clock';
 
-const icons = { stale: Hourglass, never: CircleDashed, recent: Activity };
+const icons = {
+  expired: CalendarX,
+  stale: Hourglass,
+  never: CircleDashed,
+  recent: Activity,
+};
 const loadAccessSheet = () => import('./machine-access-sheet');
 type AccessSheetComponent = typeof import('./machine-access-sheet').AccessSheet;
 type EditorModule = { Sheet: AccessSheetComponent } | { error: unknown };
@@ -141,6 +149,50 @@ function NoMachines() {
     </div>
   );
 }
+function MachineActions({
+  machine,
+  now,
+  busy,
+  preload,
+  onEdit,
+  onRevoke,
+}: {
+  machine: Machine;
+  now: number;
+  busy: boolean;
+  preload: () => void;
+  onEdit: (machine: Machine, trigger: HTMLButtonElement) => void;
+  onRevoke: (machine: Machine, trigger: HTMLButtonElement) => void;
+}) {
+  const expired = isExpired(machine, now);
+  const action = expired ? 'Remove' : 'Revoke';
+  return (
+    <ItemActions className="flex-col items-stretch self-start sm:flex-row sm:self-center">
+      {!expired && (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          aria-label={`Edit access of ${machine.name}`}
+          onPointerEnter={preload}
+          onFocus={preload}
+          onClick={(event) => onEdit(machine, event.currentTarget)}
+        >
+          Edit access
+        </Button>
+      )}
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={busy}
+        aria-label={`${action} ${machine.name}, ${approvedText(machine, now).toLowerCase()}`}
+        onClick={(event) => onRevoke(machine, event.currentTarget)}
+      >
+        {action}
+      </Button>
+    </ItemActions>
+  );
+}
 function MachineGroups({
   machines,
   now,
@@ -197,39 +249,21 @@ function MachineGroups({
                         )}
                       </ItemTitle>
                       <ItemDescription>
-                        <Facts parts={lastUsedParts(machine, now)} />
+                        <Facts parts={activityParts(machine, now)} />
                       </ItemDescription>
                       <ItemDescription truncate={false}>
-                        <Facts parts={[approvedText(machine, now)]} /> ·{' '}
+                        <Facts parts={approvalParts(machine, now)} /> ·{' '}
                         <MachineAccess grant={machine.grant} />
                       </ItemDescription>
                     </ItemContent>
-                    <ItemActions className="flex-col items-stretch self-start sm:flex-row sm:self-center">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={busy}
-                        aria-label={`Edit access of ${machine.name}`}
-                        onPointerEnter={preload}
-                        onFocus={preload}
-                        onClick={(event) =>
-                          onEdit(machine, event.currentTarget)
-                        }
-                      >
-                        Edit access
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={busy}
-                        aria-label={`Revoke ${machine.name}, ${approvedText(machine, now).toLowerCase()}`}
-                        onClick={(event) =>
-                          onRevoke(machine, event.currentTarget)
-                        }
-                      >
-                        Revoke
-                      </Button>
-                    </ItemActions>
+                    <MachineActions
+                      machine={machine}
+                      now={now}
+                      busy={busy}
+                      preload={preload}
+                      onEdit={onEdit}
+                      onRevoke={onRevoke}
+                    />
                   </Item>
                 </li>
               ))}
@@ -241,10 +275,13 @@ function MachineGroups({
   );
 }
 function revokeHeading(write: MachineRevoke) {
-  if (write.status === 'success') return 'Revoked ';
+  const removal = isExpired(write.machine, write.submittedAt);
+  if (write.status === 'success') return removal ? 'Removed ' : 'Revoked ';
   if (writeOutcome(write.error) !== 'definitive')
-    return "Couldn't confirm revocation of ";
-  return "Couldn't revoke ";
+    return removal
+      ? "Couldn't confirm removal of "
+      : "Couldn't confirm revocation of ";
+  return removal ? "Couldn't remove " : "Couldn't revoke ";
 }
 function revokeProblem(error: Error | null) {
   return describeFailure(
@@ -265,12 +302,14 @@ function RevokeFeedback({
   onRetry: (machine: Machine, trigger: HTMLButtonElement) => void;
 }) {
   const { machine } = write;
+  const removal = isExpired(machine, write.submittedAt);
   if (write.status === 'pending')
     return (
       <Alert>
         <Spinner />
         <AlertTitle>
-          Revoking <span className="wrap-anywhere">{machine.name}</span>…
+          {removal ? 'Removing' : 'Revoking'}{' '}
+          <span className="wrap-anywhere">{machine.name}</span>…
         </AlertTitle>
       </Alert>
     );
@@ -298,6 +337,16 @@ function RevokeFeedback({
           >
             Try again
           </Button>
+        </>
+      ) : removal ? (
+        <>
+          <p>
+            Its expired token is deleted. To reconnect that machine, run this on
+            it and approve it again:
+          </p>
+          <div className="mt-1">
+            <LoginCommand />
+          </div>
         </>
       ) : (
         <>
@@ -454,7 +503,6 @@ export function MachinesPage() {
   const state = useMachines();
   const { machines, write, busy, revoke } = state;
   const [dismissed, setDismissed] = useState<number>();
-  const [, tick] = useState(0);
   const heading = useRef<HTMLHeadingElement | null>(null);
   const revocation = useConfirmTarget<Machine>(() => heading.current);
   const editing = useConfirmTarget<Machine>(() => heading.current);
@@ -462,16 +510,14 @@ export function MachinesPage() {
   const [saved, setSaved] = useState<SavedAccess | null>(null);
   const [gone, setGone] = useState<Machine | null>(null);
   const [editor, setEditor] = useState<EditorModule>();
-  // Relative times and the 30-day boundary also advance on an idle open page.
-  useEffect(() => {
-    const timer = setInterval(() => tick((value) => value + 1), 60_000);
-    return () => clearInterval(timer);
-  }, []);
-  const now = Date.now();
+  const now = useMachineClock(machines.data);
   const list = machines.data;
   const confirm = (machine: Machine, button: HTMLButtonElement) => {
     if (busy) return;
-    revocation.open(machine, button);
+    if (isExpired(machine, Date.now())) {
+      revoke(machine);
+      heading.current?.focus({ preventScroll: true });
+    } else revocation.open(machine, button);
   };
   return (
     <div className="w-full max-w-4xl px-4 pb-24 sm:px-6 md:px-12">
@@ -484,8 +530,8 @@ export function MachinesPage() {
       </h1>
       {list && list.length > 0 ? (
         <p className="mb-6 max-w-2xl text-sm text-muted-foreground">
-          Every machine that holds a Nook token, grouped by last use. The ones
-          you may no longer use come first.
+          Every machine that holds a Nook token, grouped by last use. Expired
+          machines and the ones you may no longer use come first.
         </p>
       ) : (
         <div className="h-4" />

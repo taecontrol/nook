@@ -25,6 +25,7 @@ export type MachineRevoke = {
   id: number;
   machine: Machine;
   status: 'idle' | 'pending' | 'success' | 'error';
+  submittedAt: number;
   error: Error | null;
 };
 export function preloadMachines(queries: QueryClient) {
@@ -36,6 +37,7 @@ function useMachineState() {
     id: mutation.mutationId,
     machine: mutation.state.variables as Machine,
     status: mutation.state.status,
+    submittedAt: mutation.state.submittedAt,
     error: mutation.state.error,
   }));
   const { writes } = observed;

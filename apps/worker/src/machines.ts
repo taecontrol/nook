@@ -1,6 +1,8 @@
 import { D1Client } from '@effect/sql-d1';
 import {
+  type AccessLifetime,
   AlreadyHandled,
+  accessLifetimeMs,
   BucketGrant,
   Expired,
   formatUserCode,
@@ -8,6 +10,7 @@ import {
   InvalidBucketGrant,
   InvalidMachineName,
   MachineAccessChanged,
+  MachineUnauthorized,
   machineNameError,
   NoMatchingRequest,
   normalizeGrant,
@@ -33,11 +36,13 @@ const RequestRow = Schema.Struct({
   status: Schema.Literals(['pending', 'approved', 'denied']),
   requested_at: Schema.Number,
   expires_at: Schema.Number,
+  access_expires_at: Schema.NullOr(Schema.Number),
 });
 type RequestRow = typeof RequestRow.Type;
 const TokenRow = Schema.Struct({
   id: Schema.String,
   token_hash: Schema.String,
+  access_expires_at: Schema.NullOr(Schema.Number),
   machine_name: Schema.String,
   grant_json: Schema.String,
 });
@@ -47,17 +52,22 @@ const MachineRow = Schema.Struct({
   grant_json: Schema.fromJsonString(BucketGrant),
   created_at: Schema.Number,
   last_used_at: Schema.NullOr(Schema.Number),
+  access_expires_at: Schema.NullOr(Schema.Number),
 });
 const AccessRow = Schema.Struct({
   ...MachineRow.fields,
   selected_exist: Schema.Number,
 });
+function expiryIso(value: number | null) {
+  return value === null ? null : new Date(value).toISOString();
+}
 function machine(row: typeof MachineRow.Type) {
   return {
     id: row.id,
     name: row.machine_name,
     grant: row.grant_json,
     approvedAt: new Date(row.created_at).toISOString(),
+    expiresAt: expiryIso(row.access_expires_at),
     lastUsedAt:
       row.last_used_at === null
         ? null
@@ -153,7 +163,11 @@ function identity(row: typeof TokenRow.Type) {
     row.grant_json,
   ).pipe(
     unavailable,
-    Effect.map((grant) => ({ machine: row.machine_name, grant })),
+    Effect.map((grant) => ({
+      machine: row.machine_name,
+      grant,
+      expiresAt: expiryIso(row.access_expires_at),
+    })),
   );
 }
 function requireAll(grant: BucketGrant) {
@@ -179,13 +193,19 @@ export const machineOperations = Effect.gen(function* () {
     Request: Schema.String,
     Result: TokenRow,
     execute: (hash) =>
-      sql`UPDATE machine_tokens SET last_used_at=unixepoch('subsec')*1000 WHERE token_hash=${hash} RETURNING id, token_hash, machine_name, grant_json`,
+      sql`UPDATE machine_tokens SET last_used_at=unixepoch('subsec')*1000 WHERE token_hash=${hash} RETURNING id, token_hash, machine_name, grant_json, access_expires_at`,
+  });
+  const refusedExpiry = SqlSchema.findAll({
+    Request: Schema.String,
+    Result: Schema.Struct({ access_expires_at: Schema.Number }),
+    execute: (hash) =>
+      sql`SELECT access_expires_at FROM machine_tokens WHERE token_hash=${hash} AND access_expires_at IS NOT NULL`,
   });
   const listRows = SqlSchema.findAll({
     Request: Schema.Void,
     Result: MachineRow,
     execute: () =>
-      sql`SELECT id, machine_name, grant_json, created_at, last_used_at FROM machine_tokens ORDER BY created_at, id`,
+      sql`SELECT id, machine_name, grant_json, created_at, last_used_at, access_expires_at FROM machine_tokens ORDER BY created_at, id`,
   });
   const lookup = (code: string) =>
     findCode(code).pipe(
@@ -197,10 +217,19 @@ export const machineOperations = Effect.gen(function* () {
       const token = /^Bearer (nook_[A-Za-z0-9_-]{43})$/.exec(
         authorization,
       )?.[1];
-      if (!token) return yield* Effect.fail(new HttpApiError.Unauthorized());
+      if (!token) return yield* Effect.fail(new MachineUnauthorized({}));
       const hash = yield* hashCode(token);
       const [row] = yield* authenticateToken(hash).pipe(unavailable);
-      if (!row) return yield* Effect.fail(new HttpApiError.Unauthorized());
+      if (!row) {
+        const [expired] = yield* refusedExpiry(hash).pipe(unavailable);
+        return yield* Effect.fail(
+          new MachineUnauthorized(
+            expired
+              ? { expiredAt: new Date(expired.access_expires_at).toISOString() }
+              : {},
+          ),
+        );
+      }
       return row;
     });
   const handle = (
@@ -208,15 +237,17 @@ export const machineOperations = Effect.gen(function* () {
     status: 'approved' | 'denied',
     name: string | null,
     grant: BucketGrant,
+    lifetime?: AccessLifetime,
   ) =>
     Effect.gen(function* () {
       const row = yield* lookup(code);
       const grantJson = JSON.stringify(normalizeGrant(grant));
       const chosenJson = JSON.stringify(grant);
+      const duration = accessLifetimeMs[lifetime ?? 'never'];
       // Validate existence at the same atomic boundary that records the decision.
       const [updated, remaining] = yield* sql
         .batch([
-          sql`UPDATE authorizations SET status=${status}, machine_name=${name}, grant_json=${grantJson} WHERE device_hash=${row.device_hash} AND status='pending' AND expires_at>unixepoch('subsec')*1000 AND (${chosenJson}='"all"' OR NOT EXISTS (SELECT 1 FROM json_each(${chosenJson}) root WHERE NOT EXISTS (SELECT 1 FROM buckets WHERE path=root.value))) RETURNING device_hash`,
+          sql`UPDATE authorizations SET status=${status}, machine_name=${name}, grant_json=${grantJson}, access_expires_at=CASE WHEN ${duration} IS NULL THEN NULL ELSE CAST(unixepoch('subsec')*1000 AS INTEGER)+${duration} END WHERE device_hash=${row.device_hash} AND status='pending' AND expires_at>unixepoch('subsec')*1000 AND (${chosenJson}='"all"' OR NOT EXISTS (SELECT 1 FROM json_each(${chosenJson}) root WHERE NOT EXISTS (SELECT 1 FROM buckets WHERE path=root.value))) RETURNING device_hash`,
           sql<RequestRow>`SELECT * FROM authorizations WHERE device_hash=${row.device_hash}`,
         ])
         .pipe(unavailable);
@@ -260,13 +291,18 @@ export const machineOperations = Effect.gen(function* () {
           expiresAt: new Date(row.expires_at).toISOString(),
         })),
       ),
-    approve: (code: string, name: string, grant: unknown) => {
+    approve: (
+      code: string,
+      name: string,
+      grant: unknown,
+      lifetime?: AccessLifetime,
+    ) => {
       const message = machineNameError(name);
       return message
         ? Effect.fail(new InvalidMachineName({ message }))
         : decodeGrant(grant).pipe(
             Effect.flatMap((grant) =>
-              handle(code, 'approved', name.trim(), grant),
+              handle(code, 'approved', name.trim(), grant, lifetime),
             ),
           );
     },
@@ -287,7 +323,7 @@ export const machineOperations = Effect.gen(function* () {
           .batch([
             sql<
               typeof TokenRow.Type
-            >`INSERT INTO machine_tokens(token_hash, machine_name, grant_json, created_at, id) SELECT ${tokenHash}, machine_name, grant_json, ${Date.now()}, ${crypto.randomUUID()} FROM authorizations WHERE device_hash=${deviceHash} AND status='approved' AND expires_at>unixepoch('subsec')*1000 RETURNING id, token_hash, machine_name, grant_json`,
+            >`INSERT INTO machine_tokens(token_hash, machine_name, grant_json, created_at, id, access_expires_at) SELECT ${tokenHash}, machine_name, grant_json, ${Date.now()}, ${crypto.randomUUID()}, access_expires_at FROM authorizations WHERE device_hash=${deviceHash} AND status='approved' AND expires_at>unixepoch('subsec')*1000 RETURNING id, token_hash, machine_name, grant_json, access_expires_at`,
             sql`DELETE FROM authorizations WHERE device_hash=${deviceHash} AND EXISTS (SELECT 1 FROM machine_tokens WHERE token_hash=${tokenHash})`,
           ])
           .pipe(unavailable);
@@ -297,7 +333,8 @@ export const machineOperations = Effect.gen(function* () {
               ? new PollExpired()
               : new PollInvalid(),
           );
-        return { token, ...(yield* identity(inserted[0])) };
+        const { machine, grant } = yield* identity(inserted[0]);
+        return { token, machine, grant };
       }),
     list: (grant: BucketGrant) =>
       Effect.gen(function* () {
@@ -324,8 +361,8 @@ export const machineOperations = Effect.gen(function* () {
         // share one atomic boundary, including retries after a committed save.
         const [updated, remaining] = yield* sql
           .batch([
-            sql`UPDATE machine_tokens SET grant_json=${nextJson} WHERE id=${id} AND (grant_json=${priorJson} OR grant_json=${nextJson}) AND (${selectedJson}='"all"' OR NOT EXISTS (SELECT 1 FROM json_each(${selectedJson}) root WHERE NOT EXISTS (SELECT 1 FROM buckets WHERE path=root.value))) RETURNING id, machine_name, grant_json, created_at, last_used_at`,
-            sql`SELECT id, machine_name, grant_json, created_at, last_used_at, (${selectedJson}='"all"' OR NOT EXISTS (SELECT 1 FROM json_each(${selectedJson}) root WHERE NOT EXISTS (SELECT 1 FROM buckets WHERE path=root.value))) AS selected_exist FROM machine_tokens WHERE id=${id}`,
+            sql`UPDATE machine_tokens SET grant_json=${nextJson} WHERE id=${id} AND (grant_json=${priorJson} OR grant_json=${nextJson}) AND (${selectedJson}='"all"' OR NOT EXISTS (SELECT 1 FROM json_each(${selectedJson}) root WHERE NOT EXISTS (SELECT 1 FROM buckets WHERE path=root.value))) RETURNING id, machine_name, grant_json, created_at, last_used_at, access_expires_at`,
+            sql`SELECT id, machine_name, grant_json, created_at, last_used_at, access_expires_at, (${selectedJson}='"all"' OR NOT EXISTS (SELECT 1 FROM json_each(${selectedJson}) root WHERE NOT EXISTS (SELECT 1 FROM buckets WHERE path=root.value))) AS selected_exist FROM machine_tokens WHERE id=${id}`,
           ])
           .pipe(unavailable);
         return yield* savedGrant(updated, remaining);

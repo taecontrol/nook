@@ -37,9 +37,35 @@ import {
   SecretNotFound,
   VaultNotConfigured,
 } from './vault.ts';
+export const AccessLifetime = Schema.Literals([
+  '1d',
+  '7d',
+  '30d',
+  '90d',
+  'never',
+]);
+export type AccessLifetime = typeof AccessLifetime.Type;
+const dayMs = 86_400_000;
+export const accessLifetimeMs: Record<AccessLifetime, number | null> = {
+  '1d': dayMs,
+  '7d': 7 * dayMs,
+  '30d': 30 * dayMs,
+  '90d': 90 * dayMs,
+  never: null,
+};
+export class MachineUnauthorized extends Schema.Error<MachineUnauthorized>(
+  'nook/MachineUnauthorized',
+)(
+  {
+    _tag: Schema.tag('Unauthorized'),
+    expiredAt: Schema.optionalKey(Schema.String),
+  },
+  { httpApiStatus: 401 },
+) {}
 export const MachineIdentity = Schema.Struct({
   machine: Schema.String,
   grant: BucketGrant,
+  expiresAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 export type MachineIdentity = typeof MachineIdentity.Type;
 export const Machine = Schema.Struct({
@@ -47,6 +73,7 @@ export const Machine = Schema.Struct({
   name: Schema.String,
   approvedAt: Schema.String,
   lastUsedAt: Schema.NullOr(Schema.String),
+  expiresAt: Schema.NullOr(Schema.String),
   grant: BucketGrant,
 });
 export type Machine = typeof Machine.Type;
@@ -114,10 +141,7 @@ export class PollInvalid extends Schema.Error<PollInvalid>('nook/PollInvalid')(
   { httpApiStatus: 400 },
 ) {}
 const noContent = Schema.Void.annotate({ httpApiStatus: 204 });
-const machineErrors = [
-  HttpApiError.Unauthorized,
-  HttpApiError.ServiceUnavailable,
-];
+const machineErrors = [MachineUnauthorized, HttpApiError.ServiceUnavailable];
 const ownerErrors = [
   HttpApiError.Unauthorized,
   HttpApiError.Forbidden,
@@ -142,6 +166,7 @@ export const AuthorizationsApi = HttpApi.make('owner-authorizations').add(
         payload: Schema.Struct({
           machineName: Schema.String,
           grant: Schema.Unknown,
+          lifetime: Schema.optionalKey(AccessLifetime),
         }),
         success: noContent,
         error: [

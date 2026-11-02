@@ -1,7 +1,7 @@
 # ADR-0003: Cloudflare Access for the owner and Nook-issued tokens for machines
 
 Date: 2026-10-03
-Status: Accepted
+Status: Accepted ("long-lived until revoked" superseded by [ADR-0018](0018-machine-access-expires-at-an-owner-chosen-date-enforced-in-d1.md))
 
 ## Context
 

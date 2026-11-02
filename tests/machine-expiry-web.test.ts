@@ -3,7 +3,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { d1Now, dayMs, lifetimes } from './support/access-expiry.ts';
 import { expiryPage } from './support/access-expiry-browser.ts';
-import { createAuthorization, jsonRequest } from './support/authorizations.ts';
+import { jsonRequest } from './support/authorizations.ts';
 import { grantPage } from './support/grant-browser.ts';
 import { listMachines, machineIdentity } from './support/machines.ts';
 import { machineRow } from './support/machines-browser.ts';
@@ -19,6 +19,7 @@ afterAll(async () => {
 });
 const dateTime = (iso: string) =>
   new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -27,6 +28,7 @@ const dateTime = (iso: string) =>
   }).format(new Date(iso));
 const date = (iso: string) =>
   new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -264,6 +266,7 @@ it('Expiry E14: a 90-day timer is clamped and does not immediately rerender in a
   });
   try {
     await machineRow(visit.page, visit.machines[0].id).waitFor();
+    await expect.poll(() => delays.includes(2 ** 31 - 2)).toBe(true);
     expect(delays.every((delay) => delay < 2 ** 31 - 1)).toBe(true);
     expect(
       await visit.page
