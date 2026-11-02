@@ -641,7 +641,9 @@ it.each([
     );
     // KEY_1 and KEY_2 answer only 300 ms after KEY_0's refusal. Until then the
     // refusal is the only answer, so any fourth create is a CLI that ignored it.
-    // Later, a success read before the refusal may legitimately free a slot.
+    // After that, a success read before the refusal may legitimately free a
+    // slot, so the final checks only require each key's report to match whether
+    // it was sent.
     const refused = deferred();
     let sentBeforeSuccesses: string[] | undefined;
     const transport = await proxy(
@@ -668,14 +670,12 @@ it.each([
       for (const name of sentBeforeSuccesses ?? [])
         expect(['KEY_0', 'KEY_1', 'KEY_2']).toContain(name);
       const sent = new Set(names(transport));
-      expect(sent.size).toBeLessThan(7);
       expectOutput(result.stdout, 'failed  KEY_0');
       for (let i = 1; i < 7; i++)
         expectOutput(
           result.stdout,
           `${sent.has(`KEY_${i}`) ? 'created' : 'not tried'}  KEY_${i}`,
         );
-      expectOutput(result.stdout, 'not tried  KEY_6');
       expect(await secretRows(app)).toHaveLength(sent.size - 1);
       expect(await auditRows(app)).toHaveLength(sent.size - 1);
     } finally {
