@@ -330,19 +330,29 @@ Only the util-linux PTY examples are Linux-only. Every value is synthetic.
 | E13 | “Masking E13”: a binary pipe carries all 256 byte values exactly. |
 | E14 | “Masking E14”: a real `yes`/`head -1` pipe closes, the child receives SIGPIPE and run returns 141. |
 | E15 | “Masking E15” and existing native-signal tests: SIGTERM/SIGHUP forwarding, ignored parent SIGINT and preserved child status. |
-| E16 | “Masking E16”: a test-controlled FIFO holds a background writer across run's exit; an exit-time file snapshot proves the flush, later writes stay masked, and the relay exits after EOF. No sleep synchronizes this example. |
+| E16 | “Masking E16”: a test-controlled FIFO holds a background writer across run's exit; an exit-time file snapshot proves the flush, later writes stay masked, and the relay exits after EOF. A second writer refills every synchronous drain read through control FIFOs, then writes continuously across run's exit. An OS-derived byte ceiling detects an unbounded flush without a timeout or a repetition budget. |
 | E17 | “Masking E17”: the reader's exit-time snapshot already contains the complete MiB, including its final masked value. |
 | E18 | “Masking E18”: private spawn failures with and without opt-out, lost relay delivery, and the relay's own fixed protocol-failure diagnostic. |
 | E19 | “Masking E19”: a Node preload refuses only relay startup, either synchronously or through a real failed spawn; the value-request observer and Audit both remain empty and no child starts. An unusable FIFO directory proves the same private, unaudited refusal. |
-| E20 | “Masking E20”: a preload observes the real relay's argv and environment; the injected child checks both without printing the value. The SEA round trip also exercises the same-executable entry point. |
+| E20 | “Masking E20”: a preload observes the real relay's argv and environment; the injected child checks both, including values already in its parent's environment, without printing a value. Coverage runs also require separate relay execution counters. The SEA round trip exercises the same-executable entry point. |
 
 The relay receives values and flush requests only over fd 3. FIFO readers are
 passed on later descriptors, and a shared destination uses the same writer in
-both child slots. Flush pauses normal reads, drains buffered and kernel bytes
-until EAGAIN/EOF, releases the held prefix and acknowledges completed writes.
+both child slots. Flush pauses normal reads and captures a finite byte allowance:
+the readable buffer plus a FIFO capacity bound. It stops at that boundary or
+EAGAIN/EOF, waits for each output write before reading more, releases the held
+prefix and acknowledges completed writes. Linux uses `fs.pipe-max-size` (and
+the initial 16-page capacity); macOS FIFO sockets use `kern.ipc.maxsockbuf`.
 The detached relay keeps forwarding background output after its control channel
-closes. Coverage uses the existing `NOOK_CLI_COVERAGE` exit hook with a distinct
+closes. Its explicit environment contains only the optional `NOOK_CLI_COVERAGE`
+exit-hook path, with a distinct
 `-relay.json` filename, so relay counters cannot overwrite the parent's evidence.
+
+`run-masker.test.ts` also guards adversarial long prefixes with 20 values of
+65,535 bytes and a 65,536-byte mismatching chunk. It counts bulk-comparison bytes
+instead of timing the search. Precomputed KMP failure links keep tail scanning
+linear per value and let replacements discard consumed prefixes without
+rescanning the chunk.
 
 ### Project secret mappings
 

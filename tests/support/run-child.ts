@@ -121,8 +121,8 @@ if (mode === 'print-value') {
     stopped = true;
   });
   const pump = () => {
-    if (stopped) writeSync(2, 'after:' + value());
-    else process.stdout.write(next(64 * 1024), pump);
+    if (stopped) process.stdout.write('after:' + value());
+    else process.stdout.write(next(record.length), pump);
   };
   pump();
 } else if (mode === 'background') {
