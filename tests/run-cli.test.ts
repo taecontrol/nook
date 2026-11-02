@@ -951,7 +951,10 @@ it('E1: the resolved command keeps argv0 and forwards arguments literally', asyn
 });
 
 it('Masking E1: piped output closes and the relay exits after preserving masked output and exit 42', async () => {
-  const result = await outputProbe('binary', maskingArgs('print-value', ['42']));
+  const result = await outputProbe(
+    'binary',
+    maskingArgs('print-value', ['42']),
+  );
   expect(result.status).toBe(42);
   expect(result.stdout.equals(Buffer.from(`token=${marker}\n`))).toBe(true);
   expect(result.stderr.length).toBe(0);
@@ -1166,66 +1169,76 @@ it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
     );
   },
 );
-it('Masking E16: run flushes and exits while a FIFO-gated background writer stays masked', async () => {
-  const release = resolve(keyring.home, 'release');
-  expect(
-    (await keyring.command('/usr/bin/mkfifo', [release]).done).status,
-  ).toBe(0);
-  const result = await outputProbe(
-    'background',
-    maskingArgs('background', [keyring.home]),
-  );
-  expect(result.status).toBe(3);
-  expect(
-    (await readFile(resolve(keyring.home, 'exit-snapshot'), 'utf8')) ===
-      `before:${marker}:tail${app.input.value.slice(0, 8)}`,
-  ).toBe(true);
-  await expect
-    .poll(() => existsSync(resolve(keyring.home, 'writer-pid')))
-    .toBe(true);
-  const writer = (
-    await readFile(resolve(keyring.home, 'writer-pid'), 'utf8')
-  ).trim();
-  const relay = JSON.parse(
-    await readFile(resolve(keyring.home, 'relay-launch'), 'utf8'),
-  ) as { pid: number };
-  expect((await keyring.command('/bin/kill', ['-0', writer]).done).status).toBe(
-    0,
-  );
-  expect(
-    (await keyring.command('/bin/kill', ['-0', String(relay.pid)]).done).status,
-  ).toBe(0);
-  expect(
-    (
-      await keyring.command('/bin/sh', [
-        '-c',
-        'printf x > "$1"',
-        'fixture',
-        release,
-      ]).done
-    ).status,
-  ).toBe(0);
-  await expect
-    .poll(
-      async () =>
-        (await readFile(resolve(keyring.home, 'output'), 'utf8')) ===
-        `before:${marker}:tail${app.input.value.slice(0, 8)}after:${marker}`,
-    )
-    .toBe(true);
-  await expect
-    .poll(
-      async () =>
-        (await keyring.command('/bin/kill', ['-0', String(relay.pid)]).done)
-          .status,
-    )
-    .not.toBe(0);
-  await expect
-    .poll(
-      async () =>
-        (await keyring.command('/bin/kill', ['-0', writer]).done).status,
-    )
-    .not.toBe(0);
-});
+it.each(['background', 'background-separate'])(
+  'Masking E16: run flushes and exits while a FIFO-gated background writer stays masked (%s)',
+  async (destination) => {
+    const before = `before:${marker}:tail${app.input.value.slice(0, 8)}`;
+    const after = `after:${marker}`;
+    const release = resolve(keyring.home, 'release');
+    expect(
+      (await keyring.command('/usr/bin/mkfifo', [release]).done).status,
+    ).toBe(0);
+    const result = await outputProbe(
+      destination,
+      maskingArgs('background', [keyring.home]),
+    );
+    expect(result.status).toBe(3);
+    expect(
+      (await readFile(resolve(keyring.home, 'exit-snapshot'), 'utf8')) ===
+        before,
+    ).toBe(true);
+    await expect
+      .poll(() => existsSync(resolve(keyring.home, 'writer-pid')))
+      .toBe(true);
+    const writer = (
+      await readFile(resolve(keyring.home, 'writer-pid'), 'utf8')
+    ).trim();
+    const relay = JSON.parse(
+      await readFile(resolve(keyring.home, 'relay-launch'), 'utf8'),
+    ) as { pid: number };
+    expect(
+      (await keyring.command('/bin/kill', ['-0', writer]).done).status,
+    ).toBe(0);
+    expect(
+      (await keyring.command('/bin/kill', ['-0', String(relay.pid)]).done)
+        .status,
+    ).toBe(0);
+    expect(
+      (
+        await keyring.command('/bin/sh', [
+          '-c',
+          'printf x > "$1"',
+          'fixture',
+          release,
+        ]).done
+      ).status,
+    ).toBe(0);
+    await expect
+      .poll(
+        async () =>
+          (await readFile(resolve(keyring.home, 'output'), 'utf8')) ===
+          before + (destination === 'background' ? after : ''),
+      )
+      .toBe(true);
+    await expect
+      .poll(
+        async () =>
+          (await keyring.command('/bin/kill', ['-0', String(relay.pid)]).done)
+            .status,
+      )
+      .not.toBe(0);
+    if (destination === 'background-separate')
+      expect(
+        await readFile(resolve(keyring.home, 'output-error'), 'utf8'),
+      ).toBe(after);
+    await expect
+      .poll(
+        async () =>
+          (await keyring.command('/bin/kill', ['-0', writer]).done).status,
+      )
+      .not.toBe(0);
+  },
+);
 it.each(['padded', 'unpadded'])(
   'Masking E16: flush has a finite byte boundary while a continuous background writer stays masked (%s)',
   async (record) => {

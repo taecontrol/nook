@@ -59,7 +59,15 @@ async function launch(plan: MaskedPlan) {
   const child = spawn(process.execPath, args, {
     detached: true,
     env: relayEnvironment(),
-    stdio: ['ignore', 1, 2, 'pipe', ...plan.relay.map(({ read }) => read)],
+    // fd 3 is control, followed by N nonblocking and N blocking FIFO readers.
+    stdio: [
+      'ignore',
+      1,
+      2,
+      'pipe',
+      ...plan.relay.map(({ read }) => read),
+      ...plan.relay.map(({ blockingRead }) => blockingRead),
+    ],
   });
   child.on('error', () => {});
   child.unref();

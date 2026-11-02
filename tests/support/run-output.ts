@@ -8,14 +8,23 @@ const [mode, entry, ...args] = process.argv.slice(2);
 const home = process.env.HOME;
 if (!home) throw new Error('The output fixture requires a private HOME.');
 const file = resolve(home, 'output');
-const shared = ['shared', 'background', 'continuous-background'].includes(mode);
-const fd = shared ? openSync(file, 'w') : undefined;
+const background = [
+  'background',
+  'background-separate',
+  'continuous-background',
+].includes(mode);
+const fd = mode === 'shared' || background ? openSync(file, 'w') : undefined;
+const stderrFd =
+  mode === 'background-separate'
+    ? openSync(resolve(home, 'output-error'), 'w')
+    : fd;
 const child = spawn(process.execPath, [entry, ...args], {
-  stdio: ['ignore', fd ?? 'pipe', fd ?? 'pipe'],
+  stdio: ['ignore', fd ?? 'pipe', stderrFd ?? 'pipe'],
 });
 const exited = once(child, 'exit');
 const closed = once(child, 'close');
 if (fd !== undefined) closeSync(fd);
+if (stderrFd !== undefined && stderrFd !== fd) closeSync(stderrFd);
 const stdout: Buffer[] = [];
 const stderr: Buffer[] = [];
 child.stderr?.on('data', (chunk) => stderr.push(Buffer.from(chunk)));
@@ -39,7 +48,7 @@ if (mode === 'head') {
       ]);
   });
 const [status] = await exited;
-if (mode === 'background' || mode === 'continuous-background') {
+if (background) {
   // The test releases the writer only after examining this exit-time snapshot.
   writeFileSync(resolve(home, 'exit-snapshot'), readFileSync(file));
   process.stdout.write(JSON.stringify({ status }) + '\n');

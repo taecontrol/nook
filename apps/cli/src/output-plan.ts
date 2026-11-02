@@ -18,6 +18,7 @@ export const maskingStartFailure = () =>
   new CliFailure('Nook could not start output masking. Try again.');
 export type RelayStreams = readonly {
   readonly read: number;
+  readonly blockingRead: number;
   readonly target: 1 | 2;
 }[];
 export type MaskedPlan = {
@@ -58,7 +59,9 @@ function fifo(
       openSync(path, constants.O_RDONLY | constants.O_NONBLOCK),
     );
     const write = writers.add(openSync(path, constants.O_WRONLY));
-    return { read, write };
+    // Opening a blocking reader cannot wait now that the writer is open.
+    const blockingRead = readers.add(openSync(path, constants.O_RDONLY));
+    return { read, blockingRead, write };
   } finally {
     unlinkSync(path);
   }
@@ -71,10 +74,10 @@ function sharedDestination() {
 function addStream(
   plan: {
     child: MaskedPlan['child'];
-    relay: { read: number; target: 1 | 2 }[];
+    relay: { read: number; blockingRead: number; target: 1 | 2 }[];
   },
   target: 1 | 2,
-  makePipe: () => { read: number; write: number },
+  makePipe: () => { read: number; blockingRead: number; write: number },
 ) {
   if (isatty(target)) return;
   if (target === 2 && plan.relay.length && sharedDestination())
@@ -82,7 +85,11 @@ function addStream(
   else {
     const pipe = makePipe();
     plan.child[target - 1] = pipe.write;
-    plan.relay.push({ read: pipe.read, target });
+    plan.relay.push({
+      read: pipe.read,
+      blockingRead: pipe.blockingRead,
+      target,
+    });
   }
 }
 function makePlan(masking: boolean): OutputPlan {
@@ -90,7 +97,7 @@ function makePlan(masking: boolean): OutputPlan {
   const readers = descriptors();
   const writers = descriptors();
   const directory = mkdtempSync(join(tmpdir(), 'nook-output-'));
-  const relay: { read: number; target: 1 | 2 }[] = [];
+  const relay: { read: number; blockingRead: number; target: 1 | 2 }[] = [];
   const child: MaskedPlan['child'] = ['inherit', 'inherit'];
   try {
     const plan: MaskedPlan = {
