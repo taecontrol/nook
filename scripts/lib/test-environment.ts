@@ -20,6 +20,14 @@ const inheritedNames = [
 ];
 const overrideNames = new Set([
   ...inheritedNames,
+  'NOOK_AGENT_SESSION',
+  'CODEX_SESSION_ID',
+  'CODEX_THREAD_ID',
+  'CLAUDE_CODE_SESSION_ID',
+  'CURSOR_CONVERSATION_ID',
+  'CLAUDE_CODE_MESSAGING_TOKEN',
+  'CURSOR_ASKPASS_SECRET',
+  'CODEX_TOOL_CALL_ID',
   'NOOK_TEST_INHERITED',
   'GH_TOKEN',
   'NODE_OPTIONS',

@@ -42,11 +42,14 @@ export function record(result: CommandResult) {
   outputs.push(result.stdout, result.stderr);
   return result;
 }
-export async function importFile(args = importArgs()) {
+export async function importFile(
+  args = importArgs(),
+  env: Record<string, string> = {},
+) {
   return record(
     await keyring.start(
       args,
-      observeArgv(),
+      { ...observeArgv(), ...env },
       '',
       resolve(keyring.home, 'source'),
     ).done,

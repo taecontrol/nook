@@ -257,6 +257,27 @@ Audit consumes the same guarded metadata hooks as Vault, Buckets, and Machines. 
 
 URL search parameters remain plain strings for both Audit and Vault. Browser regressions create and use the valid buckets `123`, `1e3`, `true`, `false`, and `null` through the owner and machine APIs, then prove direct URLs, selection, and reload preserve the exact path. The valid `all` bucket also remains distinct from the All buckets control.
 
+### Reported agent sessions
+
+Issue #81 uses `agent-session-cli.test.ts` for harness precedence, absent and
+invalid claims, private decoy variables, and rejection of reserved secret
+mapping names before keyring or HTTP access. The reserved names are
+`NOOK_AGENT_SESSION`, `CODEX_SESSION_ID`, `CODEX_THREAD_ID`,
+`CLAUDE_CODE_SESSION_ID`, and `CURSOR_CONVERSATION_ID`, in both `--secret`
+and `nook.json`. Tests supply these variables explicitly; the runner never
+inherits the developer's claims or adjacent secret variables.
+
+`agent-session-contract.test.ts` covers normalization;
+`audit-agent-sessions-worker.test.ts` covers malformed payloads, denied uses,
+session filters and claimless reveal/file/history entries.
+`agent-create-retry-cli.test.ts` proves a lost create response retries the
+same claim and records one entry. `audit-agent-sessions-migration.test.ts`
+runs the previous Worker pinned to `875cd3e` on the new schema, exercises
+the new CLI against it, and checks generated claims against the D1 constraints.
+The session E18 cases in `audit-web.test.ts` exercise intent prefetching,
+cached session navigation within 100 ms, bucket preservation, clearing,
+empty states and claimless details at phone and desktop sizes.
+
 ### Project secret mappings
 
 Issue #6 is verified at the production CLI boundary in `nook-json-cli.test.ts` and, for invalid project files, `nook-json-invalid-cli.test.ts`, against the built Worker and migrated D1. The Linux bubblewrap fixture and the private macOS keychain fixture accept a command working directory; the CLI starts in that fixture's temporary HOME unless a test supplies a directory. Every project file lives beneath that HOME; no `nook.json` is committed at the repository root. The macOS CLI job includes both suites.

@@ -93,8 +93,11 @@ const router = createRouter({
           () => import('./audit-page'),
           'AuditPage',
         ),
-        validateSearch: (search: { bucket?: string; secret?: string }) =>
-          search,
+        validateSearch: (search: {
+          bucket?: string;
+          secret?: string;
+          session?: string;
+        }) => search,
         loaderDeps: ({ search }) => search,
         loader: ({ context, deps }) => {
           preloadAudit(context.queryClient, deps);

@@ -23,7 +23,7 @@ import {
 import { Effect, Redacted, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
 import { SqlSchema } from 'effect/sql';
-import { type AuditMachine, auditStore } from './audit.ts';
+import { type AuditMachine, auditStore, claimColumns } from './audit.ts';
 import { authorizeBucket, bucketExists, bucketNotFound } from './buckets.ts';
 import { unavailable } from './http-errors.ts';
 import { open, parseKeyring, seal } from './vault-keyring.ts';
@@ -159,10 +159,11 @@ function createStore(binding: string, grant: BucketGrant) {
         const path = secretPath(input);
         const envelope = yield* seal(ring, path, input.value);
         const now = new Date().toISOString();
+        const claim = claimColumns(creation?.input.agentSession);
         // The state SELECT below preserves changes() from the secret INSERT.
         const audit = creation
           ? [
-              sql`INSERT INTO audit_entries(id, at, outcome, path, bucket, purpose, machine_id, machine_name, working_directory) SELECT ${crypto.randomUUID()}, ${now}, 'created', ${path}, ${input.bucket}, ${creation.input.purpose}, ${creation.machine.id}, ${creation.machine.machine}, ${creation.input.workingDirectory} WHERE changes() = 1`,
+              sql`INSERT INTO audit_entries(id, at, outcome, path, bucket, purpose, machine_id, machine_name, working_directory, agent, agent_session, agent_thread) SELECT ${crypto.randomUUID()}, ${now}, 'created', ${path}, ${input.bucket}, ${creation.input.purpose}, ${creation.machine.id}, ${creation.machine.machine}, ${creation.input.workingDirectory}, ${claim.agent}, ${claim.agent_session}, ${claim.agent_thread} WHERE changes() = 1`,
             ]
           : [];
         const [inserted, states] = yield* sql

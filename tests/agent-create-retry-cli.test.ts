@@ -378,3 +378,40 @@ it.each([
     }
   },
 );
+
+it('session E11: a lost create response retries the identical claim and records exactly one created entry', async () => {
+  const claim = {
+    agent: 'codex',
+    session: '0199f3c2-7a10-7d4e-9b1a-3f2e8c1d0a11',
+    thread: '0199f3c4-7a10-7d4e-9b1a-3f2e8c1d0e01',
+  };
+  const transport = await createTransport(
+    app,
+    () => undefined,
+    async (attempt) => (attempt === 1 ? 'lost' : undefined),
+  );
+  try {
+    await configure(transport.origin);
+    const result = await keyring.start(
+      createArgs(),
+      { CODEX_SESSION_ID: claim.session, CODEX_THREAD_ID: claim.thread },
+      secretInput().value,
+    ).done;
+    expect(result.status).toBe(0);
+    expect(transport.bodies).toHaveLength(2);
+    expect(transport.bodies[0].equals(transport.bodies[1])).toBe(true);
+    expect(JSON.parse(transport.bodies[0].toString()).agentSession).toEqual(
+      claim,
+    );
+    const rows = await auditRows(app);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      outcome: 'created',
+      agent: claim.agent,
+      agent_session: claim.session,
+      agent_thread: claim.thread,
+    });
+  } finally {
+    await transport.close();
+  }
+});

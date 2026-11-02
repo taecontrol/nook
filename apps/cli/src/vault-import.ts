@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import {
+  type CreateMachineSecret,
   type EnvEntry,
   type EnvKeyStatus,
   envKeyStatuses,
@@ -11,6 +12,7 @@ import {
   validateWorkingDirectory,
 } from '@nook/contract';
 import { Effect } from 'effect';
+import { resolveAgentSession } from './agent-session.ts';
 import { CliFailure, type RequestFailure, tryCli } from './errors.ts';
 import type { Host } from './host.ts';
 import { currentDirectory } from './project-secrets.ts';
@@ -107,7 +109,10 @@ export function writeKeys(
   request: Request,
   entries: readonly EnvEntry[],
   keys: ImportedKey[],
-  input: { bucket: string; purpose: string; workingDirectory: string },
+  input: Pick<
+    CreateMachineSecret,
+    'bucket' | 'purpose' | 'workingDirectory' | 'agentSession'
+  >,
 ) {
   let stopped = false;
   return Effect.forEach(
@@ -193,6 +198,7 @@ export function vaultImport(
     const message = validateWorkingDirectory(workingDirectory);
     if (message) return yield* Effect.fail(new CliFailure(message));
     const parsed = yield* readEnv(file);
+    const agentSession = resolveAgentSession((name) => process.env[name]);
     const { request } = yield* createSession(host);
     const { secrets } = yield* request((api, headers) =>
       api.machine.secrets({ headers, query: { bucket } }),
@@ -218,6 +224,7 @@ export function vaultImport(
       bucket,
       purpose,
       workingDirectory,
+      ...(agentSession ? { agentSession } : {}),
     });
     const output = report(keys, parsed.unreadable, bucket, file);
     if (

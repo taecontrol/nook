@@ -27,6 +27,7 @@ import {
   record,
   setupImportCli,
 } from './support/agent-import-cli.ts';
+import { codexClaim } from './support/agent-session.ts';
 import { auditRows } from './support/audit.ts';
 import { filesContain } from './support/cli.ts';
 import { deferred } from './support/machines.ts';
@@ -459,6 +460,45 @@ it('E10: read-only ancestor refusal settles the pool, starts no more creates and
   }
 });
 
+it.each([
+  {
+    label: 'set',
+    env: {
+      CODEX_SESSION_ID: codexClaim.session,
+      CODEX_THREAD_ID: codexClaim.thread,
+    },
+    claim: codexClaim,
+  },
+  { label: 'unset', env: {} as Record<string, string>, claim: null },
+])(
+  'session: each imported Created entry carries the agent session claim when it is $label',
+  async ({ env, claim }) => {
+    await envFile(`GH_TOKEN=${privateValue()}\nDB_URL=${privateValue()}\n`);
+    const transport = await proxy();
+    try {
+      const result = await importFile(importArgs(), env);
+      expect(result.status).toBe(0);
+      expectOutput(result.stdout, '2 created.');
+      expect(transport.bodies).toHaveLength(2);
+      for (const body of transport.bodies) {
+        const payload = JSON.parse(body.toString());
+        if (claim) expect(payload.agentSession).toEqual(claim);
+        else expect(payload).not.toHaveProperty('agentSession');
+      }
+      const audit = await auditRows(app);
+      expect(audit).toHaveLength(2);
+      for (const row of audit)
+        expect(row).toMatchObject({
+          outcome: 'created',
+          agent: claim?.agent ?? null,
+          agent_session: claim?.session ?? null,
+          agent_thread: claim?.thread ?? null,
+        });
+    } finally {
+      await transport.close();
+    }
+  },
+);
 it('E11: lost committed response retries the same write id and creates only one audit', async () => {
   await envFile(`KEY=${privateValue()}`);
   const transport = await proxy(

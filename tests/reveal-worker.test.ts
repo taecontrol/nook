@@ -585,7 +585,7 @@ it('E26: populated previous audit schema upgrades losslessly with both indexes a
       'CREATE INDEX audit_entries_secret ON audit_entries(path, at DESC, id DESC)',
     ),
     db.prepare(
-      "DELETE FROM d1_migrations WHERE name IN ('0008_secret_reveals.sql', '0013_audit_file_entries.sql')",
+      "DELETE FROM d1_migrations WHERE name IN ('0008_secret_reveals.sql', '0013_audit_file_entries.sql', '0014_audit_agent_sessions.sql')",
     ),
   ]);
   const before: Record<string, unknown>[] = [];
@@ -621,6 +621,7 @@ it('E26: populated previous audit schema upgrades losslessly with both indexes a
       purpose: 'previous activity',
       machine: { id: 'old-machine', name: 'previous laptop' },
       workingDirectory: '/previous',
+      agentSession: null,
       ...(outcome === 'created'
         ? {}
         : { executable: 'gh', runId: 'previous-run' }),
@@ -637,7 +638,10 @@ it('E26: populated previous audit schema upgrades losslessly with both indexes a
       ({ ip: _ip, country: _country, ...facts }) => facts,
     ),
   ).toEqual(rows);
-  expect(await applyMigrations(db)).toEqual(['0013_audit_file_entries.sql']);
+  expect(await applyMigrations(db)).toEqual([
+    '0013_audit_file_entries.sql',
+    '0014_audit_agent_sessions.sql',
+  ]);
   expect((await auditPageData(app)).entries).toEqual(before);
   for (const query of ['?bucket=work', '?secret=work%2Facme%2FSTRIPE_KEY'])
     expect((await auditPageData(app, query)).entries).toEqual(before);
@@ -650,6 +654,7 @@ it('E26: populated previous audit schema upgrades losslessly with both indexes a
         .all<{ name: string }>()
     ).results.map((row) => row.name),
   ).toEqual([
+    'audit_entries_agent_session',
     'audit_entries_bucket',
     'audit_entries_chronology',
     'audit_entries_secret',

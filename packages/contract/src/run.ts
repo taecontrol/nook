@@ -1,4 +1,5 @@
 import { Schema } from 'effect';
+import { AgentSessionClaim } from './agent-session.ts';
 import { validateBucketPath } from './buckets.ts';
 import { CreateSecret, SecretValue, validateSecretName } from './vault.ts';
 
@@ -44,12 +45,14 @@ export const RunSecrets = Schema.Struct({
   workingDirectory: Schema.String,
   executable: Schema.String,
   secrets: Schema.Array(Schema.String),
+  agentSession: Schema.optionalKey(AgentSessionClaim),
 });
 export type RunSecrets = typeof RunSecrets.Type;
 export const CreateMachineSecret = CreateSecret.mapFields((fields) => ({
   ...fields,
   purpose: Schema.String,
   workingDirectory: Schema.String,
+  agentSession: Schema.optionalKey(AgentSessionClaim),
 }));
 export type CreateMachineSecret = typeof CreateMachineSecret.Type;
 export function validateRunSecrets(input: RunSecrets): string | undefined {

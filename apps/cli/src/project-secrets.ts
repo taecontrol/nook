@@ -2,6 +2,7 @@ import { readFile, realpath } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { validateSecretPath, validateSecretPaths } from '@nook/contract';
 import { Effect } from 'effect';
+import { isClaimVariable } from './agent-session.ts';
 import { CliFailure } from './errors.ts';
 
 export type SecretMapping = { name: string; path: string };
@@ -19,6 +20,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 function entry(file: string, name: string, path: unknown): SecretMapping {
+  if (isClaimVariable(name))
+    throw new CliFailure(
+      `Environment name ${name} is reserved for agent session claims.`,
+    );
   if (!isEnvironmentName(name))
     throw invalidFile(
       file,
