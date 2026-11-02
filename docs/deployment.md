@@ -72,7 +72,7 @@ updating last use. Logins in flight during a rollback can receive tokens with
 no expiration, as can a newer approval page talking to the older Worker.
 Machines shows these as No expiration; revoke them and log in again to choose
 a lifetime. Existing machines also keep no expiration. See
-[ADR-0018](adrs/0018-machine-access-expires-at-an-owner-chosen-date-enforced-in-d1.md).
+[ADR-0020](adrs/0020-machine-access-expires-at-an-owner-chosen-date-enforced-in-d1.md).
 
 ## CLI keyring internals
 

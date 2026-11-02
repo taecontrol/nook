@@ -1,4 +1,4 @@
-# ADR-0018: Machine access can expire at an owner-chosen date, enforced in D1
+# ADR-0020: Machine access can expire at an owner-chosen date, enforced in D1
 
 Date: 2026-11-02
 Status: Accepted
