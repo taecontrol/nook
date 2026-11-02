@@ -22,9 +22,10 @@ it('E1/E2/E3: upgrading existing approvals preserves their credentials and dates
     expect(oldSchema).toBeDefined();
     await db.batch([
       db.prepare('DROP TABLE machine_tokens'),
+      db.prepare('ALTER TABLE authorizations DROP COLUMN access_expires_at'),
       db.prepare(oldSchema ?? ''),
       db.prepare(
-        "DELETE FROM d1_migrations WHERE name='0004_machine_management.sql'",
+        "DELETE FROM d1_migrations WHERE name IN ('0004_machine_management.sql', '0015_machine_access_expiry.sql')",
       ),
     ]);
     const tokens = [0, 1].map(
@@ -45,7 +46,10 @@ it('E1/E2/E3: upgrading existing approvals preserves their credentials and dates
           ),
       ),
     );
-    expect(await applyMigrations(db)).toEqual(['0004_machine_management.sql']);
+    expect(await applyMigrations(db)).toEqual([
+      '0004_machine_management.sql',
+      '0015_machine_access_expiry.sql',
+    ]);
     const machines = await listMachines(app);
     expect(machines).toHaveLength(2);
     expect(new Set(machines.map((machine) => machine.id)).size).toBe(2);

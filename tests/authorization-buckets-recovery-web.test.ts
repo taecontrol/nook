@@ -79,7 +79,9 @@ it('authorization recovery from a rejected optimistic grant preserves the pendin
     const failure = await rejected;
     expect(failure.status()).toBe(400);
     expect(await failure.json()).toMatchObject({ _tag: 'GrantBucketNotFound' });
-    expect(approvals).toEqual([{ machineName: 'omarchy', grant: [path] }]);
+    expect(approvals).toEqual([
+      { machineName: 'omarchy', grant: [path], lifetime: '30d' },
+    ]);
     await page.getByText(/selected buckets.*choose again/i).waitFor();
     await page.evaluate(
       () =>
@@ -117,8 +119,8 @@ it('authorization recovery from a rejected optimistic grant preserves the pendin
     await page.getByRole('button', { name: 'Approve', exact: true }).click();
     expect((await approved).status()).toBe(204);
     expect(approvals).toEqual([
-      { machineName: 'omarchy', grant: [path] },
-      { machineName: 'omarchy', grant: [path] },
+      { machineName: 'omarchy', grant: [path], lifetime: '30d' },
+      { machineName: 'omarchy', grant: [path], lifetime: '30d' },
     ]);
     await page.getByRole('heading', { name: 'Machine approved' }).waitFor();
     expect(writes).toBe(1);

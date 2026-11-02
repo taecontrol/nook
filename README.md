@@ -20,6 +20,11 @@ brew install taecontrol/tap/nook            # macOS
 
 `nook login https://<hostname>` connects a machine to an installation. See [client connections](docs/install.md#11-sign-in-and-connect-your-clients) for the agent configuration and [releasing](docs/releasing.md) for how versions ship.
 
+Machine approval offers 1, 7, 30 or 90 days of access (30 days by default),
+or No expiration. Existing machines keep no expiration. `nook whoami` shows
+the expiry. Expired tokens stop working automatically; remove them in Machines,
+and reconnect a machine with `nook logout && nook login <origin>`.
+
 ## Remember and read
 
 The MCP `remember` tool takes an explicit existing bucket, Markdown content, optional tags, and an optional absolute `workingDirectory`:

@@ -28,6 +28,7 @@ import {
   missingRoots,
 } from './machine-access-model';
 import { useSaveAccess } from './machines-api';
+import { isExpired } from './machines-model';
 import { Path, PathList } from './path-text';
 
 type Outcome =
@@ -312,7 +313,6 @@ type EditorProps = {
   onClose: () => void;
   onSaved: (machine: Machine) => void;
   onRevoked: (machine: Machine) => void;
-  onSavingChange: (saving: boolean) => void;
   existing: Set<string>;
 };
 function AccessEditor({
@@ -320,7 +320,6 @@ function AccessEditor({
   onClose,
   onSaved,
   onRevoked,
-  onSavingChange,
   existing,
 }: EditorProps) {
   const [baseline, setBaseline] = useState(machine.grant);
@@ -343,18 +342,23 @@ function AccessEditor({
     body.current?.scrollTo({ top: 0 });
   };
   const submit = () => {
-    if (save.busy || revoked || disabled || !selection.validate()) return;
+    if (
+      isExpired(machine, Date.now()) ||
+      save.busy ||
+      revoked ||
+      disabled ||
+      !selection.validate()
+    )
+      return;
     const started = save.start(
       { machine: { ...machine, grant: baseline }, grant: selection.grant },
       {
         onSuccess: onSaved,
         onError: report,
-        onSettled: () => onSavingChange(false),
       },
     );
     if (started) {
       setOutcome({ kind: 'none' });
-      onSavingChange(true);
       form.current?.focus({ preventScroll: true });
     }
   };
@@ -472,10 +476,18 @@ export function AccessSheet({
   onRevoked: (machine: Machine) => void;
 }) {
   const buckets = useBucketList();
-  const [saving, setSaving] = useState(false);
+  const queries = useQueryClient();
   const existing = new Set((buckets.data ?? []).map((bucket) => bucket.path));
   return (
-    <Sheet open={open} onOpenChange={(next) => !next && !saving && onClose()}>
+    <Sheet
+      open={open}
+      onOpenChange={(next) => {
+        // Mutation state survives the editor and is current before React rerenders.
+        if (next || queries.isMutating({ mutationKey: ['machines', 'access'] }))
+          return;
+        onClose();
+      }}
+    >
       <SheetContent
         className="w-full sm:max-w-lg"
         motion="instant"
@@ -489,7 +501,6 @@ export function AccessSheet({
             onClose={onClose}
             onSaved={onSaved}
             onRevoked={onRevoked}
-            onSavingChange={setSaving}
           />
         ) : (
           <EditorLoading machine={machine} onClose={onClose} />

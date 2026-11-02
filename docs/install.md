@@ -273,7 +273,8 @@ nook whoami
 
 Login opens `/cli/authorize` and prints a code. Enter the code yourself in
 the browser, name the machine, choose `me` for this installation check, and
-approve only a login you started. `whoami` shows the grant without a token.
+choose how long access lasts (30 days by default, or No expiration), and
+approve only a login you started. `whoami` shows the grant and expiry without a token.
 The token stays in the OS keyring. If no browser opens, visit
 `https://<hostname>/cli/authorize` yourself.
 

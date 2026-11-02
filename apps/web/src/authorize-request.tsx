@@ -1,4 +1,5 @@
 import {
+  type AccessLifetime,
   type AuthorizationRequest,
   formatUserCode,
   machineNameError,
@@ -32,6 +33,7 @@ import {
 } from '@/components/ui/item';
 import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
+import { AccessLifetimeField } from './access-lifetime-field';
 import { Cmd, ConnectionFailure, Mark } from './authorize-parts';
 import type { GrantSelection } from './grant-selection';
 import { GrantSelector } from './grant-selector';
@@ -41,7 +43,7 @@ function RequestDetails({ request }: { request: AuthorizationRequest }) {
   const rows = [
     ['Client', request.client],
     ['Requested', timeAgo(request.requestedAt)],
-    ['Expires', timeUntil(request.expiresAt)],
+    ['Request expires', timeUntil(request.expiresAt)],
   ];
   return (
     <dl className="flex flex-col gap-2 text-sm">
@@ -107,6 +109,8 @@ export function RequestStep({
   request,
   name,
   onName,
+  lifetime,
+  onLifetime,
   phase,
   failed,
   decide,
@@ -117,6 +121,8 @@ export function RequestStep({
   request: AuthorizationRequest;
   name: string;
   onName: (value: string) => void;
+  lifetime: AccessLifetime;
+  onLifetime: (value: AccessLifetime) => void;
   phase: 'request' | 'approving' | 'denying';
   failed: boolean;
   decide: (action: 'approve' | 'deny') => void;
@@ -193,6 +199,11 @@ export function RequestStep({
             </ItemActions>
           </Item>
           <GrantSelector selection={access} busy={busy} />
+          <AccessLifetimeField
+            lifetime={lifetime}
+            onLifetime={onLifetime}
+            busy={busy}
+          />
           <MachineNameField
             input={input}
             name={name}

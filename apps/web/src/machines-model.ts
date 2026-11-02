@@ -1,8 +1,13 @@
-import type { Machine } from '@nook/contract';
+import { type Machine, untilText } from '@nook/contract';
 import { DAY, formatDate, recentTime, timeAgo } from './time';
 
 const STALE_AFTER_DAYS = 30;
 const groups = [
+  {
+    id: 'expired',
+    title: 'Expired',
+    hint: "Nook rejects these machines' tokens. Remove them, or run nook login on a machine to approve it again.",
+  },
   {
     id: 'stale',
     title: 'Not used in 30 days',
@@ -20,13 +25,19 @@ const groups = [
   },
 ] as const;
 type GroupId = (typeof groups)[number]['id'];
+export function isExpired(machine: Machine, now: number) {
+  return machine.expiresAt !== null && Date.parse(machine.expiresAt) <= now;
+}
 function groupOf(machine: Machine, now: number): GroupId {
+  if (isExpired(machine, now)) return 'expired';
   if (machine.lastUsedAt === null) return 'never';
   return now - Date.parse(machine.lastUsedAt) > STALE_AFTER_DAYS * DAY
     ? 'stale'
     : 'recent';
 }
 function orderTime(machine: Machine, group: GroupId) {
+  if (group === 'expired')
+    return -Date.parse(machine.expiresAt ?? machine.approvedAt);
   if (group === 'never') return Date.parse(machine.approvedAt);
   const at = Date.parse(machine.lastUsedAt ?? machine.approvedAt);
   return group === 'stale' ? at : -at;
@@ -50,4 +61,22 @@ export function lastUsedParts(machine: Machine, now: number) {
 }
 export function approvedText(machine: Machine, now: number) {
   return `Approved ${recentTime(machine.approvedAt, now)}`;
+}
+
+export function expiryText(machine: Machine, now: number) {
+  if (machine.expiresAt === null) return 'No expiration';
+  return Date.parse(machine.expiresAt) - now < DAY
+    ? `Expires ${untilText(machine.expiresAt, now)}`
+    : `Expires ${formatDate(machine.expiresAt)}`;
+}
+export function approvalParts(machine: Machine, now: number) {
+  const parts = [approvedText(machine, now)];
+  if (!isExpired(machine, now)) parts.push(expiryText(machine, now));
+  return parts;
+}
+export function activityParts(machine: Machine, now: number) {
+  const parts = lastUsedParts(machine, now);
+  return isExpired(machine, now) && machine.expiresAt
+    ? [`Expired ${formatDate(machine.expiresAt)}`, ...parts]
+    : parts;
 }
