@@ -84,8 +84,12 @@ function nextMatch(
 }
 function advanceTail(chunk: Uint8Array, tail: PendingPrefix) {
   const { bytes, prefixes } = tail.value;
-  let length = tail.length;
-  for (const byte of chunk) {
+  // A held prefix is shorter than its value, so a chunk at least that long
+  // decides the tail alone: scan only its end, never every byte of the chunk.
+  const window = bytes.length - 1;
+  const fresh = chunk.length >= window;
+  let length = fresh ? 0 : tail.length;
+  for (const byte of fresh ? chunk.subarray(chunk.length - window) : chunk) {
     length = extendPrefix(bytes, prefixes, length, byte);
     // Only a proper prefix can need more bytes, even after a full match.
     if (length === bytes.length) length = prefixes[length - 1];

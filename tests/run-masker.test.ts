@@ -352,6 +352,53 @@ it('single-byte writes advance long shared prefixes within a linear tail budget'
   expect(work).toBeGreaterThanOrEqual(entries.length * data.length);
   expect(Buffer.concat(output).equals(expected)).toBe(true);
 });
+it('large chunks advance each tail only over the bytes a value can still need', () => {
+  const entries = Array.from({ length: 20 }, (_, i) => ({
+    path: `work/acme/VALUE_${i}`,
+    value: `ghp_${String(i).padStart(2, '0')}${'z'.repeat(34)}`,
+  }));
+  const chunk = Buffer.alloc(64 * 1024, 'x');
+  const chunks = 16;
+  // A tail needs at most one value length of each chunk, not every byte.
+  const budget =
+    4 * entries.reduce((total, { value }) => total + chunks * value.length, 0);
+  let work = 0;
+  function counted<T extends Uint8Array | Uint32Array>(array: T): T {
+    return new Proxy(array, {
+      get(target, key) {
+        if (typeof key === 'string' && /^\d+$/.test(key) && ++work > budget)
+          throw new Error('Large chunks exceeded the tail window budget.');
+        return Reflect.get(target, key, target);
+      },
+    });
+  }
+  const originals = new Map<Uint8Array, Buffer>();
+  const values = maskedValues(entries).map((value) => {
+    const bytes = counted(value.bytes);
+    originals.set(bytes, value.bytes);
+    return { ...value, bytes, prefixes: counted(value.prefixes) };
+  });
+  const stream = masker(values);
+  const indexOf = Buffer.prototype.indexOf;
+  const search = vi
+    .spyOn(Buffer.prototype, 'indexOf')
+    .mockImplementation(function (this: Buffer, needle, ...args) {
+      if (needle instanceof Uint8Array)
+        needle = originals.get(needle) ?? needle;
+      return indexOf.call(this, needle, ...args);
+    });
+  const output: Uint8Array[] = [];
+  try {
+    for (let i = 0; i < chunks; i++) output.push(stream.push(chunk));
+    output.push(stream.end());
+  } finally {
+    search.mockRestore();
+  }
+  expect(work).toBeGreaterThan(0);
+  expect(
+    Buffer.concat(output).equals(Buffer.concat(Array(chunks).fill(chunk))),
+  ).toBe(true);
+});
 it('adversarial long prefixes stay within a linear tail-search budget', () => {
   const entries = Array.from({ length: 20 }, (_, i) => ({
     path: `work/acme/VALUE_${i}`,

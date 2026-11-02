@@ -366,10 +366,12 @@ whole-buffer earliest/longest matcher, including cap crossings and held tails.
 The tail-search guards bound KMP failure-link reads and bulk-comparison bytes
 for 20 values of 65,535 bytes and a 65,536-byte mismatching chunk, and byte and
 prefix-table reads against four times the value count times new input bytes
-for 20 values sharing a 2,048-byte prefix delivered one byte at a time. All
-search counters must record work; no guard times the search. Each masker
+for 20 values sharing a 2,048-byte prefix delivered one byte at a time, and
+against four times the value lengths per chunk for 16 ordinary 64 KiB chunks.
+All search counters must record work; no guard times the search. Each masker
 retains its KMP tail states across pushes and advances them only over new
-bytes. Replacements use failure links to discard consumed prefixes without
+bytes; a chunk at least as long as a value rescans only its last bytes, since a
+held prefix is always shorter than its value. Replacements use failure links to discard consumed prefixes without
 rescanning held bytes; final resets every state. Held buffers are still copied
 when concatenating each chunk.
 
