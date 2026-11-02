@@ -3,6 +3,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { fetchValues } from './support/audit.ts';
 import { auditEntries, selectAudit } from './support/audit-browser.ts';
+import { closeBrowserPage } from './support/buckets-browser.ts';
 import {
   approvalFixture,
   ask,
@@ -64,7 +65,7 @@ it('E30: Audit renders and filters approval events, owner IP/country and deliver
     await selectAudit(page, 'Bucket', 'me');
     await expect.poll(() => auditEntries(page).count()).toBe(0);
   } finally {
-    await context.close();
+    await closeBrowserPage(page, context);
     await app.close();
   }
 });
