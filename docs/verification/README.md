@@ -152,7 +152,7 @@ sleeping or replacing the authentication clock.
 `machine-expiry-cli.test.ts` uses real CLI processes and private keyrings for
 local-time recovery, identity, expired logout and the delivery-base CLI's
 released decoding. `machine-expiry-compatibility.test.ts` builds the actual
-Worker from `466b0e6`, including its contract, and exercises it on the current
+Worker from `1927803`, including its contract, and exercises it on the current
 schema before switching the same database to the new Worker. It also covers
 populated previous schemas and the normal migration replay/drift verifier.
 `machine-expiry-web.test.ts` uses Chromium for the Select, approved expiry,
@@ -163,7 +163,7 @@ records request, approved, Machines and removed states at both capture sizes
 and themes.
 
 Existing exact identity/list/payload assertions add only the new expiry fields,
-line and default lifetime. The historical machine-schema fixture replays 0014
+line and default lifetime. The historical machine-schema fixture replays 0015
 alongside its earlier machine migration. Existing access, revocation, privacy,
 request-count and timing assertions retain their contracts.
 

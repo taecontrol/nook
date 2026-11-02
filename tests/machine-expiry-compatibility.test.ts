@@ -35,9 +35,9 @@ beforeAll(async () => {
 afterAll(async () => {
   await base?.close();
 });
-it('Expiry E16: migration 0014 replays on empty, already-migrated and populated schemas and matches the snapshot', async () => {
+it('Expiry E16: migration 0015 replays on empty, already-migrated and populated schemas and matches the snapshot', async () => {
   expect(await migrationFiles('migrations')).toContain(
-    '0014_machine_access_expiry.sql',
+    '0015_machine_access_expiry.sql',
   );
   expect(await verifyMigrations()).toMatchObject({
     replayed: true,
@@ -57,7 +57,7 @@ it('Expiry E7/E16: migrating a populated previous schema preserves NULL expiry a
     const db = await mf.getD1Database('DB');
     const names = await migrationFiles('migrations');
     await applyMigrations(db, 'migrations', {
-      only: names.filter((name) => name < '0014'),
+      only: names.filter((name) => name < '0015'),
     });
     await db
       .prepare(

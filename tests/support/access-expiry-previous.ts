@@ -20,7 +20,7 @@ const previousSource: Plugin = {
       (args) => ({
         contents: execFileSync(
           'git',
-          ['show', `466b0e6:${relative(process.cwd(), args.path)}`],
+          ['show', `1927803:${relative(process.cwd(), args.path)}`],
           {
             encoding: 'utf8',
             env: testEnvironment(process.env.HOME),
