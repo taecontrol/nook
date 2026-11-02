@@ -261,6 +261,8 @@ function reasonFor(
   if (status === 'ready') return readyReason(row);
   const skipped = {
     empty: 'Empty value. Skipped.',
+    nul: 'Value contains NUL. Skipped.',
+    unicode: 'Value is not valid Unicode. Skipped.',
     'too-long': `Value is over ${secretValueLimit}. Skipped.`,
     exists: (
       <>
@@ -855,6 +857,8 @@ const skipWhy: Record<Status, (bucket: string) => string> = {
   'invalid-description': () => 'Invalid description; not created.',
   duplicate: () => 'Duplicate name; not created.',
   empty: () => 'Empty value; not created.',
+  nul: () => 'Invalid value; not created.',
+  unicode: () => 'Invalid value; not created.',
   'too-long': () => `Value over ${secretValueLimit}; not created.`,
   ready: () => 'Unchecked; not created.',
 };

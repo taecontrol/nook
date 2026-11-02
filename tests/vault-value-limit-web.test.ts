@@ -10,6 +10,8 @@ import {
   importPage,
   importSettled,
   importSheet,
+  openImport,
+  pasteField,
   reviewPaste,
   reviewRow,
   runRow,
@@ -66,8 +68,6 @@ it('the value limit keeps its exact create, validation, review and skipped-resul
 it('NUL and lone-surrogate values appear under Skipped in review and results and only the valid key is created', async () => {
   const visit = await importPage(browser);
   const { page, traffic, app } = visit;
-  const text =
-    'NUL_TOKEN="a\u0000b"\nSURROGATE_TOKEN=a\uD800b\nOK_TOKEN=fine\n';
   const invalid = [
     { line: 1, name: 'NUL_TOKEN', reason: 'Value contains NUL. Skipped.' },
     {
@@ -78,7 +78,27 @@ it('NUL and lone-surrogate values appear under Skipped in review and results and
   ];
   try {
     const before = (await listSecrets(app)).map(({ path }) => path);
-    const sheet = await reviewPaste(page, text);
+    await openImport(page);
+    const sheet = importSheet(page);
+    // fill's browser input transport replaces lone surrogates. Build the
+    // malformed UTF-16 inside the browser and send React a native input event.
+    await pasteField(page).evaluate((field) => {
+      const text =
+        'NUL_TOKEN="a\u0000b"\nSURROGATE_TOKEN=a' +
+        String.fromCharCode(0xd800) +
+        'b\nOK_TOKEN=fine\n';
+      const setValue = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      if (!setValue) throw new Error('Textarea value setter missing.');
+      setValue.call(field, text);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await sheet
+      .getByRole('button', { name: 'Review keys', exact: true })
+      .click();
+    await sheet.getByText(/Step 2 of 2\./).waitFor();
     const skipped = sheet.locator('section').filter({
       has: page.getByRole('heading', { name: 'Skipped', exact: true }),
     });
@@ -105,11 +125,13 @@ it('NUL and lone-surrogate values appear under Skipped in review and results and
     await importSettled(page);
     for (const { name } of invalid) {
       const row = runRow(page, name);
-      expect(
-        await row
-          .getByText('Invalid value; not created.', { exact: true })
-          .count(),
-      ).toBe(1);
+      expect
+        .soft(
+          await row
+            .getByText('Invalid value; not created.', { exact: true })
+            .count(),
+        )
+        .toBe(1);
       expect(await skipped.getByText(name, { exact: true }).count()).toBe(1);
     }
     await expectCreated(page, ['OK_TOKEN']);
