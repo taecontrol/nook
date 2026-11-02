@@ -75,14 +75,14 @@ CREATE TABLE authorizations (
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied')),
   requested_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL
-);
+, access_expires_at INTEGER);
 CREATE TABLE buckets (path TEXT PRIMARY KEY NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE file_sweep (id INTEGER PRIMARY KEY CHECK (id=1), cursor TEXT, swept_at TEXT);
 CREATE TABLE machine_tokens (
   token_hash TEXT PRIMARY KEY NOT NULL,
   machine_name TEXT NOT NULL,
   grant_json TEXT NOT NULL,
-  created_at INTEGER NOT NULL , id TEXT, last_used_at INTEGER
+  created_at INTEGER NOT NULL , id TEXT, last_used_at INTEGER, access_expires_at INTEGER
 );
 CREATE TABLE memories (
   seq INTEGER PRIMARY KEY,
@@ -153,6 +153,12 @@ CREATE TRIGGER audit_entries_assign_bucket AFTER INSERT ON audit_entries WHEN NE
 END;
 CREATE TRIGGER buckets_reserve_me BEFORE DELETE ON buckets WHEN OLD.path = 'me' BEGIN SELECT RAISE(ABORT, 'The me bucket cannot be deleted.'); END;
 CREATE TRIGGER machine_tokens_assign_id AFTER INSERT ON machine_tokens WHEN NEW.id IS NULL BEGIN UPDATE machine_tokens SET id = lower(hex(randomblob(16))) WHERE token_hash = NEW.token_hash; END;
+CREATE TRIGGER machine_tokens_expired_unused BEFORE UPDATE OF last_used_at ON machine_tokens
+WHEN OLD.access_expires_at IS NOT NULL
+  AND OLD.access_expires_at <= unixepoch('subsec')*1000
+BEGIN
+  SELECT RAISE(IGNORE);
+END;
 CREATE TRIGGER memories_fts_current_update AFTER UPDATE OF current_version ON memories BEGIN INSERT INTO memories_fts(memories_fts, rowid, content, tags) SELECT 'delete', OLD.seq, content, tags FROM memory_versions WHERE memory_id = OLD.id AND version = OLD.current_version; INSERT INTO memories_fts(rowid, content, tags) SELECT NEW.seq, content, tags FROM memory_versions WHERE memory_id = NEW.id AND version = NEW.current_version; END;
 CREATE TRIGGER memories_fts_delete BEFORE DELETE ON memories BEGIN INSERT INTO memories_fts(memories_fts, rowid, content, tags) SELECT 'delete', OLD.seq, content, tags FROM memory_versions WHERE memory_id = OLD.id AND version = OLD.current_version; END;
 CREATE TRIGGER memories_fts_version_insert AFTER INSERT ON memory_versions WHEN NEW.version = (SELECT current_version FROM memories WHERE id = NEW.memory_id) BEGIN INSERT INTO memories_fts(rowid, content, tags) SELECT seq, NEW.content, NEW.tags FROM memories WHERE id = NEW.memory_id; END;

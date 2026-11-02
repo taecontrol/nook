@@ -138,6 +138,35 @@ The load-time stage adds five phone-network samples for code acceptance to the r
 
 `pnpm captures tests/captures/machine-grant.capture.ts` records the 12 accepted Inline tree scenarios at 1440×900 and 390×844 in light and dark. The `machine-grant-*` viewport and full-page PNGs live in `.local/verification/screenshots/`. Compare them with reference A in `.work/prototypes/machine-grant/candidates/inline-tree/shots/`, accounting for DECISION.md's production corrections. Local synthetic-credential evidence does not establish hosted integration with both real clients.
 
+## Machine access expiry
+
+`machine-expiry-worker.test.ts` exercises all five approval lifetimes and the
+D1 approval window, absent/invalid lifetime payloads, every machine HTTP route
+and MCP, byte-identical revoked errors, unchanged last use and audit, retained
+expired rows, private output and live grants that deny another bucket. Its
+boundary probe sets expiry and invokes authentication within a single SQLite
+step, where D1's `now` is stable: equality is rejected and one millisecond of
+remaining access is accepted. Expiry fixtures use D1-relative writes without
+sleeping or replacing the authentication clock.
+
+`machine-expiry-cli.test.ts` uses real CLI processes and private keyrings for
+local-time recovery, identity, expired logout and the delivery-base CLI's
+released decoding. `machine-expiry-compatibility.test.ts` builds the actual
+Worker from `1927803`, including its contract, and exercises it on the current
+schema before switching the same database to the new Worker. It also covers
+populated previous schemas and the normal migration replay/drift verifier.
+`machine-expiry-web.test.ts` uses Chromium for the Select, approved expiry,
+Expired group, immediate Remove, live confirmation and idle expiry transition.
+A timer observer requires a 90-day expiry to be clamped below the signed
+32-bit timeout limit. `pnpm captures tests/captures/machine-expiry.capture.ts`
+records request, approved, Machines and removed states at both capture sizes
+and themes.
+
+Existing exact identity/list/payload assertions add only the new expiry fields,
+line and default lifetime. The historical machine-schema fixture replays 0015
+alongside its earlier machine migration. Existing access, revocation, privacy,
+request-count and timing assertions retain their contracts.
+
 ## Editing machine access
 
 The owner saves an approved machine's grant through `PUT /api/machines/:id/grant`

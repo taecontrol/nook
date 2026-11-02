@@ -32,6 +32,7 @@ import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
 import { GrantDetails, GrantRoots } from './grant-summary';
+import { formatDateTime } from './time';
 
 export function Cmd({ children }: { children: ReactNode }) {
   return (
@@ -229,11 +230,13 @@ export function ResultStep({
   code,
   name,
   grant,
+  expiresAt,
 }: {
   kind: keyof typeof results;
   code: string;
   name: string;
   grant: BucketGrant;
+  expiresAt: string | null;
 }) {
   const { icon, title, body } = results[kind];
   return (
@@ -258,6 +261,12 @@ export function ResultStep({
               <dt className="shrink-0 text-muted-foreground">Access</dt>
               <dd className="min-w-0 text-right wrap-anywhere">
                 <GrantRoots grant={grant} />
+              </dd>
+            </div>
+            <div className="flex justify-between gap-6">
+              <dt className="shrink-0 text-muted-foreground">Expires</dt>
+              <dd className="min-w-0 text-right">
+                {expiresAt === null ? 'Never' : formatDateTime(expiresAt)}
               </dd>
             </div>
             <div className="flex justify-between gap-6">

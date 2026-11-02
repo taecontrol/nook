@@ -37,6 +37,8 @@ export function AuthorizePage() {
           name={flow.name}
           access={flow.access}
           onName={flow.setName}
+          lifetime={flow.lifetime}
+          onLifetime={flow.setLifetime}
           phase={flow.phase}
           failed={flow.failure === 'network'}
           decide={flow.decide}
@@ -52,6 +54,7 @@ export function AuthorizePage() {
         code={flow.code}
         name={flow.name}
         grant={flow.access.grant}
+        expiresAt={flow.expiresAt}
       />
     </AuthorizationLayout>
   );

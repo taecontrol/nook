@@ -9,9 +9,10 @@ export type ListedMachine = {
   name: string;
   approvedAt: string;
   lastUsedAt: string | null;
+  expiresAt: string | null;
   grant: BucketGrant;
 };
-export type MachineSeed = Omit<ListedMachine, 'id' | 'grant'>;
+export type MachineSeed = Omit<ListedMachine, 'id' | 'grant' | 'expiresAt'>;
 export const machinesNow = '2026-10-05T15:00:00.000Z';
 export const typicalMachines: MachineSeed[] = [
   {
@@ -159,6 +160,7 @@ export async function seedMachines(
       ...seed,
       id: row.id,
       grant: 'all',
+      expiresAt: null,
     });
   }
   return machines;

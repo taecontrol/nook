@@ -179,6 +179,7 @@ it.each(['successful', 'failed-then-retried'])(
       expect((await approved).status()).toBe(204);
       expect(approvals.at(-1)).toEqual({
         machineName: 'omarchy',
+        lifetime: '30d',
         grant: ['personal/finances'],
       });
       await page.getByRole('heading', { name: 'Machine approved' }).waitFor();
