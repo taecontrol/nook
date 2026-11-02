@@ -249,6 +249,19 @@ export function approvalEventInsert(
 ) {
   return sql`INSERT INTO audit_entries(id,at,outcome,path,bucket,purpose,machine_id,machine_name,working_directory,executable,run_id,approval_id) SELECT ${randomId(sql)},${new Date().toISOString()},${event.outcome},p.value,substr(p.value,1,length(p.value)-length(json_extract('["' || replace(p.value,'/','","') || '"]','$[#-1]'))-1),${event.input.purpose},${event.machine.id},${event.machine.machine},${event.input.workingDirectory},${event.input.executable},${crypto.randomUUID()},${event.approval?.id ?? null} FROM json_each(${JSON.stringify(event.paths)}) p WHERE ${guard}`;
 }
+export function requestApprovalEventInsert(
+  sql: D1Client.D1Client,
+  id: string,
+  outcome: 'approval_granted' | 'approval_denied' | 'approval_withdrawn',
+  guard: Fragment,
+  facts: { ip: string | null; country: string | null } = {
+    ip: null,
+    country: null,
+  },
+) {
+  return sql`INSERT INTO audit_entries(id,at,outcome,path,bucket,purpose,machine_id,machine_name,working_directory,executable,run_id,approval_id,approval_remember,ip,country) SELECT lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-8' || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))),strftime('%Y-%m-%dT%H:%M:%fZ','now'),${outcome},p.value,substr(p.value,1,length(p.value)-length(json_extract('["' || replace(p.value,'/','","') || '"]','$[#-1]'))-1),a.purpose,a.machine_id,a.machine_name,a.working_directory,a.executable,a.id,a.id,a.remember,${facts.ip},${facts.country} FROM approval_requests a,json_each(a.covered_json) p WHERE a.id=${id} AND (${guard})`;
+}
+
 function encodeCursor(row: { at: string; id: string }) {
   return btoa(JSON.stringify({ at: row.at, id: row.id }))
     .replaceAll('+', '-')

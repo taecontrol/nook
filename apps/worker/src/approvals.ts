@@ -20,6 +20,7 @@ import {
   type AuditMachine,
   approvalEventInsert,
   claimColumns,
+  requestApprovalEventInsert,
   useInsert,
 } from './audit.ts';
 import { unavailable } from './http-errors.ts';
@@ -270,20 +271,16 @@ export const machineApprovals = Effect.gen(function* () {
       sql
         .batch([
           sql`UPDATE approval_requests SET status='withdrawn' WHERE id=${id} AND machine_id=${machineId} AND status='pending' AND expires_at>unixepoch('subsec')*1000`,
-          requestEvent(sql, id, 'approval_withdrawn', sql`changes()=1`),
+          requestApprovalEventInsert(
+            sql,
+            id,
+            'approval_withdrawn',
+            sql`changes()=1`,
+          ),
         ])
         .pipe(unavailable, Effect.asVoid),
   };
 });
-function requestEvent(
-  sql: D1Client.D1Client,
-  id: string,
-  outcome: 'approval_granted' | 'approval_denied' | 'approval_withdrawn',
-  guard: Fragment,
-  facts: OwnerFacts = { ip: null, country: null },
-) {
-  return sql`INSERT INTO audit_entries(id,at,outcome,path,bucket,purpose,machine_id,machine_name,working_directory,executable,run_id,approval_id,approval_remember,ip,country) SELECT lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-8' || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))),strftime('%Y-%m-%dT%H:%M:%fZ','now'),${outcome},p.value,substr(p.value,1,length(p.value)-length(json_extract('["' || replace(p.value,'/','","') || '"]','$[#-1]'))-1),a.purpose,a.machine_id,a.machine_name,a.working_directory,a.executable,a.id,a.id,a.remember,${facts.ip},${facts.country} FROM approval_requests a,json_each(a.covered_json) p WHERE a.id=${id} AND (${guard})`;
-}
 export const ownerApprovals = Effect.gen(function* () {
   const sql = yield* D1Client.D1Client;
   const getRows = (id: string) =>
@@ -327,7 +324,7 @@ export const ownerApprovals = Effect.gen(function* () {
         const [updated, , rows, clock] = yield* sql
           .batch([
             sql`UPDATE approval_requests SET status=${choice.kind === 'approve' ? 'approved' : 'denied'},remember=${remember},decided_at=unixepoch('subsec')*1000,valid_until=CASE WHEN ${window} IS NULL THEN NULL ELSE unixepoch('subsec')*1000+${window} END WHERE id=${id} AND status='pending' AND expires_at>unixepoch('subsec')*1000 RETURNING id`,
-            requestEvent(
+            requestApprovalEventInsert(
               sql,
               id,
               choice.kind === 'approve'
