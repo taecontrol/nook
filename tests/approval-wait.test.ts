@@ -92,6 +92,77 @@ it('E10: a stalled withdraw is bounded to three seconds after SIGTERM', async ()
   expect(withdrawn).toBe(first.id);
   expect(code).toBe(143);
 });
+it.each([
+  ['SIGINT', 130, 'delivery'],
+  ['SIGTERM', 143, 'delivery'],
+  ['SIGINT', 130, 'deadline'],
+  ['SIGTERM', 143, 'deadline'],
+] as const)(
+  'E10: %s exits %i when %s becomes ready during a stalled withdrawal, without starting a command',
+  async (signalName, expectedCode, ready) => {
+    let withdrawn = '';
+    let code = 0;
+    let commandStarted = false;
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const signal = yield* Deferred.make<'SIGINT' | 'SIGTERM'>();
+        const response = yield* Deferred.make<{
+          values: { path: string; value: Redacted.Redacted<string> }[];
+        }>();
+        const polling = yield* Deferred.make<void>();
+        const withdrawing = yield* Deferred.make<void>();
+        const fiber = yield* Effect.scoped(
+          awaitApproval(
+            { ...first, expiresIn: ready === 'deadline' ? 4 : 600 },
+            {
+              ask: Deferred.succeed(polling, undefined).pipe(
+                Effect.andThen(Deferred.await(response)),
+              ),
+              withdraw: (id) =>
+                Effect.gen(function* () {
+                  withdrawn = id;
+                  yield* Deferred.succeed(withdrawing, undefined);
+                  yield* Effect.never;
+                }),
+              status: () => {},
+              signal: Deferred.await(signal),
+            },
+          ),
+        ).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              commandStarted = true;
+            }),
+          ),
+          Effect.catch((error) =>
+            Effect.sync(() => {
+              code = error instanceof ApprovalStopped ? error.code : 1;
+            }),
+          ),
+          Effect.forkChild,
+        );
+        yield* TestClock.adjust('2 seconds');
+        yield* Deferred.await(polling);
+        yield* Deferred.succeed(signal, signalName);
+        yield* Deferred.await(withdrawing);
+        if (ready === 'delivery')
+          yield* Deferred.succeed(response, {
+            values: [
+              { path: first.paths[0], value: Redacted.make('synthetic-only') },
+            ],
+          });
+        yield* TestClock.adjust('2 seconds');
+        expect(commandStarted).toBe(false);
+        expect(code).toBe(0);
+        yield* TestClock.adjust('1 second');
+        yield* Fiber.join(fiber);
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+    expect(withdrawn).toBe(first.id);
+    expect(commandStarted).toBe(false);
+    expect(code).toBe(expectedCode);
+  },
+);
 it('E11/E19: transient failures reuse the ask and a pending answer cannot extend the original deadline', async () => {
   let calls = 0;
   let code = 0;

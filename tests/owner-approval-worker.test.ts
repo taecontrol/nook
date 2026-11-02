@@ -417,6 +417,31 @@ it.each(['once', 'deny'] as const)(
     ).toHaveLength(1);
   },
 );
+it.each([
+  ['once', 120_000],
+  ['1h', 3_600_000],
+  ['12h', 43_200_000],
+] as const)(
+  'E22: repeating %s after its validity window returns AlreadyHandled without another decision event',
+  async (remember, window) => {
+    await setMark(app);
+    const first = await pending(app, app.token);
+    expect((await decide(app, first.id, remember)).status).toBe(200);
+    expect((await decide(app, first.id, remember)).status).toBe(200);
+    await age(app, first.id, 'valid_until', window + 1);
+    const before = await requests(app);
+    const audit = await auditRows(app);
+    const response = await decide(app, first.id, remember);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      _tag: 'AlreadyHandled',
+      status: 'approved',
+      remember,
+    });
+    expect(await requests(app)).toEqual(before);
+    expect(await auditRows(app)).toEqual(audit);
+  },
+);
 it('E23: a late owner decision returns Expired and leaves the row undecided', async () => {
   await setMark(app);
   const first = await pending(app, app.token);

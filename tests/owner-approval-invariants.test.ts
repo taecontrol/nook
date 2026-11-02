@@ -74,6 +74,96 @@ it('E8: an owner denial remains terminal for its attempt after the last mark is 
     await app.close();
   }
 });
+it.each(['remembered approval', 'removed mark'] as const)(
+  'E10: a withdrawn attempt stays expired despite a %s',
+  async (route) => {
+    const app = await approvalFixture();
+    try {
+      await setMark(app);
+      const id = randomUUID();
+      const first = await pending(app, app.token, id);
+      expect((await withdraw(app, app.token, first.id)).status).toBe(204);
+      if (route === 'remembered approval') {
+        const other = await pending(app, app.token);
+        expect((await decide(app, other.id, '1h')).status).toBe(200);
+      } else {
+        expect((await mark(app, 'work', 'bucket', 'DELETE')).status).toBe(204);
+      }
+      const before = await requests(app);
+      const audit = await auditRows(app);
+      const response = await ask(app, app.token, id);
+      expect(response.status).toBe(410);
+      expect(await response.json()).toEqual({
+        _tag: 'ApprovalExpired',
+        reason: 'withdrawn',
+      });
+      expect(await requests(app)).toEqual(before);
+      expect(await auditRows(app)).toEqual(audit);
+      expect(await view(app, first.id)).toMatchObject({ state: 'withdrawn' });
+      expect(await (await ask(app, app.token)).json()).toHaveProperty('values');
+    } finally {
+      await app.close();
+    }
+  },
+);
+it.each(['remembered', 'unmarked'] as const)(
+  'E10/E26: withdrawal after the %s decision read blocks atomic delivery and expires the retry',
+  async (route) => {
+    let active = false;
+    let batches = 0;
+    const reached = deferred();
+    const resume = deferred();
+    const app = await approvalFixture(async (label) => {
+      if (
+        active &&
+        label === '/before-batch' &&
+        ++batches === (route === 'remembered' ? 3 : 2)
+      ) {
+        active = false;
+        reached.resolve();
+        await resume.promise;
+      }
+      return true;
+    });
+    let inFlight: Promise<Response> | undefined;
+    try {
+      await setMark(app);
+      const id = randomUUID();
+      const first = await pending(app, app.token, id);
+      if (route === 'remembered') {
+        const other = await pending(app, app.token);
+        expect((await decide(app, other.id, '1h')).status).toBe(200);
+      } else {
+        expect((await mark(app, 'work', 'bucket', 'DELETE')).status).toBe(204);
+      }
+      active = true;
+      inFlight = ask(app, app.token, id);
+      await reached.promise;
+      expect((await withdraw(app, app.token, first.id)).status).toBe(204);
+      const before = await requests(app);
+      const audit = await auditRows(app);
+      resume.resolve();
+      const response = await inFlight;
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({
+        _tag: 'ServiceUnavailable',
+      });
+      expect(await requests(app)).toEqual(before);
+      expect(await auditRows(app)).toEqual(audit);
+      expect(await view(app, first.id)).toMatchObject({ state: 'withdrawn' });
+      const retry = await ask(app, app.token, id);
+      expect(retry.status).toBe(410);
+      expect(await retry.json()).toEqual({
+        _tag: 'ApprovalExpired',
+        reason: 'withdrawn',
+      });
+    } finally {
+      resume.resolve();
+      await inFlight;
+      await app.close();
+    }
+  },
+);
 it.each(['once', 'deny'] as const)(
   'E22: overlapping approve and deny preserve the first committed %s',
   async (choice) => {
