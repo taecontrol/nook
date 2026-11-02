@@ -1,5 +1,11 @@
 import { type Schema, SchemaAST } from 'effect';
 import { HttpApiError } from 'effect/http-api';
+import {
+  ApprovalAlreadyHandled,
+  ApprovalDenied,
+  ApprovalExpired,
+  ApprovalLimit,
+} from './approvals.ts';
 import { InvalidAuditFilter } from './audit.ts';
 import {
   BucketHasChildren,
@@ -89,6 +95,10 @@ const errors = [
   SecretsForbidden,
   SecretKeyUnavailable,
   InvalidAuditFilter,
+  ApprovalDenied,
+  ApprovalExpired,
+  ApprovalLimit,
+  ApprovalAlreadyHandled,
 ] as const;
 type ErrorTag = (typeof errors)[number]['Type']['_tag'];
 

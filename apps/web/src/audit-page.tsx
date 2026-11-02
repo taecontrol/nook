@@ -1,6 +1,8 @@
 import {
+  type ApprovalAuditEntry,
   type AuditEntry,
   type FileAuditEntry,
+  isApprovalAuditEntry,
   isFileAuditEntry,
 } from '@nook/contract';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
@@ -216,6 +218,11 @@ function Filters({
 
 const outcomeLabels = {
   delivered: 'Delivered',
+  approval_requested: 'Approval requested',
+  approval_granted: 'Approval granted',
+  approval_denied: 'Approval denied',
+  approval_withdrawn: 'Approval withdrawn',
+  approval_refused: 'Approval refused',
   denied: 'Denied',
   revealed: 'Revealed',
   created: 'Created',
@@ -389,6 +396,21 @@ function EntryDetails({
 }) {
   if (isFileAuditEntry(entry))
     return <FileEntryDetails entry={entry} revoked={revoked} />;
+  if (isApprovalAuditEntry(entry))
+    return <ApprovalEntryDetails entry={entry} />;
+  return (
+    <VaultEntryDetails entry={entry} revoked={revoked} deleted={deleted} />
+  );
+}
+function VaultEntryDetails({
+  entry,
+  revoked,
+  deleted,
+}: {
+  entry: Exclude<AuditEntry, FileAuditEntry | ApprovalAuditEntry>;
+  revoked: boolean;
+  deleted: boolean;
+}) {
   return (
     <div className="border-t bg-muted/30 px-4 py-4 lg:px-6">
       {entry.outcome === 'denied' && (
@@ -433,6 +455,7 @@ function EntryDetails({
             <div className="min-w-0 sm:col-span-2 lg:col-span-3">
               <Fact label="Purpose">{entry.purpose}</Fact>
             </div>
+            <DeliveryApprovalFacts entry={entry} />
             <AgentSessionFact claim={entry.agentSession} />
             <div className="min-w-0 sm:col-span-2">
               <Fact label="Working directory">
@@ -464,6 +487,71 @@ function EntryDetails({
           </Link>
         </Button>
         <AgentSessionActivity entry={entry} />
+      </div>
+    </div>
+  );
+}
+function DeliveryApprovalFacts({ entry }: { entry: AuditEntry }) {
+  return 'approval' in entry && entry.approval ? (
+    <ApprovalFacts approval={entry.approval} />
+  ) : null;
+}
+const approvalDurations = {
+  once: 'Only this time',
+  '1h': '1 hour',
+  '12h': '12 hours',
+};
+function ApprovalFacts({
+  approval,
+}: {
+  approval: { id: string; remember: 'once' | '1h' | '12h' | null };
+}) {
+  return (
+    <>
+      <Fact label="Approval">
+        <span className="font-mono text-xs">{approval.id}</span>
+      </Fact>
+      {approval.remember && (
+        <Fact label="Duration">{approvalDurations[approval.remember]}</Fact>
+      )}
+    </>
+  );
+}
+function ApprovalEntryDetails({ entry }: { entry: ApprovalAuditEntry }) {
+  const ownerDecision =
+    entry.outcome === 'approval_granted' || entry.outcome === 'approval_denied';
+  return (
+    <div className="border-t bg-muted/30 px-4 py-4 lg:px-6">
+      <dl className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Fact label="Secret">
+          <span className="font-mono">{entry.path}</span>
+        </Fact>
+        <Fact label="Recorded">
+          <time dateTime={entry.at}>{formatDateTime(entry.at)}</time>
+        </Fact>
+        <Fact label="Machine">{entry.machine.name}</Fact>
+        <Fact label="Purpose">{entry.purpose}</Fact>
+        {entry.approval && <ApprovalFacts approval={entry.approval} />}
+        {ownerDecision && (
+          <>
+            <Fact label="IP address">
+              <span className="font-mono">{entry.ip ?? 'Unknown'}</span>
+            </Fact>
+            <Fact label="Country">{countryName(entry.country)}</Fact>
+          </>
+        )}
+      </dl>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button size="sm" variant="outline" asChild>
+          <Link to="/audit" search={{ secret: entry.path }}>
+            Activity for this secret
+          </Link>
+        </Button>
+        <Button size="sm" variant="ghost" asChild>
+          <Link to="/audit" search={{ bucket: entry.bucket }}>
+            Activity in this bucket
+          </Link>
+        </Button>
       </div>
     </div>
   );

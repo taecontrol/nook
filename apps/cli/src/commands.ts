@@ -105,7 +105,10 @@ export async function execute(
     write('The Nook CLI supports Linux and macOS only.');
     return 1;
   }
-  if (args[0] === 'run') return run(host, args.slice(1), write);
+  if (args[0] === 'run')
+    return run(host, args.slice(1), write, (message) =>
+      process.stderr.write(`${message}\n`),
+    );
   if (missingVaultBucket(args)) {
     write(usageOf(['nook', 'vault', 'list']));
     return 1;

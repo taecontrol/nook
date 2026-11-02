@@ -25,6 +25,8 @@ export const macosCliGroups = [
     'tests/vault-cli.test.ts',
     'tests/run-cli.test.ts',
     'tests/memory-files-transfer-cli.test.ts',
+    'tests/owner-approval-cli.test.ts',
+    'tests/approval-wait.test.ts',
   ],
 ];
 export const macosShards = macosCliGroups.length;

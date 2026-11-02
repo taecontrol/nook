@@ -8,6 +8,7 @@ import {
 import { Effect, Layer, Schema } from 'effect';
 import { HttpRouter, HttpServer } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
+import { machineApprovals } from './approvals.ts';
 import { machineFileActor } from './audit.ts';
 import { clientFrom } from './client-provenance.ts';
 import type { FileBindings } from './file-objects.ts';
@@ -119,9 +120,21 @@ export function machineHandler(
             return yield* vault.list(query.bucket);
           }).pipe(Effect.provideService(D1Client.D1Client, sql)),
         )
-        .handle('values', ({ headers, payload }) =>
+        .handle('withdraw', ({ headers, params }) =>
+          Effect.gen(function* () {
+            const machine = yield* store.forAudit(headers.authorization);
+            const approvals = yield* machineApprovals;
+            yield* approvals.withdraw(machine.id, params.id);
+          }).pipe(Effect.provideService(D1Client.D1Client, sql)),
+        )
+        .handle('values', ({ headers, payload, request }) =>
           store.forAudit(headers.authorization).pipe(
-            Effect.flatMap((machine) => runSecrets(machine, payload, vaultKey)),
+            Effect.flatMap((machine) =>
+              runSecrets(machine, payload, vaultKey, {
+                origin,
+                client: request.headers['user-agent'] ?? null,
+              }),
+            ),
             Effect.provideService(D1Client.D1Client, sql),
           ),
         )

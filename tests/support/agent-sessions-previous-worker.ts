@@ -8,7 +8,7 @@ import { vaultRuntime } from './vault.ts';
 
 // Freeze the accepted delivery base, so later rounds still exercise the actual
 // previous Worker against the new schema instead of reimplementing its SQL.
-export async function previousSessionWorker() {
+export async function previousSessionWorker(base = '875cd3e') {
   await mkdir('.local', { recursive: true });
   const directory = await mkdtemp(
     resolve('.local', 'sessions-previous-worker-'),
@@ -38,7 +38,7 @@ export async function previousSessionWorker() {
               (args) => ({
                 contents: execFileSync(
                   'git',
-                  ['show', `875cd3e:${relative(process.cwd(), args.path)}`],
+                  ['show', `${base}:${relative(process.cwd(), args.path)}`],
                   { encoding: 'utf8', env: testEnvironment(process.env.HOME) },
                 ),
                 loader: 'ts',

@@ -849,3 +849,31 @@ The installation guide is reviewed against E10's fourteen steps; the operations
 reference and README fulfill E11. Existing MCP inventory and access-guidance
 tests now read `docs/install.md`; their assertions are unchanged. E1–E4
 require a real Cloudflare installation and are not claimed by local verification.
+
+### Owner approval
+
+Issue #82 slice 1 is exercised through the built Worker, migrated local D1,
+and the real CLI in a private keyring. `owner-approval-worker.test.ts` covers
+E1–E30's marks, inheritance, grant-first decisions, remembered subsets,
+retry keys, windows, limits and cleanup. `owner-approval-invariants.test.ts`
+holds D1 checkpoint boundaries to prove both commit orders for owner
+decisions and withdrawal, and that mark or grant changes defeat delivery.
+Unmarked runs retain one authentication statement, one read batch and one
+audit batch. A capable CLI's retry payload is checked in that read batch,
+even after the last mark is removed.
+
+`owner-approval-cli.test.ts` proves that pending output stays on stderr,
+no command starts before delivery, the exact injected bytes and child's
+exit status survive, remembered approval is silent across agent sessions,
+and real SIGINT/SIGTERM withdraw before exiting 130/143. Fake HTTP failures
+prove that retries begin only after a pending response and keep the same
+attempt. `approval-wait.test.ts` uses Effect TestClock for the ten-minute
+local deadline, retry pacing and the three-second withdrawal bound.
+
+`owner-approval-migration.test.ts` runs the previous Worker's actual source
+against migration 0016 and checks its audit inserts, claims and indexes.
+`owner-approval-released-cli.test.ts` executes v0.3.2's actual error-mapping
+functions. `owner-approval-audit-web.test.ts` renders every new event in
+Chromium and proves the existing bucket and secret filters, owner IP and
+country, and approval id and duration details. All values and identities are
+synthetic. Approval pages and Vault controls belong to slice 2 (#120).

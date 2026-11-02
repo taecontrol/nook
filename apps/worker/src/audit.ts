@@ -1,6 +1,9 @@
 import { D1Client } from '@effect/sql-d1';
 import {
   type AgentSessionClaim,
+  type ApprovalAuditEntry,
+  ApprovalAuditOutcome,
+  type ApprovalReference,
   type AuditEntry,
   type AuditFilters,
   type BucketGrant,
@@ -11,6 +14,7 @@ import {
   type MemoryClient,
   normalizeAgentSession,
   type Principal,
+  ApprovalRemember as Remember,
   type RunSecrets,
   splitSecretPath,
   validateBucketPath,
@@ -43,6 +47,8 @@ const Row = Schema.Union([
     outcome: Schema.Literals(['delivered', 'denied']),
     executable: Schema.String,
     run_id: Schema.String,
+    approval_id: Schema.optionalKey(Schema.NullOr(Schema.String)),
+    approval_remember: Schema.optionalKey(Schema.NullOr(Remember)),
   })),
   MachineFacts.mapFields((fields) => ({
     ...fields,
@@ -100,9 +106,22 @@ function fileEntry(row: typeof FileRow.Type): FileAuditEntry {
     country: row.country,
   };
 }
-const AnyRow = Schema.Union([Row, FileRow]);
+const ApprovalRow = MachineFacts.mapFields((fields) => ({
+  ...fields,
+  outcome: ApprovalAuditOutcome,
+  executable: Schema.String,
+  run_id: Schema.String,
+  approval_id: Schema.NullOr(Schema.String),
+  approval_remember: Schema.NullOr(Remember),
+  ip: Schema.NullOr(Schema.String),
+  country: Schema.NullOr(Schema.String),
+}));
+const AnyRow = Schema.Union([Row, FileRow, ApprovalRow]);
 function anyEntry(row: typeof AnyRow.Type): AuditEntry {
-  return 'file_name' in row ? fileEntry(row) : entry(row);
+  if ('file_name' in row) return fileEntry(row);
+  return 'ip' in row && row.outcome !== 'revealed'
+    ? approvalEntry(row)
+    : entry(row);
 }
 
 export type FileActor = {
@@ -171,8 +190,78 @@ function entry(row: Row): AuditEntry {
         outcome: row.outcome,
         executable: row.executable,
         runId: row.run_id,
+        ...(row.approval_id && row.approval_remember
+          ? {
+              approval: {
+                id: row.approval_id,
+                remember: row.approval_remember,
+              },
+            }
+          : {}),
       };
 }
+function approvalEntry(row: typeof ApprovalRow.Type): ApprovalAuditEntry {
+  return {
+    id: row.id,
+    at: row.at,
+    path: row.path,
+    ...splitSecretPath(row.path),
+    purpose: row.purpose,
+    machine: { id: row.machine_id, name: row.machine_name },
+    workingDirectory: row.working_directory,
+    agentSession: null,
+    outcome: row.outcome,
+    executable: row.executable,
+    runId: row.run_id,
+    approval: row.approval_id
+      ? { id: row.approval_id, remember: row.approval_remember }
+      : null,
+    ip: row.ip,
+    country: row.country,
+  };
+}
+function randomId(sql: D1Client.D1Client) {
+  return sql`lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-8' || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6)))`;
+}
+export function useInsert(
+  sql: D1Client.D1Client,
+  machine: AuditMachine,
+  input: RunSecrets,
+  paths: readonly string[],
+  approval: ApprovalReference | null,
+  guard: Fragment,
+) {
+  const claim = claimColumns(input.agentSession);
+  return sql<{
+    id: string;
+  }>`INSERT INTO audit_entries(id,at,outcome,path,bucket,purpose,machine_id,machine_name,working_directory,executable,run_id,agent,agent_session,agent_thread,approval_id,approval_remember) SELECT ${randomId(sql)},${new Date().toISOString()},'delivered',p.value,substr(p.value,1,length(p.value)-length(json_extract('["' || replace(p.value,'/','","') || '"]','$[#-1]'))-1),${input.purpose},${machine.id},${machine.machine},${input.workingDirectory},${input.executable},${crypto.randomUUID()},${claim.agent},${claim.agent_session},${claim.agent_thread},${approval?.id ?? null},${approval?.remember ?? null} FROM json_each(${JSON.stringify(paths)}) p WHERE ${guard} RETURNING id`;
+}
+export function approvalEventInsert(
+  sql: D1Client.D1Client,
+  event: {
+    outcome: 'approval_requested' | 'approval_refused';
+    machine: AuditMachine;
+    input: RunSecrets;
+    paths: readonly string[];
+    approval: { id: string; remember: null } | null;
+  },
+  guard: Fragment,
+) {
+  return sql`INSERT INTO audit_entries(id,at,outcome,path,bucket,purpose,machine_id,machine_name,working_directory,executable,run_id,approval_id) SELECT ${randomId(sql)},${new Date().toISOString()},${event.outcome},p.value,substr(p.value,1,length(p.value)-length(json_extract('["' || replace(p.value,'/','","') || '"]','$[#-1]'))-1),${event.input.purpose},${event.machine.id},${event.machine.machine},${event.input.workingDirectory},${event.input.executable},${crypto.randomUUID()},${event.approval?.id ?? null} FROM json_each(${JSON.stringify(event.paths)}) p WHERE ${guard}`;
+}
+export function requestApprovalEventInsert(
+  sql: D1Client.D1Client,
+  id: string,
+  outcome: 'approval_granted' | 'approval_denied' | 'approval_withdrawn',
+  guard: Fragment,
+  facts: { ip: string | null; country: string | null } = {
+    ip: null,
+    country: null,
+  },
+) {
+  return sql`INSERT INTO audit_entries(id,at,outcome,path,bucket,purpose,machine_id,machine_name,working_directory,executable,run_id,approval_id,approval_remember,ip,country) SELECT lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-8' || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))),strftime('%Y-%m-%dT%H:%M:%fZ','now'),${outcome},p.value,substr(p.value,1,length(p.value)-length(json_extract('["' || replace(p.value,'/','","') || '"]','$[#-1]'))-1),a.purpose,a.machine_id,a.machine_name,a.working_directory,a.executable,a.id,a.id,a.remember,${facts.ip},${facts.country} FROM approval_requests a,json_each(a.covered_json) p WHERE a.id=${id} AND (${guard})`;
+}
+
 function encodeCursor(row: { at: string; id: string }) {
   return btoa(JSON.stringify({ at: row.at, id: row.id }))
     .replaceAll('+', '-')
