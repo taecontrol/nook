@@ -2,6 +2,7 @@ import { parse } from 'dotenv';
 import { Redacted } from 'effect';
 import { expect, it } from 'vitest';
 import { parseEnv } from '../apps/web/src/env-parse.ts';
+import * as contract from '../packages/contract/src/index.ts';
 import { validateSecretName } from '../packages/contract/src/vault.ts';
 import { mixedPaste, mixedValues } from './fixtures/vault-import.ts';
 
@@ -118,4 +119,91 @@ it('E2: repeated keys preserve both entries and values instead of dotenv last-wi
   ]);
   expect(parse(text).DATABASE_URL).toBe('synthetic-second');
   expect(parsed.unreadable).toEqual([]);
+});
+
+// Until the implementation adds the shared seam, fail on the missing behavior
+// rather than failing module loading before the examples can run.
+function sharedStatuses(
+  keys: readonly {
+    name: string;
+    value: Redacted.Redacted<string>;
+    counted: boolean;
+  }[],
+  existing: ReadonlySet<string>,
+): string[] {
+  const classifier = (
+    contract as unknown as {
+      envKeyStatuses?: (
+        entries: typeof keys,
+        existing: ReadonlySet<string>,
+      ) => string[];
+    }
+  ).envKeyStatuses;
+  expect(
+    typeof classifier,
+    'The contract supplies shared import key classification',
+  ).toBe('function');
+  return classifier!(keys, existing);
+}
+
+it('CLI E7/E16: shared statuses preserve value, name, existing and counted-duplicate precedence', () => {
+  const keys = [
+    ['A', '', true],
+    ['A', 'valid', true],
+    ['db_url', '', true],
+    ['bad_name', 'valid', true],
+    ['EXISTING', 'one', true],
+    ['EXISTING', 'two', true],
+    ['READY', 'one', true],
+    ['READY', 'two', false],
+    ['NUL', 'a\0b', true],
+    ['UNICODE', 'a\uD800b', true],
+    ['OVER', 'x'.repeat(65537), true],
+    ['EXACT', 'x'.repeat(65536), true],
+  ] as const;
+  expect(
+    sharedStatuses(
+      keys.map(([name, value, counted]) => ({
+        name,
+        value: Redacted.make(value),
+        counted,
+      })),
+      new Set(['EXISTING', 'bad_name', 'A']),
+    ),
+  ).toEqual([
+    'empty',
+    'exists',
+    'empty',
+    'invalid-name',
+    'exists',
+    'exists',
+    'ready',
+    'ready',
+    'nul',
+    'unicode',
+    'too-long',
+    'ready',
+  ]);
+  expect(
+    sharedStatuses(
+      keys.slice(0, 2).map(([name, value, counted]) => ({
+        name,
+        value: Redacted.make(value),
+        counted,
+      })),
+      new Set(),
+    ),
+  ).toEqual(['empty', 'duplicate']);
+});
+
+it('CLI E7/E16: every counted duplicate is blocked, even when its peer has a value issue', () => {
+  const entries = parseEnv(
+    'API_KEY=first\nAPI_KEY=second\nEMPTY=\nEMPTY=valid',
+  );
+  expect(
+    sharedStatuses(
+      entries.entries.map((entry) => ({ ...entry, counted: true })),
+      new Set(),
+    ),
+  ).toEqual(['duplicate', 'duplicate', 'empty', 'duplicate']);
 });
