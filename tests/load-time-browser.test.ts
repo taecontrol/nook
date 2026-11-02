@@ -2,7 +2,11 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
-import { measureScreen, phonePage } from '../scripts/load-time-browser.ts';
+import {
+  measureScreen,
+  phonePage,
+  withPageEvidence,
+} from '../scripts/load-time-browser.ts';
 import { closeBrowserPage } from './support/buckets-browser.ts';
 import { seedGrantTree } from './support/grants.ts';
 import { deferred } from './support/machines.ts';
@@ -180,6 +184,78 @@ it('#21: a failed initial navigation preserves the browser error', async () => {
     await expect(
       measureScreen(page, app.origin, '', 'navigation'),
     ).rejects.toThrow('net::ERR_FAILED');
+  } finally {
+    await context.close();
+  }
+});
+
+it.each(['empty', 'missing'] as const)(
+  '#100: page evidence reports the root as %s and excludes finished and failed requests',
+  async (root) => {
+    const { context, page } = await phonePage(browser, 'navigation');
+    try {
+      await page.route(`${app.origin}/evidence`, (route) =>
+        route.fulfill({
+          contentType: 'text/html',
+          body: root === 'empty' ? '<div id="root"></div>' : '<html></html>',
+        }),
+      );
+      await page.route('**/finished', (route) =>
+        route.fulfill({ body: 'synthetic response body' }),
+      );
+      await page.route('**/failed', (route) => route.abort('failed'));
+      await page.goto(`${app.origin}/evidence`);
+      const finished = page.waitForEvent('requestfinished', {
+        predicate: (request) => request.url().endsWith('/finished'),
+      });
+      const failed = page.waitForEvent('requestfailed', {
+        predicate: (request) => request.url().endsWith('/failed'),
+      });
+      await page.evaluate(async () => {
+        await Promise.all([
+          fetch('/finished').then((response) => response.text()),
+          fetch('/failed').catch(() => {}),
+        ]);
+      });
+      await Promise.all([finished, failed]);
+      const failure = await withPageEvidence(page, () =>
+        page.getByRole('dialog').waitFor({ timeout: 1 }),
+      ).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(Error);
+      const error = failure as Error;
+      expect(error.name).toBe('TimeoutError');
+      expect(error.message).toContain('document.readyState: complete');
+      expect(error.message).toContain(`#root: ${root}`);
+      expect(error.message).toContain('Pending requests: none');
+      expect(error.message).not.toContain('synthetic response body');
+      expect(error.stack).toContain(error.message);
+    } finally {
+      await context.close();
+    }
+  },
+);
+
+it('#100: page evidence preserves the failure when the page cannot answer', async () => {
+  const { context, page } = await phonePage(browser, 'navigation');
+  try {
+    const shown = page.waitForEvent('dialog');
+    const alert = page.evaluate(() => window.alert('Pause page execution'));
+    void alert.catch(() => {});
+    const dialog = await shown;
+    const original = new Error('synthetic failure');
+    const failure = await withPageEvidence(page, async () => {
+      throw original;
+    }).catch((error: unknown) => error);
+    expect(failure).toBe(original);
+    expect(original.message).toContain('The page did not answer within');
+    await dialog.dismiss();
+    await alert;
+    await context.close();
+    await expect(
+      withPageEvidence(page, async () => {
+        throw new Error('closed page failure');
+      }),
+    ).rejects.toThrow('The page state is unreadable:');
   } finally {
     await context.close();
   }
