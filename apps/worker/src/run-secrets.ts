@@ -24,6 +24,7 @@ import {
   machineApprovals,
   pendingAnswer,
   readAttempt,
+  type StoredRequest,
 } from './approvals.ts';
 import { marksRead, marksUnchanged } from './ask-first.ts';
 import { type AuditMachine, approvalEventInsert, auditStore } from './audit.ts';
@@ -48,6 +49,38 @@ export function runSecrets(
       return yield* Effect.fail(new InvalidRun({ message: invalid }));
     const paths = [...new Set(input.secrets)];
     yield* authorize(machine, input, paths);
+    const sql = yield* D1Client.D1Client;
+    const { rows, marks, secrets, covered, own } = yield* readForRun(
+      machine,
+      input,
+      paths,
+    );
+    const approvals = yield* machineApprovals;
+    const decision = yield* valuesDecision(
+      machine,
+      input,
+      secrets,
+      covered,
+      request,
+      own,
+    );
+    if (decision.kind === 'pending') return decision.answer;
+    const values = yield* decrypt(paths, rows, binding);
+    const delivered = yield* approvals.deliver({
+      machine,
+      input,
+      paths,
+      approval: decision.approval,
+      guard: marksUnchanged(sql, marks),
+      settle: decision.settle,
+    });
+    if (!delivered)
+      return yield* Effect.fail(new HttpApiError.ServiceUnavailable());
+    return { values };
+  });
+}
+function readForRun(machine: RunMachine, input: RunSecrets, paths: string[]) {
+  return Effect.gen(function* () {
     const sql = yield* D1Client.D1Client;
     const read = yield* sql
       .batch([
@@ -82,27 +115,7 @@ export function runSecrets(
       const terminal = ownTerminal(own, input);
       if (terminal) return yield* Effect.fail(terminal);
     }
-    const approvals = yield* machineApprovals;
-    const decision = yield* valuesDecision(
-      machine,
-      input,
-      secrets,
-      covered,
-      request,
-    );
-    if (decision?.kind === 'pending') return decision.answer;
-    const values = yield* decrypt(paths, rows, binding);
-    const delivered = yield* approvals.deliver({
-      machine,
-      input,
-      paths,
-      approval: decision?.approval ?? null,
-      guard: marksUnchanged(sql, marks),
-      settle: decision?.settle ?? (own?.status === 'pending' ? own.id : null),
-    });
-    if (!delivered)
-      return yield* Effect.fail(new HttpApiError.ServiceUnavailable());
-    return { values };
+    return { rows, marks, secrets, covered, own };
   });
 }
 function authorize(
@@ -126,9 +139,15 @@ function valuesDecision(
   secrets: readonly { path: string; coveredBy: AskFirstMark | null }[],
   covered: readonly string[],
   request: { origin: string; client: string | null },
+  own: StoredRequest | undefined,
 ) {
   return Effect.gen(function* () {
-    if (!covered.length) return null;
+    if (!covered.length)
+      return {
+        kind: 'deliver' as const,
+        approval: null,
+        settle: own?.status === 'pending' ? own.id : null,
+      };
     const sql = yield* D1Client.D1Client;
     if (!input.approval) {
       yield* sql

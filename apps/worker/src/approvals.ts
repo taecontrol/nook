@@ -348,8 +348,7 @@ export const ownerApprovals = Effect.gen(function* () {
           clock[0].now,
         );
         if (outcome.kind === 'fail') return yield* Effect.fail(outcome.error);
-        if (!row) return yield* Effect.fail(new HttpApiError.NotFound());
-        return toView(row, clock[0].now);
+        return toView(outcome.row, clock[0].now);
       }),
   };
 });

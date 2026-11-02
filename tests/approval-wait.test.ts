@@ -184,3 +184,31 @@ it('E7: delivery closes the wait and returns exact redacted values', async () =>
   );
   expect(received).toBe(delivered);
 });
+it.each([0, 1])(
+  'E9: a later pending answer with %i seconds remaining shortens the local deadline',
+  async (expiresIn) => {
+    let code = 0;
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.scoped(
+          awaitApproval(first, {
+            ask: Effect.succeed({ approval: { ...first, expiresIn } }),
+            withdraw: () => Effect.void,
+            status: () => {},
+            signal: Effect.never,
+          }),
+        ).pipe(
+          Effect.catch((e) =>
+            Effect.sync(() => {
+              code = e instanceof ApprovalStopped ? e.code : 1;
+            }),
+          ),
+          Effect.forkChild,
+        );
+        yield* TestClock.adjust('3 seconds');
+        yield* Fiber.join(fiber);
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+    expect(code).toBe(75);
+  },
+);

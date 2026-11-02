@@ -133,7 +133,7 @@ export function decisionOutcome(
 ) {
   if (!row)
     return { kind: 'fail', error: new HttpApiError.NotFound() } as const;
-  if (updated || sameChoice(choice, row)) return { kind: 'ok' } as const;
+  if (updated || sameChoice(choice, row)) return { kind: 'ok', row } as const;
   if (row.status === 'pending')
     return { kind: 'fail', error: new Expired() } as const;
   return {

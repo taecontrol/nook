@@ -41,7 +41,9 @@ it('E1: unmarked delivery keeps its response, audit and statement budget without
   });
   try {
     labels.length = 0;
-    const response = await fetchValues(observed, observed.token);
+    const response = await fetchValues(observed, observed.token, {
+      approval: { attemptId: randomUUID() },
+    });
     expect(await response.json()).toEqual({
       values: [{ path: acmePath, value: observed.input.value }],
     });
@@ -254,6 +256,12 @@ it.each(['once', '1h', '12h'] as const)(
           : 43_200_000,
     );
     if (remember === 'once') return;
+    expect(
+      await (await fetch(`${app.origin}/api/approvals`)).json(),
+    ).toMatchObject({
+      pending: [],
+      remembered: [{ id: first.id, state: 'approved', remember }],
+    });
     const db = await app.mf.getD1Database('DB');
     await db
       .prepare(

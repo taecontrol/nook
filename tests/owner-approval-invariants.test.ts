@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, it } from 'vitest';
 import { auditRows } from './support/audit.ts';
 import { jsonRequest } from './support/authorizations.ts';
+import { issueGrant } from './support/grants.ts';
 import { deferred, listMachines } from './support/machines.ts';
 import {
   age,
@@ -17,6 +18,23 @@ import {
   withdraw,
 } from './support/owner-approval.ts';
 import { vaultCheckpoints } from './support/vault-checkpoints.ts';
+
+it('E17: a first request outside the grant is denied before creating any approval', async () => {
+  const app = await approvalFixture();
+  try {
+    await setMark(app);
+    const machine = await issueGrant(app, ['me']);
+    const response = await ask(app, machine.token);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ _tag: 'SecretsForbidden' });
+    expect(await requests(app)).toEqual([]);
+    expect((await auditRows(app)).map((row) => row.outcome)).toEqual([
+      'denied',
+    ]);
+  } finally {
+    await app.close();
+  }
+});
 
 it('E21: removing the last mark cannot allow a changed retry payload to deliver or write', async () => {
   const app = await approvalFixture();

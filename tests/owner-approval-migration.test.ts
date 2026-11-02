@@ -1,4 +1,12 @@
+import { readFile } from 'node:fs/promises';
+import { Miniflare } from 'miniflare';
 import { expect, it } from 'vitest';
+import {
+  applyMigrations,
+  migrationFiles,
+  normalizedSchema,
+  normalizeSchema,
+} from '../scripts/lib/migrations.ts';
 import { machineCreate, machineCreateInput } from './support/agent-create.ts';
 import { previousSessionWorker } from './support/agent-sessions-previous-worker.ts';
 import { acmePath, auditRows, fetchValues } from './support/audit.ts';
@@ -72,5 +80,61 @@ it('E1/E30: migration 0015 preserves historical claims, audit constraints, index
     ).rejects.toThrow(/CHECK constraint/);
   } finally {
     await app.close();
+  }
+});
+it('E30: the populated 0014-to-0015 audit rebuild preserves all historical columns and the schema snapshot', async () => {
+  const mf = new Miniflare({
+    modules: true,
+    cf: false,
+    script: 'export default {fetch(){return new Response()}}',
+    d1Databases: ['DB'],
+    d1Persist: false,
+  });
+  try {
+    const db = await mf.getD1Database('DB');
+    const names = await migrationFiles('migrations');
+    await applyMigrations(db, 'migrations', {
+      only: names.filter((n) => n < '0015_owner_approval.sql'),
+    });
+    await db
+      .prepare(
+        "INSERT INTO audit_entries(id,at,outcome,path,bucket,purpose,machine_id,machine_name,working_directory,executable,run_id,agent,agent_session,agent_thread) VALUES ('kept','2026-11-02T12:00:00.000Z','delivered','work/acme/KEY','work/acme','kept purpose','machine','omarchy','/synthetic','node','run','codex','c1','thread')",
+      )
+      .run();
+    await db
+      .prepare(
+        "INSERT INTO audit_entries(id,at,outcome,bucket,memory_id,file_name,file_size,file_sha256,client_name) VALUES ('kept-file','2026-11-02T12:00:00.000Z','file_attached','work/acme','12345678-1234-4123-8123-123456789012','file.pdf',1,lower(hex(zeroblob(32))),'test')",
+      )
+      .run();
+    const before = (
+      await db
+        .prepare('SELECT * FROM audit_entries ORDER BY id')
+        .all<Record<string, unknown>>()
+    ).results;
+    await applyMigrations(db);
+    const after = (
+      await db
+        .prepare('SELECT * FROM audit_entries ORDER BY id')
+        .all<Record<string, unknown>>()
+    ).results;
+    expect(after).toHaveLength(before.length);
+    for (const row of before)
+      expect(after.find((r) => r.id === row.id)).toMatchObject({
+        ...row,
+        approval_id: null,
+        approval_remember: null,
+      });
+    expect(normalizeSchema(await normalizedSchema(db))).toBe(
+      normalizeSchema(await readFile('migrations/schema.sql', 'utf8')),
+    );
+    await expect(
+      db
+        .prepare(
+          "UPDATE audit_entries SET agent='codex',agent_session='c1' WHERE id='kept-file'",
+        )
+        .run(),
+    ).rejects.toThrow(/CHECK constraint/);
+  } finally {
+    await mf.dispose();
   }
 });
