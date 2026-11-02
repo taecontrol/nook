@@ -313,6 +313,24 @@ Issue #80 runs the built CLI against `runFixture`, with the existing private
 Linux/macOS keyrings and real child processes, pipes, regular files and FIFOs.
 Only the util-linux PTY examples are Linux-only. Every value is synthetic.
 
+The run suite enables `suppress-fifo-eof` in each private fixture HOME. Its
+existing spawn preload adds `--import=run-relay-no-eof.ts` only to the Node
+relay's arguments; production code has no test switch and its environment is
+unchanged. The preload swallows `Socket.push(null)` only for readable FIFO
+sockets, leaving the control channel, real FIFO bytes, `fs.read`/`readSync`,
+output writes and backpressure intact. Linux stops polling a FIFO after EOF
+even when that push is swallowed, so a MessageChannel keeps each such reader
+alive until its Socket explicitly closes. This prevents a false pass caused
+by an empty event loop and models a macOS kqueue reader that never reports EOF.
+The existing cases run once under this seam in Linux CI, including every
+masking example, normal and large output, background writers, output EPIPE,
+spawn/value failures, signals and a killed caller. The non-masking run cases
+also cover native signals after a failed run, command removal or permission
+loss after resolution, and incomplete value delivery. E17 additionally runs
+with native Socket EOF; the SEA executable keeps its real, unpreloaded path.
+This seam proves that Socket EOF is unnecessary for those paths; it does not
+reproduce every macOS I/O or scheduling behavior.
+
 | Examples | Evidence |
 | --- | --- |
 | E1 | `run-cli.test.ts`, “Masking E1”: piped exact replacement and exit 42, explicit stdout/stderr EOF and relay process exit, including a real SEA executable spawning its own relay. |
@@ -331,10 +349,10 @@ Only the util-linux PTY examples are Linux-only. Every value is synthetic.
 | E14 | “Masking E14”: a real `yes`/`head -1` pipe closes, the child receives SIGPIPE and run returns 141. “Masking E14/E16” closes the output reader after run exits and the relay switches readers; after the relay observes EPIPE, the background writer's next write must also receive EPIPE, and the relay must exit while that writer remains idle with its fds open. |
 | E15 | “Masking E15” and existing native-signal tests: SIGTERM/SIGHUP forwarding, ignored parent SIGINT and preserved child status. |
 | E16 | “Masking E16”: a test-controlled FIFO holds a background writer across run's exit, with shared and separate destinations; an exit-time file snapshot proves the flush, later writes stay masked, and the relay exits after EOF on every stream. A second writer refills every synchronous drain read through control FIFOs, then writes continuously across run's exit, with both padded records and unpadded values. The unpadded case guards values split by the flush boundary. An OS-derived byte ceiling plus at most one longest value detects an unbounded flush without a timeout or a repetition budget. |
-| E17 | “Masking E17”: the reader's exit-time snapshot already contains the complete MiB, including its final masked value. |
+| E17 | “Masking E17”: with both native and suppressed FIFO Socket EOF, the reader's exit-time snapshot already contains the complete MiB, including its final masked value. Both output pipes close and the lifecycle observer records the relay's natural exit. |
 | E18 | “Masking E18”: private missing-interpreter spawn failures preserve exit 127 and the diagnostic, with and without opt-out; masked failures must request flush, close output and exit the relay. Lost relay delivery and the relay's own fixed protocol-failure diagnostic also exclude values. |
 | E19 | “Masking E19”: a Node preload refuses only relay startup, either synchronously or through a real failed spawn; the value-request observer and Audit both remain empty and no child starts. An unusable FIFO directory proves the same private, unaudited refusal. |
-| E20 | “Masking E20”: a preload observes the real relay's argv and environment; the injected child checks both, including values already in its parent's environment, without printing a value. Coverage runs also require separate relay execution counters. The SEA round trip exercises the same-executable entry point. |
+| E20 | “Masking E20”: a preload observes the real relay's argv and environment; the injected child checks both, including values already in its parent's environment, without printing a value. The test requires the EOF preload in argv and the exact production environment: empty, or only the coverage path. Coverage runs also require separate relay execution counters. The SEA round trip exercises the same-executable entry point. |
 
 The relay receives values and flush requests only over fd 3. For N masked
 destinations, nonblocking FIFO readers occupy fds 4 through 3+N, followed by
