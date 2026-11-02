@@ -25,13 +25,6 @@ import {
   FieldLabel,
 } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import {
   Sheet,
@@ -42,11 +35,11 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
-import { reachText } from './bucket-format';
 import { noAutofill } from './no-autofill';
 import { Path as SharedPath } from './path-text';
 import { formatDate } from './time';
 import { DESCRIPTION_MAX, type Secret } from './vault-model';
+import { BucketSelect } from './vault-parts';
 import type { Draft, SheetState } from './vault-state';
 
 function Path({ children }: { children: string }) {
@@ -68,42 +61,6 @@ function sheetProblems(sheet: SheetState) {
     duplicate: !nameProblem && duplicate !== null,
     value: submitted ? validateSecretValue(draft.value) : null,
   };
-}
-
-function BucketField({
-  draft,
-  buckets,
-  parents,
-  onDraft,
-}: {
-  draft: Draft;
-  buckets: readonly string[];
-  parents: Set<string>;
-  onDraft: (patch: Partial<Draft>) => void;
-}) {
-  return (
-    <Field>
-      <FieldLabel htmlFor="secret-bucket">Bucket</FieldLabel>
-      <Select
-        value={draft.bucket}
-        onValueChange={(bucket) => onDraft({ bucket })}
-      >
-        <SelectTrigger id="secret-bucket" className="w-full">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {buckets.map((bucket) => (
-            <SelectItem key={bucket} value={bucket}>
-              <span className="font-mono">{bucket}</span>
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <FieldDescription>
-        {reachText(draft.bucket, parents.has(draft.bucket))}
-      </FieldDescription>
-    </Field>
-  );
 }
 
 function NameField({
@@ -349,11 +306,12 @@ export function SecretSheet({
             <FieldGroup>
               {create && (
                 <>
-                  <BucketField
-                    draft={draft}
+                  <BucketSelect
+                    id="secret-bucket"
+                    bucket={draft.bucket}
                     buckets={buckets}
                     parents={parents}
-                    onDraft={onDraft}
+                    onBucket={(bucket) => onDraft({ bucket })}
                   />
                   <NameField
                     draft={draft}

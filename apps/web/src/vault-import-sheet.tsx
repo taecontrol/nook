@@ -15,8 +15,6 @@ import {
   RotateCw,
 } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
-import { reachText } from '@/bucket-format';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -28,13 +26,6 @@ import {
 } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import {
   Sheet,
@@ -68,7 +59,7 @@ import {
   type RowStatus as Status,
 } from './vault-import-model';
 import { plural, type Secret } from './vault-model';
-import { sectionLabel } from './vault-styles';
+import { BucketSelect, SectionHeader } from './vault-parts';
 
 type Group = 'fix' | 'ready' | 'skip';
 type Row = ImportRow & { group: Group };
@@ -78,76 +69,6 @@ const NAME_MAX = secretLimits.name;
 
 /* ---------- shared pieces ---------- */
 
-function SectionHeader({
-  title,
-  count,
-  hint,
-}: {
-  title: string;
-  count?: number;
-  hint?: React.ReactNode;
-}) {
-  return (
-    <div className="mb-2 flex min-h-8 items-center gap-2 border-b">
-      <h3 className={sectionLabel}>{title}</h3>
-      {count !== undefined && <Badge variant="secondary">{count}</Badge>}
-      {hint && (
-        <span className="ml-auto text-right text-xs text-muted-foreground">
-          {hint}
-        </span>
-      )}
-    </div>
-  );
-}
-
-function BucketField({
-  bucket,
-  buckets,
-  parents,
-  onBucket,
-  compact = false,
-}: {
-  bucket: string;
-  buckets: readonly string[];
-  parents: ReadonlySet<string>;
-  onBucket: (bucket: string) => void;
-  compact?: boolean;
-}) {
-  return (
-    <Field orientation="horizontal">
-      <div
-        className={
-          compact
-            ? 'flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3'
-            : 'flex w-full flex-col gap-3'
-        }
-      >
-        <FieldLabel htmlFor="import-bucket" className="flex-none">
-          Bucket
-        </FieldLabel>
-        <Select value={bucket} onValueChange={onBucket}>
-          <SelectTrigger
-            id="import-bucket"
-            className={compact ? 'w-full sm:w-auto' : 'w-full'}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {buckets.map((path) => (
-              <SelectItem key={path} value={path}>
-                <span className="font-mono">{path}</span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <FieldDescription>
-          {reachText(bucket, parents.has(bucket), 'them')}
-        </FieldDescription>
-      </div>
-    </Field>
-  );
-}
-
 function UnreadLines({ lines }: { lines: readonly number[] }) {
   if (lines.length === 0) return null;
   const list =
@@ -156,7 +77,11 @@ function UnreadLines({ lines }: { lines: readonly number[] }) {
       : `Lines ${lines.slice(0, -1).join(', ')} and ${lines.at(-1)} aren’t`;
   return (
     <section className="mt-8">
-      <SectionHeader title="Not read" count={lines.length} />
+      <SectionHeader
+        title="Not read"
+        count={lines.length}
+        className="mb-2 min-h-8"
+      />
       <p className="text-sm text-muted-foreground">
         {list} a <span className="font-mono">KEY=value</span> line, so{' '}
         {lines.length === 1 ? 'it was' : 'they were'} left out.
@@ -411,7 +336,12 @@ function ReviewSection({
   if (rows.length === 0) return null;
   return (
     <section className="mt-8 first:mt-0">
-      <SectionHeader title={title} count={rows.length} hint={hint} />
+      <SectionHeader
+        title={title}
+        count={rows.length}
+        hint={hint}
+        className="mb-2 min-h-8"
+      />
       <ul
         className={cn(
           'divide-y overflow-hidden rounded-lg border',
@@ -566,7 +496,12 @@ function RunList({
   if (items.length === 0) return null;
   return (
     <section className="mt-8 first:mt-0">
-      <SectionHeader title={title} count={items.length} hint={hint} />
+      <SectionHeader
+        title={title}
+        count={items.length}
+        hint={hint}
+        className="mb-2 min-h-8"
+      />
       <ul className="divide-y overflow-hidden rounded-lg border">
         {items.map((item) => (
           <RunRow key={item.path} item={item} />
@@ -584,6 +519,7 @@ function SkippedList({ skipped }: { skipped: readonly Skipped[] }) {
         title="Skipped"
         count={skipped.length}
         hint="Not created"
+        className="mb-2 min-h-8"
       />
       <ul className="divide-y overflow-hidden rounded-lg border bg-muted/30">
         {skipped.map((item) => (
@@ -793,12 +729,14 @@ function ImportSheet(props: ImportSheetProps) {
         <Separator />
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {step !== 'run' && (
-            <BucketField
+            <BucketSelect
+              id="import-bucket"
               bucket={props.bucket}
               buckets={props.buckets}
               parents={props.parents}
               onBucket={props.onBucket}
-              compact={step === 'review'}
+              layout={step === 'review' ? 'compact' : 'horizontal'}
+              what="them"
             />
           )}
           {step === 'paste' && (
