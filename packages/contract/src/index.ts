@@ -61,7 +61,6 @@ import {
   WriteId,
 } from './vault.ts';
 
-export * from './access-expiry.ts';
 export * from './agent-session.ts';
 export {
   ApprovalAlreadyHandled,

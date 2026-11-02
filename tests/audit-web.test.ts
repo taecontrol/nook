@@ -943,24 +943,49 @@ it.each(viewports)(
       );
       await link.hover();
       await prefetched;
+      // Same clock as the load-time gate (scripts/load-time-browser.ts): from the
+      // page's click event to two frames after the filtered list is in the DOM.
+      // Timestamps live on window because this suite's browser records no marks.
+      type Clock = Window & { sessionClock?: { start?: number; end?: number } };
       await page.evaluate(() => {
-        (window as Window & { sessionStart?: number }).sessionStart =
-          performance.now();
+        const clock: { start?: number; end?: number } = {};
+        (window as Clock).sessionClock = clock;
+        document.addEventListener(
+          'click',
+          () => {
+            clock.start = performance.now();
+          },
+          { once: true, capture: true },
+        );
+        const observer = new MutationObserver(() => {
+          if (
+            clock.start === undefined ||
+            !new URL(location.href).searchParams.has('session') ||
+            document.querySelectorAll('[data-entry]').length !== 2
+          )
+            return;
+          observer.disconnect();
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              clock.end = performance.now();
+            }),
+          );
+        });
+        observer.observe(document, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+        });
       });
       await link.click();
       await page.waitForFunction(
-        () =>
-          new URL(location.href).searchParams.has('session') &&
-          document.querySelectorAll('[data-entry]').length === 2,
-        undefined,
-        { polling: 'raf' },
+        () => (window as Clock).sessionClock?.end !== undefined,
       );
-      const elapsed = await page.evaluate(
-        () =>
-          performance.now() -
-          ((window as Window & { sessionStart?: number }).sessionStart ??
-            Number.NaN),
-      );
+      const elapsed = await page.evaluate(() => {
+        const clock = (window as Clock).sessionClock;
+        return (clock?.end ?? Number.NaN) - (clock?.start ?? Number.NaN);
+      });
+      console.log(`session navigation after intent: ${elapsed.toFixed(1)} ms`);
       expect(elapsed).toBeLessThanOrEqual(100);
       expect(new URL(page.url()).searchParams.get('session')).toBe(session);
       expect(await page.locator('body').innerText()).toContain('Codex session');
