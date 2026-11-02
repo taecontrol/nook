@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import type { TestRuntime } from './runtime.ts';
 
-export const claudeSession = '78f82c41-1f68-47b1-9372-0d929da0da78';
+export const claudeSession = '3f6c2a91-5d4e-4b7a-9c18-2e0b7d5a4f63';
 export const codexSession = '0199f3c2-7a10-7d4e-9b1a-3f2e8c1d0a11';
 export const codexThread = '0199f3c4-7a10-7d4e-9b1a-3f2e8c1d0e01';
 export const cursorSession = 'bc-fix-auth-0199f3c2-7a10-7d4e-9b1a-3f2e8c1d0a11';
