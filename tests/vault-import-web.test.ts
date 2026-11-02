@@ -712,9 +712,12 @@ it('E15: pending import locks writes, permits Reveal and navigation, shows progr
     await notice
       .getByRole('button', { name: 'Show progress', exact: true })
       .click();
-    await importSheet(page)
-      .getByRole('progressbar', { name: 'Import progress', exact: true })
-      .waitFor();
+    const progress = importSheet(page).getByRole('progressbar', {
+      name: 'Import progress',
+      exact: true,
+    });
+    await progress.waitFor();
+    expect(await progress.getAttribute('aria-valuenow')).toBe('0');
     expect(pool.held).toHaveLength(3);
     expect(
       await importSheet(page)
