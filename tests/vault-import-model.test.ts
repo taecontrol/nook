@@ -222,6 +222,25 @@ it('E5: the 64 KiB UTF-8 boundary and empty values determine eligibility without
   expect(JSON.stringify(rows)).not.toContain('🔐');
 });
 
+it('NUL and lone-surrogate values are skipped without needing a fix while a valid row stays selected', () => {
+  const parsed = parseEnv(
+    'NUL_TOKEN="a\u0000b"\nSURROGATE_TOKEN=a\uD800b\nOK_TOKEN=fine\n',
+  );
+  const { rows, values } = model(parsed.entries);
+  const result = review(rows, values, new Set());
+
+  expect(rows.map(({ name }) => name)).toEqual([
+    'NUL_TOKEN',
+    'SURROGATE_TOKEN',
+    'OK_TOKEN',
+  ]);
+  for (const row of rows.slice(0, 2))
+    expect.soft(result.status.get(row.id), row.name).not.toBe('ready');
+  expect(result.status.get(rows[2].id)).toBe('ready');
+  expect(result.toFix).toBe(0);
+  expect(selectedNames(result)).toEqual(['OK_TOKEN']);
+});
+
 it.each([
   {
     issue: '201 Unicode characters',

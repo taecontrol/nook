@@ -25,11 +25,22 @@ export function validateSecretDescription(
   if (Array.from(description).length > secretLimits.description)
     return `A description can have at most ${secretLimits.description} characters.`;
 }
+export type SecretValueIssue = 'empty' | 'nul' | 'unicode' | 'too-long';
+export function secretValueIssue(value: string): SecretValueIssue | undefined {
+  if (value === '') return 'empty';
+  if (value.includes('\0')) return 'nul';
+  if (/[\uD800-\uDFFF]/u.test(value)) return 'unicode';
+  if (secretValueTooLong(value)) return 'too-long';
+}
 export function validateSecretValue(value: string): string | undefined {
-  if (value === '') return 'Enter a value.';
-  if (value.includes('\0')) return 'A value cannot contain NUL.';
-  if (/[\uD800-\uDFFF]/u.test(value)) return 'Use valid Unicode for the value.';
-  if (secretValueTooLong(value)) return secretValueLimitMessage;
+  const issue = secretValueIssue(value);
+  if (issue === undefined) return;
+  return {
+    empty: 'Enter a value.',
+    nul: 'A value cannot contain NUL.',
+    unicode: 'Use valid Unicode for the value.',
+    'too-long': secretValueLimitMessage,
+  }[issue];
 }
 export function secretPath(secret: { bucket: string; name: string }) {
   return `${secret.bucket}/${secret.name}`;

@@ -1,5 +1,6 @@
 import {
-  secretValueTooLong,
+  type SecretValueIssue,
+  secretValueIssue,
   validateSecretDescription,
   validateSecretName,
 } from '@nook/contract';
@@ -13,7 +14,7 @@ export type ImportRow = {
   name: string;
   description: string;
   included: boolean;
-  value: 'present' | 'empty' | 'too-long';
+  value: 'present' | SecretValueIssue;
 };
 export type RowStatus =
   | 'ready'
@@ -21,8 +22,7 @@ export type RowStatus =
   | 'invalid-name'
   | 'invalid-description'
   | 'duplicate'
-  | 'empty'
-  | 'too-long';
+  | SecretValueIssue;
 export type ImportSelection = readonly {
   row: ImportRow;
   value: Redacted.Redacted<string>;
@@ -45,9 +45,7 @@ export function rowsFrom(
   };
 }
 function valueStatus(value: Redacted.Redacted<string>): ImportRow['value'] {
-  const text = Redacted.value(value);
-  if (text === '') return 'empty';
-  return secretValueTooLong(text) ? 'too-long' : 'present';
+  return secretValueIssue(Redacted.value(value)) ?? 'present';
 }
 function baseStatus(row: ImportRow, existing: ReadonlySet<string>): RowStatus {
   if (row.value !== 'present') return row.value;
