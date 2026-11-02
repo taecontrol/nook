@@ -37,7 +37,7 @@ import {
 import { vaultCheckpoints } from './support/vault-checkpoints.ts';
 
 let app: Awaited<ReturnType<typeof runFixture>>;
-let keyring: Awaited<ReturnType<typeof privateKeyring>>;
+let keyring: ReturnType<typeof withRelaySeam>;
 const childFile = resolve('tests/support/run-child.ts');
 const runArgs = (
   command: string[] = [process.execPath, childFile, 'streams'],
@@ -73,6 +73,28 @@ function relaySeam() {
     ]
       .map((file) => `--import=${pathToFileURL(file).href}`)
       .join(' '),
+  };
+}
+function withRelaySeam(fixture: Awaited<ReturnType<typeof privateKeyring>>) {
+  return {
+    ...fixture,
+    start(
+      ...[args, extra, input, workingDirectory]: Parameters<
+        typeof fixture.start
+      >
+    ) {
+      return fixture.start(
+        args,
+        {
+          ...extra,
+          NODE_OPTIONS: [relaySeam().NODE_OPTIONS, extra?.NODE_OPTIONS]
+            .filter(Boolean)
+            .join(' '),
+        },
+        input,
+        workingDirectory,
+      );
+    },
   };
 }
 async function outputProbe(mode: string, args: string[]) {
@@ -162,7 +184,8 @@ async function keyringTranscript() {
 }
 beforeEach(async () => {
   app = await runFixture();
-  keyring = await privateKeyring();
+  keyring = withRelaySeam(await privateKeyring());
+  await writeFile(resolve(keyring.home, 'suppress-fifo-eof'), '');
   await mkdir(dirname(keyring.config), { recursive: true });
   await writeFile(keyring.config, JSON.stringify({ url: app.origin }));
   expect(await keyring.store(app.origin, app.token)).toBe(0);
@@ -1369,15 +1392,26 @@ it.each(['padded', 'unpadded'])(
     expectNoValue(output, [app.input.value]);
   },
 );
-it('Masking E17: the complete MiB including its final value is delivered before run exits', async () => {
-  const result = await outputProbe('binary', maskingArgs('large'));
-  expect(result.status).toBe(0);
-  const expected = Buffer.concat([
-    Buffer.alloc(1024 * 1024 - Buffer.byteLength(app.input.value), 120),
-    Buffer.from(marker),
-  ]);
-  expect(result.stdout.equals(expected)).toBe(true);
-});
+it.each(['native EOF', 'suppressed FIFO Socket EOF'])(
+  'Masking E17: the complete MiB including its final value is delivered before run exits (%s)',
+  async (eof) => {
+    if (eof === 'native EOF')
+      await rm(resolve(keyring.home, 'suppress-fifo-eof'));
+    await writeFile(resolve(keyring.home, 'observe-lifecycle'), '{}');
+    const result = await outputProbe('binary', maskingArgs('large'));
+    expect(result.status).toBe(0);
+    const expected = Buffer.concat([
+      Buffer.alloc(1024 * 1024 - Buffer.byteLength(app.input.value), 120),
+      Buffer.from(marker),
+    ]);
+    expect(result.stdout.equals(expected)).toBe(true);
+    expect(result.stdoutClosed).toBe(true);
+    expect(result.stderrClosed).toBe(true);
+    expect(
+      await readFile(resolve(keyring.home, 'lifecycle-events'), 'utf8'),
+    ).toBe('relay-exit\n');
+  },
+);
 it.each([false, true])(
   'Masking E18: Nook failures never print values even with opt-out %s',
   async (disabled) => {
@@ -1463,10 +1497,16 @@ it('Masking E20: relay argv and environment exclude new and already inherited va
   expect(result.status).toBe(0);
   expectOutput(result.stdout, 'true', true);
   expect(result.stderr).toBe('');
+  const launch = JSON.parse(
+    await readFile(resolve(keyring.home, 'relay-launch'), 'utf8'),
+  ) as { args: string[]; env: NodeJS.ProcessEnv };
+  expect(Object.keys(launch.env)).toEqual(
+    process.env.COVERAGE_RUN ? ['NOOK_CLI_COVERAGE'] : [],
+  );
+  expect(launch.args.some((arg) => arg.includes('run-relay-no-eof.ts'))).toBe(
+    true,
+  );
   if (process.env.COVERAGE_RUN) {
-    const launch = JSON.parse(
-      await readFile(resolve(keyring.home, 'relay-launch'), 'utf8'),
-    ) as { env: NodeJS.ProcessEnv };
     const file = launch.env.NOOK_CLI_COVERAGE ?? '';
     expect(file.endsWith('-relay.json')).toBe(true);
     await expect.poll(() => existsSync(file)).toBe(true);

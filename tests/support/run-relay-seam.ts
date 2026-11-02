@@ -17,6 +17,9 @@ children.spawn = ((file: string, args: string[], options: SpawnOptions) => {
   const lifecycle = new URL('./run-relay-lifecycle.ts', import.meta.url);
   lifecycle.searchParams.set('home', home);
   const relayArgs = [
+    ...(existsSync(resolve(home, 'suppress-fifo-eof'))
+      ? [`--import=${new URL('./run-relay-no-eof.ts', import.meta.url).href}`]
+      : []),
     ...(existsSync(resolve(home, 'continuous-output'))
       ? [`--import=${refill.href}`]
       : []),
