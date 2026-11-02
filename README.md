@@ -112,6 +112,16 @@ nook run --secret GH_TOKEN=work/acme/GH_TOKEN --purpose "open the release PR" --
 
 Repeat `--secret ENV=bucket/NAME` for more variables; repeated flag names are rejected. The merged mappings may contain at most 20 distinct paths, with multiple environment names allowed for the same path. A file holds references only, never secret values. Unknown top-level keys, malformed JSON, and invalid names or paths fail before keyring or network access, even when flags are supplied. An empty file needs at least one flag to run a command.
 
+`NOOK_AGENT_SESSION`, `CODEX_SESSION_ID`, `CODEX_THREAD_ID`,
+`CLAUDE_CODE_SESSION_ID`, and `CURSOR_CONVERSATION_ID` are reserved for agent
+session claims. Mapping a secret to any of them, through `--secret` or
+`nook.json`, fails before keyring or network access. `nook run` and
+`nook vault create` automatically report one session from those variables:
+Declared → Codex → Claude Code → Cursor. A declared session comes from
+`NOOK_AGENT_SESSION`; Codex can also report a distinct thread. Valid values
+contain 1–200 ASCII letters, digits, `.`, `_`, `:`, `~`, or `-`; invalid values
+are ignored. Audit marks these claims as unverified and can filter by session.
+
 The purpose is required and must be one line of 1 to 200 characters. Nook resolves the command before contacting the keyring or server. It sends one value request, fetches each distinct path once, injects values only into the child's environment, and preserves stdin, stdout, stderr, TTYs, and the child's exit status. Any denied, missing, or undecryptable path prevents the command from starting; missing-path errors name every missing path. Values never appear in Nook's own output; the child controls its output.
 
 Before delivering values, the Worker records one entry per secret, including the purpose, machine, working directory, executable, and time. Denied requests record only the denied paths. Audit entries are permanent and read-only, and retain their recorded machine name after revocation. Filter Audit by bucket subtree or exact secret path, including deleted secrets, and load older entries in pages of 25. A failed or lost value request is not retried automatically; a new request is a separate use.
