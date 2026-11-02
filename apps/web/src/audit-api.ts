@@ -3,12 +3,19 @@ import { infiniteQueryOptions, type QueryClient } from '@tanstack/react-query';
 import { runApi } from './api-client';
 import { preloadMachines } from './machines-api';
 import { preloadVault } from './vault-api';
-export type AuditFilters = Pick<ContractFilters, 'bucket' | 'secret'>;
+export type AuditFilters = Pick<
+  ContractFilters,
+  'bucket' | 'secret' | 'session'
+>;
 export function auditOptions(filters: AuditFilters) {
   return infiniteQueryOptions({
     queryKey: [
       'audit',
-      { bucket: filters.bucket ?? '', secret: filters.secret ?? '' },
+      {
+        bucket: filters.bucket ?? '',
+        secret: filters.secret ?? '',
+        session: filters.session ?? '',
+      },
     ],
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) =>
@@ -18,6 +25,9 @@ export function auditOptions(filters: AuditFilters) {
             query: {
               ...(filters.bucket ? { bucket: filters.bucket } : {}),
               ...(filters.secret ? { secret: filters.secret } : {}),
+              ...(filters.session !== undefined
+                ? { session: filters.session }
+                : {}),
               ...(pageParam ? { cursor: pageParam } : {}),
             },
           }),
