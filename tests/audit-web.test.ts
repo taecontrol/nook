@@ -896,3 +896,103 @@ it('E21: unknown current metadata does not claim a historical secret is deleted 
     await visit.close();
   }
 });
+
+it.each(viewports)(
+  'session E18: details filter to a session after intent, keep bucket through clearing and render empty/claimless states ($width)',
+  async (viewport) => {
+    const session = '0199f3c2-7a10-7d4e-9b1a-3f2e8c1d0a11';
+    const thread = '0199f3c4-7a10-7d4e-9b1a-3f2e8c1d0e01';
+    const visit = await visitAudit(browser, {
+      viewport,
+      count: 1,
+      configure: async (_page, app, seeded) => {
+        for (const [index, secrets] of [
+          [acmePath],
+          ['work/NPM_TOKEN'],
+        ].entries()) {
+          expect(
+            (
+              await fetchValues(app, seeded.token, {
+                secrets,
+                purpose: `claimed activity ${index}`,
+                agentSession: { agent: 'codex', session, thread },
+              })
+            ).status,
+          ).toBe(200);
+        }
+      },
+    });
+    try {
+      const { page } = visit;
+      const row = auditEntries(page).filter({ hasText: 'claimed activity 0' });
+      await row.getByRole('button', { name: /Show details/ }).click();
+      expect(await row.locator('dt').allTextContents()).toContain(
+        'Agent session (as reported)',
+      );
+      expect(await row.innerText()).toContain('Nook doesn’t verify it.');
+      expect(await row.innerText()).toContain(thread);
+      // Wait for actual prefetch completion after pointer intent, before timing click → paint.
+      const link = row.getByRole('link', {
+        name: 'Activity in this session',
+        exact: true,
+      });
+      const prefetched = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === '/api/audit' &&
+          new URL(response.url()).searchParams.get('session') === session,
+      );
+      await link.hover();
+      await prefetched;
+      await page.evaluate(() => {
+        (window as Window & { sessionStart?: number }).sessionStart =
+          performance.now();
+      });
+      await link.click();
+      await page.waitForFunction(
+        () =>
+          new URL(location.href).searchParams.has('session') &&
+          document.querySelectorAll('[data-entry]').length === 2,
+        undefined,
+        { polling: 'raf' },
+      );
+      const elapsed = await page.evaluate(
+        () =>
+          performance.now() -
+          (window as Window & { sessionStart: number }).sessionStart,
+      );
+      expect(elapsed).toBeLessThanOrEqual(100);
+      expect(new URL(page.url()).searchParams.get('session')).toBe(session);
+      expect(await page.locator('body').innerText()).toContain('Codex session');
+      await selectAudit(page, 'Bucket', 'work/acme');
+      await expect.poll(() => auditEntries(page).count()).toBe(1);
+      expect(new URL(page.url()).searchParams.get('session')).toBe(session);
+      await page
+        .getByRole('link', { name: 'Clear session', exact: true })
+        .click();
+      await expect.poll(() => auditEntries(page).count()).toBe(2);
+      expect(new URL(page.url()).searchParams.get('bucket')).toBe('work/acme');
+      expect(new URL(page.url()).searchParams.has('session')).toBe(false);
+      const claimless = auditEntries(page).filter({
+        hasText: 'open the release PR',
+      });
+      await claimless.getByRole('button', { name: /Show details/ }).click();
+      expect(await claimless.innerText()).not.toContain('Agent session');
+      expect(
+        await claimless
+          .getByRole('link', { name: 'Activity in this session' })
+          .count(),
+      ).toBe(0);
+      await page.goto(visit.app.origin + '/audit?session=no-activity');
+      await page
+        .getByText('No activity reported for this session', { exact: true })
+        .waitFor();
+      await expectNoOverflow(page);
+      await page
+        .getByRole('link', { name: 'Return to all activity', exact: true })
+        .click();
+      await expect.poll(() => auditEntries(page).count()).toBe(3);
+    } finally {
+      await visit.close();
+    }
+  },
+);
