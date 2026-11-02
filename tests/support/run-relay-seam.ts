@@ -6,16 +6,48 @@ import { resolve } from 'node:path';
 // Failure injection and launch observation run only in a private fixture HOME.
 const original = children.spawn;
 const writeSync = fs.writeSync;
+const writeAsync = fs.write;
 let flushToken: string | undefined;
+function observeToken(fd: number, bytes: unknown) {
+  if (
+    !flushToken ||
+    !(typeof bytes === 'string' || bytes instanceof Uint8Array) ||
+    !Buffer.from(bytes).equals(Buffer.from(flushToken))
+  )
+    return false;
+  appendFileSync(
+    resolve(process.env.HOME ?? '', 'flush-tokens'),
+    JSON.stringify({ fd, token: flushToken }) + '\n',
+  );
+  return true;
+}
+function tokenQueued() {
+  const home = process.env.HOME ?? '';
+  if (existsSync(resolve(home, 'relay-release')))
+    writeFileSync(resolve(home, 'lifecycle-events'), 'token-queued\n');
+}
 fs.writeSync = ((...parameters: Parameters<typeof fs.writeSync>) => {
   const [fd, bytes] = parameters;
-  if (flushToken && Buffer.from(bytes).equals(Buffer.from(flushToken)))
-    appendFileSync(
-      resolve(process.env.HOME ?? '', 'flush-tokens'),
-      JSON.stringify({ fd, token: flushToken }) + '\n',
-    );
-  return writeSync(...parameters);
+  const token = observeToken(fd, bytes);
+  try {
+    return writeSync(...parameters);
+  } catch (error) {
+    if (token && existsSync(resolve(process.env.HOME ?? '', 'relay-release')))
+      writeFileSync(
+        resolve(process.env.HOME ?? '', 'token-write-error'),
+        (error as NodeJS.ErrnoException).code ?? 'unknown',
+      );
+    throw error;
+  } finally {
+    if (token) tokenQueued();
+  }
 }) as typeof fs.writeSync;
+fs.write = ((...parameters: Parameters<typeof fs.write>) => {
+  const token = observeToken(parameters[0], parameters[1]);
+  const result = writeAsync(...parameters);
+  if (token) tokenQueued();
+  return result;
+}) as typeof fs.write;
 children.spawn = ((file: string, args: string[], options: SpawnOptions) => {
   const home = process.env.HOME;
   if (!home) throw new Error('The relay seam requires a private HOME.');

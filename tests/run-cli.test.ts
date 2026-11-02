@@ -174,6 +174,30 @@ async function flushTokens() {
   expect(Buffer.byteLength(writes[0].token)).toBe(77);
   return writes;
 }
+async function pressureProbe(mode: string, args: string[]) {
+  // The spawn seam adds the observer only to the relay, never to the child.
+  await writeFile(resolve(keyring.home, 'observe-lifecycle'), '{}');
+  const result = await keyring.command(
+    process.execPath,
+    [
+      resolve('tests/support/run-output-pressure.ts'),
+      mode,
+      resolve(testBuild, 'cli.js'),
+      ...args,
+    ],
+    { ...coverageEnvironment(), ...relaySeam() },
+  ).done;
+  expect(result.status).toBe(0);
+  expect(result.stderr).toBe('');
+  return JSON.parse(result.stdout) as {
+    status: number;
+    atExit: string;
+    output: string;
+    padding: number;
+    relayExited: boolean;
+    nonblocking: boolean;
+  };
+}
 async function addValue(name: string, value: string) {
   expect((await createSecret(app, secretInput({ name, value }))).status).toBe(
     201,
@@ -1361,6 +1385,63 @@ it.each(['background', 'background-separate'])(
       .not.toBe(0);
   },
 );
+it('Masking E16: a full FIFO made nonblocking by a background Node writer still flushes before run exits', async () => {
+  const result = await pressureProbe(
+    'full-input',
+    runArgs([
+      '/bin/sh',
+      '-c',
+      'printf "before:%s\\n" "$GH_TOKEN"; "$2" "$3" full-input-writer "$1" & read -r line < "$1/writer-ready"; exit 3',
+      'fixture',
+      keyring.home,
+      process.execPath,
+      childFile,
+    ]),
+  );
+  const { records, padding } = JSON.parse(
+    await readFile(resolve(keyring.home, 'full-input-counts'), 'utf8'),
+  ) as { records: number; padding: number };
+  const expected =
+    `before:${marker}\n` + `${marker}\n`.repeat(records) + 'x'.repeat(padding);
+  expect(result.status).toBe(3);
+  expect(Buffer.from(result.atExit, 'base64').toString() === expected).toBe(
+    true,
+  );
+  expect(
+    Buffer.from(result.output, 'base64').toString() ===
+      expected + `after:${marker}`,
+  ).toBe(true);
+  expectNoValue(Buffer.from(result.output, 'base64').toString(), [
+    app.input.value,
+  ]);
+  expect(result.relayExited).toBe(true);
+  expect(await flushTokens()).toHaveLength(1);
+});
+it('Masking E14: closing a full named-FIFO destination stops the relay and gives the child SIGPIPE', async () => {
+  const result = await pressureProbe(
+    'fifo-epipe',
+    runArgs(['/bin/sh', '-c', 'exec yes "$GH_TOKEN"']),
+  );
+  expect(result.status).toBe(141);
+  expect(result.relayExited).toBe(true);
+});
+it('Masking E17: a slow nonblocking named-FIFO destination receives all bytes masked after EAGAIN', async () => {
+  const result = await pressureProbe(
+    'nonblocking-output',
+    maskingArgs('large'),
+  );
+  const expected = Buffer.concat([
+    Buffer.alloc(
+      result.padding + 1024 * 1024 - Buffer.byteLength(app.input.value),
+      120,
+    ),
+    Buffer.from(marker),
+  ]);
+  expect(result.status).toBe(0);
+  expect(Buffer.from(result.output, 'base64').equals(expected)).toBe(true);
+  expect(result.nonblocking).toBe(true);
+  expect(result.relayExited).toBe(true);
+});
 it.each(['padded', 'unpadded'])(
   'Masking E16: the token confirms flush while a continuous background writer stays masked (%s)',
   async (record) => {

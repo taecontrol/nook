@@ -69,6 +69,42 @@ if (mode === 'print-value') {
       Buffer.from(value()),
     ]),
   );
+} else if (mode === 'full-input-writer') {
+  // Constructing Node's stdout changes its shared open file description to
+  // O_NONBLOCK, including the child's writer retained by nook run.
+  void process.stdout;
+  const record = Buffer.from(value() + '\n');
+  let records = 0;
+  let padding = 0;
+  try {
+    for (;;) {
+      writeSync(1, record);
+      records++;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EAGAIN') throw error;
+  }
+  try {
+    for (;;) {
+      writeSync(1, 'x');
+      padding++;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EAGAIN') throw error;
+  }
+  writeFileSync(
+    resolve(expected, 'full-input-counts'),
+    JSON.stringify({ records, padding }),
+  );
+  writeFileSync(resolve(expected, 'writer-ready'), 'x\n');
+  readSync(
+    openSync(resolve(expected, 'writer-release'), 'r'),
+    Buffer.alloc(1),
+    0,
+    1,
+    null,
+  );
+  process.stdout.write('after:' + value());
 } else if (mode === 'continuous-background') {
   writeFileSync(1, 'before:' + value() + '\n');
   spawn(process.execPath, [process.argv[1], 'continuous-writer', expected], {
