@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import type { Browser, Page, Request } from 'playwright';
 import { memoryId } from '../tests/fixtures/memories.ts';
 import { loadTimeBudgets, type Measurements } from './lib/load-time.ts';
@@ -21,12 +22,102 @@ export async function phonePage(browser: Browser, kind: string) {
       : {}),
   });
   const page = await context.newPage();
+  recordPage(page);
   page.setDefaultTimeout(15_000);
   const cdp = await context.newCDPSession(page);
   await cdp.send('Network.enable');
   await cdp.send('Network.setCacheDisabled', { cacheDisabled: true });
   await cdp.send('Network.emulateNetworkConditions', loadTimeBudgets.network);
   return { context, page };
+}
+type PageRecord = { pending: Map<Request, number>; errors: string[] };
+const pageRecords = new WeakMap<Page, PageRecord>();
+const withEvidence = new WeakSet<Error>();
+// The page may be too busy to answer; that is evidence too.
+const pageStateTimeout = 2_000;
+
+// Records, from the moment the page opens, what a failure report needs:
+// unfinished requests and the errors the page reported. It keeps URLs and
+// error text only, never request or response headers or bodies.
+function recordPage(page: Page) {
+  const known = pageRecords.get(page);
+  if (known) return known;
+  const record: PageRecord = { pending: new Map(), errors: [] };
+  const ended = (request: Request) => record.pending.delete(request);
+  const clip = (text: string) => text.replaceAll(/\s+/g, ' ').slice(0, 500);
+  page.on('request', (request) => record.pending.set(request, Date.now()));
+  page.on('requestfinished', ended);
+  page.on('requestfailed', ended);
+  page.on('pageerror', (error) =>
+    record.errors.push(`page error: ${clip(error.message)}`),
+  );
+  page.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    const { url } = message.location();
+    record.errors.push(
+      `console error: ${clip(message.text())}${url ? ` (${url})` : ''}`,
+    );
+  });
+  pageRecords.set(page, record);
+  return record;
+}
+async function describePage(page: Page, { pending, errors }: PageRecord) {
+  const now = Date.now();
+  const requests = [...pending].map(
+    ([request, since]) =>
+      `${request.method()} ${request.url()}, pending for ${now - since} ms`,
+  );
+  const answered = new AbortController();
+  const state = await Promise.race([
+    page
+      .evaluate(() => {
+        const root = document.querySelector('#root');
+        return {
+          readyState: document.readyState,
+          root: !root
+            ? 'missing'
+            : root.childElementCount
+              ? 'rendered'
+              : 'empty',
+        };
+      })
+      .then(({ readyState, root }) => [
+        `document.readyState: ${readyState}`,
+        `#root: ${root}`,
+      ]),
+    delay(pageStateTimeout, undefined, { signal: answered.signal }).then(() => [
+      `The page did not answer within ${pageStateTimeout} ms.`,
+    ]),
+  ])
+    .catch((error: Error) => [`The page state is unreadable: ${error.message}`])
+    .finally(() => answered.abort());
+  const list = (items: string[]) =>
+    items.length ? items.map((item) => `\n    ${item}`).join('') : ' none';
+  return [
+    'Page evidence:',
+    ...state.map((line) => `  ${line}`),
+    `  Pending requests:${list(requests)}`,
+    `  Page and console errors:${list(errors)}`,
+  ].join('\n');
+}
+// Runs a step against the page and appends the page evidence to its failure,
+// once, so a timeout says whether the page waited on the network or itself.
+export async function withPageEvidence<T>(
+  page: Page,
+  action: () => Promise<T>,
+): Promise<T> {
+  const record = recordPage(page);
+  try {
+    return await action();
+  } catch (error) {
+    if (!(error instanceof Error) || withEvidence.has(error)) throw error;
+    withEvidence.add(error);
+    // V8 formats the stack lazily: read it before the message changes.
+    const { message, stack } = error;
+    error.message = `${message}\n\n${await describePage(page, record)}`;
+    error.stack = stack?.replace(message, () => error.message);
+    throw error;
+  }
 }
 type ColdScreen =
   | 'home'
@@ -347,11 +438,13 @@ export async function measureScreen(
     memoryReaderNavigation: 'memoryReader',
   } as const;
   const destination = destinations[kind as keyof typeof destinations];
-  if (kind === 'approvalNavigation')
-    return approvalNavigation(page, origin, code);
-  if (kind === 'machineAccessNavigation')
-    return machineAccessNavigation(page, origin, preloadTimeout);
-  return destination
-    ? navigate(page, origin, destination, preloadTimeout)
-    : cold(page, origin, kind as ColdScreen);
+  return withPageEvidence(page, () => {
+    if (kind === 'approvalNavigation')
+      return approvalNavigation(page, origin, code);
+    if (kind === 'machineAccessNavigation')
+      return machineAccessNavigation(page, origin, preloadTimeout);
+    return destination
+      ? navigate(page, origin, destination, preloadTimeout)
+      : cold(page, origin, kind as ColdScreen);
+  });
 }
