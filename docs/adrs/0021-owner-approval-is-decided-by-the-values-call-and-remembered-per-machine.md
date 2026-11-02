@@ -1,4 +1,4 @@
-# ADR-0020: Owner approval is decided by the values call and remembered per machine
+# ADR-0021: Owner approval is decided by the values call and remembered per machine
 
 Date: 2026-11-02
 Status: Accepted

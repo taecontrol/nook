@@ -871,7 +871,7 @@ attempt. `approval-wait.test.ts` uses Effect TestClock for the ten-minute
 local deadline, retry pacing and the three-second withdrawal bound.
 
 `owner-approval-migration.test.ts` runs the previous Worker's actual source
-against migration 0015 and checks its audit inserts, claims and indexes.
+against migration 0016 and checks its audit inserts, claims and indexes.
 `owner-approval-released-cli.test.ts` executes v0.3.2's actual error-mapping
 functions. `owner-approval-audit-web.test.ts` renders every new event in
 Chromium and proves the existing bucket and secret filters, owner IP and

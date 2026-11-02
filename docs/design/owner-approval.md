@@ -4,7 +4,7 @@ Status: Accepted (owner, 2026-11-02)
 Date: 2026-11-02
 Issue: [#82](https://github.com/taecontrol/nook/issues/82), part of [#76](https://github.com/taecontrol/nook/issues/76)
 Grounded at: `main` 1927803 (designed at 466b0e6)
-Numbering: ADR-0020 and migration `0015_owner_approval.sql` are the slice 1 brief’s assigned numbers. Recheck migration numbering when integrating with `origin/main`.
+Numbering: ADR-0021 and migration `0016_owner_approval.sql`. Recheck migration numbering when integrating with `origin/main`.
 
 ## 1. Problem and scope
 

@@ -13,14 +13,14 @@ import { acmePath, auditRows, fetchValues } from './support/audit.ts';
 import { issueGrant } from './support/grants.ts';
 import { createSecret, secretInput } from './support/vault.ts';
 
-it('E1/E30: migration 0015 preserves historical claims, audit constraints, indexes and inserts from the previous Worker', async () => {
+it('E1/E30: migration 0016 preserves historical claims, audit constraints, indexes and inserts from the previous Worker', async () => {
   const app = await previousSessionWorker('1927803');
   try {
     const db = await app.mf.getD1Database('DB');
     expect(
       await db
         .prepare(
-          "SELECT name FROM d1_migrations WHERE name='0015_owner_approval.sql'",
+          "SELECT name FROM d1_migrations WHERE name='0016_owner_approval.sql'",
         )
         .first(),
     ).not.toBeNull();
@@ -82,7 +82,7 @@ it('E1/E30: migration 0015 preserves historical claims, audit constraints, index
     await app.close();
   }
 });
-it('E30: the populated 0014-to-0015 audit rebuild preserves all historical columns and the schema snapshot', async () => {
+it('E30: the populated 0015-to-0016 audit rebuild preserves all historical columns and the schema snapshot', async () => {
   const mf = new Miniflare({
     modules: true,
     cf: false,
@@ -94,7 +94,7 @@ it('E30: the populated 0014-to-0015 audit rebuild preserves all historical colum
     const db = await mf.getD1Database('DB');
     const names = await migrationFiles('migrations');
     await applyMigrations(db, 'migrations', {
-      only: names.filter((n) => n < '0015_owner_approval.sql'),
+      only: names.filter((n) => n < '0016_owner_approval.sql'),
     });
     await db
       .prepare(
