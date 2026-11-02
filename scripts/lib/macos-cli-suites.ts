@@ -8,6 +8,8 @@ export const macosCliGroups = [
     'tests/macos-boundary-policy.test.ts',
     'tests/agent-create-cli.test.ts',
     'tests/agent-import-cli.test.ts',
+    'tests/owner-approval-cli.test.ts',
+    'tests/approval-wait.test.ts',
     'tests/agent-create-retry-cli.test.ts',
     'tests/nook-json-cli.test.ts',
     'tests/nook-json-invalid-cli.test.ts',

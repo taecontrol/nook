@@ -378,7 +378,11 @@ export const machineOperations = Effect.gen(function* () {
       authenticated(authorization).pipe(
         Effect.flatMap((row) =>
           identity(row).pipe(
-            Effect.map((result) => ({ ...result, id: row.id })),
+            Effect.map((result) => ({
+              ...result,
+              id: row.id,
+              grantJson: row.grant_json,
+            })),
           ),
         ),
       ),

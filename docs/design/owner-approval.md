@@ -4,7 +4,7 @@ Status: Accepted (owner, 2026-11-02)
 Date: 2026-11-02
 Issue: [#82](https://github.com/taecontrol/nook/issues/82), part of [#76](https://github.com/taecontrol/nook/issues/76)
 Grounded at: `main` 1927803 (designed at 466b0e6)
-Numbering: the ADR and migration numbers are fixed just before merge, as the next free ones on `origin/main`.
+Numbering: ADR-0020 and migration `0015_owner_approval.sql` are the slice 1 brief’s assigned numbers. Recheck migration numbering when integrating with `origin/main`.
 
 ## 1. Problem and scope
 
@@ -273,3 +273,16 @@ The owner's decision is a conditional `UPDATE … WHERE status='pending' AND exp
 ## 11. Visual reference
 
 The owner chose the `card` direction ("Read down, pick, approve"), polished, on 2026-11-02, with one change: no End button and no confirmation for it; the active approvals list is read-only. The reference screenshots live in `docs/design/owner-approval-ui/` and cover every scenario at 390×844 (light), plus dark and 1440×900 for the main screens. Implementation matches their structure, hierarchy, and copy, using the app's real components; pixel parity is not required.
+
+## Slice 1 implementation notes
+
+The contract exports the duration as `ApprovalRemember` because `Remember`
+already names the memory creation payload. The approvals module keeps its
+local `Remember` name.
+
+A capable run reads its own attempt in the existing ciphertext/marks batch,
+including when no mark remains. This preserves payload equality and a prior
+denial after the last mark is removed; skipping all approval reads on that
+path would bypass both. There is no additional round trip or approval row
+for a new unmarked run. Successful unmarked or remembered delivery settles
+a pending attempt in the delivery batch, after the guarded audit insert.

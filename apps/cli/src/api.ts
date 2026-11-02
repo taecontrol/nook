@@ -109,7 +109,7 @@ function serverFailure(error: unknown) {
     new ServerFailure(
       tag,
       transient ? undefined : typed.message,
-      tag === 'SecretsForbidden' ? typed.paths : [],
+      ['SecretsForbidden', 'ApprovalDenied'].includes(tag) ? typed.paths : [],
       transient,
       tag === 'Unauthorized' ? typed.expiredAt : undefined,
     ),

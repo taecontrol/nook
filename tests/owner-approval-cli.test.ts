@@ -31,7 +31,7 @@ async function startWaiting() {
   await expect
     .poll(() => /\/approvals\/[0-9a-f-]+/.test(running.output()))
     .toBe(true);
-  const id = /\/approvals\/([0-9a-f-]+)/.exec(running.output())?.[1];
+  const id = /\/approvals\/([0-9a-f-]+)/.exec(running.output())?.[1] ?? '';
   return { input, running, id };
 }
 it('E6/E7/E13/E30: the real CLI waits privately, delivers the exact value, propagates child exit and silently reuses across agents', async () => {
@@ -48,7 +48,7 @@ it('E6/E7/E13/E30: the real CLI waits privately, delivers the exact value, propa
   expect(running.output()).toContain(acmePath);
   expect(running.output()).toMatch(/\d+:\d{2} left/);
   expect(running.output()).not.toContain('true');
-  const id = /\/approvals\/([0-9a-f-]+)/.exec(running.output())?.[1];
+  const id = /\/approvals\/([0-9a-f-]+)/.exec(running.output())?.[1] ?? '';
   expect((await auditRows(app)).map((r) => r.outcome)).toEqual([
     'approval_requested',
   ]);
@@ -219,3 +219,40 @@ it.each([
     }
   },
 );
+it('E3: nook vault create inherits an existing bucket mark', async () => {
+  await setMark(app);
+  expect(
+    (
+      await keyring.start(
+        [
+          'vault',
+          'create',
+          'work/acme/NEW_KEY',
+          '--purpose',
+          'new marked secret',
+        ],
+        {},
+        'synthetic-created-only',
+      ).done
+    ).status,
+  ).toBe(0);
+  const running = keyring.start([
+    'run',
+    '--secret',
+    'T=work/acme/NEW_KEY',
+    '--purpose',
+    'created secret',
+    '--',
+    process.execPath,
+    '-e',
+    '',
+  ]);
+  try {
+    await expect
+      .poll(() => running.output().includes('/approvals/'))
+      .toBe(true);
+  } finally {
+    await running.kill('SIGTERM');
+    await running.done;
+  }
+});

@@ -1,6 +1,13 @@
+import { randomUUID } from 'node:crypto';
 import { NodeServices } from '@effect/platform-node';
 import { Effect, Redacted } from 'effect';
 import { resolveAgentSession } from './agent-session.ts';
+import {
+  ApprovalStopped,
+  approvalFailure,
+  awaitApproval,
+  processSignal,
+} from './approval-wait.ts';
 import {
   CliFailure,
   networkError,
@@ -14,6 +21,8 @@ import { CommandFailure, resolveCommand, runCommand } from './run-command.ts';
 import { session } from './session.ts';
 
 function runFailure(error: RequestFailure) {
+  const approval = approvalFailure(error);
+  if (approval instanceof ApprovalStopped) return approval;
   if (error.server.tag === 'SecretsForbidden')
     return new CliFailure(
       error.server.paths
@@ -33,6 +42,7 @@ export function run(
   host: Host,
   args: string[],
   write: (message: string) => void,
+  status: (message: string) => void = write,
 ) {
   return Effect.runPromise(
     Effect.gen(function* () {
@@ -44,15 +54,36 @@ export function run(
       const file = yield* resolveCommand(parsed.command[0]);
       const agentSession = resolveAgentSession((name) => process.env[name]);
       const { url, request } = yield* session(host);
-      const delivered = yield* request((api, headers) =>
+      const attemptId = randomUUID();
+      const ask = request((api, headers) =>
         api.machine.values({
           headers,
           payload: {
             ...parsed.input,
+            approval: { attemptId },
             ...(agentSession ? { agentSession } : {}),
           },
         }),
-      ).pipe(Effect.mapError(runFailure));
+      );
+      const response = yield* ask.pipe(Effect.mapError(runFailure));
+      const delivered =
+        'values' in response
+          ? response
+          : yield* Effect.scoped(
+              awaitApproval(response.approval, {
+                ask,
+                withdraw: (id) =>
+                  request((api, headers) =>
+                    api.machine.withdraw({ headers, params: { id } }),
+                  ).pipe(Effect.catchCause(() => Effect.void)),
+                status,
+                signal: processSignal,
+              }),
+            ).pipe(
+              Effect.mapError((error) =>
+                error instanceof ApprovalStopped ? error : runFailure(error),
+              ),
+            );
       const values = new Map(
         delivered.values.map(({ path, value }) => [path, value]),
       );
@@ -69,8 +100,12 @@ export function run(
     }).pipe(
       Effect.provide(NodeServices.layer),
       Effect.catch((error) => {
-        write(error.message);
-        return Effect.succeed(error instanceof CommandFailure ? error.code : 1);
+        (error instanceof ApprovalStopped ? status : write)(error.message);
+        return Effect.succeed(
+          error instanceof CommandFailure || error instanceof ApprovalStopped
+            ? error.code
+            : 1,
+        );
       }),
     ),
   );

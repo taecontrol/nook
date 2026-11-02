@@ -1,5 +1,6 @@
 import { Schema } from 'effect';
 import { AgentSessionClaim } from './agent-session.ts';
+import { ApprovalReference, Remember } from './approvals.ts';
 import { MemoryClient, Principal } from './provenance.ts';
 
 const EntryFacts = Schema.Struct({
@@ -16,10 +17,31 @@ const MachineFacts = EntryFacts.mapFields((fields) => ({
   workingDirectory: Schema.String,
   agentSession: Schema.NullOr(AgentSessionClaim),
 }));
+export const ApprovalAuditOutcome = Schema.Literals([
+  'approval_requested',
+  'approval_granted',
+  'approval_denied',
+  'approval_withdrawn',
+  'approval_refused',
+]);
+export const ApprovalAuditEntry = MachineFacts.mapFields((fields) => ({
+  ...fields,
+  outcome: ApprovalAuditOutcome,
+  executable: Schema.String,
+  runId: Schema.String,
+  approval: Schema.NullOr(
+    Schema.Struct({ id: Schema.String, remember: Schema.NullOr(Remember) }),
+  ),
+  ip: Schema.NullOr(Schema.String),
+  country: Schema.NullOr(Schema.String),
+}));
+export type ApprovalAuditEntry = typeof ApprovalAuditEntry.Type;
 export const VaultAuditEntry = Schema.Union([
+  ApprovalAuditEntry,
   MachineFacts.mapFields((fields) => ({
     ...fields,
     outcome: Schema.Literals(['delivered', 'denied']),
+    approval: Schema.optionalKey(ApprovalReference),
     executable: Schema.String,
     runId: Schema.String,
   })),
@@ -61,6 +83,11 @@ export const FileAuditEntry = Schema.Struct({
 export type FileAuditEntry = typeof FileAuditEntry.Type;
 export const AuditEntry = Schema.Union([VaultAuditEntry, FileAuditEntry]);
 export type AuditEntry = typeof AuditEntry.Type;
+export function isApprovalAuditEntry(
+  entry: AuditEntry,
+): entry is ApprovalAuditEntry {
+  return 'approval' in entry && 'ip' in entry;
+}
 export function isFileAuditEntry(entry: AuditEntry): entry is FileAuditEntry {
   return 'memoryId' in entry;
 }

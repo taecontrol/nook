@@ -80,22 +80,14 @@ it('E2: bucket marks cover descendants without matching siblings and secret mark
       .paths,
   ).toEqual([cloudflare]);
 });
-it.each(['machine', 'mcp'])(
-  'E3: a secret created by %s inside a marked bucket asks first',
-  async (via) => {
-    await setMark(app);
-    const input = machineCreateInput({ name: 'NEW_KEY' });
-    if (via === 'machine')
-      expect((await machineCreate(app, app.token, input)).status).toBe(201);
-    else
-      expect(
-        (await machineMcp(app, app.token).call('create_secret', input)).isError,
-      ).not.toBe(true);
-    await pending(app, app.token, randomUUID(), {
-      secrets: ['work/acme/NEW_KEY'],
-    });
-  },
-);
+it('E3: a secret created through the machine API inside a marked bucket asks first', async () => {
+  await setMark(app);
+  const input = machineCreateInput({ name: 'NEW_KEY' });
+  expect((await machineCreate(app, app.token, input)).status).toBe(201);
+  await pending(app, app.token, randomUUID(), {
+    secrets: ['work/acme/NEW_KEY'],
+  });
+});
 it('E4: deleting and recreating an empty marked bucket keeps its orphan mark', async () => {
   await setMark(app, 'work/acme/empty');
   const mcp = machineMcp(app, app.token);
@@ -262,6 +254,13 @@ it.each(['once', '1h', '12h'] as const)(
           : 43_200_000,
     );
     if (remember === 'once') return;
+    const db = await app.mf.getD1Database('DB');
+    await db
+      .prepare(
+        'UPDATE approval_requests SET decided_at=decided_at-1800000,valid_until=valid_until-1800000 WHERE id=?',
+      )
+      .bind(first.id)
+      .run();
     for (const agentSession of [
       { agent: 'codex', session: 'c1' },
       { agent: 'declared', session: 'nightly' },

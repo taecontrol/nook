@@ -5,6 +5,14 @@ import {
   HttpApiError,
   HttpApiGroup,
 } from 'effect/http-api';
+import {
+  ApprovalAlreadyHandled,
+  ApprovalList,
+  ApprovalView,
+  AskFirstList,
+  AskFirstMark,
+  Remember,
+} from './approvals.ts';
 import { AuditFilters, AuditPage, InvalidAuditFilter } from './audit.ts';
 import {
   Bucket,
@@ -15,7 +23,7 @@ import {
   ReservedBucket,
 } from './buckets.ts';
 import { GrantBucketNotFound, InvalidBucketGrant } from './grants.ts';
-import { Machine, MachineAccessChanged } from './machines.ts';
+import { Expired, Machine, MachineAccessChanged } from './machines.ts';
 import {
   BucketHasMemories,
   InvalidMemory,
@@ -55,6 +63,22 @@ import {
 
 export * from './access-expiry.ts';
 export * from './agent-session.ts';
+export {
+  ApprovalAlreadyHandled,
+  ApprovalAttempt,
+  ApprovalDenied,
+  ApprovalExpired,
+  ApprovalLimit,
+  ApprovalList,
+  ApprovalPending,
+  ApprovalReference,
+  ApprovalView,
+  AskFirstList,
+  AskFirstMark,
+  coveringMark,
+  Remember as ApprovalRemember,
+  rememberDuration,
+} from './approvals.ts';
 export * from './audit.ts';
 export * from './buckets.ts';
 export * from './env-import.ts';
@@ -73,6 +97,70 @@ const errors = [
   HttpApiError.ServiceUnavailable,
 ];
 export const Api = HttpApi.make('nook')
+  .add(
+    HttpApiGroup.make('askFirst')
+      .add(
+        HttpApiEndpoint.get('list', '/api/ask-first', {
+          success: AskFirstList,
+          error: errors,
+        }),
+      )
+      .add(
+        HttpApiEndpoint.put('put', '/api/ask-first/:kind/:path', {
+          params: AskFirstMark,
+          success: Schema.Void.annotate({ httpApiStatus: 204 }),
+          error: [...errors, InvalidBucketPath, InvalidSecret],
+        }),
+      )
+      .add(
+        HttpApiEndpoint.delete('remove', '/api/ask-first/:kind/:path', {
+          params: AskFirstMark,
+          success: Schema.Void.annotate({ httpApiStatus: 204 }),
+          error: [...errors, InvalidBucketPath, InvalidSecret],
+        }),
+      ),
+  )
+  .add(
+    HttpApiGroup.make('approvals')
+      .add(
+        HttpApiEndpoint.get('list', '/api/approvals', {
+          success: ApprovalList,
+          error: errors,
+        }),
+      )
+      .add(
+        HttpApiEndpoint.get('get', '/api/approvals/:id', {
+          params: Schema.Struct({ id: Schema.String }),
+          success: ApprovalView,
+          error: [...errors, HttpApiError.NotFound],
+        }),
+      )
+      .add(
+        HttpApiEndpoint.post('approve', '/api/approvals/:id/approve', {
+          params: Schema.Struct({ id: Schema.String }),
+          payload: Schema.Struct({ remember: Remember }),
+          success: ApprovalView,
+          error: [
+            ...errors,
+            HttpApiError.NotFound,
+            Expired,
+            ApprovalAlreadyHandled,
+          ],
+        }),
+      )
+      .add(
+        HttpApiEndpoint.post('deny', '/api/approvals/:id/deny', {
+          params: Schema.Struct({ id: Schema.String }),
+          success: ApprovalView,
+          error: [
+            ...errors,
+            HttpApiError.NotFound,
+            Expired,
+            ApprovalAlreadyHandled,
+          ],
+        }),
+      ),
+  )
   .add(
     HttpApiGroup.make('memories')
       .add(

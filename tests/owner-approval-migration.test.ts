@@ -25,7 +25,7 @@ it('E1/E30: migration 0015 preserves historical claims, audit constraints, index
     expect(
       (
         await fetchValues(app, token, {
-          secrets: ['me/X'],
+          secrets: ['personal/X'],
           agentSession: claim,
         })
       ).status,

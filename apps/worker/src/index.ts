@@ -13,6 +13,8 @@ import {
 import { Effect, Layer } from 'effect';
 import { HttpRouter, HttpServer, HttpServerRequest } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
+import { ownerApprovals, ownerFacts } from './approvals.ts';
+import { askFirstStore, requireOwner } from './ask-first.ts';
 import { auditStore } from './audit.ts';
 import { authenticate } from './auth.ts';
 import {
@@ -120,13 +122,10 @@ export function handlerForPrincipal(
         .handle('reveal', ({ params }) =>
           Effect.gen(function* () {
             const request = yield* HttpServerRequest.HttpServerRequest;
-            const source = request.source as Request & {
-              cf?: { country?: string };
-            };
-            return yield* store.reveal(params.path, {
-              ip: source.headers.get('CF-Connecting-IP') || null,
-              country: source.cf?.country || null,
-            });
+            return yield* store.reveal(
+              params.path,
+              ownerFacts(request.source as Request),
+            );
           }),
         )
         .handle('list', () => store.listAll())
@@ -145,8 +144,66 @@ export function handlerForPrincipal(
       return handlers.handle('list', ({ query }) => store.list(grant, query));
     }),
   ).pipe(Layer.provide(D1Client.layer({ db })));
+  const askFirst = HttpApiBuilder.group(Api, 'askFirst', (handlers) =>
+    Effect.gen(function* () {
+      const store = yield* askFirstStore;
+      return handlers
+        .handle('list', () =>
+          requireOwner(grant).pipe(Effect.andThen(store.list())),
+        )
+        .handle('put', ({ params }) =>
+          requireOwner(grant).pipe(Effect.andThen(store.put(params))),
+        )
+        .handle('remove', ({ params }) =>
+          requireOwner(grant).pipe(Effect.andThen(store.remove(params))),
+        );
+    }),
+  ).pipe(Layer.provide(D1Client.layer({ db })));
+  const approvals = HttpApiBuilder.group(Api, 'approvals', (handlers) =>
+    Effect.gen(function* () {
+      const store = yield* ownerApprovals;
+      return handlers
+        .handle('list', () =>
+          requireOwner(grant).pipe(Effect.andThen(store.list())),
+        )
+        .handle('get', ({ params }) =>
+          requireOwner(grant).pipe(Effect.andThen(store.get(params.id))),
+        )
+        .handle('approve', ({ params, payload, request }) =>
+          requireOwner(grant).pipe(
+            Effect.andThen(
+              store.decide(
+                params.id,
+                { kind: 'approve', remember: payload.remember },
+                ownerFacts(request.source as Request),
+              ),
+            ),
+          ),
+        )
+        .handle('deny', ({ params, request }) =>
+          requireOwner(grant).pipe(
+            Effect.andThen(
+              store.decide(
+                params.id,
+                { kind: 'deny' },
+                ownerFacts(request.source as Request),
+              ),
+            ),
+          ),
+        );
+    }),
+  ).pipe(Layer.provide(D1Client.layer({ db })));
   const routes = HttpApiBuilder.layer(Api).pipe(
-    Layer.provide([session, buckets, machines, vault, audit, memories]),
+    Layer.provide([
+      session,
+      buckets,
+      machines,
+      vault,
+      audit,
+      memories,
+      askFirst,
+      approvals,
+    ]),
     Layer.provide(HttpServer.layerServices),
   );
   const apiHandler = HttpRouter.toWebHandler(routes, {

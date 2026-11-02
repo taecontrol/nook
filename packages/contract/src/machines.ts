@@ -5,6 +5,12 @@ import {
   HttpApiError,
   HttpApiGroup,
 } from 'effect/http-api';
+import {
+  ApprovalDenied,
+  ApprovalExpired,
+  ApprovalLimit,
+  ApprovalPending,
+} from './approvals.ts';
 import { BucketNotFound, InvalidBucketPath } from './buckets.ts';
 import {
   BucketGrant,
@@ -264,11 +270,14 @@ export const MachineApi = HttpApi.make('machine').add(
       HttpApiEndpoint.post('values', '/api/machine/secrets/values', {
         headers: Schema.Struct({ authorization: Schema.String }),
         payload: RunSecrets,
-        success: DeliveredSecrets,
+        success: Schema.Union([DeliveredSecrets, ApprovalPending]),
         error: [
           ...machineErrors,
           InvalidRun,
           SecretsForbidden,
+          ApprovalDenied,
+          ApprovalExpired,
+          ApprovalLimit,
           SecretNotFound,
           SecretKeyUnavailable,
           VaultNotConfigured,
@@ -315,6 +324,14 @@ export const MachineApi = HttpApi.make('machine').add(
           ],
         },
       ),
+    )
+    .add(
+      HttpApiEndpoint.delete('withdraw', '/api/machine/approvals/:id', {
+        params: Schema.Struct({ id: Schema.String }),
+        headers: Schema.Struct({ authorization: Schema.String }),
+        success: noContent,
+        error: machineErrors,
+      }),
     )
     .add(
       HttpApiEndpoint.delete('logout', '/api/machine/token', {
