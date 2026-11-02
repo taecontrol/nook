@@ -5,7 +5,12 @@ type MaskedValue = {
 };
 type Value = { readonly path: string; readonly value: string };
 type PendingPrefix = { length: number; readonly prefixes: Uint32Array };
-type MatchCandidate = { at: number; readonly value: MaskedValue };
+type MatchCandidate = {
+  at: number;
+  searches: number;
+  scan?: { pos: number; length: number };
+  readonly value: MaskedValue;
+};
 
 function extendPrefix(
   bytes: Buffer,
@@ -37,6 +42,30 @@ export function maskedValues(values: readonly Value[]): MaskedValue[] {
   }
   return [...distinct.values()].sort((a, b) => b.bytes.length - a.bytes.length);
 }
+function searchAfter(data: Buffer, candidate: MatchCandidate, from: number) {
+  const { bytes, prefixes } = candidate.value;
+  // Overlapping replacements can repeatedly invalidate a long cached match.
+  // Cap indexOf at 16 searches, then use a forward-only KMP scan for this call.
+  if (candidate.searches < 16) {
+    candidate.searches++;
+    return data.indexOf(bytes, from);
+  }
+  // After a full match, the automaton resumes at that match's failure link.
+  candidate.scan ??= {
+    pos: candidate.at + bytes.length,
+    length: prefixes[bytes.length - 1],
+  };
+  const scan = candidate.scan;
+  while (scan.pos < data.length) {
+    scan.length = extendPrefix(bytes, prefixes, scan.length, data[scan.pos++]);
+    if (scan.length === bytes.length) {
+      const start = scan.pos - bytes.length;
+      scan.length = prefixes[scan.length - 1];
+      if (start >= from) return start;
+    }
+  }
+  return -1;
+}
 function nextMatch(
   data: Buffer,
   candidates: readonly MatchCandidate[],
@@ -47,7 +76,7 @@ function nextMatch(
     // Keep misses and future matches. Only consumed or overlapping matches
     // need another search in this chunk.
     if (candidate.at !== -1 && candidate.at < from)
-      candidate.at = data.indexOf(candidate.value.bytes, from);
+      candidate.at = searchAfter(data, candidate, from);
     if (candidate.at !== -1 && (!match || candidate.at < match.at))
       match = candidate;
   }
@@ -85,6 +114,7 @@ function replace(data: Buffer, values: readonly MaskedValue[], final: boolean) {
   const output: Buffer[] = [];
   const candidates = values.map((value) => ({
     at: data.indexOf(value.bytes),
+    searches: 1,
     value,
   }));
   const tails = final

@@ -4,6 +4,33 @@ import { maskedValues, masker } from '../apps/cli/src/masker.ts';
 const path = 'work/acme/TOKEN';
 const value = 'abcdabcdefgh';
 const marker = `<nook:${path}>`;
+function referenceMask(
+  data: Buffer,
+  entries: { path: string; value: string }[],
+) {
+  const values = entries
+    .filter(({ value }) => [...value].length >= 8)
+    .map(({ path, value }) => ({ path, bytes: Buffer.from(value) }))
+    .sort(
+      (a, b) =>
+        b.bytes.length - a.bytes.length ||
+        (a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
+    );
+  const output: Buffer[] = [];
+  for (let at = 0; at < data.length; ) {
+    const match = values.find(({ bytes }) =>
+      data.subarray(at, at + bytes.length).equals(bytes),
+    );
+    if (match) {
+      output.push(Buffer.from(`<nook:${match.path}>`));
+      at += match.bytes.length;
+    } else {
+      output.push(data.subarray(at, at + 1));
+      at++;
+    }
+  }
+  return Buffer.concat(output);
+}
 function replaced(chunks: Uint8Array[], entries = [{ path, value }]) {
   const stream = masker(maskedValues(entries));
   return Buffer.concat([
@@ -152,6 +179,102 @@ it('repeated matches search absent values only once per chunk', () => {
   expect(Buffer.concat([output, stream.end()]).toString()).toBe(
     '<nook:work/acme/VALUE_0>'.repeat(matches),
   );
+});
+it('overlapping cached matches stay within capped native and linear KMP search budgets', () => {
+  const chunk = Buffer.alloc(65_536, 'abcdefghi');
+  const entries = [
+    { path, value: 'abcdefgh' },
+    ...Array.from({ length: 19 }, (_, i) => ({
+      path: `work/acme/VALUE_${i}`,
+      value: chunk.subarray(1, 32_769 - i).toString(),
+    })),
+  ];
+  const expected = referenceMask(chunk, entries);
+  const searchBudget = (16 + 1) * entries.length;
+  const prefixBudget = 4 * entries.length * chunk.length;
+  let searches = 0;
+  let prefixes = 0;
+  const values = maskedValues(entries).map((value) => ({
+    ...value,
+    prefixes: new Proxy(value.prefixes, {
+      get(table, key) {
+        if (++prefixes > prefixBudget)
+          throw new Error('Full-match KMP search exceeded its linear budget.');
+        return Reflect.get(table, key, table);
+      },
+    }),
+  }));
+  const stream = masker(values);
+  const indexOf = Buffer.prototype.indexOf;
+  const search = vi
+    .spyOn(Buffer.prototype, 'indexOf')
+    .mockImplementation(function (this: Buffer, ...args) {
+      if (++searches > searchBudget)
+        throw new Error('Overlapping matches exceeded their indexOf budget.');
+      return indexOf.apply(this, args);
+    });
+  let output: Buffer;
+  try {
+    output = Buffer.concat([stream.push(chunk), stream.end()]);
+  } finally {
+    search.mockRestore();
+  }
+  expect(searches).toBeGreaterThanOrEqual(entries.length);
+  expect(prefixes).toBeGreaterThan(0);
+  expect(output.equals(expected)).toBe(true);
+});
+it('randomized binary-alphabet chunks match a whole-buffer reference across the search cap and held tails', () => {
+  let seed = 0x80abcdef;
+  function random(limit: number) {
+    seed ^= seed << 13;
+    seed ^= seed >>> 17;
+    seed ^= seed << 5;
+    return (seed >>> 0) % limit;
+  }
+  const text = (length: number) =>
+    Array.from({ length }, () => (random(2) ? 'a' : 'b')).join('');
+  for (let sample = 0; sample < 80; sample++) {
+    // Offset periodic values force repeated invalidations beyond the cap.
+    const first = random(2) ? 'a' : 'b';
+    const unit = first + (first === 'a' ? 'b' : 'a').repeat(1 + random(4));
+    const short = unit.repeat(Math.ceil(8 / unit.length));
+    const long = unit.repeat(16 + random(16)).slice(1);
+    const entries = [
+      { path, value: short },
+      { path: 'work/acme/LONG', value: long },
+      { path: 'work/acme/DUPLICATE', value: long },
+      ...Array.from({ length: 1 + random(4) }, (_, i) => ({
+        path: `work/acme/VALUE_${i}`,
+        value: text(8 + random(32)),
+      })),
+    ];
+    const data = Buffer.from(
+      long +
+        text(32) +
+        unit.repeat(256 + random(128)) +
+        long +
+        text(32) +
+        short +
+        long.slice(0, 1 + random(long.length - 1)),
+    );
+    const stream = masker(maskedValues(entries));
+    const split = 1 + random(7);
+    const output = [stream.push(data.subarray(0, split))];
+    expect(stream.pendingBytes).toBe(split);
+    for (let at = split; at < data.length; ) {
+      const end = Math.min(
+        data.length,
+        at + (sample % 2 ? 1 + random(97) : data.length),
+      );
+      output.push(stream.push(data.subarray(at, end)));
+      at = end;
+    }
+    output.push(stream.end());
+    expect(
+      Buffer.concat(output).equals(referenceMask(data, entries)),
+      `sample ${sample}`,
+    ).toBe(true);
+  }
 });
 it('adversarial long prefixes stay within a linear tail-search budget', () => {
   const entries = Array.from({ length: 20 }, (_, i) => ({
