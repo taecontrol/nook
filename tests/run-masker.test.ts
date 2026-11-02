@@ -68,6 +68,35 @@ it('flush releases an incomplete prefix and later complete values are still mask
   expect(Buffer.from(stream.end()).toString()).toBe('abc');
   expect(Buffer.from(stream.push(Buffer.from(value))).toString()).toBe(marker);
 });
+it('pending bytes track unresolved input across matches, new tails, mismatches and flushes', () => {
+  const bytes = Buffer.from('🔐秘密-token-🔑');
+  const stream = masker(maskedValues([{ path, value: bytes.toString() }]));
+  expect(stream.pendingBytes).toBe(0);
+  expect(
+    Buffer.from(
+      stream.push(
+        Buffer.concat([Buffer.from('prompt:'), bytes.subarray(0, 7)]),
+      ),
+    ).toString(),
+  ).toBe('prompt:');
+  expect(stream.pendingBytes).toBe(7);
+  expect(
+    Buffer.from(
+      stream.push(Buffer.concat([bytes.subarray(7), bytes.subarray(0, 3)])),
+    ).toString(),
+  ).toBe(marker);
+  expect(stream.pendingBytes).toBe(3);
+  expect(
+    Buffer.from(stream.push(Buffer.from('!'))).equals(
+      Buffer.concat([bytes.subarray(0, 3), Buffer.from('!')]),
+    ),
+  ).toBe(true);
+  expect(stream.pendingBytes).toBe(0);
+  expect(stream.push(bytes.subarray(0, 7)).length).toBe(0);
+  expect(stream.pendingBytes).toBe(7);
+  expect(Buffer.from(stream.end()).equals(bytes.subarray(0, 7))).toBe(true);
+  expect(stream.pendingBytes).toBe(0);
+});
 it('duplicates pick the first path, seven code points are skipped and eight survive', () => {
   const entries = [
     { path: 'work/acme/Z', value },

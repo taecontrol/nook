@@ -96,6 +96,9 @@ function replace(data: Buffer, values: readonly MaskedValue[], final: boolean) {
 export function masker(values: readonly MaskedValue[]) {
   let held: Buffer = Buffer.alloc(0);
   return {
+    get pendingBytes(): number {
+      return held.length;
+    },
     push(chunk: Uint8Array): Uint8Array {
       const result = replace(Buffer.concat([held, chunk]), values, false);
       held = result.held;

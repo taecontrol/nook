@@ -95,30 +95,38 @@ function forwarder(
       else output.write(chunk, complete);
     });
   }
+  async function drainChunk(bytes: Buffer, length: number) {
+    if (input.readableLength) {
+      // read() emits data synchronously through the normal masking handler.
+      // libuv may have buffered more bytes while a previous write completed;
+      // consume those before reading the fd directly to preserve byte order.
+      const chunk = input.read(
+        Math.min(input.readableLength, length),
+      ) as Buffer;
+      await written(Buffer.alloc(0));
+      return chunk.length;
+    }
+    if (input.destroyed) return 0;
+    const size = readAvailable(fd, bytes, length);
+    // Wait for each write, including backpressure, before taking more data.
+    if (size) await written(masking.push(bytes.subarray(0, size)));
+    return size;
+  }
   async function drain(remaining: number) {
     const bytes = Buffer.alloc(64 * 1024);
-    while (!stopped && remaining > 0) {
-      if (input.readableLength) {
-        // read() emits data synchronously through the normal masking handler.
-        // libuv may have buffered more bytes while a previous write completed;
-        // consume those before reading the fd directly to preserve byte order.
-        const chunk = input.read(
-          Math.min(input.readableLength, remaining),
-        ) as Buffer;
-        remaining -= chunk.length;
-        await written(Buffer.alloc(0));
-      } else {
-        if (input.destroyed) return;
-        const size = readAvailable(
-          fd,
-          bytes,
-          Math.min(bytes.length, remaining),
-        );
-        if (!size) return;
-        remaining -= size;
-        // Wait for each write, including backpressure, before taking more data.
-        await written(masking.push(bytes.subarray(0, size)));
+    const longest = values[0]?.bytes.length ?? 0;
+    // A held tail starts before the boundary while it exceeds the bytes read
+    // past it. At most one longest value of lookahead resolves those bytes.
+    while (!stopped && remaining + masking.pendingBytes > 0) {
+      const length = remaining > 0 ? remaining : longest + remaining;
+      const size = await drainChunk(bytes, Math.min(bytes.length, length));
+      if (!size) {
+        // EAGAIN/EOF confirms the flush. A background writer pausing mid-value
+        // exactly here is the accepted best-effort gap: release its held tail.
+        await written(masking.end());
+        return;
       }
+      remaining -= size;
     }
   }
   return {
@@ -132,7 +140,6 @@ function forwarder(
       const remaining = input.readableLength + bound;
       await written(Buffer.alloc(0));
       await drain(remaining);
-      await written(masking.end());
       flushing = false;
       if (!stopped) input.resume();
     },
