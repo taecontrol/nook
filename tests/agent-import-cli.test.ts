@@ -6,6 +6,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { parse } from 'dotenv';
 import { expect, it } from 'vitest';
 import { validateSecretName } from '../packages/contract/src/index.ts';
@@ -638,22 +639,35 @@ it.each([
         '\n',
       ),
     );
-    const transport = await proxy((_attempt, body) =>
-      JSON.parse(body.toString()).name === 'KEY_0'
-        ? { status, body: { _tag: tag, message: 'Public bucket refusal.' } }
-        : undefined,
+    // KEY_1 and KEY_2 answer only after KEY_0's refusal, so the refusal is
+    // the first answer and its freed slot is the only one a new create could use.
+    const refused = deferred();
+    const transport = await proxy(
+      (_attempt, body) => {
+        if (JSON.parse(body.toString()).name !== 'KEY_0') return undefined;
+        refused.resolve();
+        return {
+          status,
+          body: { _tag: tag, message: 'Public bucket refusal.' },
+        };
+      },
+      async () => {
+        await refused.promise;
+        await sleep(300);
+        return undefined;
+      },
     );
     try {
       const result = await importFile();
       expect(result.status).toBe(1);
-      expect(transport.bodies.length).toBeLessThanOrEqual(3);
+      expect(names(transport)).toEqual(['KEY_0', 'KEY_1', 'KEY_2']);
       expectOutput(result.stdout, 'failed  KEY_0');
-      expectOutput(result.stdout, 'not tried  KEY_6');
-      const stored = await secretRows(app);
-      expect(stored).toHaveLength(transport.bodies.length - 1);
-      for (const row of stored)
-        expectOutput(result.stdout, `created  ${row.name}`);
-      expect(await auditRows(app)).toHaveLength(stored.length);
+      expectOutput(result.stdout, 'created  KEY_1');
+      expectOutput(result.stdout, 'created  KEY_2');
+      for (let i = 3; i < 7; i++)
+        expectOutput(result.stdout, `not tried  KEY_${i}`);
+      expect(await secretRows(app)).toHaveLength(2);
+      expect(await auditRows(app)).toHaveLength(2);
     } finally {
       await transport.close();
     }
@@ -700,35 +714,53 @@ it.each([
 
 it('E3/state: concurrent existing names are reported and mapped, while other definitive refusals continue', async () => {
   await envFile(
-    `EXISTS=${privateValue()}\nREFUSED=${privateValue()}\nREADY=${privateValue()}`,
+    `REFUSED=${privateValue()}\nREADY=${privateValue()}\nHELD=${privateValue()}\nEXISTS=${privateValue()}`,
   );
-  const transport = await proxy((_attempt, body) => {
-    const { name } = JSON.parse(body.toString());
-    return name === 'EXISTS'
-      ? {
-          status: 409,
-          body: { _tag: 'SecretExists', message: 'Already exists.' },
-        }
-      : name === 'REFUSED'
+  // READY and HELD answer only once EXISTS arrives, and EXISTS can only start
+  // in the slot REFUSED freed, so a per-key refusal must not stop new creates.
+  const later = deferred();
+  const transport = await proxy(
+    (_attempt, body) => {
+      const { name } = JSON.parse(body.toString());
+      if (name === 'EXISTS') later.resolve();
+      return name === 'EXISTS'
         ? {
-            status: 400,
-            body: { _tag: 'InvalidSecret', message: 'Public per-key refusal.' },
+            status: 409,
+            body: { _tag: 'SecretExists', message: 'Already exists.' },
           }
-        : undefined;
-  });
+        : name === 'REFUSED'
+          ? {
+              status: 400,
+              body: {
+                _tag: 'InvalidSecret',
+                message: 'Public per-key refusal.',
+              },
+            }
+          : undefined;
+    },
+    async () => {
+      await later.promise;
+      return undefined;
+    },
+  );
   try {
     const result = await importFile();
     expect(result.status).toBe(1);
+    expect(names(transport)).toEqual(['REFUSED', 'READY', 'HELD', 'EXISTS']);
     expectOutput(
       result.stdout,
       'exists   EXISTS  already in work/acme; not changed',
     );
     expectOutput(result.stdout, 'failed  REFUSED  Public per-key refusal.');
-    expectOutput(result.stdout, '1 created, 1 already existed, 1 failed.');
+    expectOutput(result.stdout, '2 created, 1 already existed, 1 failed.');
     expect(mapping(result.stdout)).toEqual({
-      secrets: { EXISTS: 'work/acme/EXISTS', READY: 'work/acme/READY' },
+      secrets: {
+        READY: 'work/acme/READY',
+        HELD: 'work/acme/HELD',
+        EXISTS: 'work/acme/EXISTS',
+      },
     });
-    expect(await auditRows(app)).toHaveLength(1);
+    expect(await auditRows(app)).toHaveLength(2);
   } finally {
     await transport.close();
   }
