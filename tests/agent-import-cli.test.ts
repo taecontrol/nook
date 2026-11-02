@@ -502,11 +502,17 @@ it('E12/E13: three retryable failures leave one key unconfirmed, continue others
       3,
     );
     expect(await auditRows(app)).toHaveLength(2);
-    await configure(app.origin);
-    const rerun = await importFile();
-    expect(rerun.status).toBe(0);
-    expectOutput(rerun.stdout, '1 created, 2 already existed.');
-    expect(await auditRows(app)).toHaveLength(3);
+    // The rerun reaches the Worker through a fresh, fault-free origin.
+    const healthy = await proxy();
+    try {
+      const rerun = await importFile();
+      expect(rerun.status).toBe(0);
+      expectOutput(rerun.stdout, '1 created, 2 already existed.');
+      expect(names(healthy)).toEqual(['FAILED']);
+      expect(await auditRows(app)).toHaveLength(3);
+    } finally {
+      await healthy.close();
+    }
   } finally {
     await transport.close();
   }
@@ -539,14 +545,20 @@ it.each(['SIGINT', 'SIGTERM'] as const)(
       const result = record(await command.done);
       expect(result.status).toBe(signal === 'SIGINT' ? 130 : 143);
       held.resolve();
-      await configure(app.origin);
-      const rerun = await importFile();
-      expect(rerun.status).toBe(0);
-      expectOutput(
-        rerun.stdout,
-        'exists   KEY  already in work/acme; not changed',
-      );
-      expect(await auditRows(app)).toHaveLength(1);
+      // The rerun reaches the Worker through a fresh, fault-free origin.
+      const healthy = await proxy();
+      try {
+        const rerun = await importFile();
+        expect(rerun.status).toBe(0);
+        expectOutput(
+          rerun.stdout,
+          'exists   KEY  already in work/acme; not changed',
+        );
+        expect(healthy.bodies).toHaveLength(0);
+        expect(await auditRows(app)).toHaveLength(1);
+      } finally {
+        await healthy.close();
+      }
     } finally {
       held.resolve();
       await command.kill();
