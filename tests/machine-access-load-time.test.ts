@@ -4,6 +4,7 @@ import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { measureScreen, phonePage } from '../scripts/load-time-browser.ts';
 import { jsonRequest, ownerRuntime } from './support/authorizations.ts';
 import { issueGrant, seedGrantTree } from './support/grants.ts';
+import { deferred } from './support/machines.ts';
 import { runtime, type TestRuntime } from './support/runtime.ts';
 
 let app: TestRuntime;
@@ -222,6 +223,63 @@ async function assertInterval(page: Page, returned: number) {
   );
   expect(observed.qualifiedFrames).toBeGreaterThanOrEqual(2);
 }
+
+// Runs a step of a test while its measurement is pending.
+async function whileMeasuring<T>(
+  _page: Page,
+  _measurement: Promise<unknown>,
+  step: () => Promise<T>,
+) {
+  return step();
+}
+
+it('#100: a measurement that fails before the click fails the test at once with page evidence', async () => {
+  const { context, page } = await phonePage(browser, 'machineAccessNavigation');
+  const preload = deferred();
+  try {
+    await page.addInitScript(() => {
+      console.error('synthetic console error');
+      setTimeout(() => {
+        throw new Error('synthetic page error');
+      });
+    });
+    await page.route('**/api/buckets', async (route) => {
+      await preload.promise;
+      await route.abort().catch(() => {});
+    });
+    const measurement = measureScreen(
+      page,
+      app.origin,
+      '',
+      'machineAccessNavigation',
+      { preloadTimeout: 1_000 },
+    );
+    void measurement.catch(() => {});
+    const started = performance.now();
+    const failure = await whileMeasuring(page, measurement, () =>
+      page.getByRole('dialog', { name: 'Edit access', exact: true }).waitFor(),
+    ).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(performance.now() - started).toBeLessThan(10_000);
+    expect(failure).toBe(await measurement.catch((error: unknown) => error));
+    const message = failure instanceof Error ? failure.message : '';
+    expect(message).toContain(
+      'Intent preload did not reach 500 ms of network quiet.',
+    );
+    expect(message).toMatch(
+      new RegExp(`GET ${app.origin}/api/buckets, pending for \\d+ ms`),
+    );
+    expect(message).toContain('document.readyState: complete');
+    expect(message).toContain('#root: rendered');
+    expect(message).toContain('synthetic console error');
+    expect(message).toContain('synthetic page error');
+  } finally {
+    preload.resolve();
+    await context.close();
+  }
+});
 
 it.each(['left', 'right', 'top', 'bottom', 'absent'] as const)(
   'E17: timing stays pending until the rendered tree enters the viewport: %s',
