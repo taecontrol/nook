@@ -17,6 +17,9 @@ if (!home) throw new Error('The refill fixture requires a private HOME.');
 const requests = openSync(resolve(home, 'refill-requests'), 'r+');
 const replies = openSync(resolve(home, 'refill-replies'), 'r+');
 const read = fs.readSync;
+const { maximumTailBytes } = JSON.parse(
+  readFileSync(resolve(home, 'continuous-output'), 'utf8'),
+) as { maximumTailBytes: number };
 const maximum = Number(
   process.platform === 'linux'
     ? readFileSync('/proc/sys/fs/pipe-max-size', 'utf8')
@@ -49,9 +52,10 @@ fs.readSync = ((
     size = read(fd, bytes, offset, length, position);
   }
   transferred += size;
-  if (transferred > maximum) {
-    // A byte boundary from the OS, not a timeout or a repetition budget. Let
-    // the broken implementation finish so its regression fails by assertion.
+  if (transferred > maximum + maximumTailBytes) {
+    // The OS byte boundary plus at most one value to resolve a straddling tail,
+    // not a timeout or a repetition budget. Let a broken implementation finish
+    // so its regression fails by assertion.
     writeFileSync(
       resolve(home, 'flush-overrun'),
       'Drain exceeded FIFO capacity.',

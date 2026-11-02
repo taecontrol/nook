@@ -88,7 +88,13 @@ if (mode === 'print-value') {
   const requests = openSync(resolve(expected, 'refill-requests'), 'r');
   const replies = openSync(resolve(expected, 'refill-replies'), 'w');
   writeFileSync(resolve(expected, 'writer-ready'), 'x');
-  const record = Buffer.alloc(512, 46);
+  const configuration = JSON.parse(
+    readFileSync(resolve(expected, 'continuous-output'), 'utf8'),
+  ) as { record: string };
+  const record =
+    configuration.record === 'unpadded'
+      ? Buffer.from(value())
+      : Buffer.alloc(512, 46);
   Buffer.from(value()).copy(record);
   let offset = 0;
   const next = (size: number) => {
@@ -122,7 +128,8 @@ if (mode === 'print-value') {
   });
   const pump = () => {
     if (stopped) process.stdout.write('after:' + value());
-    else process.stdout.write(next(record.length), pump);
+    // Small writes can complete synchronously: let SIGTERM reach its handler.
+    else process.stdout.write(next(record.length), () => setImmediate(pump));
   };
   pump();
 } else if (mode === 'background') {
