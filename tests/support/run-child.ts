@@ -132,13 +132,44 @@ if (mode === 'print-value') {
     else process.stdout.write(next(record.length), () => setImmediate(pump));
   };
   pump();
-} else if (mode === 'background') {
-  spawn(process.execPath, [process.argv[1], 'background-writer', expected], {
-    detached: true,
-    stdio: 'inherit',
-  }).unref();
+} else if (mode === 'background' || mode === 'background-epipe') {
+  spawn(
+    process.execPath,
+    [
+      process.argv[1],
+      mode === 'background' ? 'background-writer' : 'epipe-writer',
+      expected,
+    ],
+    { detached: true, stdio: 'inherit' },
+  ).unref();
   writeSync(1, 'before:' + value() + ':tail' + value().slice(0, 8));
   process.exitCode = 3;
+} else if (mode === 'epipe-writer' || mode === 'killed-parent') {
+  const events = openSync(resolve(expected, 'lifecycle-events'), 'w');
+  const commands = openSync(resolve(expected, 'lifecycle-commands'), 'r');
+  if (mode === 'killed-parent')
+    writeSync(1, 'before:' + value() + ':tail' + value().slice(0, 8));
+  writeSync(
+    events,
+    mode === 'epipe-writer' ? 'writer-ready\n' : 'child-ready\n',
+  );
+  const command = Buffer.alloc(1);
+  let writes = 0;
+  while (readSync(commands, command, 0, 1, null) && command[0] !== 120) {
+    let result = 'accepted';
+    try {
+      writeSync(1, 'after:' + value());
+    } catch (error) {
+      result = (error as NodeJS.ErrnoException).code ?? 'unknown';
+    }
+    if (++writes === 1) writeSync(events, 'write-ok\n');
+    else {
+      writeFileSync(resolve(expected, 'second-write'), result);
+      writeSync(events, 'second-write\n');
+    }
+  }
+  if (mode === 'killed-parent') writeSync(2, 'after:' + value());
+  writeSync(events, 'writer-done\n');
 } else if (mode === 'background-writer') {
   writeFileSync(resolve(expected, 'writer-pid'), String(process.pid));
   readSync(

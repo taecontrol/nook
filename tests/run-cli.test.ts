@@ -103,6 +103,37 @@ async function outputProbe(mode: string, args: string[]) {
     stderrClosed: report.stderrClosed,
   };
 }
+async function lifecycleProbe(
+  mode: string,
+  args: string[],
+  beforeBytes: number,
+) {
+  await writeFile(
+    resolve(keyring.home, 'observe-lifecycle'),
+    JSON.stringify({ beforeBytes }),
+  );
+  const result = await keyring.command(
+    process.execPath,
+    [
+      resolve('tests/support/run-output-lifecycle.ts'),
+      mode,
+      resolve(testBuild, 'cli.js'),
+      ...args,
+    ],
+    { ...coverageEnvironment(), ...relaySeam() },
+  ).done;
+  expect(result.status).toBe(0);
+  expect(result.stderr === '').toBe(true);
+  return JSON.parse(result.stdout) as {
+    status: number | null;
+    signal: NodeJS.Signals | null;
+    stdout: string;
+    atExit: string;
+    outputClosed: boolean;
+    relayExited: boolean;
+    secondWrite?: string;
+  };
+}
 async function addValue(name: string, value: string) {
   expect((await createSecret(app, secretInput({ name, value }))).status).toBe(
     201,
@@ -1151,6 +1182,35 @@ it('Masking E14: head closes its pipe, yes gets SIGPIPE and run exits 141', asyn
   expect(result.stdout.equals(Buffer.from('y\n'))).toBe(true);
   expect(result.stderr.length).toBe(0);
 });
+it('Masking E14/E16: EPIPE after the blocking-reader switch closes the FIFO and exits with an idle writer', async () => {
+  const before = `before:${marker}:tail${app.input.value.slice(0, 8)}`;
+  const result = await lifecycleProbe(
+    'epipe',
+    maskingArgs('background-epipe', [keyring.home]),
+    Buffer.byteLength(before),
+  );
+  expect(result.status).toBe(3);
+  expect(Buffer.from(result.atExit, 'base64').toString()).toBe(before);
+  expect(result.secondWrite).toBe('EPIPE');
+  expect(result.outputClosed).toBe(true);
+  expect(result.relayExited).toBe(true);
+});
+it('Masking E16: killing run implicitly flushes a held prefix and exits the relay after the child closes', async () => {
+  const before = `before:${marker}:tail${app.input.value.slice(0, 8)}`;
+  const result = await lifecycleProbe(
+    'killed',
+    maskingArgs('killed-parent', [keyring.home]),
+    Buffer.byteLength(before),
+  );
+  expect(result.status).toBeNull();
+  expect(result.signal).toBe('SIGKILL');
+  expect(Buffer.from(result.atExit, 'base64').toString()).toBe(before);
+  expect(Buffer.from(result.stdout, 'base64').toString()).toBe(
+    before + `after:${marker}`,
+  );
+  expect(result.outputClosed).toBe(true);
+  expect(result.relayExited).toBe(true);
+});
 it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
   'Masking E15: %s keeps forwarding and the child status',
   async (signal) => {
@@ -1322,18 +1382,16 @@ it.each([false, true])(
     await writeFile(command, '#!/nook-fixture-absent\n', { mode: 0o700 });
     const args = runArgs([command]);
     if (disabled) args.splice(1, 0, '--no-masking');
-    const result = await keyring.start(args).done;
+    const result = await lifecycleProbe('spawn-failure', args, 0);
     expect(result.status).toBe(127);
-    expectOutput(
-      result.stdout + result.stderr,
-      `Command not found: ${command}`,
-      true,
+    expect(result.outputClosed).toBe(true);
+    expect(result.relayExited).toBe(!disabled);
+    expect(existsSync(resolve(keyring.home, 'flush-requested'))).toBe(
+      !disabled,
     );
-    expectNoValue(result.stdout + result.stderr, [
-      app.input.value,
-      app.key,
-      app.token,
-    ]);
+    const output = Buffer.from(result.stdout, 'base64').toString();
+    expectOutput(output, `Command not found: ${command}`, true);
+    expectNoValue(output, [app.input.value, app.key, app.token]);
   },
 );
 it('Masking E18: a relay lost during value delivery refuses the child with fixed private output', async () => {

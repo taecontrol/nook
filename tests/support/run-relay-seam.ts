@@ -14,9 +14,17 @@ children.spawn = ((file: string, args: string[], options: SpawnOptions) => {
     throw new Error('fixture-start-failure');
   const refill = new URL('./run-relay-refill.ts', import.meta.url);
   refill.searchParams.set('home', home);
-  const relayArgs = existsSync(resolve(home, 'continuous-output'))
-    ? [`--import=${refill.href}`, ...args]
-    : args;
+  const lifecycle = new URL('./run-relay-lifecycle.ts', import.meta.url);
+  lifecycle.searchParams.set('home', home);
+  const relayArgs = [
+    ...(existsSync(resolve(home, 'continuous-output'))
+      ? [`--import=${refill.href}`]
+      : []),
+    ...(existsSync(resolve(home, 'observe-lifecycle'))
+      ? [`--import=${lifecycle.href}`]
+      : []),
+    ...args,
+  ];
   const child = original(
     existsSync(resolve(home, 'unavailable-relay'))
       ? '/nook-fixture-absent-relay'
@@ -28,6 +36,17 @@ children.spawn = ((file: string, args: string[], options: SpawnOptions) => {
     resolve(home, 'relay-launch'),
     JSON.stringify({ args: relayArgs, env: options.env, pid: child.pid }),
   );
+  if (existsSync(resolve(home, 'observe-lifecycle'))) {
+    const control = child.stdio[3];
+    if (control && 'write' in control) {
+      const write = control.write.bind(control);
+      control.write = (...parameters: Parameters<typeof control.write>) => {
+        if (String(parameters[0]).includes('"type":"flush"'))
+          writeFileSync(resolve(home, 'flush-requested'), 'x');
+        return write(...parameters);
+      };
+    }
+  }
   if (existsSync(resolve(home, 'break-delivery'))) {
     const control = child.stdio[3];
     if (control && 'write' in control)
