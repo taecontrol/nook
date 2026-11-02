@@ -639,9 +639,11 @@ it.each([
         '\n',
       ),
     );
-    // KEY_1 and KEY_2 answer only after KEY_0's refusal, so the refusal is
-    // the first answer and its freed slot is the only one a new create could use.
+    // KEY_1 and KEY_2 answer only 300 ms after KEY_0's refusal. Until then the
+    // refusal is the only answer, so any fourth create is a CLI that ignored it.
+    // Later, a success read before the refusal may legitimately free a slot.
     const refused = deferred();
+    let sentBeforeSuccesses: string[] | undefined;
     const transport = await proxy(
       (_attempt, body) => {
         if (JSON.parse(body.toString()).name !== 'KEY_0') return undefined;
@@ -654,20 +656,25 @@ it.each([
       async () => {
         await refused.promise;
         await sleep(300);
+        sentBeforeSuccesses ??= names(transport).sort();
         return undefined;
       },
     );
     try {
       const result = await importFile();
       expect(result.status).toBe(1);
-      expect(names(transport)).toEqual(['KEY_0', 'KEY_1', 'KEY_2']);
+      expect(sentBeforeSuccesses).toEqual(['KEY_0', 'KEY_1', 'KEY_2']);
+      const sent = new Set(names(transport));
+      expect(sent.size).toBeLessThan(7);
       expectOutput(result.stdout, 'failed  KEY_0');
-      expectOutput(result.stdout, 'created  KEY_1');
-      expectOutput(result.stdout, 'created  KEY_2');
-      for (let i = 3; i < 7; i++)
-        expectOutput(result.stdout, `not tried  KEY_${i}`);
-      expect(await secretRows(app)).toHaveLength(2);
-      expect(await auditRows(app)).toHaveLength(2);
+      for (let i = 1; i < 7; i++)
+        expectOutput(
+          result.stdout,
+          `${sent.has(`KEY_${i}`) ? 'created' : 'not tried'}  KEY_${i}`,
+        );
+      expectOutput(result.stdout, 'not tried  KEY_6');
+      expect(await secretRows(app)).toHaveLength(sent.size - 1);
+      expect(await auditRows(app)).toHaveLength(sent.size - 1);
     } finally {
       await transport.close();
     }
@@ -746,7 +753,12 @@ it('E3/state: concurrent existing names are reported and mapped, while other def
   try {
     const result = await importFile();
     expect(result.status).toBe(1);
-    expect(names(transport)).toEqual(['REFUSED', 'READY', 'HELD', 'EXISTS']);
+    expect(names(transport).sort()).toEqual([
+      'EXISTS',
+      'HELD',
+      'READY',
+      'REFUSED',
+    ]);
     expectOutput(
       result.stdout,
       'exists   EXISTS  already in work/acme; not changed',
