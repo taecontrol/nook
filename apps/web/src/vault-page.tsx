@@ -23,7 +23,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -60,6 +59,7 @@ import { useLastValue } from './use-confirm-target';
 import { useVaultPage } from './use-vault-page';
 import { ImportNotice, WriteFeedback } from './vault-feedback';
 import { ancestorsOf, plural, type Secret, secretsIn } from './vault-model';
+import { SectionHeader } from './vault-parts';
 import { SecretSheet } from './vault-sheet';
 import { sectionLabel } from './vault-styles';
 
@@ -201,29 +201,6 @@ function SecretRow({
   );
 }
 
-function ListHeader({
-  id,
-  title,
-  count,
-}: {
-  id: string;
-  title: string;
-  count: number;
-}) {
-  return (
-    <div className="mb-2 flex h-8 items-center gap-2 border-b pr-4">
-      <h3 id={id} className={sectionLabel}>
-        {title}
-      </h3>
-      <Badge variant="secondary">{count}</Badge>
-      <span className="ml-auto hidden w-28 text-right text-xs text-muted-foreground sm:block">
-        Updated
-      </span>
-      <span className="hidden w-8 sm:block" />
-    </div>
-  );
-}
-
 function SecretsSkeleton() {
   return (
     <div role="status" aria-busy="true" aria-label="Loading secrets">
@@ -272,12 +249,12 @@ function Inherited({
   return (
     <section aria-labelledby="inherited-heading" className="mt-10">
       <div className="mb-3">
-        <div className="flex h-8 items-center gap-2 border-b pr-4">
-          <h3 id="inherited-heading" className={sectionLabel}>
-            Inherited
-          </h3>
-          <Badge variant="secondary">{total}</Badge>
-        </div>
+        <SectionHeader
+          id="inherited-heading"
+          title="Inherited"
+          count={total}
+          className="h-8 pr-4"
+        />
         <p className="mt-2 text-sm text-muted-foreground">
           {total === 0 ? (
             <>
@@ -520,7 +497,20 @@ function StoredSecrets({
     );
   return (
     <section aria-labelledby="stored-heading">
-      <ListHeader id="stored-heading" title="Stored here" count={own.length} />
+      <SectionHeader
+        id="stored-heading"
+        title="Stored here"
+        count={own.length}
+        className="mb-2 h-8 pr-4"
+        trailing={
+          <>
+            <span className="ml-auto hidden w-28 text-right text-xs text-muted-foreground sm:block">
+              Updated
+            </span>
+            <span className="hidden w-8 sm:block" />
+          </>
+        }
+      />
       <ul className="divide-y overflow-hidden rounded-lg border">
         {own.map((secret) => {
           const path = secretPath(secret);
