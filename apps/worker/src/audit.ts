@@ -1,12 +1,15 @@
 import { D1Client } from '@effect/sql-d1';
 import {
+  type AgentSessionClaim,
   type AuditEntry,
   type AuditFilters,
   type BucketGrant,
   type FileAuditEntry,
   FileAuditOutcome,
   InvalidAuditFilter,
+  isClaimValue,
   type MemoryClient,
+  normalizeAgentSession,
   type Principal,
   type RunSecrets,
   splitSecretPath,
@@ -30,6 +33,9 @@ const MachineFacts = Facts.mapFields((fields) => ({
   machine_id: Schema.String,
   machine_name: Schema.String,
   working_directory: Schema.String,
+  agent: Schema.NullOr(Schema.String),
+  agent_session: Schema.NullOr(Schema.String),
+  agent_thread: Schema.NullOr(Schema.String),
 }));
 const Row = Schema.Union([
   MachineFacts.mapFields((fields) => ({
@@ -149,6 +155,14 @@ function entry(row: Row): AuditEntry {
     ...facts,
     machine: { id: row.machine_id, name: row.machine_name },
     workingDirectory: row.working_directory,
+    agentSession:
+      row.agent !== null && row.agent_session !== null
+        ? {
+            agent: row.agent,
+            session: row.agent_session,
+            ...(row.agent_thread !== null ? { thread: row.agent_thread } : {}),
+          }
+        : null,
   };
   return row.outcome === 'created'
     ? { ...machineFacts, outcome: row.outcome }
@@ -180,22 +194,34 @@ function decodeCursor(cursor?: string) {
     throw new InvalidAuditFilter();
   return decoded;
 }
+function invalidFilters(input: AuditFilters) {
+  return (
+    (input.bucket && validateBucketPath(input.bucket)) ||
+    (input.secret && validateSecretPath(input.secret)) ||
+    (input.session !== undefined && !isClaimValue(input.session))
+  );
+}
 function filters(input: AuditFilters) {
   return Effect.try({
     try: () => {
-      if (
-        (input.bucket && validateBucketPath(input.bucket)) ||
-        (input.secret && validateSecretPath(input.secret))
-      )
-        throw new InvalidAuditFilter();
+      if (invalidFilters(input)) throw new InvalidAuditFilter();
       return {
         bucket: input.bucket ?? '',
         secret: input.secret ?? '',
+        session: input.session,
         cursor: decodeCursor(input.cursor),
       };
     },
     catch: () => new InvalidAuditFilter(),
   });
+}
+export function claimColumns(claim: AgentSessionClaim | undefined) {
+  const normalized = normalizeAgentSession(claim);
+  return {
+    agent: normalized?.agent ?? null,
+    agent_session: normalized?.session ?? null,
+    agent_thread: normalized?.thread ?? null,
+  };
 }
 export const auditStore = Effect.gen(function* () {
   const sql = yield* D1Client.D1Client;
@@ -216,11 +242,12 @@ export const auditStore = Effect.gen(function* () {
     ) => {
       const run = crypto.randomUUID();
       const at = new Date().toISOString();
+      const claim = claimColumns(input.agentSession);
       return sql
         .batch(
           paths.map(
             (path) =>
-              sql`INSERT INTO audit_entries(id, at, outcome, path, bucket, purpose, machine_id, machine_name, working_directory, executable, run_id) VALUES (${crypto.randomUUID()}, ${at}, ${outcome}, ${path}, ${splitSecretPath(path).bucket}, ${input.purpose}, ${machine.id}, ${machine.machine}, ${input.workingDirectory}, ${input.executable}, ${run})`,
+              sql`INSERT INTO audit_entries(id, at, outcome, path, bucket, purpose, machine_id, machine_name, working_directory, executable, run_id, agent, agent_session, agent_thread) VALUES (${crypto.randomUUID()}, ${at}, ${outcome}, ${path}, ${splitSecretPath(path).bucket}, ${input.purpose}, ${machine.id}, ${machine.machine}, ${input.workingDirectory}, ${input.executable}, ${run}, ${claim.agent}, ${claim.agent_session}, ${claim.agent_thread})`,
           ),
         )
         .pipe(unavailable, Effect.asVoid);
@@ -229,12 +256,14 @@ export const auditStore = Effect.gen(function* () {
       Effect.gen(function* () {
         if (grant !== 'all')
           return yield* Effect.fail(new HttpApiError.Forbidden());
-        const { bucket, secret, cursor } = yield* filters(input);
+        const { bucket, secret, session, cursor } = yield* filters(input);
         const boundary = cursor
           ? sql`(at < ${cursor.at} OR (at = ${cursor.at} AND id < ${cursor.id}))`
           : sql`1`;
+        const sessionFilter =
+          session !== undefined ? sql`agent_session = ${session}` : sql`1`;
         const rows =
-          yield* sql`SELECT * FROM audit_entries WHERE (${bucket} = '' OR bucket=${bucket} OR bucket LIKE ${`${bucket}/%`}) AND (${secret} = '' OR path = ${secret}) AND ${boundary} ORDER BY at DESC, id DESC LIMIT 26`.pipe(
+          yield* sql`SELECT * FROM audit_entries WHERE (${bucket} = '' OR bucket=${bucket} OR bucket LIKE ${`${bucket}/%`}) AND (${secret} = '' OR path = ${secret}) AND ${sessionFilter} AND ${boundary} ORDER BY at DESC, id DESC LIMIT 26`.pipe(
             unavailable,
           );
         const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(AnyRow))(

@@ -1,5 +1,6 @@
 import { NodeServices } from '@effect/platform-node';
 import { Effect, Redacted } from 'effect';
+import { resolveAgentSession } from './agent-session.ts';
 import {
   CliFailure,
   networkError,
@@ -41,11 +42,15 @@ export function run(
         parseRun(args, workingDirectory, project),
       );
       const file = yield* resolveCommand(parsed.command[0]);
+      const agentSession = resolveAgentSession((name) => process.env[name]);
       const { url, request } = yield* session(host);
       const delivered = yield* request((api, headers) =>
         api.machine.values({
           headers,
-          payload: parsed.input,
+          payload: {
+            ...parsed.input,
+            ...(agentSession ? { agentSession } : {}),
+          },
         }),
       ).pipe(Effect.mapError(runFailure));
       const values = new Map(
