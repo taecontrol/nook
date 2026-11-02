@@ -1,3 +1,5 @@
+CREATE INDEX audit_entries_agent_session
+  ON audit_entries(agent_session, at DESC, id DESC) WHERE agent_session IS NOT NULL;
 CREATE INDEX audit_entries_bucket ON audit_entries(bucket, at DESC, id DESC);
 CREATE INDEX audit_entries_chronology ON audit_entries(at DESC, id DESC);
 CREATE INDEX audit_entries_secret ON audit_entries(path, at DESC, id DESC);
@@ -26,6 +28,16 @@ CREATE TABLE "audit_entries" (
   replaced_sha256 TEXT,
   client_name TEXT,
   client_version TEXT,
+  agent TEXT CHECK (agent IS NULL OR (
+    outcome IN ('delivered','denied','created')
+    AND length(agent) BETWEEN 1 AND 32 AND agent NOT GLOB '*[^a-z0-9-]*')),
+  agent_session TEXT CHECK (
+    (agent IS NULL) = (agent_session IS NULL)
+    AND (agent_session IS NULL OR (length(agent_session) BETWEEN 1 AND 200
+         AND agent_session NOT GLOB '*[^A-Za-z0-9._:~-]*'))),
+  agent_thread TEXT CHECK (agent_thread IS NULL OR (
+    agent_session IS NOT NULL AND agent_thread <> agent_session
+    AND length(agent_thread) BETWEEN 1 AND 200 AND agent_thread NOT GLOB '*[^A-Za-z0-9._:~-]*')),
   CHECK (
     (path IS NOT NULL AND purpose IS NOT NULL
       AND memory_id IS NULL AND file_name IS NULL AND file_size IS NULL

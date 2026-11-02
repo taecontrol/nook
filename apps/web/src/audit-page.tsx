@@ -11,8 +11,6 @@ import {
   ChevronRight,
   CircleCheck,
   Eye,
-  History,
-  SearchX,
   ShieldX,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -23,14 +21,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from '@/components/ui/empty';
 import { Item } from '@/components/ui/item';
 import { Label } from '@/components/ui/label';
 import {
@@ -44,6 +34,16 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { describeFailure } from './api-client';
 import { type AuditFilters, auditOptions } from './audit-api';
+import {
+  AgentSessionActivity,
+  AgentSessionFact,
+  AgentSourceLine,
+  claimOf,
+  NoAuditEntries,
+  SessionFilterNote,
+  SessionFilterValue,
+  sessionAgent,
+} from './audit-session';
 import { useBucketList } from './buckets-api';
 import { LoadFailure } from './failure';
 import { useMachineList } from './machines-api';
@@ -104,6 +104,7 @@ function Filters({
     const bucket = value === allBuckets ? undefined : value;
     return {
       bucket,
+      session: filters.session,
       secret:
         filters.secret && inBucket(filters.secret, bucket)
           ? filters.secret
@@ -116,90 +117,100 @@ function Filters({
   });
   const preload = (next: AuditFilters) =>
     void queries.prefetchInfiniteQuery(auditOptions(next));
+  const agent = sessionAgent(entries, filters.session);
   return (
-    <div className="sticky top-16 z-10 mb-4 border-b bg-background py-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:max-w-64">
-          <Label htmlFor="audit-bucket">Bucket</Label>
-          <Select
-            value={filters.bucket ?? allBuckets}
-            onValueChange={(value) =>
-              void navigate({ search: changeBucket(value) })
-            }
-          >
-            <SelectTrigger id="audit-bucket" className="w-full min-w-0">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent position="popper" className="w-80 sm:w-96">
-              <SelectItem
-                value={allBuckets}
-                onPointerEnter={() => preload(changeBucket(allBuckets))}
-              >
-                All buckets
-              </SelectItem>
-              {bucketPaths.map((path) => (
+    <>
+      <div className="sticky top-16 z-10 mb-4 border-b bg-background py-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:max-w-64">
+            <Label htmlFor="audit-bucket">Bucket</Label>
+            <Select
+              value={filters.bucket ?? allBuckets}
+              onValueChange={(value) =>
+                void navigate({ search: changeBucket(value) })
+              }
+            >
+              <SelectTrigger id="audit-bucket" className="w-full min-w-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent position="popper" className="w-80 sm:w-96">
                 <SelectItem
-                  key={path}
-                  value={path}
-                  className="w-72 sm:w-80"
-                  onPointerEnter={() => preload(changeBucket(path))}
+                  value={allBuckets}
+                  onPointerEnter={() => preload(changeBucket(allBuckets))}
                 >
-                  <span className="min-w-0 font-mono text-xs break-all">
-                    {path}
-                  </span>
+                  All buckets
                 </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:max-w-96">
-          <Label htmlFor="audit-secret">Secret</Label>
-          <Select
-            value={filters.secret ?? 'all'}
-            onValueChange={(value) =>
-              void navigate({ search: changeSecret(value) })
-            }
-          >
-            <SelectTrigger id="audit-secret" className="w-full min-w-0">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent position="popper" className="w-80 sm:w-96">
-              <SelectItem
-                value="all"
-                onPointerEnter={() => preload(changeSecret('all'))}
-              >
-                All secrets
-              </SelectItem>
-              {secretPaths.map((path) => (
+                {bucketPaths.map((path) => (
+                  <SelectItem
+                    key={path}
+                    value={path}
+                    className="w-72 sm:w-80"
+                    onPointerEnter={() => preload(changeBucket(path))}
+                  >
+                    <span className="min-w-0 font-mono text-xs break-all">
+                      {path}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:max-w-96">
+            <Label htmlFor="audit-secret">Secret</Label>
+            <Select
+              value={filters.secret ?? 'all'}
+              onValueChange={(value) =>
+                void navigate({ search: changeSecret(value) })
+              }
+            >
+              <SelectTrigger id="audit-secret" className="w-full min-w-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent position="popper" className="w-80 sm:w-96">
                 <SelectItem
-                  key={path}
-                  value={path}
-                  className="w-72 sm:w-80"
-                  onPointerEnter={() => preload(changeSecret(path))}
+                  value="all"
+                  onPointerEnter={() => preload(changeSecret('all'))}
                 >
-                  <span className="min-w-0 font-mono text-xs break-all">
-                    {path}
-                  </span>
+                  All secrets
                 </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+                {secretPaths.map((path) => (
+                  <SelectItem
+                    key={path}
+                    value={path}
+                    className="w-72 sm:w-80"
+                    onPointerEnter={() => preload(changeSecret(path))}
+                  >
+                    <span className="min-w-0 font-mono text-xs break-all">
+                      {path}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {(filters.bucket || filters.secret) && (
+            <Button variant="ghost" size="sm" asChild>
+              <Link to="/audit" search={{}}>
+                Clear filters
+              </Link>
+            </Button>
+          )}
         </div>
-        {(filters.bucket || filters.secret) && (
-          <Button variant="ghost" size="sm" asChild>
-            <Link to="/audit" search={{}}>
-              Clear filters
-            </Link>
-          </Button>
+        {filters.bucket && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Includes buckets inside{' '}
+            <span className="font-mono wrap-anywhere">{filters.bucket}</span>.
+          </p>
         )}
+        <SessionFilterNote
+          session={filters.session}
+          agent={agent}
+          clear={{ bucket: filters.bucket, secret: filters.secret }}
+          empty={entries.length === 0}
+        />
       </div>
-      {filters.bucket && (
-        <p className="mt-2 text-xs text-muted-foreground">
-          Includes buckets inside{' '}
-          <span className="font-mono wrap-anywhere">{filters.bucket}</span>.
-        </p>
-      )}
-    </div>
+      <SessionFilterValue session={filters.session} agent={agent} />
+    </>
   );
 }
 
@@ -326,19 +337,14 @@ function Entry({
               </p>
               <p className="mt-1 truncate text-xs text-muted-foreground lg:hidden">
                 {machineName}
-                {executable && ` · ${executable}`}
+                <AgentSourceLine entry={entry} executable={executable} phone />
               </p>
             </div>
             <div className="hidden w-40 min-w-0 shrink-0 lg:block">
               <p className="truncate text-sm" title={machineName}>
                 {machineName}
               </p>
-              <p
-                className="truncate font-mono text-xs text-muted-foreground"
-                title={executable}
-              >
-                {executable}
-              </p>
+              <AgentSourceLine entry={entry} executable={executable} />
             </div>
           </div>
           <CollapsibleTrigger asChild>
@@ -427,6 +433,7 @@ function EntryDetails({
             <div className="min-w-0 sm:col-span-2 lg:col-span-3">
               <Fact label="Purpose">{entry.purpose}</Fact>
             </div>
+            <AgentSessionFact claim={entry.agentSession} />
             <div className="min-w-0 sm:col-span-2">
               <Fact label="Working directory">
                 <span className="font-mono">{entry.workingDirectory}</span>
@@ -456,6 +463,7 @@ function EntryDetails({
             Activity in this bucket
           </Link>
         </Button>
+        <AgentSessionActivity entry={entry} />
       </div>
     </div>
   );
@@ -542,38 +550,6 @@ function Loading() {
     </div>
   );
 }
-function NoEntries({ filtered }: { filtered: boolean }) {
-  return (
-    <div className="rounded-lg border border-dashed">
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            {filtered ? <SearchX /> : <History />}
-          </EmptyMedia>
-          <EmptyTitle>
-            {filtered
-              ? 'No activity matches these filters'
-              : 'No secret activity yet'}
-          </EmptyTitle>
-          <EmptyDescription>
-            {filtered
-              ? 'Try another bucket or secret, or return to all activity.'
-              : 'When a machine uses a secret through nook run or stores one through nook vault create, or you reveal a value in the web app, it appears here. Denied uses appear here too.'}
-          </EmptyDescription>
-        </EmptyHeader>
-        {filtered && (
-          <EmptyContent>
-            <Button variant="outline" size="sm" asChild>
-              <Link to="/audit" search={{}}>
-                Clear filters
-              </Link>
-            </Button>
-          </EmptyContent>
-        )}
-      </Empty>
-    </div>
-  );
-}
 export function AuditPage() {
   const filters = useSearch({ from: '/owner/audit' });
   const query = useAuditEntries(filters);
@@ -593,8 +569,8 @@ export function AuditPage() {
       </h1>
       <p className="max-w-2xl text-sm text-muted-foreground">
         Every secret use, creation, and reveal, newest first. Review what
-        happened, why, and by which machine. File attachments, replacements,
-        downloads, detaches and forgetting appear here too.
+        happened, why, and by which machine and agent. File attachments,
+        replacements, downloads, detaches and forgetting appear here too.
       </p>
       <Filters
         filters={filters}
@@ -605,7 +581,7 @@ export function AuditPage() {
       <AuditResults
         query={query}
         entries={entries}
-        filtered={Boolean(filters.bucket || filters.secret)}
+        filters={filters}
         machines={machines.data}
         secrets={secrets.data}
       />
@@ -614,9 +590,7 @@ export function AuditPage() {
 }
 
 function useAuditEntries(filters: AuditFilters) {
-  return useInfiniteQuery(
-    auditOptions({ bucket: filters.bucket, secret: filters.secret }),
-  );
+  return useInfiniteQuery(auditOptions(filters));
 }
 function AuditLoadFailure({
   query,
@@ -651,13 +625,13 @@ function AuditLoadFailure({
 function AuditResults({
   query,
   entries,
-  filtered,
+  filters,
   machines,
   secrets,
 }: {
   query: ReturnType<typeof useAuditEntries>;
   entries: AuditEntry[];
-  filtered: boolean;
+  filters: AuditFilters;
   machines?: readonly { id: string }[];
   secrets?: readonly { path: string }[];
 }) {
@@ -670,7 +644,7 @@ function AuditResults({
     <>
       <AuditLoadFailure query={query} />
       {entries.length === 0 ? (
-        <NoEntries filtered={filtered} />
+        <NoAuditEntries filters={filters} />
       ) : (
         <section aria-label={labels.region}>
           <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
@@ -729,7 +703,9 @@ function activityLabels(entries: readonly AuditEntry[]) {
       region: 'Secret activity',
       item: 'Secret / bucket',
       summary: 'Purpose',
-      source: 'Machine / executable',
+      source: entries.some((entry) => claimOf(entry))
+        ? 'Machine / executable · agent'
+        : 'Machine / executable',
     };
   if (entries.some((entry) => !isFileAuditEntry(entry)))
     return {

@@ -1,5 +1,6 @@
 import { basename } from 'node:path';
 import { validateRunSecrets, validateSecretPath } from '@nook/contract';
+import { isClaimVariable } from './agent-session.ts';
 import { type Grammar, parseArguments } from './arguments.ts';
 import { CliFailure } from './errors.ts';
 import {
@@ -19,6 +20,10 @@ function mapping(value: string): SecretMapping {
   const separator = value.indexOf('=');
   const name = value.slice(0, separator);
   const path = value.slice(separator + 1);
+  if (isClaimVariable(name))
+    throw new CliFailure(
+      `Environment name ${name} is reserved for agent session claims.`,
+    );
   if (!isEnvironmentName(name))
     throw new CliFailure(
       'Use --secret ENV=bucket/NAME with a valid environment name and secret path.',

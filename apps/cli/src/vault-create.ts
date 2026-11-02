@@ -4,6 +4,7 @@ import {
   validateWorkingDirectory,
 } from '@nook/contract';
 import { Effect } from 'effect';
+import { resolveAgentSession } from './agent-session.ts';
 import { readConfig } from './config.ts';
 import {
   CliFailure,
@@ -75,9 +76,16 @@ export function vaultCreate(
     const message = validateWorkingDirectory(workingDirectory);
     if (message) return yield* Effect.fail(new CliFailure(message));
     const value = yield* readSecretInput(parsed.path);
+    const agentSession = resolveAgentSession((name) => process.env[name]);
     yield* store(
       host,
-      { ...parsed, value, writeId: randomUUID(), workingDirectory },
+      {
+        ...parsed,
+        value,
+        writeId: randomUUID(),
+        workingDirectory,
+        ...(agentSession ? { agentSession } : {}),
+      },
       parsed.path,
     );
     write(`Stored ${parsed.path}.`);

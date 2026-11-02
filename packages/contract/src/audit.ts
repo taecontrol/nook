@@ -1,4 +1,5 @@
 import { Schema } from 'effect';
+import { AgentSessionClaim } from './agent-session.ts';
 import { MemoryClient, Principal } from './provenance.ts';
 
 const EntryFacts = Schema.Struct({
@@ -13,6 +14,7 @@ const MachineFacts = EntryFacts.mapFields((fields) => ({
   ...fields,
   machine: Schema.Struct({ id: Schema.String, name: Schema.String }),
   workingDirectory: Schema.String,
+  agentSession: Schema.NullOr(AgentSessionClaim),
 }));
 export const VaultAuditEntry = Schema.Union([
   MachineFacts.mapFields((fields) => ({
@@ -65,6 +67,7 @@ export function isFileAuditEntry(entry: AuditEntry): entry is FileAuditEntry {
 export const AuditFilters = Schema.Struct({
   bucket: Schema.optionalKey(Schema.String),
   secret: Schema.optionalKey(Schema.String),
+  session: Schema.optionalKey(Schema.String),
   cursor: Schema.optionalKey(Schema.String),
 });
 export type AuditFilters = typeof AuditFilters.Type;
