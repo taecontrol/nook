@@ -314,14 +314,15 @@ Linux/macOS keyrings and real child processes, pipes, regular files and FIFOs.
 Only the util-linux PTY examples are Linux-only. Every value is synthetic.
 
 The run suite's spawn preload adds `--import=run-relay-fs-only.ts` only to
-Node relays. This guard rejects construction of a readable FIFO `net.Socket`
-before it starts polling; fd 3 remains a real control socket. It replaces the
+Node relays. This guard rejects construction of any output-fd `net.Socket` and
+any readable FIFO Socket before it starts polling; fd 3 remains a real control
+socket. It replaces the
 former FIFO Socket EOF-suppression seam: the relay no longer uses Socket reads
 for data or EOF, so suppressing their EOF would exercise nothing. Real `fs.read`,
 FIFO bytes, output writes and EOF remain intact. Run cases exercise this guard
 on Linux and macOS; the SEA executable and direct TTY fixtures also exercise
 unpreloaded entry points.
-The guard proves that the Node relay never relies on kqueue-based FIFO reads;
+The guard proves that the Node relay never relies on kqueue for data I/O;
 Linux cannot reproduce every macOS scheduling behavior.
 
 | Examples | Evidence |
@@ -339,10 +340,10 @@ Linux cannot reproduce every macOS scheduling behavior.
 | E11 | “Masking E11”: transparent opt-out; repeated flags, a separate value and an equals value fail before keyring, HTTP, Audit or child startup. |
 | E12 | “Masking E12”: a real FIFO releases the writer only after the reader receives the unterminated prompt. |
 | E13 | “Masking E13”: a binary pipe carries all 256 byte values exactly. |
-| E14 | “Masking E14”: a real `yes`/`head -1` pipe closes, the child receives SIGPIPE and run returns 141. “Masking E14/E16” closes the output reader after run exits and the token is acknowledged; after the relay observes EPIPE, the background writer's next write must also receive EPIPE, and the relay must exit while that writer remains idle with its fds open. |
+| E14 | “Masking E14”: a real `yes`/`head -1` pipe closes, the child receives SIGPIPE and run returns 141. A full named-FIFO destination whose reader closes also produces EPIPE, relay exit and child SIGPIPE on Linux and macOS. “Masking E14/E16” closes the output reader after run exits and the token is acknowledged; after the relay observes EPIPE, the background writer's next write must also receive EPIPE, and the relay must exit while that writer remains idle with its fds open. |
 | E15 | “Masking E15” and existing native-signal tests: SIGTERM/SIGHUP forwarding, ignored parent SIGINT and preserved child status. |
-| E16 | “Masking E16”: a test-controlled FIFO holds a background writer across run's exit, with shared and separate destinations; an exit-time file snapshot proves the flush, later values stay masked, and near-token prefixes survive unchanged. The relay exits after EOF on every stream. Padded and unpadded continuous writers prove the token can acknowledge a finite boundary while output keeps arriving; each complete record fits PIPE_BUF, so the token falls between values. Killing run before its token proves the relay keeps masking until FIFO EOF and releases its held tail then. |
-| E17 | “Masking E17”: a single 1 MiB `writeFileSync` includes the value at the end; the reader's exit-time snapshot already contains all bytes with that value masked. The second case pauses the output reader until the real output stream reports backpressure, using a highWaterMark of one byte to exercise it even with partial FIFO reads. Both output pipes close and the lifecycle observer records the relay's natural exit. |
+| E16 | “Masking E16”: a test-controlled FIFO holds a background writer across run's exit, with shared and separate destinations; an exit-time file snapshot proves the flush, later values stay masked, and near-token prefixes survive unchanged. The relay exits after EOF on every stream. A Node background writer changes its shared writer to O_NONBLOCK and fills the FIFO while the first relay read is gated. The token attempt releases that gate; run's exit snapshot must already contain all preceding masked bytes, and the writer's later output stays masked. Padded and unpadded continuous writers also exercise the finite flush boundary. Killing run before its token proves the relay keeps masking until FIFO EOF and releases its held tail then. |
+| E17 | “Masking E17”: a single 1 MiB `writeFileSync` includes the value at the end; the reader's exit-time snapshot already contains all bytes with that value masked. After spawn (which can reset inherited stdio flags), the fixture uses Node's stdout handle to set the description shared with the relay to O_NONBLOCK, then releases the child through a FIFO. The paused reader resumes only after a real fs.write EAGAIN. Both output pipes close and the lifecycle observer records the relay's natural exit. A full named-FIFO destination also forces EAGAIN before its reader drains in small chunks; all output must arrive complete and masked. |
 | E18 | “Masking E18”: private missing-interpreter spawn failures preserve exit 127 and the diagnostic, with and without opt-out; masked failures write one token per distinct FIFO, close output and exit the relay. Incomplete value responses exercise the same finalizer after values were sent; lost responses close the relay without tokens before delivery. Signal cases also flush an incomplete value prefix and observe relay exit. Lost relay delivery and the relay's fixed protocol-failure diagnostic exclude values. |
 | E19 | “Masking E19”: a Node preload refuses only relay startup, either synchronously or through a real failed spawn; the value-request observer and Audit both remain empty and no child starts. An unusable FIFO directory proves the same private, unaudited refusal. |
 | E20 | “Masking E20”: a preload observes the real relay's argv and environment; the injected child checks both, including values already in its parent's environment and the flush token, without printing a value. The test requires the FIFO Socket guard in argv and the exact production environment: empty, or only the coverage path. Coverage runs also require separate relay execution counters. The SEA round trip exercises the same-executable entry point. |
@@ -352,10 +353,13 @@ through arguments or environment. The token is `NUL + nook-flush: + 64 lowercase
 hex digits + NUL`: 32 random bytes encoded as 77 bytes, below the portable
 512-byte PIPE_BUF minimum. For N masked destinations, fds 4 through 3+N are the
 only FIFO readers and are blocking. To create each FIFO, the parent opens a
-nonblocking reader, its writer, then its blocking reader, closes the temporary
+nonblocking reader, the child's writer, a separate blocking token writer, then
+its blocking reader, closes the temporary
 nonblocking reader and unlinks the path. It closes its remaining readers after
 spawning the relay. A shared destination uses one FIFO and the same writer in
-both child slots, preserving stdout/stderr order.
+both child slots, preserving stdout/stderr order. The token writer has its own
+open file description and is never passed to the child, so Node background
+writers changing their stdout to O_NONBLOCK cannot change the token writer.
 
 A manual `fs.read` loop is the only FIFO reader from startup through EOF. macOS
 kqueue does not reliably report FIFO readability while a large write is blocked,
@@ -366,29 +370,41 @@ error stops forwarding and closes the reader as soon as no read is pending,
 preserving child SIGPIPE. A blocked read cannot be cancelled; its callback closes
 the fd if stop arrived while it was pending. At most two reads or writes occupy
 libuv's default four pool threads, so the relay needs no pool-size override.
-Output to a pipe or socket uses a write-only Socket, which waits for writable
-readiness under backpressure. Files and other destinations use `fs.WriteStream`;
-using it for a full nonblocking pipe would exhaust Node's five EAGAIN retries.
-After completed writes, the relay destroys its output Socket instead of calling
-`end()`: shutdown would affect the caller's shared socket and prevent its own
-post-flush diagnostics. Closing just the relay's copy preserves those writes.
+All destinations use awaited `fs.write`, with partial writes completed in order
+and only one write in flight per destination. EAGAIN retries the remaining bytes
+after a backoff from 1 ms up to 50 ms, resetting after progress. This timer only
+paces retries of a nonblocking destination; it never decides masking or flush.
+There is no output Socket or kqueue dependency, including for named FIFOs.
+After forwarding ends, the relay closes only its copy of each destination;
+it never shuts down a shared socket, preserving the caller's later diagnostics.
 
 A splitter before each masker retains only a possible token prefix, at most
-76 bytes. At the first token it removes the token, sends preceding bytes through
-the masker, releases the masker's held tail with `end()`, and waits for those
-writes to complete. That stream then counts as flushed. Bytes after the token
-continue through the same masker with fresh state, including bytes already in
-the token's read. EOF releases both held tails, ends output and closes the fd;
+76 bytes. At the first token it removes the token and sends the preceding and
+following bytes from that read through the masker as one continuous input.
+Values spanning the token remain masked. It releases the masker's held tail
+with `end()` only if that tail still begins before the token's position
+(`pendingBytes > after.length`), then acknowledges after those writes complete.
+It never reads ahead to resolve a tail: an idle background writer could block
+forever. A writer paused mid-value at flush whose rest is absent from that read
+is the accepted best-effort gap. A tail entirely after the token stays held for
+the next read. EOF releases both held tails, ends output and closes the fd;
 EOF or stop before the token also counts as flushed. The relay replies `flushed`
 only after every stream has passed its token or ended. No capacity probe,
 nonblocking drain, lookahead, timer or implicit flush defines this boundary.
-`run-masker.test.ts` proves token detection at every byte split, token removal,
-unchanged near-prefix bytes at mismatch and EOF, and fresh masking after the token.
+`run-masker.test.ts` proves token detection at every byte split, token removal
+and unchanged near-prefix bytes at mismatch and EOF. `run-relay.test.ts` controls
+read chunks to prove masking across a token within one read, across reads, and
+across a split token whose completing read also contains the value's rest.
+It also checks both held-tail cases, partial writes, EAGAIN retries, serialization
+and fixed diagnostics with reader closure on EPIPE, other errors or no progress.
 
 The relay's scoped finalizer runs on normal exit, spawn failure, incomplete
 value delivery and forwarded signals. After values were sent, it writes the
-token once per distinct FIFO through the parent's retained writer, closes all
-writers, waits for `flushed`, then closes control. EPIPE during token delivery
+token once per distinct FIFO through its private blocking writer using awaited
+`fs.write`. The event loop and control-EOF path stay live even while that write
+blocks. It closes each token writer immediately after its write, closes all
+remaining writers on every exit path, waits for `flushed`, then closes control.
+EPIPE during token delivery
 is silent; control EOF resolves the wait if the relay is gone. Before values
 were sent, it closes writers and control without sending tokens. If run dies
 without sending its token, control EOF does not flush: the detached relay keeps
