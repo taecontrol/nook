@@ -1,15 +1,37 @@
-type MaskedValue = { readonly bytes: Buffer; readonly marker: Buffer };
+type MaskedValue = {
+  readonly bytes: Buffer;
+  readonly marker: Buffer;
+  readonly prefixes: Uint32Array;
+};
 type Value = { readonly path: string; readonly value: string };
+type PendingPrefix = { length: number; readonly prefixes: Uint32Array };
 
+function extendPrefix(
+  bytes: Buffer,
+  prefixes: Uint32Array,
+  length: number,
+  byte: number,
+) {
+  while (length && bytes[length] !== byte) length = prefixes[length - 1];
+  return bytes[length] === byte ? length + 1 : 0;
+}
+function prefixTable(bytes: Buffer) {
+  const prefixes = new Uint32Array(bytes.length);
+  for (let i = 1; i < bytes.length; i++)
+    prefixes[i] = extendPrefix(bytes, prefixes, prefixes[i - 1], bytes[i]);
+  return prefixes;
+}
 export function maskedValues(values: readonly Value[]): MaskedValue[] {
   const distinct = new Map<string, MaskedValue>();
   for (const { path, value } of [...values].sort((a, b) =>
     a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
   )) {
     if ([...value].length < 8 || distinct.has(value)) continue;
+    const bytes = Buffer.from(value);
     distinct.set(value, {
-      bytes: Buffer.from(value),
+      bytes,
       marker: Buffer.from(`<nook:${path}>`),
+      prefixes: prefixTable(bytes),
     });
   }
   return [...distinct.values()].sort((a, b) => b.bytes.length - a.bytes.length);
@@ -22,34 +44,46 @@ function nextMatch(data: Buffer, values: readonly MaskedValue[], from: number) {
   }
   return match;
 }
-function prefixStart(data: Buffer, bytes: Buffer, from: number) {
-  let at = data.indexOf(
-    bytes[0],
-    Math.max(from, data.length - bytes.length + 1),
-  );
-  while (at !== -1) {
-    if (bytes.subarray(0, data.length - at).equals(data.subarray(at)))
-      return at;
-    at = data.indexOf(bytes[0], at + 1);
-  }
-  return data.length;
+function tailLength(data: Buffer, value: MaskedValue) {
+  const { bytes, prefixes } = value;
+  let length = 0;
+  // Only a proper prefix can need more bytes. KMP's failure links avoid
+  // rescanning long, nearly identical suffixes after each mismatch.
+  for (
+    let at = Math.max(0, data.length - bytes.length + 1);
+    at < data.length;
+    at++
+  )
+    length = extendPrefix(bytes, prefixes, length, data[at]);
+  return length;
 }
 function pendingStart(
   data: Buffer,
-  values: readonly MaskedValue[],
+  tails: readonly PendingPrefix[],
   from: number,
 ) {
   let start = data.length;
-  for (const { bytes } of values)
-    start = Math.min(start, prefixStart(data, bytes, from));
+  for (const tail of tails) {
+    // A replacement can consume part of a candidate prefix. Reuse its failure
+    // links instead of rescanning the chunk after every complete match.
+    while (tail.length > data.length - from)
+      tail.length = tail.prefixes[tail.length - 1];
+    start = Math.min(start, data.length - tail.length);
+  }
   return start;
 }
 function replace(data: Buffer, values: readonly MaskedValue[], final: boolean) {
   const output: Buffer[] = [];
+  const tails = final
+    ? []
+    : values.map((value) => ({
+        length: tailLength(data, value),
+        prefixes: value.prefixes,
+      }));
   let from = 0;
   while (from < data.length) {
     const match = nextMatch(data, values, from);
-    const pending = final ? data.length : pendingStart(data, values, from);
+    const pending = final ? data.length : pendingStart(data, tails, from);
     if (!match || match.at >= pending) {
       output.push(data.subarray(from, pending));
       return { output: Buffer.concat(output), held: data.subarray(pending) };

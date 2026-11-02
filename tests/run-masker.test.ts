@@ -127,3 +127,13 @@ it('adversarial long prefixes stay within a linear bulk-comparison budget', () =
   expect(Buffer.from(output).equals(chunk)).toBe(true);
   expect(stream.end().length).toBe(0);
 });
+it('replacements discard overlapping tail candidates before holding the next prefix', () => {
+  const stream = masker(maskedValues([{ path, value: 'a'.repeat(8) }]));
+  expect(Buffer.from(stream.push(Buffer.from('a'.repeat(26)))).toString()).toBe(
+    marker.repeat(3),
+  );
+  expect(Buffer.from(stream.push(Buffer.from('a'.repeat(6)))).toString()).toBe(
+    marker,
+  );
+  expect(stream.end().length).toBe(0);
+});
