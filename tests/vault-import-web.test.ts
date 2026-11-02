@@ -719,6 +719,11 @@ it('E15: pending import locks writes, permits Reveal and navigation, shows progr
     await progress.waitFor();
     expect(await progress.getAttribute('aria-valuenow')).toBe('0');
     expect(pool.held).toHaveLength(3);
+    pool.held[0].gate.resolve();
+    await expect
+      .poll(() => progress.getAttribute('aria-valuenow'))
+      .toBe('12.5');
+    await expect.poll(() => pool.held.length).toBe(4);
     expect(
       await importSheet(page)
         .getByRole('button', { name: 'Done', exact: true })
