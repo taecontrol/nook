@@ -519,7 +519,9 @@ it('session: a reserved claim name is imported but left out of nook.json, and th
       resolve(keyring.home, 'source', 'nook.json'),
       JSON.stringify(block),
     );
-    await configure(app.origin);
+    // Run against the Worker directly, with the token stored in beforeEach;
+    // storing it again fails on the macOS keychain (errSecDuplicateItem).
+    await writeFile(keyring.config, JSON.stringify({ url: app.origin }));
     const run = record(
       await keyring.start(
         [
