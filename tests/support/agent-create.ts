@@ -73,6 +73,7 @@ export async function createTransport(
   app: TestRuntime,
   before: (
     attempt: number,
+    body: Buffer,
   ) =>
     | 'lost'
     | 'hang'
@@ -82,14 +83,30 @@ export async function createTransport(
   after?: (attempt: number, response: Response) => Promise<CreateResponseFault>,
 ) {
   const bodies: Buffer[] = [];
+  const listings: string[] = [];
+  let active = 0;
+  let maxActive = 0;
   const server = createServer(async (request, response) => {
+    if (request.method === 'GET') {
+      listings.push(request.url ?? '');
+      const forwarded = await fetch(app.origin + request.url, {
+        headers: { Authorization: request.headers.authorization ?? '' },
+      });
+      response.writeHead(forwarded.status, {
+        'Content-Type': 'application/json',
+      });
+      response.end(Buffer.from(await forwarded.arrayBuffer()));
+      return;
+    }
+    active++;
+    maxActive = Math.max(maxActive, active);
     try {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const body = Buffer.concat(chunks);
       bodies.push(body);
       const attempt = bodies.length;
-      const fault = before(attempt);
+      const fault = before(attempt, body);
       if (fault === 'hang') return;
       if (fault === 'lost') {
         response.destroy();
@@ -120,12 +137,18 @@ export async function createTransport(
       await replyToCreate(response, forwarded, responseFault);
     } catch {
       response.writeHead(503).end('{"_tag":"ServiceUnavailable"}');
+    } finally {
+      active--;
     }
   });
   await new Promise<void>((accept) => server.listen(0, '127.0.0.1', accept));
   return {
     origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
     bodies,
+    listings,
+    get maxActive() {
+      return maxActive;
+    },
     close: () =>
       new Promise<void>((accept) => {
         server.closeAllConnections();

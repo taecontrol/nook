@@ -56,6 +56,7 @@ import {
 export * from './agent-session.ts';
 export * from './audit.ts';
 export * from './buckets.ts';
+export * from './env-import.ts';
 export * from './error-status.ts';
 export * from './grants.ts';
 export * from './machines.ts';

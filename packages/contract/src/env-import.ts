@@ -1,4 +1,9 @@
 import { Redacted } from 'effect';
+import {
+  type SecretValueIssue,
+  secretValueIssue,
+  validateSecretName,
+} from './vault.ts';
 
 export type EnvEntry = {
   line: number;
@@ -48,4 +53,39 @@ export function parseEnv(text: string): ParsedEnv {
     entries.push({ line, name: match[1], value: parsedValue(match[2]) });
   }
   return { entries, unreadable: unreadLines(normalized, read) };
+}
+
+export const IMPORT_KEYS_MAX = 100;
+export type EnvKeyStatus =
+  | 'ready'
+  | 'exists'
+  | 'invalid-name'
+  | 'duplicate'
+  | SecretValueIssue;
+type ImportKey = {
+  name: string;
+  value: Redacted.Redacted<string>;
+  counted: boolean;
+};
+
+function keyStatus(
+  key: ImportKey,
+  existing: ReadonlySet<string>,
+  counts: ReadonlyMap<string, number>,
+): EnvKeyStatus {
+  const issue = secretValueIssue(Redacted.value(key.value));
+  if (issue) return issue;
+  if (validateSecretName(key.name)) return 'invalid-name';
+  if (existing.has(key.name)) return 'exists';
+  return (counts.get(key.name) ?? 0) > 1 ? 'duplicate' : 'ready';
+}
+export function envKeyStatuses(
+  keys: readonly ImportKey[],
+  existing: ReadonlySet<string>,
+): EnvKeyStatus[] {
+  const counts = new Map<string, number>();
+  for (const key of keys) {
+    if (key.counted) counts.set(key.name, (counts.get(key.name) ?? 0) + 1);
+  }
+  return keys.map((key) => keyStatus(key, existing, counts));
 }

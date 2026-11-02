@@ -136,6 +136,10 @@ it('E15: the read-only tool requires a bucket and teaches metadata-only ancestor
   expect(tool!.description).toContain(
     'nook vault create <bucket>/<NAME> --purpose "…"',
   );
+  expect(tool!.description).toContain(
+    'nook vault import <bucket> <file> --purpose "…"',
+  );
+  expect(tool!.description).toMatch(/without reading/i);
   expect(tool!.description).toMatch(/stdin/i);
   expect(tool!.description).toMatch(/(?:never|without|instead of) pasting/i);
   expect(

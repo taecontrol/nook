@@ -1,4 +1,6 @@
 import {
+  type ParsedEnv as Parsed,
+  parseEnv,
   secretLimits,
   secretValueLimit,
   validateSecretDescription,
@@ -39,7 +41,6 @@ import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 import { noAutofill } from '@/no-autofill';
 import { Path } from '@/path-text';
-import { type ParsedEnv as Parsed, parseEnv } from './env-parse';
 import {
   importing,
   importPausedMessage,
