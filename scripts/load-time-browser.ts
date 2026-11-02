@@ -1,34 +1,47 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Browser, Page, Request } from 'playwright';
 import { memoryId } from '../tests/fixtures/memories.ts';
-import { loadTimeBudgets, type Measurements } from './lib/load-time.ts';
+import type { Measurements } from './lib/load-time.ts';
+import { startPhoneNetwork } from './lib/phone-network.ts';
 
 export async function phonePage(browser: Browser, kind: string) {
-  const context = await browser.newContext({
-    ...([
-      'authorize',
-      'machines',
-      'machinesNavigation',
-      'approvalNavigation',
-      'machineAccessNavigation',
-      'audit',
-      'auditNavigation',
-      'memory',
-      'memoryNavigation',
-      'memoryReader',
-      'memoryReaderNavigation',
-    ].includes(kind)
-      ? { viewport: { width: 390, height: 844 } }
-      : {}),
-  });
-  const page = await context.newPage();
-  recordPage(page);
-  page.setDefaultTimeout(15_000);
-  const cdp = await context.newCDPSession(page);
-  await cdp.send('Network.enable');
-  await cdp.send('Network.setCacheDisabled', { cacheDisabled: true });
-  await cdp.send('Network.emulateNetworkConditions', loadTimeBudgets.network);
-  return { context, page };
+  const network = await startPhoneNetwork();
+  try {
+    const context = await browser.newContext({
+      proxy: network.proxy,
+      ...([
+        'authorize',
+        'machines',
+        'machinesNavigation',
+        'approvalNavigation',
+        'machineAccessNavigation',
+        'audit',
+        'auditNavigation',
+        'memory',
+        'memoryNavigation',
+        'memoryReader',
+        'memoryReaderNavigation',
+      ].includes(kind)
+        ? { viewport: { width: 390, height: 844 } }
+        : {}),
+    });
+    context.once('close', () => network.close());
+    try {
+      const page = await context.newPage();
+      recordPage(page);
+      page.setDefaultTimeout(15_000);
+      const cdp = await context.newCDPSession(page);
+      await cdp.send('Network.enable');
+      await cdp.send('Network.setCacheDisabled', { cacheDisabled: true });
+      return { context, page };
+    } catch (error) {
+      await context.close();
+      throw error;
+    }
+  } catch (error) {
+    network.close();
+    throw error;
+  }
 }
 type PageRecord = { pending: Map<Request, number>; errors: string[] };
 const pageRecords = new WeakMap<Page, PageRecord>();
