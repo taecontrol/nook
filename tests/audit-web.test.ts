@@ -958,7 +958,8 @@ it.each(viewports)(
       const elapsed = await page.evaluate(
         () =>
           performance.now() -
-          (window as Window & { sessionStart: number }).sessionStart,
+          ((window as Window & { sessionStart?: number }).sessionStart ??
+            Number.NaN),
       );
       expect(elapsed).toBeLessThanOrEqual(100);
       expect(new URL(page.url()).searchParams.get('session')).toBe(session);

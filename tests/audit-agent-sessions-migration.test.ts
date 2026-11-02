@@ -120,7 +120,7 @@ it('E17: D1 rejects claims on revealed/file rows, incomplete or invalid claims, 
     .run();
   await db
     .prepare(
-      "INSERT INTO audit_entries(id,at,outcome,bucket,memory_id,file_name,file_size,file_sha256,client_name) VALUES ('constraint-file','2026-11-02','file_attached','work/acme','memory','x.pdf',1,'sha','test')",
+      "INSERT INTO audit_entries(id,at,outcome,bucket,memory_id,file_name,file_size,file_sha256,client_name) VALUES ('constraint-file','2026-11-02','file_attached','work/acme','12345678-1234-4123-8123-123456789012','x.pdf',1,lower(hex(zeroblob(32))),'test')",
     )
     .run();
   for (const [id, agent, session, thread] of [
@@ -171,12 +171,13 @@ it('E17: every generated claim accepted by the shared validator passes the D1 co
       thread: index % 3 ? `thread_${index}` : session,
     });
     expect(claim).not.toBeNull();
+    if (!claim) throw new Error('Expected a normalized claim.');
     await expect(
       db
         .prepare(
           'UPDATE audit_entries SET agent=?,agent_session=?,agent_thread=? WHERE id=?',
         )
-        .bind(claim!.agent, claim!.session, claim!.thread ?? null, 'property')
+        .bind(claim.agent, claim.session, claim.thread ?? null, 'property')
         .run(),
     ).resolves.toMatchObject({ success: true });
   }
