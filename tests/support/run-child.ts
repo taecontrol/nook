@@ -61,7 +61,7 @@ if (mode === 'print-value') {
     detached: true,
     stdio: 'inherit',
   }).unref();
-  writeSync(1, 'before:' + value() + ':tail');
+  writeSync(1, 'before:' + value() + ':tail' + value().slice(0, 8));
   process.exitCode = 3;
 } else if (mode === 'background-writer') {
   writeFileSync(resolve(expected, 'writer-pid'), String(process.pid));
@@ -77,7 +77,10 @@ if (mode === 'print-value') {
   const launches = JSON.parse(
     readFileSync(resolve(expected, 'relay-launch'), 'utf8'),
   ) as { args: string[]; env: NodeJS.ProcessEnv };
-  writeSync(1, String(!JSON.stringify(launches).includes(value())));
+  const exposed = [...launches.args, ...Object.values(launches.env)].some(
+    (entry) => entry?.includes(value()),
+  );
+  writeSync(1, String(!exposed));
 } else if (mode === 'signal-status') {
   for (const signal of ['SIGTERM', 'SIGHUP'] as const)
     process.on(signal, () => {

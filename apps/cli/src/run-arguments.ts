@@ -11,9 +11,10 @@ import {
 } from './project-secrets.ts';
 
 export const runGrammar: Grammar = {
-  usage: 'nook run --secret ENV=bucket/NAME --purpose "…" -- <command>',
+  usage:
+    'nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] -- <command>',
   positional: [],
-  flags: { secret: 'repeated', purpose: 'required' },
+  flags: { secret: 'repeated', purpose: 'required', 'no-masking': 'boolean' },
   rest: 'command',
 };
 function mapping(value: string): SecretMapping {
@@ -50,7 +51,7 @@ export function parseRun(
   };
   const invalid = validateRunSecrets(input);
   if (invalid) throw new CliFailure(invalid);
-  return { command, mappings, input };
+  return { command, mappings, input, masking: !flags.has('no-masking') };
 }
 function mergeMappings(
   project: ProjectSecrets | undefined,

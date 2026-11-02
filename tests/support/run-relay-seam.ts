@@ -6,7 +6,8 @@ import { resolve } from 'node:path';
 // Failure injection and launch observation run only in a private fixture HOME.
 const original = children.spawn;
 children.spawn = ((file: string, args: string[], options: SpawnOptions) => {
-  const home = process.env.HOME!;
+  const home = process.env.HOME;
+  if (!home) throw new Error('The relay seam requires a private HOME.');
   if (!args.includes('--nook-output-relay'))
     return original(file, args, options);
   if (existsSync(resolve(home, 'refuse-relay')))
@@ -23,6 +24,13 @@ children.spawn = ((file: string, args: string[], options: SpawnOptions) => {
         child.kill('SIGKILL');
         return false;
       };
+  }
+  if (existsSync(resolve(home, 'break-protocol'))) {
+    const control = child.stdio[3];
+    if (control && 'write' in control) {
+      const write = control.write.bind(control);
+      control.write = () => write('invalid-json\n');
+    }
   }
   return child;
 }) as typeof children.spawn;

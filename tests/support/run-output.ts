@@ -5,7 +5,8 @@ import { resolve } from 'node:path';
 
 // Keep binary streams and shared file descriptors intact inside the sandbox.
 const [mode, entry, ...args] = process.argv.slice(2);
-const home = process.env.HOME!;
+const home = process.env.HOME;
+if (!home) throw new Error('The output fixture requires a private HOME.');
 const file = resolve(home, 'output');
 const fd =
   mode === 'shared' || mode === 'background' ? openSync(file, 'w') : undefined;
@@ -19,10 +20,11 @@ const stdout: Buffer[] = [];
 const stderr: Buffer[] = [];
 child.stderr?.on('data', (chunk) => stderr.push(Buffer.from(chunk)));
 if (mode === 'head') {
+  if (!child.stdout) throw new Error('The pipe fixture requires stdout.');
   const head = spawn('/usr/bin/head', ['-1'], {
-    stdio: [child.stdout!, 'pipe', 'inherit'],
+    stdio: [child.stdout, 'pipe', 'inherit'],
   });
-  child.stdout!.destroy();
+  child.stdout.destroy();
   head.stdout.on('data', (chunk) => stdout.push(Buffer.from(chunk)));
   await once(head, 'close');
 } else

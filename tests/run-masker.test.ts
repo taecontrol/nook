@@ -16,8 +16,12 @@ it('every byte split of a value, including Unicode, is masked without leaking a 
     const bytes = Buffer.from(text);
     for (let split = 0; split <= bytes.length; split++) {
       const stream = masker(maskedValues([{ path, value: text }]));
-      expect(Buffer.from(stream.push(bytes.subarray(0, split))).length).toBe(0);
+      const first = Buffer.from(stream.push(bytes.subarray(0, split)));
+      expect(first.length).toBe(
+        split === bytes.length ? Buffer.byteLength(marker) : 0,
+      );
       const output = Buffer.concat([
+        first,
         Buffer.from(stream.push(bytes.subarray(split))),
         Buffer.from(stream.end()),
       ]);

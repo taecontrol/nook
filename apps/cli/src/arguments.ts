@@ -1,7 +1,7 @@
 import { Argument, Flag, type Param } from 'effect/cli';
 import { CliFailure } from './errors.ts';
 
-type Occurrence = 'required' | 'optional' | 'repeated';
+type Occurrence = 'required' | 'optional' | 'repeated' | 'boolean';
 /**
  * The arguments of a command whose grammar effect/cli cannot parse: positional
  * arguments, then `--flag value` pairs, then, when `rest` is named, `--` and
@@ -20,6 +20,7 @@ const flag: Record<Occurrence, (name: string) => Param.AnyFlag> = {
   required: (name) => Flag.String(name),
   optional: (name) => Flag.optional(Flag.String(name)),
   repeated: (name) => Flag.String(name).pipe(Flag.atLeast(0)),
+  boolean: (name) => Flag.Boolean(name),
 };
 // The same grammar as an effect/cli declaration, so help describes it.
 export function declaration(grammar: Grammar) {
@@ -48,15 +49,16 @@ function requireFlags(grammar: Grammar, flags: Map<string, string[]>) {
       throw new CliFailure(`A ${name} is required.`);
 }
 function readFlags(grammar: Grammar, pairs: readonly string[]) {
-  if (pairs.length % 2) throw usageFailure(grammar);
   const flags = new Map<string, string[]>();
-  for (let index = 0; index < pairs.length; index += 2) {
+  for (let index = 0; index < pairs.length; index++) {
     const name = pairs[index].slice(2);
     const occurs = occurrence(grammar, pairs[index]);
     const values = flags.get(name) ?? [];
     if (!occurs || (values.length && occurs !== 'repeated'))
       throw usageFailure(grammar);
-    flags.set(name, [...values, pairs[index + 1]]);
+    const value = occurs === 'boolean' ? '' : pairs[++index];
+    if (value === undefined) throw usageFailure(grammar);
+    flags.set(name, [...values, value]);
   }
   requireFlags(grammar, flags);
   return flags;

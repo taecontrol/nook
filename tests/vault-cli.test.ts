@@ -84,7 +84,7 @@ it.each([
   [['vault', 'unknown'], `Usage: ${vaultUsage}`],
   [
     ['unknown'],
-    `Usage: nook run --secret ENV=bucket/NAME --purpose "…" -- <command> | ${vaultUsage} | ${memoryUsage} | nook login <url> | nook whoami | nook logout | nook mcp-header | nook version`,
+    `Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] -- <command> | ${vaultUsage} | ${memoryUsage} | nook login <url> | nook whoami | nook logout | nook mcp-header | nook version`,
   ],
 ])(
   'Parser failure %j ends with the usage of the command that failed',

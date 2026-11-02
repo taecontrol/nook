@@ -15,7 +15,9 @@ import {
   tryCli,
 } from './errors.ts';
 import type { Host } from './host.ts';
+import { planOutput } from './output-plan.ts';
 import { currentDirectory, projectSecrets } from './project-secrets.ts';
+import { startRelay } from './relay-client.ts';
 import { parseRun } from './run-arguments.ts';
 import { CommandFailure, resolveCommand, runCommand } from './run-command.ts';
 import { session } from './session.ts';
@@ -53,6 +55,9 @@ export function run(
       );
       const file = yield* resolveCommand(parsed.command[0]);
       const agentSession = resolveAgentSession((name) => process.env[name]);
+      const plan = yield* planOutput(parsed.masking);
+      const relay =
+        plan.kind === 'masked' ? yield* startRelay(plan) : undefined;
       const { url, request } = yield* session(host);
       const attemptId = randomUUID();
       const ask = request((api, headers) =>
@@ -87,6 +92,7 @@ export function run(
       const values = new Map(
         delivered.values.map(({ path, value }) => [path, value]),
       );
+      if (relay) yield* relay.send(delivered.values);
       const env: NodeJS.ProcessEnv = Object.assign(
         Object.create(null),
         process.env,
@@ -96,8 +102,24 @@ export function run(
         if (!value) return yield* Effect.fail(networkError(url));
         env[name] = Redacted.value(value);
       }
-      return yield* runCommand(file, parsed.command, env);
+      const status = yield* runCommand(
+        file,
+        parsed.command,
+        env,
+        plan.kind === 'masked'
+          ? ['inherit', ...plan.child]
+          : ['inherit', 'inherit', 'inherit'],
+      ).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (plan.kind === 'masked') plan.closeWriters();
+          }),
+        ),
+      );
+      if (relay) yield* relay.flushed();
+      return status;
     }).pipe(
+      Effect.scoped,
       Effect.provide(NodeServices.layer),
       Effect.catch((error) => {
         (error instanceof ApprovalStopped ? status : write)(error.message);

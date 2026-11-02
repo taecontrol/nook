@@ -16,6 +16,7 @@ import { pathToFileURL } from 'node:url';
 import { build, stop } from 'esbuild';
 import { beforeEach, expect, it } from 'vitest';
 import { evidenceRoot } from '../scripts/lib/instrument.ts';
+import { buildExecutable } from '../scripts/release/binary.ts';
 import {
   acmePath,
   auditPageData,
@@ -1079,13 +1080,15 @@ it('Masking E11: no-masking passes bytes unchanged without a relay', async () =>
   expect(result.stdout === 'token=' + app.input.value + '\n').toBe(true);
   expect(existsSync(resolve(keyring.home, 'relay-launch'))).toBe(false);
 });
-it.each([
-  ['--no-masking', '--no-masking'],
-  ['--no-masking', 'true'],
-  ['--no-masking=false'],
-])(
+it.each(
+  [
+    ['--no-masking', '--no-masking'],
+    ['--no-masking', 'true'],
+    ['--no-masking=false'],
+  ].map((flags) => ({ flags })),
+)(
   'Masking E11: invalid boolean occurrence starts nothing (%#)',
-  async (flags) => {
+  async ({ flags }) => {
     const before = await keyringTranscript();
     const args = maskingArgs('mark', [resolve(keyring.home, 'started')]);
     args.splice(1, 0, ...flags);
@@ -1153,7 +1156,7 @@ it('Masking E16: run flushes and exits while a FIFO-gated background writer stay
   expect(result.status).toBe(3);
   expect(
     (await readFile(resolve(keyring.home, 'exit-snapshot'), 'utf8')) ===
-      `before:${marker}:tail`,
+      `before:${marker}:tail${app.input.value.slice(0, 8)}`,
   ).toBe(true);
   await expect
     .poll(() => existsSync(resolve(keyring.home, 'writer-pid')))
@@ -1184,7 +1187,7 @@ it('Masking E16: run flushes and exits while a FIFO-gated background writer stay
     .poll(
       async () =>
         (await readFile(resolve(keyring.home, 'output'), 'utf8')) ===
-        `before:${marker}:tailafter:${marker}`,
+        `before:${marker}:tail${app.input.value.slice(0, 8)}after:${marker}`,
     )
     .toBe(true);
   await expect
@@ -1280,4 +1283,33 @@ it('Masking E20: relay argv and environment never carry an injected value', asyn
   expect(result.status).toBe(0);
   expectOutput(result.stdout, 'true', true);
   expect(result.stderr).toBe('');
+});
+it('Masking E1/E20: the SEA executable starts its own relay and masks pipe output', async () => {
+  const directory = resolve(keyring.home, 'sea');
+  await mkdir(directory);
+  const executable = await buildExecutable(directory);
+  const result = await keyring.command(
+    executable,
+    maskingArgs('print-value', ['42']),
+  ).done;
+  expect(result.status).toBe(42);
+  expectOutput(result.stdout, `token=${marker}`, true);
+  expect(result.stderr).toBe('');
+});
+it('Masking E18: the relay itself reports a fixed failure without protocol values', async () => {
+  await writeFile(resolve(keyring.home, 'break-protocol'), '');
+  const result = await keyring.start(maskingArgs('print-value'), relaySeam())
+    .done;
+  expect(result.status).toBe(1);
+  expectOutput(result.stderr, 'Nook output masking failed.', true);
+  expectOutput(
+    result.stdout,
+    'Nook could not deliver values to output masking. Try again.',
+    true,
+  );
+  expectNoValue(result.stdout + result.stderr, [
+    app.input.value,
+    app.key,
+    app.token,
+  ]);
 });

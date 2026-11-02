@@ -63,6 +63,11 @@ export function runCommand(
   file: string,
   command: string[],
   env: NodeJS.ProcessEnv,
+  stdio: readonly ['inherit', number | 'inherit', number | 'inherit'] = [
+    'inherit',
+    'inherit',
+    'inherit',
+  ],
 ) {
   return Effect.tryPromise({
     try: () => {
@@ -86,7 +91,7 @@ export function runCommand(
       return new Promise<number>((accept, reject) => {
         child = spawn(file, command.slice(1), {
           env,
-          stdio: 'inherit',
+          stdio: [...stdio],
           argv0: command[0],
         });
         child.once('error', (error) => {
