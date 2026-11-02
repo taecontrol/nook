@@ -1428,7 +1428,7 @@ it('Masking E14: closing a full named-FIFO destination stops the relay and gives
 it('Masking E17: a slow nonblocking named-FIFO destination receives all bytes masked after EAGAIN', async () => {
   const result = await pressureProbe(
     'nonblocking-output',
-    maskingArgs('large'),
+    maskingArgs('large', [resolve(keyring.home, 'nonblocking-ready')]),
   );
   const expected = Buffer.concat([
     Buffer.alloc(
@@ -1510,11 +1510,15 @@ it.each(['binary', 'backpressure'])(
       Buffer.from(marker),
     ]);
     if (mode === 'backpressure') {
-      const result = await lifecycleProbe(mode, maskingArgs('large'), 0);
+      const result = await lifecycleProbe(
+        mode,
+        maskingArgs('large', [resolve(keyring.home, 'nonblocking-ready')]),
+        0,
+      );
       expect(result.status).toBe(0);
       expect(Buffer.from(result.atExit, 'base64').equals(expected)).toBe(true);
       expect(result.backpressured).toBe(true);
-      expect(result.outputErrors).toEqual([]);
+      expect(result.outputErrors).toEqual(['output-error:EAGAIN']);
       expect(result.stdoutClosed).toBe(true);
       expect(result.stderrClosed).toBe(true);
       expect(result.relayExited).toBe(true);

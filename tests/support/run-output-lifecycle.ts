@@ -22,6 +22,7 @@ assert.equal(
   spawnSync('/usr/bin/mkfifo', [
     path('lifecycle-events'),
     path('lifecycle-commands'),
+    ...(mode === 'backpressure' ? [path('nonblocking-ready')] : []),
   ]).status,
   0,
 );

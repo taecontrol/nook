@@ -1,10 +1,4 @@
-import {
-  closeSync,
-  createWriteStream,
-  fstatSync,
-  read,
-  writeSync,
-} from 'node:fs';
+import { closeSync, read, write, writeSync } from 'node:fs';
 import { Socket } from 'node:net';
 import { createInterface } from 'node:readline';
 import { splitFlushToken } from './flush-token.ts';
@@ -18,13 +12,14 @@ function failure() {
     /* The reader may have closed stderr too. */
   }
 }
-function outputStream(target: number) {
-  const destination = fstatSync(target);
-  // fs.WriteStream retries EAGAIN only five times. Pipes/sockets need libuv's
-  // writable readiness under backpressure; this Socket never reads a FIFO.
-  return destination.isFIFO() || destination.isSocket()
-    ? new Socket({ fd: target, readable: false, writable: true })
-    : createWriteStream('', { fd: target, autoClose: false });
+function writeSome(target: number, chunk: Uint8Array, offset: number) {
+  return new Promise<number>((accept, reject) => {
+    write(target, chunk, offset, chunk.length - offset, null, (error, size) => {
+      if (error) reject(error);
+      else if (!size) reject(new Error('Output write made no progress.'));
+      else accept(size);
+    });
+  });
 }
 function forwarder(
   fd: number,
@@ -39,7 +34,6 @@ function forwarder(
   const flushed = new Promise<void>((accept) => {
     markFlushed = accept;
   });
-  const output = outputStream(target);
   const masking = masker(values);
   const splitter = splitFlushToken(token);
   const closeInput = () => {
@@ -50,24 +44,26 @@ function forwarder(
       reader = undefined;
     }
   };
-  const stop = (error?: Error) => {
+  const stop = () => {
     stopped = true;
     closeInput();
-    output.destroy(error);
     markFlushed();
   };
-  output.on('error', (error: NodeJS.ErrnoException) => {
-    if (error.code !== 'EPIPE') failure();
-    stop();
-  });
-  function written(chunk: Uint8Array) {
-    return new Promise<void>((accept) => {
-      if (stopped || !chunk.length) return accept();
-      output.write(chunk, (error) => {
-        if (error) stop(error);
-        accept();
-      });
-    });
+  async function written(chunk: Uint8Array) {
+    let offset = 0;
+    let backoff = 1;
+    while (!stopped && offset < chunk.length) {
+      try {
+        offset += await writeSome(target, chunk, offset);
+        backoff = 1;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EAGAIN') throw error;
+        // The caller can share a nonblocking destination. This timer only
+        // paces write retries; it never decides masking or the flush boundary.
+        await new Promise((accept) => setTimeout(accept, backoff));
+        backoff = Math.min(backoff * 2, 50);
+      }
+    }
   }
   function readBlocking(bytes: Buffer) {
     return new Promise<number>((accept, reject) => {
@@ -84,13 +80,18 @@ function forwarder(
   }
   async function forward(chunk: Uint8Array) {
     const { before, after } = splitter.push(chunk);
-    await written(masking.push(before));
+    await written(
+      masking.push(
+        after === undefined ? before : Buffer.concat([before, after]),
+      ),
+    );
     if (after !== undefined) {
-      await written(masking.end());
-      // Confirm only the completed writes before the token. Background output
-      // in this same read must not extend the boundary or delay the caller.
+      // Remove the token transparently: a value can span it. Flush a tail
+      // only if it began before the token. Never read ahead: an idle writer
+      // can block forever. A writer paused mid-value here whose rest is not
+      // in this read is the accepted best-effort gap at the flush boundary.
+      if (masking.pendingBytes > after.length) await written(masking.end());
       markFlushed();
-      await written(masking.push(after));
     }
   }
   async function followWriters() {
@@ -98,8 +99,9 @@ function forwarder(
     try {
       // One blocking read per FIFO, from the start: kqueue cannot reliably
       // signal either data from a blocked large FIFO write or FIFO EOF.
-      // Each write finishes before the next read, so EPIPE closes the reader
-      // immediately. At most two operations occupy libuv's four pool threads.
+      // Each fs.write finishes before the next read, so EPIPE closes the
+      // reader immediately. No output fd uses kqueue, including named FIFOs.
+      // At most two operations occupy libuv's four pool threads.
       while (!stopped) {
         const size = await readBlocking(bytes);
         if (stopped) return;
@@ -108,15 +110,14 @@ function forwarder(
       }
       await written(masking.push(splitter.end()));
       await written(masking.end());
-      // Close only the relay's copy. Socket.end() would shutdown the caller's
-      // shared socket too, preventing Nook's own post-flush diagnostics.
-      if (output instanceof Socket) output.destroy();
-      else output.end();
       closeInput();
       markFlushed();
-    } catch {
-      failure();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EPIPE') failure();
       stop();
+    } finally {
+      // Close only this copy; never shutdown the caller's shared socket.
+      closeSync(target);
     }
   }
   void followWriters();

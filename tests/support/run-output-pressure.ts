@@ -24,7 +24,7 @@ const path = (name: string) => resolve(home, name);
 const names =
   mode === 'full-input'
     ? ['lifecycle-events', 'relay-release', 'writer-ready', 'writer-release']
-    : ['lifecycle-events', 'destination'];
+    : ['lifecycle-events', 'destination', 'nonblocking-ready'];
 assert.equal(spawnSync('/usr/bin/mkfifo', names.map(path)).status, 0);
 writeFileSync(path('observe-lifecycle'), JSON.stringify({ pressure: mode }));
 const events = new Socket({
@@ -48,7 +48,7 @@ const waitFor = (event: string) =>
     if (received.has(event)) accept();
     else waiting.set(event, accept);
   });
-let reader: number | undefined;
+let reader = -1;
 let padding = 0;
 let fd: number;
 if (mode === 'full-input') fd = openSync(path('output'), 'w');
@@ -102,7 +102,7 @@ if (mode === 'full-input') {
   writeFileSync(path('writer-release'), 'x');
 } else if (mode === 'fifo-epipe') {
   await waitFor('output-write');
-  closeSync(reader!);
+  closeSync(reader);
   [status] = await exited;
   await waitFor('output-epipe');
 } else {
@@ -111,14 +111,14 @@ if (mode === 'full-input') {
     for (;;) {
       const bytes = Buffer.alloc(1024);
       const size = await new Promise<number>((accept, reject) =>
-        read(reader!, bytes, 0, bytes.length, null, (error, size) =>
+        read(reader, bytes, 0, bytes.length, null, (error, size) =>
           error ? reject(error) : accept(size),
         ),
       );
       if (!size) break;
       chunks.push(bytes.subarray(0, size));
     }
-    closeSync(reader!);
+    closeSync(reader);
   })();
   [status] = await exited;
   await draining;

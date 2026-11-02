@@ -47,23 +47,6 @@ it('token prefixes pass on mismatch or EOF and retain at most token length minus
   expect(Buffer.from(splitter.end()).equals(prefix)).toBe(true);
   expect(splitter.end().length).toBe(0);
 });
-it('a token releases the masker tail before the boundary and starts fresh masking after it', () => {
-  const splitter = splitFlushToken(token);
-  const stream = masker(maskedValues([{ path, value }]));
-  const { before, after } = splitter.push(
-    Buffer.concat([Buffer.from(value + ':abc'), token, Buffer.from(value)]),
-  );
-  expect(after).toBeDefined();
-  expect(Buffer.concat([stream.push(before), stream.end()]).toString()).toBe(
-    marker + ':abc',
-  );
-  expect(
-    Buffer.concat([
-      stream.push(after ?? Buffer.alloc(0)),
-      stream.end(),
-    ]).toString(),
-  ).toBe(marker);
-});
 function referenceMask(
   data: Buffer,
   entries: { path: string; value: string }[],

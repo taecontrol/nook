@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { writeSync } from 'node:fs';
+import { write } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { isSea } from 'node:sea';
 import type { Duplex } from 'node:stream';
@@ -53,14 +53,20 @@ function relayEnvironment() {
     ? { NOOK_CLI_COVERAGE: coverage.replace(/\.json$/, '-relay.json') }
     : {};
 }
-function writeTokens(plan: MaskedPlan, token: Buffer) {
-  for (const fd of new Set(plan.child)) {
-    if (fd === 'inherit') continue;
+async function writeTokens(plan: MaskedPlan, token: Buffer) {
+  for (const { tokenWrite } of plan.relay) {
     try {
-      writeSync(fd, token);
-    } catch (error) {
-      // EPIPE means the forwarder stopped or died; it can no longer flush.
-      if ((error as NodeJS.ErrnoException).code !== 'EPIPE') throw error;
+      // A blocking PIPE_BUF-sized write is atomic. Use the threadpool so a
+      // full FIFO cannot block the caller's control-EOF handling/event loop.
+      await new Promise<void>((accept, reject) => {
+        write(tokenWrite, token, (error) => {
+          // EPIPE means the forwarder stopped or died; it cannot flush.
+          if (error && error.code !== 'EPIPE') reject(error);
+          else accept();
+        });
+      });
+    } finally {
+      plan.closeTokenWriter(tokenWrite);
     }
   }
 }
@@ -117,7 +123,7 @@ async function launch(plan: MaskedPlan) {
     flushed: () =>
       Effect.promise(async () => {
         try {
-          if (sent) writeTokens(plan, token);
+          if (sent) await writeTokens(plan, token);
         } catch {
           // If a token cannot be sent, do not await an unreachable boundary.
           close();

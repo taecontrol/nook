@@ -1,10 +1,19 @@
 import children, { type SpawnOptions } from 'node:child_process';
-import fs, { appendFileSync, existsSync, writeFileSync } from 'node:fs';
+import fs, {
+  appendFileSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { resolve } from 'node:path';
 
 // Failure injection and launch observation run only in a private fixture HOME.
 const original = children.spawn;
+const observation = resolve(process.env.HOME ?? '', 'observe-lifecycle');
+const configuration = existsSync(observation)
+  ? JSON.parse(readFileSync(observation, 'utf8'))
+  : {};
 const writeSync = fs.writeSync;
 const writeAsync = fs.write;
 let flushToken: string | undefined;
@@ -51,8 +60,24 @@ fs.write = ((...parameters: Parameters<typeof fs.write>) => {
 children.spawn = ((file: string, args: string[], options: SpawnOptions) => {
   const home = process.env.HOME;
   if (!home) throw new Error('The relay seam requires a private HOME.');
-  if (!args.includes('--nook-output-relay'))
-    return original(file, args, options);
+  if (!args.includes('--nook-output-relay')) {
+    const child = original(file, args, options);
+    if (
+      args[1] === 'large' &&
+      (configuration.backpressure ||
+        configuration.pressure === 'nonblocking-output')
+    ) {
+      // Spawn can reset inherited stdio to blocking. Change the description
+      // shared with the already-running relay after spawning the real child.
+      // Gate that child so it cannot write before this flag change completes.
+      const output = process.stdout as typeof process.stdout & {
+        _handle: { setBlocking(blocking: boolean): void };
+      };
+      output._handle.setBlocking(false);
+      writeFileSync(resolve(home, 'nonblocking-ready'), 'x');
+    }
+    return child;
+  }
   if (existsSync(resolve(home, 'refuse-relay')))
     throw new Error('fixture-start-failure');
   const lifecycle = new URL('./run-relay-lifecycle.ts', import.meta.url);

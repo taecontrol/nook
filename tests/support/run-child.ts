@@ -62,6 +62,7 @@ if (mode === 'print-value') {
 } else if (mode === 'bytes') {
   writeSync(1, Buffer.from(Array.from({ length: 256 }, (_, i) => i)));
 } else if (mode === 'large') {
+  if (expected) readSync(openSync(expected, 'r'), Buffer.alloc(1), 0, 1, null);
   writeFileSync(
     1,
     Buffer.concat([
