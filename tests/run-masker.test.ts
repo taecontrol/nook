@@ -223,6 +223,35 @@ it('overlapping cached matches stay within capped native and linear KMP search b
   expect(prefixes).toBeGreaterThan(0);
   expect(output.equals(expected)).toBe(true);
 });
+it.each([false, true])(
+  'overlapping full matches retain their failure-link seed (held until final: %s)',
+  (final) => {
+    const long = 'a'.repeat(32);
+    const short = `b${'a'.repeat(7)}`;
+    const repeated = `b${'a'.repeat(40)}!`;
+    const data = Buffer.from(`${long}!${repeated.repeat(20)}`);
+    const entries = [
+      { path, value: long },
+      { path: 'work/acme/SHORT', value: short },
+      ...(final
+        ? [{ path: 'work/acme/HOLD', value: `${data.toString()}?` }]
+        : []),
+    ];
+    const expected = referenceMask(data, entries);
+    for (const split of [1, 31, 33, 97, data.length - 1, 0, data.length]) {
+      const stream = masker(maskedValues(entries));
+      const output = [
+        stream.push(data.subarray(0, split)),
+        stream.push(data.subarray(split)),
+      ];
+      if (final) expect(stream.pendingBytes).toBe(data.length);
+      output.push(stream.end());
+      expect(Buffer.concat(output).equals(expected), `split ${split}`).toBe(
+        true,
+      );
+    }
+  },
+);
 it('randomized binary-alphabet chunks match a whole-buffer reference across the search cap and held tails', () => {
   let seed = 0x80abcdef;
   function random(limit: number) {
@@ -261,10 +290,11 @@ it('randomized binary-alphabet chunks match a whole-buffer reference across the 
     const split = 1 + random(7);
     const output = [stream.push(data.subarray(0, split))];
     expect(stream.pendingBytes).toBe(split);
+    const chunkLimit = sample % 3 === 1 ? 3 : 97;
     for (let at = split; at < data.length; ) {
       const end = Math.min(
         data.length,
-        at + (sample % 2 ? 1 + random(97) : data.length),
+        at + (sample % 3 ? 1 + random(chunkLimit) : data.length),
       );
       output.push(stream.push(data.subarray(at, end)));
       at = end;
@@ -275,6 +305,52 @@ it('randomized binary-alphabet chunks match a whole-buffer reference across the 
       `sample ${sample}`,
     ).toBe(true);
   }
+});
+it('single-byte writes advance long shared prefixes within a linear tail budget', () => {
+  const data = Buffer.alloc(2_048, 'a');
+  const entries = Array.from({ length: 20 }, (_, i) => ({
+    path: `work/acme/VALUE_${i}`,
+    value: data.toString() + String.fromCharCode(66 + i),
+  }));
+  const expected = referenceMask(data, entries);
+  const budget = 4 * entries.length * data.length;
+  let work = 0;
+  function counted<T extends Uint8Array | Uint32Array>(array: T): T {
+    return new Proxy(array, {
+      get(target, key) {
+        // Successful KMP steps read bytes, but need no failure-link reads.
+        if (typeof key === 'string' && /^\d+$/.test(key) && ++work > budget)
+          throw new Error('Small writes exceeded the linear tail budget.');
+        return Reflect.get(target, key, target);
+      },
+    });
+  }
+  const originals = new Map<Uint8Array, Buffer>();
+  const values = maskedValues(entries).map((value) => {
+    const bytes = counted(value.bytes);
+    originals.set(bytes, value.bytes);
+    return { ...value, bytes, prefixes: counted(value.prefixes) };
+  });
+  const stream = masker(values);
+  const indexOf = Buffer.prototype.indexOf;
+  // Native indexOf requires a real typed array, so unwrap only its needles.
+  const search = vi
+    .spyOn(Buffer.prototype, 'indexOf')
+    .mockImplementation(function (this: Buffer, needle, ...args) {
+      if (typeof needle !== 'string' && typeof needle !== 'number')
+        needle = originals.get(needle) ?? needle;
+      return indexOf.call(this, needle, ...args);
+    });
+  const output: Uint8Array[] = [];
+  try {
+    for (let at = 0; at < data.length; at++)
+      output.push(stream.push(data.subarray(at, at + 1)));
+    output.push(stream.end());
+  } finally {
+    search.mockRestore();
+  }
+  expect(work).toBeGreaterThanOrEqual(entries.length * data.length);
+  expect(Buffer.concat(output).equals(expected)).toBe(true);
 });
 it('adversarial long prefixes stay within a linear tail-search budget', () => {
   const entries = Array.from({ length: 20 }, (_, i) => ({
