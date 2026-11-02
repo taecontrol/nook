@@ -4,20 +4,30 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import { type AddressInfo, connect } from 'node:net';
 import type { Browser } from 'playwright';
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { loadTimeBudgets } from '../scripts/lib/load-time.ts';
+import * as phoneNetwork from '../scripts/lib/phone-network.ts';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { phonePage } from '../scripts/load-time-browser.ts';
 
 const downloadBytes = 450_000;
 const uploadBytes = 150_000;
 let cacheReads = 0;
+let pendingClosed = false;
 async function respond(request: IncomingMessage, response: ServerResponse) {
   let bytes = 0;
   for await (const chunk of request) bytes += chunk.length;
-  if (request.url === '/download') {
+  if (request.url === '/pending') {
+    pendingClosed = false;
+    response.once('close', () => {
+      pendingClosed = true;
+    });
+    response.write('pending');
+    return;
+  }
+  if (request.url?.startsWith('/download')) {
     response.end(Buffer.alloc(downloadBytes));
     return;
   }
@@ -73,18 +83,27 @@ it('#101: every request pays at least 85 ms, including requests on reused connec
   }
 });
 
-it.each(['download', 'upload'] as const)(
-  '#101: concurrent %ss share the page throughput limit',
-  async (direction) => {
+it.each([
+  ['download', 'browser'],
+  ['upload', 'browser'],
+  ['download', 'route.fetch'],
+  ['upload', 'route.fetch'],
+] as const)(
+  '#101: concurrent %ss via %s share the page throughput limit',
+  async (direction, transport) => {
     const { context, page } = await phonePage(browser, 'memory');
     try {
       await page.goto(origin);
+      if (transport === 'route.fetch')
+        await page.route(`**/${direction}?*`, async (route) => {
+          await route.fulfill({ response: await route.fetch() });
+        });
       const result = await page.evaluate(
         async ({ direction, uploadBytes }) => {
           const started = performance.now();
           const sizes = await Promise.all(
-            Array.from({ length: 3 }, async () => {
-              const response = await fetch(`/${direction}`, {
+            Array.from({ length: 3 }, async (_, i) => {
+              const response = await fetch(`/${direction}?${i}`, {
                 method: direction === 'upload' ? 'POST' : 'GET',
                 body:
                   direction === 'upload' ? 'x'.repeat(uploadBytes) : undefined,
@@ -144,5 +163,71 @@ it('#101: the app keeps its origin, cookies and Origin/Host headers', async () =
     });
   } finally {
     await context.close();
+  }
+});
+
+async function canConnect(address: string) {
+  const url = new URL(address);
+  return new Promise<boolean>((resolve) => {
+    const socket = connect(Number(url.port), url.hostname);
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('error', () => resolve(false));
+  });
+}
+
+it.each(['context', 'browser'] as const)(
+  '#101: closing the %s releases the proxy listener and unfinished upstream sockets',
+  async (scope) => {
+    const owned = await launchTestBrowser();
+    const started = vi.spyOn(phoneNetwork, 'startPhoneNetwork');
+    let network:
+      | Awaited<ReturnType<typeof phoneNetwork.startPhoneNetwork>>
+      | undefined;
+    try {
+      const { context, page } = await phonePage(owned.browser, 'memory');
+      network = (await started.mock.results[0].value) as Awaited<
+        ReturnType<typeof phoneNetwork.startPhoneNetwork>
+      >;
+      started.mockRestore();
+      await page.goto(origin);
+      expect(await canConnect(network.proxy.server)).toBe(true);
+      const pending = page.waitForResponse(`${origin}/pending`);
+      await page.evaluate(() => {
+        void fetch('/pending')
+          .then((r) => r.text())
+          .catch(() => {});
+      });
+      await pending;
+      if (scope === 'browser') await owned.close();
+      else await context.close();
+      expect(await canConnect(network.proxy.server)).toBe(false);
+      await expect.poll(() => pendingClosed).toBe(true);
+    } finally {
+      started.mockRestore();
+      network?.close();
+      await owned.close();
+    }
+  },
+);
+
+it('#101: failed context setup closes the proxy listener', async () => {
+  const owned = await launchTestBrowser();
+  await owned.close();
+  const started = vi.spyOn(phoneNetwork, 'startPhoneNetwork');
+  let network:
+    | Awaited<ReturnType<typeof phoneNetwork.startPhoneNetwork>>
+    | undefined;
+  try {
+    await expect(phonePage(owned.browser, 'memory')).rejects.toThrow();
+    network = (await started.mock.results[0].value) as Awaited<
+      ReturnType<typeof phoneNetwork.startPhoneNetwork>
+    >;
+    expect(await canConnect(network.proxy.server)).toBe(false);
+  } finally {
+    started.mockRestore();
+    network?.close();
   }
 });
