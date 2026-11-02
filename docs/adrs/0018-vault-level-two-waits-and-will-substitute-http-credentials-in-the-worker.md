@@ -15,13 +15,13 @@ The owner reports no incident; the work is preventive
 
 Local spikes on 2026-11-02 established:
 
-- **Anything delivered to the machine is level 1.** The agent runs as the
-  owner's user, so it can use the CLI's machine token from the keyring and
-  run `nook run` itself. A same-user process's environment was readable
+- **Anything delivered through the CLI is level 1.** The agent runs as
+  the owner's user, so it can use the CLI's machine token from the keyring
+  and run `nook run` itself. A same-user process's environment was readable
   through `/proc/<pid>/environ`. Its memory was not, under
   `ptrace_scope=1`, but that does not matter while the token is reachable.
-  A secret stays out of the agent's reach only if Nook never delivers its
-  value to a machine.
+  A secret stays out of the agent's reach only if its value stays outside
+  the agent's trust domain: under another user or host, or in Cloudflare.
 - **The Worker can substitute.** A prototype in local workerd replaced a
   placeholder with the value in `Authorization` (Bearer and Basic),
   custom headers and query parameters. It refused other destinations,
@@ -34,13 +34,15 @@ Local spikes on 2026-11-02 established:
   another user or root to hold the value, and an egress sandbox around the
   agent that Nook does not control. `bwrap --unshare-net` isolates one
   command, not the agent.
-- **Substitution has fixed limits.** The tool must accept a different base
+- **Substitution has limits.** The tool must accept a different base
   URL: the OpenAI and Anthropic SDKs document one, while `gh` accepts only a
   host and appends `/api/v3`. A destination that echoes request headers
-  returns the value to the agent. Request bodies, client-side signatures
-  such as AWS SigV4, non-HTTP protocols, private destinations unreachable
-  from Cloudflare, and secrets an application needs at runtime cannot be
-  substituted.
+  returns the value to the agent. Non-HTTP protocols and secrets an
+  application needs at runtime fall outside the model, and a private
+  destination needs a path from Cloudflare to it. The spikes did not
+  validate credentials in request bodies or client-side signatures such as
+  AWS SigV4; the Claude Code sandbox re-signs SigV4, so they need more
+  mechanism rather than being impossible.
 
 ## Decision
 
@@ -50,10 +52,14 @@ because metadata that nothing enforces protects nothing and its shape
 depends on the proxy.
 
 When the owner decides a concrete secret justifies it, level 2 takes this
-shape: the Nook Worker is the substituting proxy. A secret placed behind it
-is never delivered to a machine. The command receives a placeholder and a
-proxy base URL instead, and the Worker substitutes the value only for
-destinations the owner approved and only until the placeholder expires.
+shape: the Nook Worker is the substituting proxy, because Cloudflare is
+already outside the agent's trust domain and needs nothing installed on the
+machine. Nook never delivers the value of a secret placed behind it to a
+machine. The command receives a placeholder and a proxy base URL instead,
+and the Worker substitutes the value only for destinations the owner
+approved and only until the placeholder expires. Whether the owner can
+still reveal such a value in the web app, and which request locations and
+signing schemes are supported, are left to that work.
 
 ## Consequences
 
@@ -68,8 +74,9 @@ for it. That work still has to verify in production whether destination
 APIs accept Cloudflare's egress addresses, how host-only tools such as `gh`
 reach the proxy, and how far a destination that echoes headers can be
 contained. An agent behind the proxy can still use the credential against
-an approved destination until the placeholder expires; it loses only the
-ability to take the value away.
+an approved destination until the placeholder expires. It no longer
+receives the value from Nook, but preventing extraction through an approved
+destination remains an open requirement.
 
 ## Alternatives considered
 
