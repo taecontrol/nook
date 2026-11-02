@@ -12,6 +12,8 @@ import { login, logout, mcpHeader, whoami } from './session.ts';
 import { vaultCheck, vaultList } from './vault.ts';
 import { vaultCreate } from './vault-create.ts';
 import { createGrammar } from './vault-create-arguments.ts';
+import { vaultImport } from './vault-import.ts';
+import { importGrammar } from './vault-import-arguments.ts';
 
 type Usage = string | { readonly [command: string]: Usage };
 const usage: Usage = {
@@ -20,6 +22,7 @@ const usage: Usage = {
     check: 'nook vault check',
     list: 'nook vault list <bucket>',
     create: createGrammar.usage,
+    import: importGrammar.usage,
   },
   memory: {
     attach: 'nook memory attach <id> <path>',
@@ -53,8 +56,10 @@ function failedPath(error: unknown) {
 function missingVaultBucket(args: readonly string[]) {
   return args[0] === 'vault' && args[1] === 'list' && args.length === 2;
 }
-function creatingVault(args: readonly string[]) {
-  return args[0] === 'vault' && args[1] === 'create' && args[2] !== '--help';
+function writingVault(args: readonly string[]) {
+  if (args[0] !== 'vault' || args[2] === '--help') return;
+  if (args[1] === 'create') return vaultCreate;
+  if (args[1] === 'import') return vaultImport;
 }
 
 async function runInterruptible(effect: Effect.Effect<number>) {
@@ -120,6 +125,11 @@ export async function execute(
             { bucket: Argument.String('bucket') },
             ({ bucket }) => vaultList(host, bucket, write),
           ),
+          Command.make('import', declaration(importGrammar)).pipe(
+            Command.withDescription(
+              'Import a .env file without overwriting existing secrets.',
+            ),
+          ),
           Command.make('create', declaration(createGrammar)).pipe(
             Command.withDescription(
               'Store a new secret from stdin without overwriting.',
@@ -165,9 +175,10 @@ export async function execute(
       ),
     ]),
   );
+  const vaultWrite = writingVault(args);
   return runInterruptible(
-    (creatingVault(args)
-      ? vaultCreate(host, args.slice(2), write)
+    (vaultWrite
+      ? vaultWrite(host, args.slice(2), write)
       : Command.runWith(command, {
           version: cliPackage.version,
           renderErrors: false,

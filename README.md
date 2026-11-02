@@ -120,8 +120,9 @@ Repeat `--secret ENV=bucket/NAME` for more variables; repeated flag names are re
 `NOOK_AGENT_SESSION`, `CODEX_SESSION_ID`, `CODEX_THREAD_ID`,
 `CLAUDE_CODE_SESSION_ID`, and `CURSOR_CONVERSATION_ID` are reserved for agent
 session claims. Mapping a secret to any of them, through `--secret` or
-`nook.json`, fails before keyring or network access. `nook run` and
-`nook vault create` automatically report one session from those variables:
+`nook.json`, fails before keyring or network access. `nook run`,
+`nook vault create`, and `nook vault import` (on every key it creates)
+automatically report one session from those variables:
 Declared → Codex → Claude Code → Cursor. A declared session comes from
 `NOOK_AGENT_SESSION`; Codex can also report a distinct thread. Valid values
 contain 1–200 ASCII letters, digits, `.`, `_`, `:`, `~`, or `-`; invalid values
@@ -136,6 +137,14 @@ Before delivering values, the Worker records one entry per secret, including the
 ```sh
 provider-cli new-token | nook vault create work/acme/NEW_TOKEN --purpose "token from provider setup" --description "Provider API token"
 ```
+
+Import a local `.env` without reading its values into the conversation:
+
+```sh
+nook vault import work/acme .env --purpose "migrate acme env"
+```
+
+The CLI parses dotenv syntax locally, imports up to 100 keys and never changes the file. Invalid names and duplicate new names block the import before any write. Empty values, values over 64 KiB and values containing NUL are skipped. Existing names in that bucket are left unchanged. The report names each result and prints a `nook.json` block for created and existing keys without writing it to disk. Keys named like an agent session variable are left out of the block with a note to map them under another name, and a block of more than 20 keys notes that `nook run` uses at most 20. A failed or unconfirmed write exits with status 1; rerunning safely skips names already stored.
 
 In the Vault web app, choose **Import .env**, paste your file and select a bucket. Review the names, fix problems and create the checked keys together. Existing secrets are skipped. Values stay hidden after review; use **Retry failed** for any remaining keys, then **Done** to discard the import.
 

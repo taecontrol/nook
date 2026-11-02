@@ -33,10 +33,11 @@ function validExecutable(executable: string) {
   if (!executable || /[/\0]/.test(executable) || byteLength(executable) > 255)
     return 'Executable must be a name of 1 to 255 bytes, without a slash or NUL.';
 }
+export const RUN_PATHS_MAX = 20;
 export function validateSecretPaths(paths: readonly string[]) {
   const distinct = [...new Set(paths)];
-  if (distinct.length < 1 || distinct.length > 20)
-    return 'Request 1 to 20 distinct secret paths.';
+  if (distinct.length < 1 || distinct.length > RUN_PATHS_MAX)
+    return `Request 1 to ${RUN_PATHS_MAX} distinct secret paths.`;
   if (distinct.some((path) => validateSecretPath(path)))
     return 'Use a secret path such as work/acme/GH_TOKEN.';
 }
