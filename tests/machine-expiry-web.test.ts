@@ -351,7 +351,9 @@ it('Expiry E12/E14: Enter during the expiry close animation sends no PUT and pre
       await save.evaluate((button) => button === document.activeElement),
     ).toBe(true);
     await page.keyboard.press('Enter');
-    await animation.evaluate((style) => style.remove());
+    await animation.evaluate((style) => {
+      style.parentNode?.removeChild(style);
+    });
     await sheet.waitFor({ state: 'hidden' });
     expect(
       visit.requests.filter((request) => request.method === 'PUT'),
