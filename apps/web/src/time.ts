@@ -50,3 +50,13 @@ export function timeUntil(iso: string, now = Date.now()) {
   const minutes = Math.max(1, Math.ceil((Date.parse(iso) - now) / MINUTE));
   return `in ${count(minutes, 'minute')}`;
 }
+
+/** Relative access lifetime in minutes, hours or days. Never zero minutes. */
+export function untilText(iso: string, now: number) {
+  const remaining = Date.parse(iso) - now;
+  const minutes = Math.max(1, Math.ceil(remaining / MINUTE));
+  if (minutes < HOUR / MINUTE) return `in ${count(minutes, 'minute')}`;
+  if (remaining < DAY)
+    return `in ${count(Math.ceil(minutes / (HOUR / MINUTE)), 'hour')}`;
+  return `in ${count(Math.ceil(minutes / (DAY / MINUTE)), 'day')}`;
+}

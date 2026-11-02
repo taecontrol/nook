@@ -1,5 +1,5 @@
-import { type Machine, untilText } from '@nook/contract';
-import { DAY, formatDate, recentTime, timeAgo } from './time';
+import type { Machine } from '@nook/contract';
+import { DAY, formatDate, recentTime, timeAgo, untilText } from './time';
 
 const STALE_AFTER_DAYS = 30;
 const groups = [

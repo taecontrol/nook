@@ -1,5 +1,5 @@
 import { hostname } from 'node:os';
-import { limitedAccessText, readOnlyText, untilText } from '@nook/contract';
+import { limitedAccessText, readOnlyText } from '@nook/contract';
 import { Effect } from 'effect';
 import { ChildProcess, ChildProcessSpawner } from 'effect/process';
 import cliPackage from '../package.json' with { type: 'json' };
@@ -13,6 +13,7 @@ import {
   NotLoggedIn,
   networkError,
   RequestFailure,
+  untilText,
 } from './errors.ts';
 import type { Host } from './host.ts';
 
