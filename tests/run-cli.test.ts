@@ -16,6 +16,7 @@ import { pathToFileURL } from 'node:url';
 import { build, stop } from 'esbuild';
 import { beforeEach, expect, it } from 'vitest';
 import { evidenceRoot } from '../scripts/lib/instrument.ts';
+import { buildExecutable } from '../scripts/release/binary.ts';
 import {
   acmePath,
   auditPageData,
@@ -36,7 +37,7 @@ import {
 import { vaultCheckpoints } from './support/vault-checkpoints.ts';
 
 let app: Awaited<ReturnType<typeof runFixture>>;
-let keyring: Awaited<ReturnType<typeof privateKeyring>>;
+let keyring: ReturnType<typeof withRelaySeam>;
 const childFile = resolve('tests/support/run-child.ts');
 const runArgs = (
   command: string[] = [process.execPath, childFile, 'streams'],
@@ -49,6 +50,160 @@ const runArgs = (
   '--',
   ...command,
 ];
+const marker = `<nook:${acmePath}>`;
+const maskingArgs = (mode: string, extra: string[] = [], secrets?: string[]) =>
+  runArgs([process.execPath, childFile, mode, ...extra], secrets);
+function coverageEnvironment() {
+  return process.env.COVERAGE_RUN
+    ? {
+        NOOK_CLI_COVERAGE: resolve(
+          evidenceRoot,
+          `cli-${crypto.randomUUID()}.json`,
+        ),
+      }
+    : {};
+}
+function relaySeam() {
+  return {
+    NODE_OPTIONS: [
+      ...(process.platform === 'darwin'
+        ? [resolve(keyring.home, 'process-groups.mjs')]
+        : []),
+      resolve('tests/support/run-relay-seam.ts'),
+    ]
+      .map((file) => `--import=${pathToFileURL(file).href}`)
+      .join(' '),
+  };
+}
+function withRelaySeam(fixture: Awaited<ReturnType<typeof privateKeyring>>) {
+  return {
+    ...fixture,
+    start(
+      ...[args, extra, input, workingDirectory]: Parameters<
+        typeof fixture.start
+      >
+    ) {
+      return fixture.start(
+        args,
+        {
+          ...extra,
+          NODE_OPTIONS: [relaySeam().NODE_OPTIONS, extra?.NODE_OPTIONS]
+            .filter(Boolean)
+            .join(' '),
+        },
+        input,
+        workingDirectory,
+      );
+    },
+  };
+}
+async function outputProbe(mode: string, args: string[]) {
+  const result = await keyring.command(
+    process.execPath,
+    [
+      resolve('tests/support/run-output.ts'),
+      mode,
+      resolve(testBuild, 'cli.js'),
+      ...args,
+    ],
+    { ...coverageEnvironment(), ...relaySeam() },
+  ).done;
+  expect(result.status).toBe(0);
+  expect(result.stderr === '').toBe(true);
+  const report = JSON.parse(result.stdout) as {
+    status: number;
+    stdout: string;
+    stderr: string;
+    stdoutClosed: boolean;
+    stderrClosed: boolean;
+  };
+  return {
+    status: report.status,
+    stdout: Buffer.from(report.stdout ?? '', 'base64'),
+    stderr: Buffer.from(report.stderr ?? '', 'base64'),
+    stdoutClosed: report.stdoutClosed,
+    stderrClosed: report.stderrClosed,
+  };
+}
+async function lifecycleProbe(
+  mode: string,
+  args: string[],
+  beforeBytes: number,
+) {
+  await writeFile(
+    resolve(keyring.home, 'observe-lifecycle'),
+    JSON.stringify({ beforeBytes, backpressure: mode === 'backpressure' }),
+  );
+  const result = await keyring.command(
+    process.execPath,
+    [
+      resolve('tests/support/run-output-lifecycle.ts'),
+      mode,
+      resolve(testBuild, 'cli.js'),
+      ...args,
+    ],
+    { ...coverageEnvironment(), ...relaySeam() },
+  ).done;
+  expect(result.status).toBe(0);
+  expect(result.stderr === '').toBe(true);
+  return JSON.parse(result.stdout) as {
+    status: number | null;
+    signal: NodeJS.Signals | null;
+    stdout: string;
+    stderr: string;
+    atExit: string;
+    outputClosed: boolean;
+    stdoutClosed: boolean;
+    stderrClosed: boolean;
+    relayExited: boolean;
+    secondWrite?: string;
+    backpressured: boolean;
+    outputErrors: string[];
+  };
+}
+async function flushTokens() {
+  const file = resolve(keyring.home, 'flush-tokens');
+  if (!existsSync(file)) return [];
+  const writes = (await readFile(file, 'utf8'))
+    .trimEnd()
+    .split('\n')
+    .map((line) => JSON.parse(line) as { fd: number; token: string });
+  expect(new Set(writes.map(({ fd }) => fd)).size).toBe(writes.length);
+  expect(new Set(writes.map(({ token }) => token)).size).toBe(1);
+  expect(writes[0].token).toMatch(/^\0nook-flush:[a-f0-9]{64}\0$/);
+  expect(Buffer.byteLength(writes[0].token)).toBe(77);
+  return writes;
+}
+async function pressureProbe(mode: string, args: string[]) {
+  // The spawn seam adds the observer only to the relay, never to the child.
+  await writeFile(resolve(keyring.home, 'observe-lifecycle'), '{}');
+  const result = await keyring.command(
+    process.execPath,
+    [
+      resolve('tests/support/run-output-pressure.ts'),
+      mode,
+      resolve(testBuild, 'cli.js'),
+      ...args,
+    ],
+    { ...coverageEnvironment(), ...relaySeam() },
+  ).done;
+  expect(result.status).toBe(0);
+  expect(result.stderr).toBe('');
+  return JSON.parse(result.stdout) as {
+    status: number;
+    atExit: string;
+    output: string;
+    padding: number;
+    relayExited: boolean;
+    nonblocking: boolean;
+  };
+}
+async function addValue(name: string, value: string) {
+  expect((await createSecret(app, secretInput({ name, value }))).status).toBe(
+    201,
+  );
+  return `work/acme/${name}`;
+}
 async function nativeSignal(
   running: { kill(signal: NodeJS.Signals): boolean | Promise<boolean> },
   signal: NodeJS.Signals,
@@ -68,7 +223,7 @@ async function keyringTranscript() {
 }
 beforeEach(async () => {
   app = await runFixture();
-  keyring = await privateKeyring();
+  keyring = withRelaySeam(await privateKeyring());
   await mkdir(dirname(keyring.config), { recursive: true });
   await writeFile(keyring.config, JSON.stringify({ url: app.origin }));
   expect(await keyring.store(app.origin, app.token)).toBe(0);
@@ -437,7 +592,7 @@ it('E6: incomplete run prints its required usage', async () => {
   expect(result.status).toBe(1);
   expectOutput(
     result.stdout + result.stderr,
-    'Usage: nook run --secret ENV=bucket/NAME --purpose "…" -- <command>',
+    'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] -- <command>',
     true,
   );
 });
@@ -609,12 +764,12 @@ it.each([
   {
     args: ['--secret', '--', 'node'],
     message:
-      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" -- <command>',
+      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] -- <command>',
   },
   {
     args: ['--purpose', '--', 'node'],
     message:
-      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" -- <command>',
+      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] -- <command>',
   },
   {
     args: [
@@ -628,12 +783,12 @@ it.each([
       'node',
     ],
     message:
-      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" -- <command>',
+      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] -- <command>',
   },
   {
     args: ['--secret', `GH_TOKEN=${acmePath}`, '--purpose', 'test', '--'],
     message:
-      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" -- <command>',
+      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] -- <command>',
   },
   {
     args: [
@@ -751,22 +906,27 @@ it('E5: alias mappings send one path in the real value request', async () => {
 it('E9: an incomplete successful value response fails privately before spawning', async () => {
   const transport = await valueTransport('incomplete');
   try {
-    const result = await keyring.start(
+    const result = await lifecycleProbe(
+      'spawn-failure',
       runArgs([process.execPath, childFile, 'tty']),
-    ).done;
+      0,
+    );
+    const output =
+      Buffer.from(result.stdout, 'base64').toString() +
+      Buffer.from(result.stderr, 'base64').toString();
+    expect(result.stdoutClosed).toBe(true);
+    expect(result.stderrClosed).toBe(true);
+    expect(result.relayExited).toBe(true);
+    expect(await flushTokens()).toHaveLength(2);
     expect(result.status).toBe(1);
     expectOutput(
-      result.stdout + result.stderr,
+      output,
       `Could not reach ${transport.origin}. Try again.`,
       true,
     );
     expect(transport.counts).toEqual([1]);
     expect(await auditRows(app)).toHaveLength(1);
-    expectNoValue(result.stdout + result.stderr, [
-      app.input.value,
-      app.token,
-      app.key,
-    ]);
+    expectNoValue(output, [app.input.value, app.token, app.key]);
   } finally {
     await transport.close();
   }
@@ -774,22 +934,27 @@ it('E9: an incomplete successful value response fails privately before spawning'
 it('E11: the CLI does not retry a lost value response after the Worker audited delivery', async () => {
   const transport = await valueTransport('lost');
   try {
-    const result = await keyring.start(
+    const result = await lifecycleProbe(
+      'spawn-failure',
       runArgs([process.execPath, childFile, 'tty']),
-    ).done;
+      0,
+    );
+    const output =
+      Buffer.from(result.stdout, 'base64').toString() +
+      Buffer.from(result.stderr, 'base64').toString();
+    expect(result.stdoutClosed).toBe(true);
+    expect(result.stderrClosed).toBe(true);
+    expect(result.relayExited).toBe(true);
+    expect(await flushTokens()).toHaveLength(0);
     expect(result.status).toBe(1);
     expectOutput(
-      result.stdout + result.stderr,
+      output,
       `Could not reach ${transport.origin}. Try again.`,
       true,
     );
     expect(transport.counts).toEqual([1]);
     expect(await auditRows(app)).toHaveLength(1);
-    expectNoValue(result.stdout + result.stderr, [
-      app.input.value,
-      app.token,
-      app.key,
-    ]);
+    expectNoValue(output, [app.input.value, app.token, app.key]);
   } finally {
     await transport.close();
   }
@@ -874,6 +1039,7 @@ it('CLI help lists the installed audited run command', async () => {
 });
 it('E1: the resolved command keeps argv0 and forwards arguments literally', async () => {
   await symlink(process.execPath, resolve(keyring.shim, 'node'));
+  await symlink('/usr/bin/mkfifo', resolve(keyring.shim, 'mkfifo'));
   const probe = resolve(keyring.home, 'arguments.js');
   await writeFile(
     probe,
@@ -887,4 +1053,693 @@ it('E1: the resolved command keeps argv0 and forwards arguments literally', asyn
   expectOutput(result.stdout, 'true', true);
   expect(result.stderr).toBe('');
   expect(await auditRows(app)).toHaveLength(1);
+});
+
+it('Masking E1: piped output closes and the relay exits after preserving masked output and exit 42', async () => {
+  const result = await outputProbe(
+    'binary',
+    maskingArgs('print-value', ['42']),
+  );
+  expect(result.status).toBe(42);
+  expect(result.stdout.equals(Buffer.from(`token=${marker}\n`))).toBe(true);
+  expect(result.stderr.length).toBe(0);
+  expect(result.stdoutClosed).toBe(true);
+  expect(result.stderrClosed).toBe(true);
+  const relay = JSON.parse(
+    await readFile(resolve(keyring.home, 'relay-launch'), 'utf8'),
+  ) as { pid: number };
+  await expect
+    .poll(
+      async () =>
+        (await keyring.command('/bin/kill', ['-0', String(relay.pid)]).done)
+          .status,
+    )
+    .not.toBe(0);
+});
+it('Masking E2: a shared regular file retains all 2000 alternating writes in order', async () => {
+  const result = await outputProbe('shared', maskingArgs('alternate'));
+  expect(result.status).toBe(0);
+  const expected = Array.from(
+    { length: 2000 },
+    (_, i) => `${i}:${i % 10 === 0 ? marker : 'plain'}\n`,
+  ).join('');
+  expect(result.stdout.equals(Buffer.from(expected))).toBe(true);
+});
+it('Masking E2: both child streams share one real FIFO for a shared destination', async () => {
+  const result = await outputProbe('shared', maskingArgs('shared-fifo'));
+  expect(result.status).toBe(0);
+  expect(result.stdout.equals(Buffer.from('true'))).toBe(true);
+  const launch = JSON.parse(
+    await readFile(resolve(keyring.home, 'relay-launch'), 'utf8'),
+  ) as { readers: number };
+  expect(launch.readers).toBe(1);
+  expect(await flushTokens()).toHaveLength(1);
+});
+it('Masking E3: separate pipes retain their stream and plain bytes', async () => {
+  const result = await keyring.start(maskingArgs('separate')).done;
+  expect(result.status).toBe(0);
+  expectOutput(result.stdout, 'plain', true);
+  expectOutput(result.stderr, marker, true);
+  const launch = JSON.parse(
+    await readFile(resolve(keyring.home, 'relay-launch'), 'utf8'),
+  ) as { readers: number };
+  expect(launch.readers).toBe(2);
+  expect(await flushTokens()).toHaveLength(2);
+});
+it('Masking E4: writes 200 ms apart never expose a value fragment', async () => {
+  const result = await keyring.start(maskingArgs('split-value')).done;
+  expect(result.status).toBe(0);
+  expectOutput(result.stdout, marker, true);
+});
+it('Masking E5: the longest containing value wins whole', async () => {
+  const shorter = await addValue('SHORT', 'abcdefgh');
+  const longer = await addValue('LONG', 'prefix-abcdefgh-suffix');
+  const result = await keyring.start(
+    maskingArgs('print-value', [], [`GH_TOKEN=${longer}`, `SHORT=${shorter}`]),
+  ).done;
+  expect(result.status).toBe(0);
+  expectOutput(result.stdout, `token=<nook:${longer}>`, true);
+});
+it('Masking E6: duplicate values sort by path and aliases share that marker', async () => {
+  const first = await addValue('AAA', app.input.value);
+  const result = await keyring.start(
+    maskingArgs(
+      'all-values',
+      ['GH_TOKEN,ALIAS,FIRST'],
+      [`GH_TOKEN=${acmePath}`, `ALIAS=${acmePath}`, `FIRST=${first}`],
+    ),
+  ).done;
+  expect(result.status).toBe(0);
+  expectOutput(result.stdout, `<nook:${first}>|`.repeat(3), true);
+});
+it('Masking E7: seven Unicode code points pass through and eight are masked', async () => {
+  const seven = '🔐'.repeat(7);
+  const short = await addValue('SEVEN', seven);
+  const eight = await addValue('EIGHT', seven + '🔑');
+  const result = await keyring.start(
+    maskingArgs(
+      'all-values',
+      ['SEVEN,EIGHT'],
+      [`SEVEN=${short}`, `EIGHT=${eight}`],
+    ),
+  ).done;
+  expect(result.status).toBe(0);
+  expectOutput(result.stdout, `${seven}|<nook:${eight}>|`, true);
+});
+it('Masking E8: whole multiline bytes are masked and separate labelled lines survive', async () => {
+  const result = await keyring.start(maskingArgs('multiline')).done;
+  expect(result.status).toBe(0);
+  expectOutput(
+    result.stdout,
+    marker +
+      '|' +
+      app.input.value
+        .split('\n')
+        .map((line) => `[${line}]\n`)
+        .join('')
+        .trimEnd(),
+    true,
+  );
+});
+it.skipIf(process.platform !== 'linux')(
+  'Masking E9: three TTYs print values unchanged without starting a relay',
+  async () => {
+    await writeFile(resolve(keyring.home, 'refuse-relay'), '');
+    const args = [
+      process.execPath,
+      resolve(testBuild, 'cli.js'),
+      ...maskingArgs('tty-value'),
+    ];
+    const command = args
+      .map((arg) => "'" + arg.replaceAll("'", "'\\''") + "'")
+      .join(' ');
+    const result = await keyring.command(
+      '/usr/bin/script',
+      ['--quiet', '--return', '--command', command, '/dev/null'],
+      { ...coverageEnvironment(), ...relaySeam() },
+    ).done;
+    expect(result.status).toBe(0);
+    expectOutput(result.stdout, '[true,true,true]');
+    expect(
+      result.stdout.includes(app.input.value.replaceAll('\n', '\r\n')),
+    ).toBe(true);
+    expect(existsSync(resolve(keyring.home, 'relay-launch'))).toBe(false);
+  },
+);
+it.skipIf(process.platform !== 'linux')(
+  'Masking E10: a TTY stays plain while redirected stderr is masked',
+  async () => {
+    const file = resolve(keyring.home, 'stderr-file');
+    const args = [
+      process.execPath,
+      resolve(testBuild, 'cli.js'),
+      ...maskingArgs('tty-value'),
+    ];
+    const command =
+      args.map((arg) => "'" + arg.replaceAll("'", "'\\''") + "'").join(' ') +
+      ` 2>'${file}'`;
+    const result = await keyring.command(
+      '/usr/bin/script',
+      ['--quiet', '--return', '--command', command, '/dev/null'],
+      coverageEnvironment(),
+    ).done;
+    expect(result.status).toBe(0);
+    expectOutput(result.stdout, '[true,true,false]');
+    expect(
+      result.stdout.includes(app.input.value.replaceAll('\n', '\r\n')),
+    ).toBe(true);
+    expect((await readFile(file, 'utf8')) === marker).toBe(true);
+  },
+);
+it('Masking E11: no-masking passes bytes unchanged without a relay', async () => {
+  await writeFile(resolve(keyring.home, 'refuse-relay'), '');
+  const args = maskingArgs('print-value');
+  args.splice(1, 0, '--no-masking');
+  const result = await keyring.start(args, relaySeam()).done;
+  expect(result.status).toBe(0);
+  expect(result.stdout === 'token=' + app.input.value + '\n').toBe(true);
+  expect(existsSync(resolve(keyring.home, 'relay-launch'))).toBe(false);
+});
+it.each(
+  [
+    ['--no-masking', '--no-masking'],
+    ['--no-masking', 'true'],
+    ['--no-masking=false'],
+  ].map((flags) => ({ flags })),
+)(
+  'Masking E11: invalid boolean occurrence starts nothing (%#)',
+  async ({ flags }) => {
+    const before = await keyringTranscript();
+    const args = maskingArgs('mark', [resolve(keyring.home, 'started')]);
+    args.splice(1, 0, ...flags);
+    const result = await keyring.start(args).done;
+    expect(result.status).toBe(1);
+    expectOutput(
+      result.stdout + result.stderr,
+      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] -- <command>',
+      true,
+    );
+    expect((await keyringTranscript()) === before).toBe(true);
+    expect(await auditRows(app)).toEqual([]);
+    expect(existsSync(resolve(keyring.home, 'started'))).toBe(false);
+  },
+);
+it('Masking E12: an unterminated prompt arrives before the writer is released', async () => {
+  const release = resolve(keyring.home, 'release');
+  expect(
+    (await keyring.command('/usr/bin/mkfifo', [release]).done).status,
+  ).toBe(0);
+  const result = await outputProbe('prompt', maskingArgs('prompt', [release]));
+  expect(result.status).toBe(0);
+  expect(result.stdout.equals(Buffer.from('Password: ' + marker))).toBe(true);
+});
+it('Masking E13: all 256 byte values survive a binary pipe exactly', async () => {
+  const result = await outputProbe('binary', maskingArgs('bytes'));
+  expect(result.status).toBe(0);
+  expect(
+    result.stdout.equals(Buffer.from(Array.from({ length: 256 }, (_, i) => i))),
+  ).toBe(true);
+});
+it('Masking E14: head closes its pipe, yes gets SIGPIPE and run exits 141', async () => {
+  const result = await outputProbe('head', runArgs(['/usr/bin/yes']));
+  expect(result.status).toBe(141);
+  expect(result.stdout.equals(Buffer.from('y\n'))).toBe(true);
+  expect(result.stderr.length).toBe(0);
+});
+it('Masking E14/E16: EPIPE after the token flush closes the FIFO and exits with an idle writer', async () => {
+  const before = `before:${marker}:tail${app.input.value.slice(0, 8)}`;
+  const result = await lifecycleProbe(
+    'epipe',
+    maskingArgs('background-epipe', [keyring.home]),
+    Buffer.byteLength(before),
+  );
+  expect(result.status).toBe(3);
+  expect(Buffer.from(result.atExit, 'base64').toString()).toBe(before);
+  expect(result.secondWrite).toBe('EPIPE');
+  expect(result.outputClosed).toBe(true);
+  expect(result.relayExited).toBe(true);
+});
+it('Masking E16: killing run keeps masking until EOF and releases the held tail before relay exit', async () => {
+  const before = `before:${marker}:tail${app.input.value.slice(0, 8)}`;
+  const result = await lifecycleProbe(
+    'killed',
+    maskingArgs('killed-parent', [keyring.home]),
+    Buffer.byteLength(before),
+  );
+  expect(result.status).toBeNull();
+  expect(result.signal).toBe('SIGKILL');
+  expect(Buffer.from(result.stdout, 'base64').toString()).toBe(
+    before + `after:${marker}:tail${app.input.value.slice(0, 8)}`,
+  );
+  expect(result.outputClosed).toBe(true);
+  expect(result.relayExited).toBe(true);
+});
+it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
+  'Masking E15: %s keeps forwarding and the child status',
+  async (signal) => {
+    const result = await lifecycleProbe(
+      signal,
+      maskingArgs('signal-status'),
+      0,
+    );
+    expect(result.status).toBe(143);
+    expectOutput(
+      Buffer.from(result.stdout, 'base64').toString(),
+      'child-ready\n' +
+        (signal === 'SIGINT' ? 'SIGTERM' : signal) +
+        `:${marker}:tail${app.input.value.slice(0, 8)}`,
+      true,
+    );
+    expect(result.stdoutClosed).toBe(true);
+    expect(result.relayExited).toBe(true);
+    expect((await flushTokens()).length).toBe(1);
+  },
+);
+it.each(['background', 'background-separate'])(
+  'Masking E16: run flushes and exits while a FIFO-gated background writer stays masked (%s)',
+  async (destination) => {
+    const before = `before:${marker}:tail${app.input.value.slice(0, 8)}`;
+    const after = `\0nook-flush:near-match:${marker}\0nook-flush:`;
+    const release = resolve(keyring.home, 'release');
+    expect(
+      (await keyring.command('/usr/bin/mkfifo', [release]).done).status,
+    ).toBe(0);
+    const result = await outputProbe(
+      destination,
+      maskingArgs('background', [keyring.home]),
+    );
+    expect(result.status).toBe(3);
+    expect(
+      (await readFile(resolve(keyring.home, 'exit-snapshot'), 'utf8')) ===
+        before,
+    ).toBe(true);
+    await expect
+      .poll(() => existsSync(resolve(keyring.home, 'writer-pid')))
+      .toBe(true);
+    const writer = (
+      await readFile(resolve(keyring.home, 'writer-pid'), 'utf8')
+    ).trim();
+    const relay = JSON.parse(
+      await readFile(resolve(keyring.home, 'relay-launch'), 'utf8'),
+    ) as { pid: number };
+    expect(
+      (await keyring.command('/bin/kill', ['-0', writer]).done).status,
+    ).toBe(0);
+    expect(
+      (await keyring.command('/bin/kill', ['-0', String(relay.pid)]).done)
+        .status,
+    ).toBe(0);
+    expect(
+      (
+        await keyring.command('/bin/sh', [
+          '-c',
+          'printf x > "$1"',
+          'fixture',
+          release,
+        ]).done
+      ).status,
+    ).toBe(0);
+    await expect
+      .poll(
+        async () =>
+          (await readFile(resolve(keyring.home, 'output'), 'utf8')) ===
+          before + (destination === 'background' ? after : ''),
+      )
+      .toBe(true);
+    await expect
+      .poll(
+        async () =>
+          (await keyring.command('/bin/kill', ['-0', String(relay.pid)]).done)
+            .status,
+      )
+      .not.toBe(0);
+    if (destination === 'background-separate')
+      expect(
+        await readFile(resolve(keyring.home, 'output-error'), 'utf8'),
+      ).toBe(after);
+    await expect
+      .poll(
+        async () =>
+          (await keyring.command('/bin/kill', ['-0', writer]).done).status,
+      )
+      .not.toBe(0);
+  },
+);
+it('Masking E16: a full FIFO made nonblocking by a background Node writer still flushes before run exits', async () => {
+  const result = await pressureProbe(
+    'full-input',
+    runArgs([
+      '/bin/sh',
+      '-c',
+      'printf "before:%s\\n" "$GH_TOKEN"; "$2" "$3" full-input-writer "$1" & read -r line < "$1/writer-ready"; exit 3',
+      'fixture',
+      keyring.home,
+      process.execPath,
+      childFile,
+    ]),
+  );
+  const { records, padding } = JSON.parse(
+    await readFile(resolve(keyring.home, 'full-input-counts'), 'utf8'),
+  ) as { records: number; padding: number };
+  const expected =
+    `before:${marker}\n` + `${marker}\n`.repeat(records) + 'x'.repeat(padding);
+  expect(result.status).toBe(3);
+  expect(Buffer.from(result.atExit, 'base64').toString() === expected).toBe(
+    true,
+  );
+  expect(
+    Buffer.from(result.output, 'base64').toString() ===
+      expected + `after:${marker}`,
+  ).toBe(true);
+  expectNoValue(Buffer.from(result.output, 'base64').toString(), [
+    app.input.value,
+  ]);
+  expect(result.relayExited).toBe(true);
+  expect(await flushTokens()).toHaveLength(1);
+});
+it('Masking E14: closing a full named-FIFO destination stops the relay and gives the child SIGPIPE', async () => {
+  const result = await pressureProbe(
+    'fifo-epipe',
+    runArgs(['/bin/sh', '-c', 'exec yes "$GH_TOKEN"']),
+  );
+  expect(result.status).toBe(141);
+  expect(result.relayExited).toBe(true);
+});
+it('Masking E17: a slow nonblocking named-FIFO destination receives all bytes masked after EAGAIN', async () => {
+  const result = await pressureProbe(
+    'nonblocking-output',
+    maskingArgs('large', [resolve(keyring.home, 'nonblocking-ready')]),
+  );
+  const expected = Buffer.concat([
+    Buffer.alloc(
+      result.padding + 1024 * 1024 - Buffer.byteLength(app.input.value),
+      120,
+    ),
+    Buffer.from(marker),
+  ]);
+  expect(result.status).toBe(0);
+  expect(Buffer.from(result.output, 'base64').equals(expected)).toBe(true);
+  expect(result.nonblocking).toBe(true);
+  expect(result.relayExited).toBe(true);
+});
+it.each(['padded', 'unpadded'])(
+  'Masking E16: the token confirms flush while a continuous background writer stays masked (%s)',
+  async (record) => {
+    await writeFile(
+      resolve(keyring.home, 'continuous-output'),
+      JSON.stringify({ record }),
+    );
+    expect(
+      (
+        await keyring.command(
+          '/usr/bin/mkfifo',
+          ['writer-ready'].map((name) => resolve(keyring.home, name)),
+        ).done
+      ).status,
+    ).toBe(0);
+    const result = await outputProbe(
+      'continuous-background',
+      maskingArgs('continuous-background', [keyring.home]),
+    );
+    const writer = (
+      await readFile(resolve(keyring.home, 'writer-pid'), 'utf8')
+    ).trim();
+    const relay = JSON.parse(
+      await readFile(resolve(keyring.home, 'relay-launch'), 'utf8'),
+    ) as { pid: number };
+    try {
+      expect(result.status).toBe(3);
+      expect(await flushTokens()).toHaveLength(1);
+      expect(existsSync(resolve(keyring.home, 'writer-flowing'))).toBe(true);
+      expect(
+        (await keyring.command('/bin/kill', ['-0', writer]).done).status,
+      ).toBe(0);
+      const snapshot = await readFile(
+        resolve(keyring.home, 'exit-snapshot'),
+        'utf8',
+      );
+      expect(snapshot.startsWith(`before:${marker}\n`)).toBe(true);
+      expectNoValue(snapshot, [app.input.value]);
+    } finally {
+      await keyring.command('/bin/kill', ['-TERM', writer]).done;
+    }
+    await expect
+      .poll(
+        async () =>
+          (await keyring.command('/bin/kill', ['-0', String(relay.pid)]).done)
+            .status,
+      )
+      .not.toBe(0);
+    await expect
+      .poll(
+        async () =>
+          (await keyring.command('/bin/kill', ['-0', writer]).done).status,
+      )
+      .not.toBe(0);
+    const output = await readFile(resolve(keyring.home, 'output'), 'utf8');
+    expect(output.endsWith(`after:${marker}`)).toBe(true);
+    expectNoValue(output, [app.input.value]);
+  },
+);
+it.each(['binary', 'backpressure'])(
+  'Masking E17: the complete MiB including its final value is delivered before run exits (%s)',
+  async (mode) => {
+    await writeFile(resolve(keyring.home, 'observe-lifecycle'), '{}');
+    const expected = Buffer.concat([
+      Buffer.alloc(1024 * 1024 - Buffer.byteLength(app.input.value), 120),
+      Buffer.from(marker),
+    ]);
+    if (mode === 'backpressure') {
+      const result = await lifecycleProbe(
+        mode,
+        maskingArgs('large', [resolve(keyring.home, 'nonblocking-ready')]),
+        0,
+      );
+      expect(result.status).toBe(0);
+      expect(Buffer.from(result.atExit, 'base64').equals(expected)).toBe(true);
+      expect(result.backpressured).toBe(true);
+      expect(result.outputErrors).toEqual(['output-error:EAGAIN']);
+      expect(result.stdoutClosed).toBe(true);
+      expect(result.stderrClosed).toBe(true);
+      expect(result.relayExited).toBe(true);
+    } else {
+      const result = await outputProbe(mode, maskingArgs('large'));
+      expect(result.status).toBe(0);
+      expect(result.stdout.equals(expected)).toBe(true);
+      expect(result.stdoutClosed).toBe(true);
+      expect(result.stderrClosed).toBe(true);
+      expect(
+        await readFile(resolve(keyring.home, 'lifecycle-events'), 'utf8'),
+      ).toBe('relay-exit\n');
+    }
+    expect(await flushTokens()).toHaveLength(mode === 'backpressure' ? 1 : 2);
+  },
+);
+it.each([false, true])(
+  'Masking E18: Nook failures never print values even with opt-out %s',
+  async (disabled) => {
+    const command = resolve(keyring.home, 'bad-interpreter');
+    await writeFile(command, '#!/nook-fixture-absent\n', { mode: 0o700 });
+    const args = runArgs([command]);
+    if (disabled) args.splice(1, 0, '--no-masking');
+    const result = await lifecycleProbe('spawn-failure', args, 0);
+    expect(result.status).toBe(127);
+    expect(result.outputClosed).toBe(true);
+    expect(result.stdoutClosed).toBe(true);
+    expect(result.stderrClosed).toBe(true);
+    expect(result.relayExited).toBe(!disabled);
+    expect(await flushTokens()).toHaveLength(disabled ? 0 : 2);
+    const output =
+      Buffer.from(result.stdout, 'base64').toString() +
+      Buffer.from(result.stderr, 'base64').toString();
+    expectOutput(output, `Command not found: ${command}`, true);
+    expectNoValue(output, [app.input.value, app.key, app.token]);
+  },
+);
+it('Masking E18: a relay lost during value delivery refuses the child with fixed private output', async () => {
+  await writeFile(resolve(keyring.home, 'break-delivery'), '');
+  const started = resolve(keyring.home, 'started');
+  const result = await keyring.start(
+    maskingArgs('mark', [started]),
+    relaySeam(),
+  ).done;
+  expect(result.status).toBe(1);
+  expect(existsSync(started)).toBe(false);
+  expectOutput(
+    result.stdout + result.stderr,
+    'Nook could not deliver values to output masking. Try again.',
+    true,
+  );
+  expectNoValue(result.stdout + result.stderr, [
+    app.input.value,
+    app.key,
+    app.token,
+  ]);
+});
+it.each(['refuse-relay', 'unavailable-relay'])(
+  'Masking E19: relay startup failure precedes the value request and Audit (%s)',
+  async (seam) => {
+    await writeFile(resolve(keyring.home, seam), '');
+    const transport = await valueTransport();
+    try {
+      const started = resolve(keyring.home, 'started');
+      const result = await keyring.start(
+        maskingArgs('mark', [started]),
+        relaySeam(),
+      ).done;
+      expect(result.status).toBe(1);
+      expectOutput(
+        result.stdout + result.stderr,
+        'Nook could not start output masking. Try again.',
+        true,
+      );
+      expect(transport.counts).toEqual([]);
+      expect(await auditRows(app)).toEqual([]);
+      expect(existsSync(started)).toBe(false);
+      expectNoValue(result.stdout + result.stderr, [
+        app.input.value,
+        app.key,
+        app.token,
+      ]);
+    } finally {
+      await transport.close();
+    }
+  },
+);
+it('Masking E20: relay argv and environment exclude new and already inherited values', async () => {
+  const result = await keyring.start(
+    maskingArgs('relay-private', [keyring.home]),
+    {
+      ...relaySeam(),
+      GH_TOKEN: app.input.value,
+      NOOK_TEST_INHERITED: randomBytes(24).toString('hex'),
+    },
+  ).done;
+  expect(result.status).toBe(0);
+  expectOutput(result.stdout, 'true', true);
+  expect(result.stderr).toBe('');
+  const launch = JSON.parse(
+    await readFile(resolve(keyring.home, 'relay-launch'), 'utf8'),
+  ) as { args: string[]; env: NodeJS.ProcessEnv };
+  expect(Object.keys(launch.env)).toEqual(
+    process.env.COVERAGE_RUN ? ['NOOK_CLI_COVERAGE'] : [],
+  );
+  expect(launch.args.some((arg) => arg.includes('run-relay-fs-only.ts'))).toBe(
+    true,
+  );
+  if (process.env.COVERAGE_RUN) {
+    const file = launch.env.NOOK_CLI_COVERAGE ?? '';
+    expect(file.endsWith('-relay.json')).toBe(true);
+    await expect.poll(() => existsSync(file)).toBe(true);
+    const coverage = JSON.parse(await readFile(file, 'utf8')) as {
+      seam: string;
+      counters: Record<string, { f: Record<string, number> }>;
+    };
+    expect(coverage.seam).toBe('cli');
+    expect(
+      Object.values(coverage.counters['apps/cli/src/relay.ts'].f).some(
+        (count) => count > 0,
+      ),
+    ).toBe(true);
+  }
+});
+it('Masking E1/E20: the SEA executable starts its own relay and masks pipe output', async () => {
+  const directory = resolve(keyring.home, 'sea');
+  await mkdir(directory);
+  const executable = await buildExecutable(directory);
+  const result = await keyring.command(
+    executable,
+    maskingArgs('print-value', ['42']),
+  ).done;
+  expect(result.status).toBe(42);
+  expectOutput(result.stdout, `token=${marker}`, true);
+  expect(result.stderr).toBe('');
+});
+it('Masking E18: the relay itself reports a fixed failure without protocol values', async () => {
+  await writeFile(resolve(keyring.home, 'break-protocol'), '');
+  const result = await keyring.start(maskingArgs('print-value'), relaySeam())
+    .done;
+  expect(result.status).toBe(1);
+  expectOutput(result.stderr, 'Nook output masking failed.', true);
+  expectOutput(
+    result.stdout,
+    'Nook could not deliver values to output masking. Try again.',
+    true,
+  );
+  expectNoValue(result.stdout + result.stderr, [
+    app.input.value,
+    app.key,
+    app.token,
+  ]);
+});
+it('Masking E1/E20: FIFO creation uses PATH without inherited or injected values', async () => {
+  await writeFile(
+    resolve(keyring.shim, 'mkfifo'),
+    '#!/bin/sh\nif [ "$#" -ne 3 ] || [ "$1" != "-m" ] || [ "$2" != "600" ] || [ -n "$GH_TOKEN" ]; then exit 1; fi\nprintf "private\\n" >> fifo-calls\nexec /usr/bin/mkfifo "$@"\n',
+    { mode: 0o700 },
+  );
+  const result = await keyring.start(maskingArgs('print-value', ['42']), {
+    GH_TOKEN: app.input.value,
+  }).done;
+  expect(result.status).toBe(42);
+  expectOutput(result.stdout, `token=${marker}`, true);
+  expect(result.stderr).toBe('');
+  expect(await readFile(resolve(keyring.home, 'fifo-calls'), 'utf8')).toBe(
+    'private\nprivate\n',
+  );
+});
+it.each(['missing', 'refused'])(
+  'Masking E19: a %s FIFO command fails privately before requesting values',
+  async (failure) => {
+    if (failure === 'refused')
+      await writeFile(
+        resolve(keyring.shim, 'mkfifo'),
+        '#!/bin/sh\nprintf "fixture-mkfifo-failure\\n"\nprintf "fixture-mkfifo-failure\\n" >&2\nexit 1\n',
+        { mode: 0o700 },
+      );
+    const transport = await valueTransport();
+    try {
+      const started = resolve(keyring.home, 'started');
+      const result = await keyring.start(maskingArgs('mark', [started]), {
+        PATH: keyring.shim,
+      }).done;
+      expect(result.status).toBe(1);
+      expectOutput(
+        result.stdout + result.stderr,
+        'Nook could not start output masking. Try again.',
+        true,
+      );
+      expect(transport.counts).toEqual([]);
+      expect(await auditRows(app)).toEqual([]);
+      expect(existsSync(started)).toBe(false);
+      expectNoValue(result.stdout + result.stderr, [
+        app.input.value,
+        app.key,
+        app.token,
+      ]);
+    } finally {
+      await transport.close();
+    }
+  },
+);
+it('Masking E19: an unusable FIFO directory fails privately before requesting values', async () => {
+  const invalid = resolve(keyring.home, 'runtime/not-directory');
+  await writeFile(invalid, 'fixture');
+  const started = resolve(keyring.home, 'started');
+  const result = await keyring.start(maskingArgs('mark', [started]), {
+    TMPDIR: invalid,
+  }).done;
+  expect(result.status).toBe(1);
+  expectOutput(
+    result.stdout + result.stderr,
+    'Nook could not start output masking. Try again.',
+    true,
+  );
+  expect(await auditRows(app)).toEqual([]);
+  expect(existsSync(started)).toBe(false);
+  expectNoValue(result.stdout + result.stderr, [
+    app.input.value,
+    app.key,
+    app.token,
+  ]);
 });
