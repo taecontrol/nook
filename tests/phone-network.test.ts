@@ -16,9 +16,19 @@ const downloadBytes = 450_000;
 const uploadBytes = 150_000;
 let cacheReads = 0;
 let pendingClosed = false;
+let heldReceived = false;
+let heldClosed = false;
 async function respond(request: IncomingMessage, response: ServerResponse) {
   let bytes = 0;
   for await (const chunk of request) bytes += chunk.length;
+  if (request.url === '/held') {
+    heldClosed = false;
+    response.once('close', () => {
+      heldClosed = true;
+    });
+    heldReceived = true;
+    return;
+  }
   if (request.url === '/pending') {
     pendingClosed = false;
     response.once('close', () => {
@@ -161,6 +171,24 @@ it('#101: the app keeps its origin, cookies and Origin/Host headers', async () =
       origin,
       cookie: 'owner=synthetic',
     });
+  } finally {
+    await context.close();
+  }
+});
+
+it('#101: a request aborted before its response headers releases its upstream request', async () => {
+  const { context, page } = await phonePage(browser, 'memory');
+  try {
+    await page.goto(origin);
+    heldReceived = false;
+    const held = await page.evaluateHandle(() => {
+      const controller = new AbortController();
+      void fetch('/held', { signal: controller.signal }).catch(() => {});
+      return controller;
+    });
+    await expect.poll(() => heldReceived).toBe(true);
+    await held.evaluate((controller) => controller.abort());
+    await expect.poll(() => heldClosed).toBe(true);
   } finally {
     await context.close();
   }

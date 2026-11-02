@@ -79,7 +79,12 @@ export async function startPhoneNetwork() {
       { signal },
     );
     // Observe both promises immediately: an upload failure can precede headers.
-    const [[received]] = await Promise.all([response, sent]);
+    // A finished upload pipeline no longer owns the request, so a cancellation
+    // while the server holds its headers must release the upstream explicitly.
+    const [[received]] = await Promise.all([response, sent]).catch((error) => {
+      upstream.destroy();
+      throw error;
+    });
     const body = received as IncomingMessage;
     outgoing.writeHead(body.statusCode ?? 502, body.headers);
     await pipeline(
