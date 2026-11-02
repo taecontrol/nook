@@ -5,6 +5,7 @@ import { d1Now, dayMs, lifetimes } from './support/access-expiry.ts';
 import { expiryPage } from './support/access-expiry-browser.ts';
 import { jsonRequest } from './support/authorizations.ts';
 import { grantPage } from './support/grant-browser.ts';
+import { seedGrantTree } from './support/grants.ts';
 import { listMachines, machineIdentity } from './support/machines.ts';
 import { machineRow } from './support/machines-browser.ts';
 import { expectNoOverflow } from './support/page-checks.ts';
@@ -230,6 +231,73 @@ it('Expiry E14: an idle page moves a machine into Expired within a minute withou
         .count(),
     ).toBe(2);
     expect(visit.requests).toHaveLength(requests);
+  } finally {
+    await visit.close();
+  }
+});
+it('Expiry E12/E14: an open access editor closes at expiry, discards its draft and restores focus', async () => {
+  const visit = await expiryPage(browser, {
+    configure: async (_page, app, now) => {
+      await seedGrantTree(app, ['me']);
+      await (await app.mf.getD1Database('DB'))
+        .prepare(
+          "UPDATE machine_tokens SET access_expires_at=? WHERE machine_name='short-lived'",
+        )
+        .bind(now + 10_000)
+        .run();
+    },
+  });
+  try {
+    const { page } = visit;
+    const machine = visit.machines[2];
+    const row = machineRow(page, machine.id);
+    await row.getByRole('button', { name: /Edit access/ }).click();
+    const sheet = page.getByRole('dialog', {
+      name: 'Edit access',
+      exact: true,
+    });
+    await sheet
+      .getByRole('checkbox', { name: 'All buckets', exact: true })
+      .uncheck();
+    await sheet.getByRole('checkbox', { name: 'me', exact: true }).check();
+    expect(
+      await sheet
+        .getByRole('button', { name: 'Save access', exact: true })
+        .isEnabled(),
+    ).toBe(true);
+    const expiresAt = (await listMachines(visit.app)).find(
+      (entry) => entry.id === machine.id,
+    )?.expiresAt;
+    if (!expiresAt) throw new Error('The edited machine must have an expiry.');
+    await page.clock.setFixedTime(new Date(expiresAt));
+    await page.clock.runFor(60_000);
+    await sheet.waitFor({ state: 'hidden' });
+    expect(
+      await page
+        .getByRole('button', { name: 'Save access', exact: true })
+        .count(),
+    ).toBe(0);
+    expect(
+      await page
+        .getByRole('region', { name: 'Expired', exact: true })
+        .locator(`[data-machine="${machine.id}"]`)
+        .count(),
+    ).toBe(1);
+    expect(await row.getByRole('button').allTextContents()).toEqual(['Remove']);
+    await expect
+      .poll(() =>
+        page
+          .getByRole('heading', { name: 'Machines', exact: true })
+          .evaluate((heading) => heading === document.activeElement),
+      )
+      .toBe(true);
+    expect(
+      visit.requests.filter((request) => request.method === 'PUT'),
+    ).toHaveLength(0);
+    expect(
+      (await listMachines(visit.app)).find((entry) => entry.id === machine.id)
+        ?.grant,
+    ).toBe('all');
   } finally {
     await visit.close();
   }

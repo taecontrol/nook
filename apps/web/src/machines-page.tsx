@@ -512,6 +512,7 @@ export function MachinesPage() {
   const [editor, setEditor] = useState<EditorModule>();
   const now = useMachineClock(machines.data);
   const list = machines.data;
+  if (editing.target && isExpired(editing.target, now)) editing.close();
   const confirm = (machine: Machine, button: HTMLButtonElement) => {
     if (busy) return;
     if (isExpired(machine, Date.now())) {
