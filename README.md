@@ -22,8 +22,8 @@ brew install taecontrol/tap/nook            # macOS
 
 Machine approval offers 1, 7, 30 or 90 days of access (30 days by default),
 or No expiration. Existing machines keep no expiration. `nook whoami` shows
-the expiry. Expired tokens stop working automatically; remove them in Machines
-and run `nook login <origin>` again to reconnect.
+the expiry. Expired tokens stop working automatically; remove them in Machines,
+and reconnect a machine with `nook logout && nook login <origin>`.
 
 ## Remember and read
 
