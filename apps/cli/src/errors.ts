@@ -10,6 +10,20 @@ export function invalidToken(url: string) {
     `This machine's token is no longer valid. Run: nook logout && nook login ${url}`,
   );
 }
+export function accessDateTime(iso: string) {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(iso));
+}
+export function expiredAccess(url: string, expiredAt: string) {
+  return new CliFailure(
+    `This machine's access expired on ${accessDateTime(expiredAt)}. Run: nook logout && nook login ${url}`,
+  );
+}
 // Lifts a synchronous check whose only failure is a thrown CliFailure.
 export function tryCli<A>(check: () => A) {
   return Effect.try({ try: check, catch: (error) => error as CliFailure });
@@ -20,6 +34,7 @@ export class ServerFailure {
     readonly message?: string,
     readonly paths: readonly string[] = [],
     readonly retryable: boolean = false,
+    readonly expiredAt?: string,
   ) {}
 }
 export class RequestFailure extends CliFailure {

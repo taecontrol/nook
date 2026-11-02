@@ -97,6 +97,7 @@ function serverFailure(error: unknown) {
     _tag?: string;
     message?: string;
     paths?: readonly string[];
+    expiredAt?: string;
   };
   const tag = typed._tag ?? 'Unavailable';
   const transient = [
@@ -110,6 +111,7 @@ function serverFailure(error: unknown) {
       transient ? undefined : typed.message,
       tag === 'SecretsForbidden' ? typed.paths : [],
       transient,
+      tag === 'Unauthorized' ? typed.expiredAt : undefined,
     ),
   );
 }

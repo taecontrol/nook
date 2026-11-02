@@ -69,6 +69,10 @@ it('E1/E12: Linux login approves in Chromium, stores only in the private keyring
     });
     await name.waitFor();
     expect(await name.inputValue()).toBe(hostname());
+    await page.getByRole('combobox', { name: 'Access expires after' }).click();
+    await page
+      .getByRole('option', { name: 'No expiration', exact: true })
+      .click();
     await name.press('Enter');
     await page
       .getByRole('heading', { name: 'Machine approved', exact: true })
@@ -89,7 +93,7 @@ it('E1/E12: Linux login approves in Chromium, stores only in the private keyring
     expect(identity.status).toBe(0);
     expectOutput(
       identity.stdout,
-      `${hostname()} at ${app.origin}\nAccess: me (read/write, including current and future descendants)\nRead only: none\nAll other buckets: hidden`,
+      `${hostname()} at ${app.origin}\nAccess: me (read/write, including current and future descendants)\nRead only: none\nAll other buckets: hidden\nExpires: never`,
       true,
     );
     expect(await configHasOnlyUrl(keyring.config, app.origin)).toBe(true);

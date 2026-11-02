@@ -50,6 +50,7 @@ it('E1: the owner lists all active approvals with independent opaque ids, includ
     );
     expect(Object.keys(machine).sort()).toEqual([
       'approvedAt',
+      'expiresAt',
       'grant',
       'id',
       'lastUsedAt',

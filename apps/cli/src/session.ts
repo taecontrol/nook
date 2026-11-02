@@ -1,12 +1,14 @@
 import { hostname } from 'node:os';
-import { limitedAccessText, readOnlyText } from '@nook/contract';
+import { limitedAccessText, readOnlyText, untilText } from '@nook/contract';
 import { Effect } from 'effect';
 import { ChildProcess, ChildProcessSpawner } from 'effect/process';
 import cliPackage from '../package.json' with { type: 'json' };
 import { type MachineClient, machineApi, type RequestOptions } from './api.ts';
 import { installationOrigin, readConfig, writeConfig } from './config.ts';
 import {
+  accessDateTime,
   CliFailure,
+  expiredAccess,
   invalidToken,
   NotLoggedIn,
   networkError,
@@ -37,7 +39,11 @@ function authenticatedRequest(
     return request((api) => operation(api, headers)).pipe(
       Effect.mapError((error) => {
         const unauthorized = error.tag === 'Unauthorized';
-        const failure = unauthorized ? invalidToken(url) : networkError(url);
+        const failure = unauthorized
+          ? error.expiredAt
+            ? expiredAccess(url, error.expiredAt)
+            : invalidToken(url)
+          : networkError(url);
         return new RequestFailure(
           failure.message,
           error,
@@ -212,7 +218,15 @@ export function whoami(host: Host, write: Write) {
       identity.grant === 'all'
         ? 'all buckets (current and future)'
         : `${identity.grant.join(', ')} (${limitedAccessText})\n${readOnlyText(identity.grant)}\nAll other buckets: hidden`;
-    write(`${identity.machine} at ${url}\nAccess: ${access}`);
+    const expiry =
+      identity.expiresAt === undefined
+        ? ''
+        : `\nExpires: ${
+            identity.expiresAt === null
+              ? 'never'
+              : `${accessDateTime(identity.expiresAt)} (${untilText(identity.expiresAt, Date.now())})`
+          }`;
+    write(`${identity.machine} at ${url}\nAccess: ${access}${expiry}`);
   });
 }
 export function mcpHeader({ keyring }: Host, write: Write) {

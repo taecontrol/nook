@@ -63,6 +63,17 @@ Execute that SQL privately in D1, then export to an owner-controlled file. Recre
 
 After restoring the export into a new database, recreate these same derived objects, clear `memories.embedding_marker` to `NULL`, and let Cron rebuild the vectors in the correctly provisioned index. Never edit or prune version rows to rebuild search. [ADR-0013](adrs/0013-search-indexes-derive-from-d1-and-converge-eventually.md) records why both indexes are disposable while D1 remains authoritative.
 
+## Machine expiry and rollback
+
+Machine expiry is enforced by D1, including while the previous Worker serves
+between migration and deployment and after a Worker rollback. Keep the
+`machine_tokens_expired_unused` trigger: expired tokens remain rejected without
+updating last use. Logins in flight during a rollback can receive tokens with
+no expiration, as can a newer approval page talking to the older Worker.
+Machines shows these as No expiration; revoke them and log in again to choose
+a lifetime. Existing machines also keep no expiration. See
+[ADR-0020](adrs/0020-machine-access-expires-at-an-owner-chosen-date-enforced-in-d1.md).
+
 ## CLI keyring internals
 
 The Secret Service item has `service=nook` and `url=<origin>`. Its label holds the machine name; its value reaches `secret-tool store` only through stdin. `$XDG_CONFIG_HOME/nook/config.json` (default `~/.config/nook/config.json`) holds only the URL. Logout clears the item only after revocation succeeds or the Worker confirms an invalid token. On macOS, a generic password has service `nook`, account `<origin>`, and the same machine-name label. `security -i` receives one quoted command on stdin, including the token; the token never enters argv. Login, identity, and logout wait up to two minutes for Keychain access. Unlock the login keychain when prompted, then try again if the command times out. The CLI opens the approval URL with `open` on macOS and `xdg-open` on Linux.

@@ -53,6 +53,7 @@ import {
   WriteId,
 } from './vault.ts';
 
+export * from './access-expiry.ts';
 export * from './agent-session.ts';
 export * from './audit.ts';
 export * from './buckets.ts';

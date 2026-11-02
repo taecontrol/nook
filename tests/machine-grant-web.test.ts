@@ -58,7 +58,9 @@ it('E24: step two puts an expanded bounded checklist between code and name, defa
     ).toBe(true);
     await page.getByRole('button', { name: 'Approve', exact: true }).click();
     await page.getByRole('heading', { name: 'Machine approved' }).waitFor();
-    expect(approvals).toEqual([{ machineName: 'omarchy', grant: ['me'] }]);
+    expect(approvals).toEqual([
+      { machineName: 'omarchy', lifetime: '30d', grant: ['me'] },
+    ]);
   } finally {
     await close();
   }
@@ -129,7 +131,7 @@ it('E25/E26: choosing a parent replaces descendants, labels coverage and read-on
     await page.getByRole('button', { name: 'Approve', exact: true }).click();
     await page.getByRole('heading', { name: 'Machine approved' }).waitFor();
     expect(approvals).toEqual([
-      { machineName: 'omarchy', grant: ['me', 'work'] },
+      { machineName: 'omarchy', lifetime: '30d', grant: ['me', 'work'] },
     ]);
   } finally {
     await close();
@@ -151,7 +153,9 @@ it('E27: All buckets explicitly covers everything and unchecking restores the pr
     await bucketCheck(page, 'All buckets').check();
     await page.getByRole('button', { name: 'Approve', exact: true }).click();
     await page.getByRole('heading', { name: 'Machine approved' }).waitFor();
-    expect(approvals).toEqual([{ machineName: 'omarchy', grant: 'all' }]);
+    expect(approvals).toEqual([
+      { machineName: 'omarchy', lifetime: '30d', grant: 'all' },
+    ]);
   } finally {
     await close();
   }
@@ -281,7 +285,11 @@ it.each(viewports)(
         .click();
       await page.getByRole('heading', { name: 'Machine approved' }).waitFor();
       expect(approvals).toEqual(
-        Array(2).fill({ machineName: 'omarchy', grant: ['work/acme'] }),
+        Array(2).fill({
+          machineName: 'omarchy',
+          lifetime: '30d',
+          grant: ['work/acme'],
+        }),
       );
       await page.getByText('Read only: me, work', { exact: true }).waitFor();
       await expectNoOverflow(page);
@@ -327,6 +335,7 @@ it('E5: a deleted choice leaves approval pending and asks the owner to choose ag
     await page.getByRole('heading', { name: 'Machine approved' }).waitFor();
     expect(approvals.at(-1)).toEqual({
       machineName: 'omarchy',
+      lifetime: '30d',
       grant: ['work'],
     });
   } finally {

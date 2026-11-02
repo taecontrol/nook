@@ -1,7 +1,11 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import { D1Client } from '@effect/sql-d1';
-import { AuthorizationsApi, MachineApi } from '@nook/contract';
-import { Effect, Layer } from 'effect';
+import {
+  AuthorizationsApi,
+  MachineApi,
+  MachineUnauthorized,
+} from '@nook/contract';
+import { Effect, Layer, Schema } from 'effect';
 import { HttpRouter, HttpServer } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
 import { machineFileActor } from './audit.ts';
@@ -32,7 +36,9 @@ export function machineMcpHandler(
         onFailure: (error) =>
           Effect.succeed(
             error._tag === 'Unauthorized'
-              ? Response.json({ _tag: 'Unauthorized' }, { status: 401 })
+              ? Response.json(Schema.encodeSync(MachineUnauthorized)(error), {
+                  status: 401,
+                })
               : unavailable(),
           ),
         onSuccess: ({ grant, id, machine }) =>
@@ -148,7 +154,12 @@ export function authorizationHandler(db: D1Database) {
         return handlers
           .handle('lookup', ({ params }) => store.lookup(params.userCode))
           .handle('approve', ({ params, payload }) =>
-            store.approve(params.userCode, payload.machineName, payload.grant),
+            store.approve(
+              params.userCode,
+              payload.machineName,
+              payload.grant,
+              payload.lifetime,
+            ),
           )
           .handle('deny', ({ params }) => store.deny(params.userCode));
       }),

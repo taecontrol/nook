@@ -1,6 +1,7 @@
-import type { AuthorizationRequest } from '@nook/contract';
+import type { AccessLifetime, AuthorizationRequest } from '@nook/contract';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import { defaultLifetime, lifetimeExpiry } from './access-lifetime';
 import { ApiError, runAuthorizationsApi as run } from './api-client';
 import { useGrantSelection } from './grant-selection';
 
@@ -39,6 +40,8 @@ export function useAuthorizationFlow() {
   const [request, setRequest] = useState<AuthorizationRequest>();
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
+  const [lifetime, setLifetime] = useState<AccessLifetime>(defaultLifetime);
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [failure, setFailure] = useState<'unknown' | 'network'>();
   async function lookup() {
     setFailure(undefined);
@@ -57,6 +60,7 @@ export function useAuthorizationFlow() {
       setRequest(request);
       setName(request.suggestedName);
       access.reset();
+      setLifetime(defaultLifetime);
       setPhase('request');
     } catch (error) {
       const failed = approvalFailure(error, 'code');
@@ -67,17 +71,19 @@ export function useAuthorizationFlow() {
   async function decide(action: 'approve' | 'deny') {
     setFailure(undefined);
     setPhase(action === 'approve' ? 'approving' : 'denying');
+    const expiry = lifetimeExpiry(lifetime, Date.now());
     try {
       await run((api) =>
         action === 'approve'
           ? api.authorizations.approve({
               params: { userCode: code },
-              payload: { machineName: name, grant: access.grant },
+              payload: { machineName: name, grant: access.grant, lifetime },
             })
           : api.authorizations.deny({ params: { userCode: code } }),
       );
       queries.removeQueries({ queryKey: ['authorization', code] });
       setName(name.trim());
+      setExpiresAt(expiry);
       setPhase(action === 'approve' ? 'approved' : 'denied');
     } catch (error) {
       queries.removeQueries({ queryKey: ['authorization', code] });
@@ -118,6 +124,9 @@ export function useAuthorizationFlow() {
     setCode,
     name,
     setName,
+    lifetime,
+    setLifetime,
+    expiresAt,
     failure,
     lookup,
     decide,
