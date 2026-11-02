@@ -16,7 +16,7 @@ Out of scope:
 - Push, email, or any other notification channel.
 - Approval for MCP tools. MCP never returns values.
 - Owner reveal in the web app. It stays as it is today.
-- The owner-OAuth exposure described in section 10. It predates this change.
+- The owner-OAuth exposure described in section 9. It predates this change.
 
 Protected behavior:
 - A secret that no mark covers behaves exactly as today: one call, the same response, no extra latency.
@@ -53,7 +53,7 @@ The server verifies two facts: the machine, through its Nook token, and the secr
 - A remembered approval is not bound to the agent session (option B, consistent with ADR-0019 from #117). Any run on the same machine that needs only approved secrets reuses it until it ends.
 - "Same secrets" means that a remembered approval also covers a later run that needs *some* of the approved secrets. It never covers a run that needs a secret outside the approved set.
 - There is no way to end a remembered approval early. To cut one short, the owner narrows or revokes the machine.
-- Visual reference: the `card` direction, polished (section 11).
+- Visual reference: the `card` direction, polished (section 10).
 
 ## 4. Caller usage
 
@@ -189,27 +189,9 @@ The owner's decision is a conditional `UPDATE … WHERE status='pending' AND exp
 - **Marks as columns on `buckets` and `secrets`.** It lost because agents delete empty buckets, and the mark would go with the bucket.
 - **Web Push or email.** The owner chose link-only. Push needs a PWA, VAPID configuration, and installation on the iPhone home screen. Email needs Email Routing on the domain.
 - **Not waiting (fail at once and re-run).** The owner chose waiting. The spikes show that both agents tolerate it.
+- **`SecretsForbidden` for released CLIs.** It lost because its wording sends agents toward widening the grant.
 
-## 8. Synthesis provenance
-
-- **Arena.** Two candidates and one independent cross-judge.
-- **Base: candidate A.** `values` is the single decision point, and marks live in their own table.
-- **Grafted from candidate B:**
-  - coverage re-asserted in the delivery batch;
-  - owner decisions audited with IP and country, and withdrawals audited;
-  - the `VaultNotConfigured` update message for released CLIs;
-  - remembered coverage limited to the covered paths.
-- **Rejected:**
-  - B's marks as columns, because they contradict owner decision 4;
-  - B's re-request limit;
-  - B's version guard on unmarking;
-  - A's `SecretsForbidden` for released CLIs, because its wording sends agents toward widening the grant.
-- **Ties I resolved:**
-  - the message for released CLIs;
-  - remembered coverage limited to the covered paths;
-  - *only this time* bound to the attempt, with a 2-minute window.
-
-## 9. Implementation contract
+## 8. Implementation contract
 
 **Must preserve:**
 - everything in sections 3 to 5;
@@ -254,7 +236,7 @@ The owner's decision is a conditional `UPDATE … WHERE status='pending' AND exp
 - Access cannot protect `/approvals/*` like the other owner routes;
 - the owner changes a decision in section 3.
 
-## 10. Open risks
+## 9. Open risks
 
 - **Owner-OAuth MCP can reach owner routes (predates this change).**
   - `auth.ts` accepts any valid Access assertion for the owner's email, and Managed OAuth gives MCP clients that same assertion.
@@ -270,7 +252,7 @@ The owner's decision is a conditional `UPDATE … WHERE status='pending' AND exp
 - **Approval fatigue, and fake URLs relayed by an agent.** These are mitigated by Access on the owner's hostname and by a page that leads with the machine and the secrets.
 - **Write churn.** Each poll updates `last_used_at` on the machine token. It is cheap but noisy.
 
-## 11. Visual reference
+## 10. Visual reference
 
 The owner chose the `card` direction ("Read down, pick, approve"), polished, on 2026-11-02, with one change: no End button and no confirmation for it; the active approvals list is read-only. The reference screenshots live in `docs/design/owner-approval-ui/` and cover every scenario at 390×844 (light), plus dark and 1440×900 for the main screens. Implementation matches their structure, hierarchy, and copy, using the app's real components; pixel parity is not required.
 

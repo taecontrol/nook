@@ -26,4 +26,4 @@ The repository needs these settings, which only the owner can create:
 
 The workflow passes tokens to Git only through environment configuration, never in arguments, remote URLs, or `.git/config`.
 
-Owner approval (#82, slice 1) changes the Worker/CLI contract and requires a CLI release from a green `main`. Older CLIs keep working for unmarked secrets; covered secrets require the update so the CLI can wait for the owner. The feature implementation deliberately leaves `apps/cli/package.json` unchanged.
+Owner approval (#82, slice 1) changes the Worker/CLI contract and requires a CLI release from a green `main`. Older CLIs keep working for unmarked secrets; covered secrets require the update so the CLI can wait for the owner.
