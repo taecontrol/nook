@@ -51,41 +51,50 @@ function ReviewApproval({ view }: { view: ApprovalView }) {
     </ItemActions>
   );
 }
-function ApprovalRow({ view }: { view: ApprovalView }) {
+function ApprovalSummary({
+  view,
+  msLeft,
+}: {
+  view: ApprovalView;
+  msLeft: number;
+}) {
   const wide = useDesktop();
+  const approved = view.state === 'approved' ? view : undefined;
+  return (
+    <ItemContent className="min-w-0">
+      <ItemTitle>
+        <span className="min-w-0 wrap-anywhere">
+          {view.verified.machine.name}
+        </span>
+        <Badge variant="secondary">
+          {approved ? `Ends ${endTime(approved.validUntil)}` : timeLeft(msLeft)}
+        </Badge>
+      </ItemTitle>
+      {approved && (
+        <ItemDescription truncate={false}>
+          {durationLabel[approved.remember]}
+        </ItemDescription>
+      )}
+      <ApprovalPaths view={view} />
+      {!approved && (
+        <ItemDescription truncate={wide === false} className="wrap-anywhere">
+          Claimed: “{view.claimed.purpose}”
+        </ItemDescription>
+      )}
+    </ItemContent>
+  );
+}
+function ApprovalRow({ view }: { view: ApprovalView }) {
   const msLeft = useCountdown(
     view.state === 'pending' ? view.expiresAt : undefined,
   );
-  const approved = view.state === 'approved' ? view : undefined;
   if (view.state === 'pending' && msLeft === 0) return null;
   return (
     <Item variant="outline" className="items-start" data-approval={view.id}>
       <ItemMedia variant="icon" className="hidden sm:flex">
-        <ApprovalIcon remembered={!!approved} />
+        <ApprovalIcon remembered={view.state === 'approved'} />
       </ItemMedia>
-      <ItemContent className="min-w-0">
-        <ItemTitle>
-          <span className="min-w-0 wrap-anywhere">
-            {view.verified.machine.name}
-          </span>
-          <Badge variant="secondary">
-            {approved
-              ? `Ends ${endTime(approved.validUntil)}`
-              : timeLeft(msLeft)}
-          </Badge>
-        </ItemTitle>
-        {approved && (
-          <ItemDescription truncate={false}>
-            {durationLabel[approved.remember]}
-          </ItemDescription>
-        )}
-        <ApprovalPaths view={view} />
-        {!approved && (
-          <ItemDescription truncate={wide === false} className="wrap-anywhere">
-            Claimed: “{view.claimed.purpose}”
-          </ItemDescription>
-        )}
-      </ItemContent>
+      <ApprovalSummary view={view} msLeft={msLeft} />
       <ReviewApproval view={view} />
     </Item>
   );
