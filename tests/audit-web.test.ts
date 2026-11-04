@@ -44,6 +44,7 @@ it('E17/E18/E28: chronological ledger, named facts, details and historical links
     expect(await platform.getByRole('link').allTextContents()).toEqual([
       'Buckets',
       'Machines',
+      'Approvals',
       'Audit',
     ]);
     await expect.poll(() => auditEntries(page).count()).toBe(25);
