@@ -133,6 +133,23 @@ function ClaimedContext({ view }: { view: ApprovalView }) {
     </section>
   );
 }
+function ApprovalScope({
+  view,
+  remember,
+  until,
+}: {
+  view: ApprovalView;
+  remember: Remember;
+  until: number | string | null;
+}) {
+  return approvalScope(view, remember, until).map((part) =>
+    typeof part === 'string' ? (
+      part
+    ) : (
+      <SlashPath key={part.path}>{part.path}</SlashPath>
+    ),
+  );
+}
 function DurationChoice({
   choice,
   setChoice,
@@ -171,7 +188,11 @@ function DurationChoice({
         })}
       </RadioGroup>
       <p className="text-sm leading-5 text-muted-foreground wrap-anywhere">
-        {approvalScope(view, choice, endsAt(choice, Date.now()))}
+        <ApprovalScope
+          view={view}
+          remember={choice}
+          until={endsAt(choice, Date.now())}
+        />
       </p>
     </div>
   );
@@ -317,8 +338,16 @@ function approvedResult(view: Extract<ApprovalView, { state: 'approved' }>) {
       view.remember === 'once'
         ? 'Approved'
         : `Approved for ${durationLabel[view.remember]}`,
-    copy: () =>
-      `This run got its secrets. ${approvalScope(view, view.remember, view.validUntil)}`,
+    copy: () => (
+      <>
+        This run got its secrets.{' '}
+        <ApprovalScope
+          view={view}
+          remember={view.remember}
+          until={view.validUntil}
+        />
+      </>
+    ),
   };
 }
 function UnsavedDecision({
@@ -379,7 +408,7 @@ function ResultCard({ screen }: { screen: ResultScreen }) {
             {result.title}
           </CardTitle>
         </div>
-        <CardDescription>
+        <CardDescription className="min-w-0">
           <span className="wrap-anywhere">{result.copy(view)}</span>
         </CardDescription>
       </CardHeader>

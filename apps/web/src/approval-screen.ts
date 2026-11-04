@@ -90,18 +90,28 @@ export function approvalScope(
   view: ApprovalView,
   remember: Remember,
   until: number | string | null,
-) {
+): (string | { path: string })[] {
   if (remember === 'once')
-    return 'Only this run gets the secrets. The next run asks again.';
+    return ['Only this run gets the secrets. The next run asks again.'];
   const covered = coveredSecrets(view);
   const secrets = covered.length === 1 ? 'this secret' : 'these secrets';
+  const scope: (string | { path: string })[] = [
+    `Any later run on ${view.verified.machine.name} uses ${secrets}`,
+  ];
   // Mixed requests still show every requested path in the verified details.
   // Name the covered subset here so "these secrets" cannot include unmarked paths.
-  const paths =
-    covered.length === view.verified.secrets.length
-      ? ''
-      : ` (${covered.map(({ path }) => path).join(', ')})`;
-  return `Any later run on ${view.verified.machine.name} uses ${secrets}${paths} without asking until ${endTime(until ?? Date.now())}, whichever agent runs it. Other secrets still ask.`;
+  if (covered.length !== view.verified.secrets.length) {
+    scope.push(' (');
+    for (const [index, { path }] of covered.entries()) {
+      if (index > 0) scope.push(', ');
+      scope.push({ path });
+    }
+    scope.push(')');
+  }
+  scope.push(
+    ` without asking until ${endTime(until ?? Date.now())}, whichever agent runs it. Other secrets still ask.`,
+  );
+  return scope;
 }
 export function coveredSecrets(view: ApprovalView) {
   return view.verified.secrets.filter(({ coveredBy }) => coveredBy !== null);
