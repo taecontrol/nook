@@ -95,6 +95,9 @@ const router = createRouter({
           typeof search.bucket === 'string' ? { bucket: search.bucket } : {},
         loader: ({ context }) => {
           preloadVault(context.queryClient);
+          void import('./ask-first-api').then(({ preloadAskFirst }) =>
+            preloadAskFirst(context.queryClient),
+          );
         },
       }),
       createRoute({

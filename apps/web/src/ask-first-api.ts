@@ -2,6 +2,7 @@ import { type AskFirstMark, coveringMark } from '@nook/contract';
 import {
   type Mutation,
   type MutationStatus,
+  type QueryClient,
   queryOptions,
   useQuery,
   useQueryClient,
@@ -33,6 +34,9 @@ const options = queryOptions({
 });
 const writeKey = ['ask-first', 'toggle'];
 const gate = createWriteGate(writeKey, { disableWhileBusy: false });
+export function preloadAskFirst(queries: QueryClient): void {
+  void queries.prefetchQuery(options);
+}
 function same(a: AskFirstMark, b: AskFirstMark) {
   return a.kind === b.kind && a.path === b.path;
 }
@@ -79,7 +83,7 @@ export function useAskFirst() {
     queries.getQueryState(options.queryKey)?.dataUpdateCount ?? 0;
   const marks = project(list.data ?? [], writes, revision);
   const failure = writes.findLast(
-    (write) => write.status === 'error' && write.id !== dismissed,
+    (write) => write.status === 'error' && write.id > (dismissed ?? -1),
   );
   function toggle(mark: AskFirstMark, on: boolean) {
     const key = [...writeKey, mark.kind, mark.path];

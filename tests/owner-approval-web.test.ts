@@ -1,4 +1,4 @@
-import type { Browser, Page } from 'playwright';
+import type { Browser, Page, Response } from 'playwright';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { seedGrantTree } from './support/grants.ts';
@@ -477,10 +477,11 @@ it('E41: approval details, decisions, the approvals list and Vault marks never r
   const requests: string[] = [];
   const bodies: Promise<string>[] = [];
   page.on('request', (r) => requests.push(new URL(r.url()).pathname));
-  page.on('response', (response) => {
+  const observeResponse = (response: Response) => {
     if (new URL(response.url()).pathname.startsWith('/api/'))
       bodies.push(response.text());
-  });
+  };
+  page.on('response', observeResponse);
   async function noRetainedValue() {
     expectNoValue(await page.content(), values);
     expect(
@@ -533,6 +534,8 @@ it('E41: approval details, decisions, the approvals list and Vault marks never r
   ).toEqual([]);
   expect(requests.some((path) => path.startsWith('/api/approvals'))).toBe(true);
   expect(requests).toContain('/api/ask-first');
+  await page.waitForLoadState('networkidle');
+  page.off('response', observeResponse);
   const encoded = values.map((value) => JSON.stringify(value).slice(1, -1));
   for (const body of await Promise.all(bodies))
     expectNoValue(body, [...values, ...encoded]);

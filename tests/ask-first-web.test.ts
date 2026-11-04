@@ -481,3 +481,30 @@ it('E37: an optimistic bucket mark covers an already marked secret and failed PU
     gate.resolve();
   }
 });
+
+it('E37: Vault intent preloads marks without adding a read when the page opens', async () => {
+  await setMark(app);
+  const reads: string[] = [];
+  page.on('request', (request) => {
+    if (
+      request.method() === 'GET' &&
+      new URL(request.url()).pathname === '/api/ask-first'
+    )
+      reads.push(request.url());
+  });
+  await page.goto(app.origin);
+  await page
+    .getByRole('region', { name: 'Owner access', exact: true })
+    .waitFor();
+  expect(reads).toEqual([]);
+  const loaded = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === '/api/ask-first',
+  );
+  await page.getByRole('link', { name: 'Vault', exact: true }).hover();
+  expect((await loaded).status()).toBe(200);
+  await page.getByRole('link', { name: 'Vault', exact: true }).click();
+  await page.locator('[data-path="work/acme"] a').click();
+  await expect.poll(() => secretSwitch().isDisabled()).toBe(true);
+  expect(await secretSwitch().getAttribute('aria-checked')).toBe('true');
+  expect(reads).toHaveLength(1);
+});
