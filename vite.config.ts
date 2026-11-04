@@ -21,5 +21,29 @@ export default defineConfig({
       },
     ],
   },
-  build: { outDir: resolve('dist/assets'), emptyOutDir: true },
+  build: {
+    outDir: resolve('dist/assets'),
+    emptyOutDir: true,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          // Group only modules the entry actually needs. New lazy pages must
+          // not fragment the shell's shared dependencies into more requests.
+          groups: [
+            {
+              name: 'initial-react',
+              tags: ['$initial'],
+              test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/,
+            },
+            {
+              name: 'initial-vendor',
+              tags: ['$initial'],
+              test: /node_modules/,
+            },
+            { name: 'initial-app', tags: ['$initial'] },
+          ],
+        },
+      },
+    },
+  },
 });

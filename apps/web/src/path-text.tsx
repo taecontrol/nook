@@ -1,4 +1,23 @@
 import { cn } from 'cn';
+import { Fragment } from 'react';
+
+/** Wrap at path separators, preserving each segment (including hyphens). */
+export function SlashPath({ children }: { children: string }) {
+  const parts = children.split('/');
+  return (
+    <span className="font-mono wrap-normal break-normal">
+      {parts.map((part, index) => (
+        <Fragment key={parts.slice(0, index + 1).join('/')}>
+          <span className="whitespace-nowrap">
+            {part}
+            {index < parts.length - 1 ? '/' : ''}
+          </span>
+          {index < parts.length - 1 && <wbr />}
+        </Fragment>
+      ))}
+    </span>
+  );
+}
 
 /** A bucket or secret path, in mono. */
 export function Path({
