@@ -7,6 +7,10 @@ import {
   seedMemories,
 } from '../tests/support/memory.ts';
 import { seedFile } from '../tests/support/memory-files.ts';
+import {
+  pending as pendingApproval,
+  setMark,
+} from '../tests/support/owner-approval.ts';
 import { seedSecrets, vaultRuntime } from '../tests/support/vault.ts';
 import { startHostIsolation } from './lib/host-isolation.ts';
 import {
@@ -34,6 +38,10 @@ try {
     throw new Error('The Audit timing fixture requires a genuine use.');
   await used.body?.cancel();
   const pending = await createAuthorization(app);
+  await setMark(app);
+  const ownerApproval = await pendingApproval(app, token, undefined, {
+    secrets: [acmePath],
+  });
   await db
     .prepare(
       'INSERT INTO machine_tokens(token_hash, machine_name, grant_json, created_at, id) VALUES (?, ?, ?, ?, ?)',
@@ -56,6 +64,8 @@ try {
       machines: [],
       machinesNavigation: [],
       approvalNavigation: [],
+      ownerApproval: [],
+      approvalsNavigation: [],
       machineAccessNavigation: [],
       vault: [],
       vaultNavigation: [],
@@ -75,6 +85,8 @@ try {
       'machines',
       'machinesNavigation',
       'approvalNavigation',
+      'ownerApproval',
+      'approvalsNavigation',
       'machineAccessNavigation',
       'vault',
       'vaultNavigation',
@@ -89,7 +101,9 @@ try {
         const { context, page } = await phonePage(browser, kind);
         try {
           measured[kind].push(
-            await measureScreen(page, app.origin, pending.userCode, kind),
+            await measureScreen(page, app.origin, pending.userCode, kind, {
+              approvalId: ownerApproval.id,
+            }),
           );
         } finally {
           await context.close();

@@ -15,6 +15,15 @@ const dateTimeFormat = new Intl.DateTimeFormat('en-US', {
   hour: 'numeric',
   minute: '2-digit',
 });
+const clockFormat = new Intl.DateTimeFormat('en-GB', {
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+/** "11:42", in the browser's time zone. */
+export function formatTime(at: string | number) {
+  return clockFormat.format(new Date(at));
+}
 
 function count(amount: number, unit: string) {
   return `${amount} ${unit}${amount === 1 ? '' : 's'}`;

@@ -5,12 +5,13 @@ import {
   ListTree,
   type LucideIcon,
   MonitorSmartphone,
+  ShieldCheck,
 } from 'lucide-react';
 
 /** The owner pages the sidebar, breadcrumb and home screen lead to. */
 export const destinations: readonly {
   group: 'Platform' | 'Tools';
-  to: '/buckets' | '/machines' | '/audit' | '/memory' | '/vault';
+  to: '/buckets' | '/machines' | '/approvals' | '/audit' | '/memory' | '/vault';
   title: string;
   description: string;
   icon: LucideIcon;
@@ -28,6 +29,13 @@ export const destinations: readonly {
     title: 'Machines',
     description: 'See connected machines and revoke their access.',
     icon: MonitorSmartphone,
+  },
+  {
+    group: 'Platform',
+    to: '/approvals',
+    title: 'Approvals',
+    description: 'Review waiting runs and remembered approvals.',
+    icon: ShieldCheck,
   },
   {
     group: 'Platform',

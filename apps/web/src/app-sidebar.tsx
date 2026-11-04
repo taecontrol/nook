@@ -11,10 +11,12 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
 } from '@/components/ui/sidebar';
+import { usePendingCount } from './approvals-api';
 import { destinationGroups, destinations } from './destinations';
 import type { Session } from './identity';
 import { OwnerMenu } from './owner-menu';
@@ -27,6 +29,7 @@ const footerText = {
 };
 
 export function AppSidebar({ session }: { session: Session }) {
+  const pending = usePendingCount();
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   });
@@ -64,6 +67,11 @@ export function AppSidebar({ session }: { session: Session }) {
                           <span>{title}</span>
                         </Link>
                       </SidebarMenuButton>
+                      {to === '/approvals' &&
+                        pending !== undefined &&
+                        pending > 0 && (
+                          <SidebarMenuBadge>{pending}</SidebarMenuBadge>
+                        )}
                     </SidebarMenuItem>
                   ))}
               </SidebarMenu>

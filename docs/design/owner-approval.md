@@ -258,6 +258,8 @@ The owner chose the `card` direction ("Read down, pick, approve"), polished, on 
 
 ## Slice 1 implementation notes
 
+Slice 2 (D4): the Ask first switch lives on the opened bucket's card; the bucket tree shows only the hand icon for explicit or inherited marks.
+
 The contract exports the duration as `ApprovalRemember` because `Remember`
 already names the memory creation payload. The approvals module keeps its
 local `Remember` name.

@@ -75,10 +75,13 @@ export async function auditPageData(
 export async function runFixture(
   grant: BucketGrant = ['work/acme'],
   onCheckpoint?: (label: string) => Promise<boolean>,
+  suppliedRuntime?: Awaited<ReturnType<typeof vaultRuntime>>,
 ) {
-  const app = onCheckpoint
-    ? await vaultCheckpoints(onCheckpoint, undefined, true)
-    : await vaultRuntime();
+  const app =
+    suppliedRuntime ??
+    (onCheckpoint
+      ? await vaultCheckpoints(onCheckpoint, undefined, true)
+      : await vaultRuntime());
   const input = secretInput({
     name: 'GH_TOKEN',
     value: `synthetic\n秘密 🔐\r\ntrailing  \t\n`,

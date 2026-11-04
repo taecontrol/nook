@@ -9,6 +9,8 @@ import {
   stringifySearchWith,
 } from '@tanstack/react-router';
 import { createRoot } from 'react-dom/client';
+import { preloadApproval, preloadApprovals } from './approvals-api';
+import { preloadAskFirst } from './ask-first-query';
 import { preloadAudit } from './audit-api';
 import { preloadBuckets } from './buckets-api';
 import { Home } from './home';
@@ -35,8 +37,10 @@ const owner = createRoute({
   getParentRoute: () => root,
   id: 'owner',
   component: Shell,
+  shouldReload: true,
   loader: ({ context }) => {
     void context.queryClient.ensureQueryData(identityOptions);
+    preloadApprovals(context.queryClient);
   },
 });
 const home = createRoute({
@@ -57,6 +61,14 @@ const router = createRouter({
     owner.addChildren([
       home,
       buckets,
+      createRoute({
+        getParentRoute: () => owner,
+        path: '/approvals',
+        component: lazyRouteComponent(
+          () => import('./approvals-page'),
+          'ApprovalsPage',
+        ),
+      }),
       createRoute({
         getParentRoute: () => owner,
         path: '/memory',
@@ -84,6 +96,7 @@ const router = createRouter({
           typeof search.bucket === 'string' ? { bucket: search.bucket } : {},
         loader: ({ context }) => {
           preloadVault(context.queryClient);
+          preloadAskFirst(context.queryClient);
         },
       }),
       createRoute({
@@ -115,6 +128,17 @@ const router = createRouter({
         },
       }),
     ]),
+    createRoute({
+      getParentRoute: () => root,
+      path: '/approvals/$id',
+      loader: ({ context, params }) => {
+        preloadApproval(context.queryClient, params.id);
+      },
+      component: lazyRouteComponent(
+        () => import('./approval-page'),
+        'ApprovalPage',
+      ),
+    }),
     createRoute({
       getParentRoute: () => root,
       path: '/cli/authorize',

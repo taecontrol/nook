@@ -64,6 +64,7 @@ it('E17: Home and the Platform sidebar lead to Machines below Buckets with the N
     expect(await sidebar.getByRole('link').allTextContents()).toEqual([
       'Buckets',
       'Machines',
+      'Approvals',
       'Audit',
     ]);
     const link = sidebar.getByRole('link', { name: 'Machines', exact: true });

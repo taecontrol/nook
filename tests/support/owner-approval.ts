@@ -3,6 +3,7 @@ import { expect } from 'vitest';
 import { acmePath, fetchValues, runFixture } from './audit.ts';
 import { jsonRequest } from './authorizations.ts';
 import { seedGrantTree } from './grants.ts';
+import { filesRuntime } from './memory-files-runtime.ts';
 import type { TestRuntime } from './runtime.ts';
 import { createSecret, secretInput } from './vault.ts';
 
@@ -21,8 +22,14 @@ export type Pending = {
 };
 export async function approvalFixture(
   onCheckpoint?: (label: string) => Promise<boolean>,
+  clock?: { now: number },
 ) {
-  const app = await runFixture('all', onCheckpoint);
+  // Reuse the existing test-only SQLite clock decorator over the built Worker.
+  const app = await runFixture(
+    'all',
+    onCheckpoint,
+    clock ? await filesRuntime(clock) : undefined,
+  );
   await seedGrantTree(app, ['work/acme/prod', 'work/acme2', 'me/nook']);
   for (const path of [stripe, database, cloudflare, 'work/acme2/TOKEN']) {
     const at = path.lastIndexOf('/');

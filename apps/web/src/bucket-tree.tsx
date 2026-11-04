@@ -1,7 +1,7 @@
 import { type Bucket, type BucketScope, bucketLineage } from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import { cn } from 'cn';
-import { ChevronRight, Dot } from 'lucide-react';
+import { ChevronRight, Dot, Hand } from 'lucide-react';
 import { type ReactNode, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -171,6 +171,7 @@ export function TreeBranches({
 }
 
 type TreeState = {
+  marked?: (path: string) => boolean;
   to: '/vault' | '/memory';
   noun: 'secret' | 'memory';
   scope: BucketScope;
@@ -247,6 +248,12 @@ function Row({
         >
           {node.name}
         </span>
+        {state.marked?.(node.path) && (
+          <Hand
+            className="size-3.5 shrink-0 text-muted-foreground"
+            aria-label="Ask first"
+          />
+        )}
         <Count path={node.path} state={state} />
         <ChevronRight
           className="size-4 shrink-0 text-muted-foreground lg:hidden"
@@ -266,6 +273,7 @@ export function BucketTree({
   noun = 'secret',
   scope = 'inherited',
   query,
+  marked,
 }: {
   buckets: readonly string[];
   selected: string | null;
@@ -275,6 +283,7 @@ export function BucketTree({
   noun?: 'secret' | 'memory';
   scope?: BucketScope;
   query?: string;
+  marked?: (path: string) => boolean;
 }) {
   const nodes = useMemo(
     () =>
@@ -287,6 +296,7 @@ export function BucketTree({
   // The way to the selected bucket always stays open.
   const { visible, toggle } = useCollapsed([selected]);
   const state: TreeState = {
+    marked,
     to,
     noun,
     scope,

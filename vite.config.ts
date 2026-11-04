@@ -21,5 +21,35 @@ export default defineConfig({
       },
     ],
   },
-  build: { outDir: resolve('dist/assets'), emptyOutDir: true },
+  build: {
+    outDir: resolve('dist/assets'),
+    emptyOutDir: true,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          // Group only modules the entry actually needs. New lazy pages must
+          // not fragment the shell's shared dependencies into more requests.
+          groups: [
+            {
+              name: 'initial-react',
+              tags: ['$initial'],
+              test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/,
+            },
+            {
+              name: 'initial-vendor',
+              tags: ['$initial'],
+              test: /node_modules/,
+            },
+            { name: 'initial-app', tags: ['$initial'] },
+            {
+              // Small lazy icon files otherwise occupy the phone's connections
+              // ahead of Vault's data. Initial icons are already grouped above.
+              name: 'lazy-icons',
+              test: /node_modules[\\/]lucide-react[\\/]dist[\\/]esm[\\/]icons[\\/]/,
+            },
+          ],
+        },
+      },
+    },
+  },
 });

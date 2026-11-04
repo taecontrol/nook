@@ -8,6 +8,7 @@ import {
 import { useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, writeOutcome } from './api-client';
+import { useAskFirst } from './ask-first-api';
 import { parentBuckets } from './bucket-tree';
 import { useBucketList } from './buckets-api';
 import { useDesktop } from './hooks/use-desktop';
@@ -88,6 +89,7 @@ function duplicateHandler(
   };
 }
 export function useVaultPage() {
+  const askFirst = useAskFirst();
   const search = useSearch({ strict: false }) as { bucket?: string };
   const navigate = useNavigate();
   const location = useLocation();
@@ -217,6 +219,7 @@ export function useVaultPage() {
         ?.scrollIntoView({ block: 'nearest' });
   }, [highlighted]);
   return {
+    askFirst,
     importer,
     importOpen,
     openImport: () => setImportOpen(true),
