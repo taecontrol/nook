@@ -2,13 +2,12 @@ import { type AskFirstMark, coveringMark } from '@nook/contract';
 import {
   type Mutation,
   type MutationStatus,
-  type QueryClient,
-  queryOptions,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
 import { useState } from 'react';
 import { runApi } from './api-client';
+import { askFirstOptions as options } from './ask-first-query';
 import { createWriteGate } from './write-gate';
 
 type StoredMark = AskFirstMark & { exists: boolean };
@@ -21,22 +20,8 @@ type Write = {
   id: number;
 };
 export type Coverage = { mark: AskFirstMark; inherited: boolean } | null;
-const options = queryOptions({
-  queryKey: ['ask-first'],
-  queryFn: async ({ signal }) => [
-    ...(await runApi((api) => api.askFirst.list(), signal)).marks,
-  ],
-  staleTime: 30_000,
-  retry: false,
-  gcTime: Infinity,
-  structuralSharing: false,
-  refetchOnWindowFocus: 'always',
-});
 const writeKey = ['ask-first', 'toggle'];
 const gate = createWriteGate(writeKey, { disableWhileBusy: false });
-export function preloadAskFirst(queries: QueryClient): void {
-  void queries.prefetchQuery(options);
-}
 function same(a: AskFirstMark, b: AskFirstMark) {
   return a.kind === b.kind && a.path === b.path;
 }

@@ -10,6 +10,7 @@ import {
 } from '@tanstack/react-router';
 import { createRoot } from 'react-dom/client';
 import { preloadApproval, preloadApprovals } from './approvals-api';
+import { preloadAskFirst } from './ask-first-query';
 import { preloadAudit } from './audit-api';
 import { preloadBuckets } from './buckets-api';
 import { Home } from './home';
@@ -95,9 +96,7 @@ const router = createRouter({
           typeof search.bucket === 'string' ? { bucket: search.bucket } : {},
         loader: ({ context }) => {
           preloadVault(context.queryClient);
-          void import('./ask-first-api').then(({ preloadAskFirst }) =>
-            preloadAskFirst(context.queryClient),
-          );
+          preloadAskFirst(context.queryClient);
         },
       }),
       createRoute({

@@ -157,6 +157,21 @@ function markFirstScreen(kind: ColdScreen) {
     home: '',
     vault: '',
   };
+  const vaultReady = () => {
+    const rows = document.querySelectorAll('[data-secret]');
+    const switches = document.querySelectorAll('[role="switch"]');
+    const stripe = document.querySelector(
+      '[data-secret="work/acme/STRIPE_KEY"]',
+    );
+    return (
+      stripe?.querySelector('[role="switch"][aria-checked="true"]:disabled') &&
+      stripe.textContent?.includes('Ask first, from work') &&
+      switches.length === rows.length + 1 &&
+      document
+        .querySelector('[aria-label="Buckets"] [data-path="work/acme"]')
+        ?.textContent?.includes('4 secrets')
+    );
+  };
   const observer = new MutationObserver(() => {
     const ready =
       kind === 'home'
@@ -164,10 +179,7 @@ function markFirstScreen(kind: ColdScreen) {
             .querySelector('[aria-label="Owner access"]')
             ?.textContent?.includes('owner@nook.test')
         : kind === 'vault'
-          ? document.querySelector('[data-secret="work/acme/STRIPE_KEY"]') &&
-            document
-              .querySelector('[aria-label="Buckets"] [data-path="work/acme"]')
-              ?.textContent?.includes('4 secrets')
+          ? vaultReady()
           : document.querySelector(selectors[kind]);
     if (!ready) return;
     observer.disconnect();
