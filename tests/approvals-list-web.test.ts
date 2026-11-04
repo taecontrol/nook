@@ -61,7 +61,7 @@ it('E36: the sidebar badge leads to pending reviews and read-only remembered app
         message: 'The sidebar exposes Approvals with its pending-count badge',
       })
       .toBe(1);
-    expect(await link.innerText()).toContain('2');
+    await expect.poll(() => link.innerText()).toContain('2');
     await link.getByRole('link', { name: /^Approvals/ }).click();
     await page
       .getByRole('heading', { name: 'Approvals', exact: true })

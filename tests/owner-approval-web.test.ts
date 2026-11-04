@@ -540,3 +540,40 @@ it('E41: approval details, decisions, the approvals list and Vault marks never r
   for (const body of await Promise.all(bodies))
     expectNoValue(body, [...values, ...encoded]);
 });
+
+it('E34: AlreadyHandled cancels an older pending detail read before refreshing the withdrawn state', async () => {
+  const request = await webPending(app);
+  await page.goto(request.url);
+  await expectPendingPage(page);
+  await page.getByRole('link', { name: 'All approvals', exact: true }).click();
+  await page.getByRole('link', { name: 'Review', exact: true }).waitFor();
+  await page.clock.setFixedTime(new Date(approvalNow.getTime() + 31_000));
+  const old = deferred();
+  const read = deferred();
+  let reads = 0;
+  await page.route(`**/api/approvals/${request.id}`, async (route) => {
+    reads++;
+    if (reads > 1) return route.continue();
+    const response = await route.fetch();
+    read.resolve();
+    await old.promise;
+    await route.fulfill({ response }).catch(() => {});
+  });
+  try {
+    await page.getByRole('link', { name: 'Review', exact: true }).click();
+    await read.promise;
+    await expectPendingPage(page);
+    expect((await withdraw(app, app.token, request.id)).status).toBe(204);
+    await approveButton(page).click();
+    await page
+      .getByRole('heading', {
+        name: 'The agent cancelled this run',
+        exact: true,
+      })
+      .waitFor();
+    expect(reads).toBe(2);
+    await expectNoDecisionControls(page);
+  } finally {
+    old.resolve();
+  }
+});

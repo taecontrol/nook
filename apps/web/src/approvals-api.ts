@@ -64,7 +64,7 @@ export function useApproval(id: string) {
       return;
     }
     if (error instanceof ApiError && error.tag === 'AlreadyHandled') {
-      await queries.fetchQuery({ ...approvalOptions(id), staleTime: 0 });
+      await load.refetch({ throwOnError: true });
       return;
     }
     setFailure('network');
