@@ -5,6 +5,121 @@ import { expect } from 'e2e';
 import { observe } from '../../scripts/observation.ts';
 import { spanishRelease } from '../fixtures/search-corpus.ts';
 import { privateKeyring } from '../support/cli.ts';
+import { approvalJourney } from '../support/owner-approval-journey.ts';
+
+test('E42: the owner marks work in Vault, approves a waiting nook run for 1 hour and sees both agent sessions delivered in Audit', async ({
+  app,
+  screen,
+  browser,
+}) => {
+  await app.open('/');
+  const origin = JSON.parse(
+    await browser.evaluate(() => JSON.stringify(location.origin)),
+  ) as string;
+  const { keyring, args, path } = await approvalJourney(origin);
+  try {
+    await app.open('/vault?bucket=work');
+    const card = browser
+      .locator('[data-slot="card"]')
+      .filter({ has: screen.getByRole('switch', { name: /Ask first/ }) });
+    const toggle = card.getByRole('switch');
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await expect
+      .poll(async () => {
+        const response = await fetch(`${origin}/api/ask-first`);
+        const body = (await response.json()) as {
+          marks: { kind: string; path: string }[];
+        };
+        return body.marks.some(
+          (mark) => mark.kind === 'bucket' && mark.path === 'work',
+        );
+      })
+      .toBe(true);
+    const running = keyring.start(args, {
+      CLAUDE_CODE_SESSION_ID: 'approval-journey-session-one',
+    });
+    let finished = false;
+    void running.done.then(() => {
+      finished = true;
+    });
+    await expect
+      .poll(() =>
+        /https?:\/\/[^\s]+\/approvals\/[0-9a-f-]+/.test(running.output()),
+      )
+      .toBe(true);
+    expect(finished).toBe(false);
+    expect(running.output().includes('delivered')).toBe(false);
+    const url = /https?:\/\/[^\s]+\/approvals\/[0-9a-f-]+/.exec(
+      running.output(),
+    )?.[0];
+    if (!url || new URL(url).origin !== origin)
+      throw new Error(
+        'The waiting CLI must print this installation’s approval link.',
+      );
+    const id = new URL(url).pathname.split('/').at(-1);
+    await app.open(new URL(url).pathname);
+    await expect(
+      screen.getByRole('heading', { name: 'Approve this run?', exact: true }),
+    ).toBeVisible();
+    await expect(screen.getByText(path, { exact: true })).toBeVisible();
+    await screen.getByRole('radio', { name: /^1 hour(?:\s|$)/ }).click();
+    await screen
+      .getByRole('button', { name: 'Approve for 1 hour', exact: true })
+      .click();
+    await expect(
+      screen.getByRole('heading', { name: 'Approved for 1 hour', exact: true }),
+    ).toBeVisible();
+    const delivered = await running.done;
+    expect(delivered.status).toBe(0);
+    expect(delivered.stdout).toBe('delivered');
+    const second = await keyring.start(args, {
+      CODEX_SESSION_ID: 'approval-journey-session-two',
+    }).done;
+    expect(second.status).toBe(0);
+    expect(second.stdout).toBe('delivered');
+    expect(second.stderr).toBe('');
+    await app.open('/audit');
+    const rows = browser.locator('[data-entry]');
+    await expect(rows).toHaveCount(4);
+    await expect(rows.filter({ hasText: 'Approval requested' })).toHaveCount(1);
+    await expect(rows.filter({ hasText: 'Approval granted' })).toHaveCount(1);
+    const deliveries = rows.filter({ hasText: 'Delivered' });
+    await expect(deliveries).toHaveCount(2);
+    for (const row of await deliveries.all()) {
+      await expect(row).toContainText('approval-journey-machine');
+      await row.getByRole('button', { name: /Show details/ }).click();
+      await expect(row).toContainText(id ?? 'missing approval id');
+      await expect(row).toContainText('1 hour');
+    }
+    await expect(
+      deliveries.filter({ hasText: 'approval-journey-session-one' }),
+    ).toHaveCount(1);
+    await expect(
+      deliveries.filter({ hasText: 'approval-journey-session-two' }),
+    ).toHaveCount(1);
+    if (process.env.COVERAGE_RUN)
+      await observe(
+        JSON.parse(
+          await browser.evaluate(() =>
+            JSON.stringify({
+              seam: 'browser',
+              loaded: globalThis.__authoredModules__ ?? {},
+              counters: globalThis.__coverage__ ?? {},
+            }),
+          ),
+        ),
+      );
+  } finally {
+    try {
+      await keyring.close();
+    } finally {
+      await fetch(`${origin}/api/ask-first/bucket/work`, { method: 'DELETE' });
+    }
+  }
+});
 
 test('Search E22: the owner finds a Spanish release by meaning from an ancestor bucket', async ({
   app,

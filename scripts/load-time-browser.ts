@@ -14,6 +14,8 @@ export async function phonePage(browser: Browser, kind: string) {
         'machines',
         'machinesNavigation',
         'approvalNavigation',
+        'ownerApproval',
+        'approvalsNavigation',
         'machineAccessNavigation',
         'audit',
         'auditNavigation',
@@ -140,9 +142,11 @@ type ColdScreen =
   | 'vault'
   | 'audit'
   | 'memory'
-  | 'memoryReader';
+  | 'memoryReader'
+  | 'ownerApproval';
 function markFirstScreen(kind: ColdScreen) {
   const selectors = {
+    ownerApproval: '[role="radio"]',
     buckets: '[aria-label="All buckets"] [data-path]',
     authorize: '#authorization-code',
     machines: '[data-machine]',
@@ -177,9 +181,19 @@ function markFirstScreen(kind: ColdScreen) {
     characterData: true,
   });
 }
-async function cold(page: Page, origin: string, kind: ColdScreen) {
+async function cold(
+  page: Page,
+  origin: string,
+  kind: ColdScreen,
+  approvalId?: string,
+) {
+  if (kind === 'ownerApproval' && !approvalId)
+    throw new Error(
+      'Owner approval timing requires a real pending request id.',
+    );
   await page.addInitScript(markFirstScreen, kind);
   const paths = {
+    ownerApproval: `/approvals/${approvalId}`,
     home: '/',
     buckets: '/buckets',
     authorize: '/cli/authorize',
@@ -255,7 +269,7 @@ async function approvalNavigation(page: Page, origin: string, code: string) {
 }
 // Measurement scripts wait this long for intent preloading to go quiet.
 const intentPreloadTimeout = 15_000;
-export type MeasureOptions = { preloadTimeout?: number };
+export type MeasureOptions = { preloadTimeout?: number; approvalId?: string };
 
 async function settleNetworkAfter<T>(
   page: Page,
@@ -305,7 +319,14 @@ async function settleNetworkAfter<T>(
 async function navigate(
   page: Page,
   origin: string,
-  kind: 'buckets' | 'machines' | 'vault' | 'audit' | 'memory' | 'memoryReader',
+  kind:
+    | 'buckets'
+    | 'machines'
+    | 'vault'
+    | 'audit'
+    | 'memory'
+    | 'memoryReader'
+    | 'approvals',
   preloadTimeout: number,
 ) {
   const link = await settleNetworkAfter(page, preloadTimeout, async () => {
@@ -317,6 +338,14 @@ async function navigate(
     }
     await page.goto(origin);
     await page.getByRole('heading', { name: "You're signed in" }).waitFor();
+    if (kind === 'approvals') {
+      await page
+        .getByRole('button', { name: 'Toggle Sidebar', exact: true })
+        .click();
+      const link = page.getByRole('link', { name: 'Approvals', exact: true });
+      await link.hover();
+      return link;
+    }
     const link = page
       .getByRole('region', {
         name: ['vault', 'memory'].includes(kind) ? 'Tools' : 'Platform',
@@ -356,6 +385,7 @@ async function navigate(
       vault: '[data-secret="me/GITHUB_TOKEN"]',
       machines: '[data-machine]',
       audit: '[data-entry]',
+      approvals: '[data-approval] a[href^="/approvals/"]',
       memory: '[aria-label="Memory buckets"] [data-path="me"]',
       memoryReader:
         '[data-memory-reading] [data-memory-files][aria-label="Files, 1"]',
@@ -440,10 +470,11 @@ export async function measureScreen(
   origin: string,
   code: string,
   kind: Exclude<keyof Measurements, 'gzipBytes'>,
-  { preloadTimeout = intentPreloadTimeout }: MeasureOptions = {},
+  { preloadTimeout = intentPreloadTimeout, approvalId }: MeasureOptions = {},
 ) {
   const destinations = {
     navigation: 'buckets',
+    approvalsNavigation: 'approvals',
     machinesNavigation: 'machines',
     vaultNavigation: 'vault',
     auditNavigation: 'audit',
@@ -458,6 +489,6 @@ export async function measureScreen(
       return machineAccessNavigation(page, origin, preloadTimeout);
     return destination
       ? navigate(page, origin, destination, preloadTimeout)
-      : cold(page, origin, kind as ColdScreen);
+      : cold(page, origin, kind as ColdScreen, approvalId);
   });
 }

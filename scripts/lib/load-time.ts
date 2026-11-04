@@ -21,6 +21,8 @@ export type Measurements = {
   machines: number[];
   machinesNavigation: number[];
   approvalNavigation: number[];
+  ownerApproval: number[];
+  approvalsNavigation: number[];
   machineAccessNavigation: number[];
   vault: number[];
   vaultNavigation: number[];
@@ -56,6 +58,12 @@ export function assertLoadTimes(measured: Measurements) {
     [
       'memoryReaderNavigation',
       'Intent navigation /memory with files',
+      loadTimeBudgets.navigationMs,
+    ],
+    ['ownerApproval', 'Cold open /approvals/:id', loadTimeBudgets.coldOpenMs],
+    [
+      'approvalsNavigation',
+      'Intent navigation /approvals',
       loadTimeBudgets.navigationMs,
     ],
     ['home', 'Cold open /', loadTimeBudgets.coldOpenMs],
@@ -110,6 +118,8 @@ export function formatMeasurements(measured: Measurements) {
         machines: median(measured.machines),
         machinesNavigation: median(measured.machinesNavigation),
         approvalNavigation: median(measured.approvalNavigation),
+        ownerApproval: median(measured.ownerApproval),
+        approvalsNavigation: median(measured.approvalsNavigation),
         machineAccessNavigation: median(measured.machineAccessNavigation),
         audit: median(measured.audit),
         auditNavigation: median(measured.auditNavigation),

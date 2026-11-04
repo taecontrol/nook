@@ -12,6 +12,8 @@ import {
 
 // Every measured screen, the label its failure names, and its fixed budget.
 const screens = [
+  ['ownerApproval', 'Cold open /approvals/:id', 1000],
+  ['approvalsNavigation', 'Intent navigation /approvals', 100],
   ['home', 'Cold open /', 1000],
   ['buckets', 'Cold open /buckets', 1000],
   ['authorize', 'Cold open /cli/authorize', 1000],
