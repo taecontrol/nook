@@ -151,16 +151,19 @@ it.each(['secret', 'bucket'] as const)(
     try {
       await control.click();
       await started.promise;
-      expect(
-        await control.getAttribute('aria-checked'),
-        'The switch flips before the PUT response',
-      ).toBe('true');
+      await expect
+        .poll(() => control.getAttribute('aria-checked'), {
+          message: 'The switch flips before the PUT response',
+        })
+        .toBe('true');
       expect((await marks()).marks).toEqual([]);
       gate.resolve();
       await expect
         .poll(async () => (await marks()).marks.some((m) => m.path === path))
         .toBe(true);
-      expect(await control.getAttribute('aria-checked')).toBe('true');
+      await expect
+        .poll(() => control.getAttribute('aria-checked'))
+        .toBe('true');
       await page.unroute(url);
       await control.click();
       await expect.poll(async () => (await marks()).marks.length).toBe(0);
@@ -176,7 +179,9 @@ it.each(['secret', 'bucket'] as const)(
       try {
         await control.click();
         await failedStarted.promise;
-        expect(await control.getAttribute('aria-checked')).toBe('true');
+        await expect
+          .poll(() => control.getAttribute('aria-checked'))
+          .toBe('true');
         failed.resolve();
         await expect
           .poll(() => control.getAttribute('aria-checked'))
@@ -269,7 +274,7 @@ it('E37: rapid toggles stay optimistic, serialize writes per path and preserve t
     await page.locator('[data-path="work/acme"] a').click();
     await control.click();
     await writeStarted.promise;
-    expect(await control.getAttribute('aria-checked')).toBe('true');
+    await expect.poll(() => control.getAttribute('aria-checked')).toBe('true');
     const refreshed = page.waitForResponse(
       (r) => new URL(r.url()).pathname === '/api/ask-first',
     );
@@ -286,12 +291,12 @@ it('E37: rapid toggles stay optimistic, serialize writes per path and preserve t
       'An older server list cannot erase pending intent',
     ).toBe('true');
     await control.click();
-    expect(await control.getAttribute('aria-checked')).toBe('false');
+    await expect.poll(() => control.getAttribute('aria-checked')).toBe('false');
     expect(writes, 'DELETE waits for this path’s PUT').toEqual(['PUT']);
     putGate.resolve();
     await expect.poll(() => writes).toEqual(['PUT', 'DELETE']);
     await expect.poll(async () => (await marks()).marks.length).toBe(0);
-    expect(await control.getAttribute('aria-checked')).toBe('false');
+    await expect.poll(() => control.getAttribute('aria-checked')).toBe('false');
   } finally {
     readGate.resolve();
     putGate.resolve();
@@ -323,7 +328,7 @@ it('E37: a failed DELETE restores the server mark and an error instead of leavin
   try {
     await control.click();
     await started.promise;
-    expect(await control.getAttribute('aria-checked')).toBe('false');
+    await expect.poll(() => control.getAttribute('aria-checked')).toBe('false');
     expect((await marks()).marks).toContainEqual({
       kind: 'secret',
       path: stripe,
@@ -385,7 +390,7 @@ it('E38: a deleted bucket mark appears above Vault with Remove mark and disappea
       .getByRole('button', { name: 'Remove mark', exact: true })
       .click();
     await started.promise;
-    expect(await alert.count()).toBe(0);
+    await expect.poll(() => alert.count()).toBe(0);
     expect((await marks()).marks).toHaveLength(1);
     gate.resolve();
     await expect.poll(async () => (await marks()).marks.length).toBe(0);
@@ -431,7 +436,7 @@ it('E38: a failed Remove mark restores the orphan alert and reports an error', a
       .getByRole('button', { name: 'Remove mark', exact: true })
       .click();
     await started.promise;
-    expect(await alert.count()).toBe(0);
+    await expect.poll(() => alert.count()).toBe(0);
     gate.resolve();
     await expect.poll(() => alert.count()).toBe(1);
     expect((await marks()).marks).toContainEqual({

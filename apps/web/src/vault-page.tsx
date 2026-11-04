@@ -50,10 +50,18 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { describeFailure } from './api-client';
+import type { useAskFirst } from './ask-first-api';
+import {
+  AskFirstFeedback,
+  AskFirstSwitch,
+  BucketAskFirstCard,
+  OrphanMarksAlert,
+  SecretMark,
+} from './ask-first-parts';
 import { agentsIn, reachText } from './bucket-format';
 import { BucketTree, BucketTreeSkeleton } from './bucket-tree';
 import { LoadFailure } from './failure';
-import { Path, PathList } from './path-text';
+import { Path, PathList, SlashPath } from './path-text';
 import { formatDate } from './time';
 import { useLastValue } from './use-confirm-target';
 import { useVaultPage } from './use-vault-page';
@@ -160,12 +168,14 @@ function SecretRow({
   highlighted,
   actions,
   confirming = false,
+  marks,
 }: {
   secret: Secret;
   saving: boolean;
   highlighted: boolean;
   actions?: React.ReactNode;
   confirming?: boolean;
+  marks?: ReturnType<typeof useAskFirst>;
 }) {
   return (
     <li
@@ -182,6 +192,7 @@ function SecretRow({
               {secret.description}
             </ItemDescription>
           )}
+          {marks && <SecretMark marks={marks} path={secretPath(secret)} />}
           <span className="text-xs text-muted-foreground sm:hidden">
             {saving ? (
               <Updated secret={secret} saving confirming={confirming} />
@@ -190,6 +201,15 @@ function SecretRow({
             )}
           </span>
         </ItemContent>
+        {marks && (
+          <div className="flex w-12 shrink-0 justify-center">
+            <AskFirstSwitch
+              marks={marks}
+              kind="secret"
+              path={secretPath(secret)}
+            />
+          </div>
+        )}
         <div className="hidden w-28 shrink-0 text-right text-xs tabular-nums text-muted-foreground sm:block">
           <Updated secret={secret} saving={saving} confirming={confirming} />
         </div>
@@ -233,9 +253,11 @@ function SecretsSkeleton() {
 function Inherited({
   bucket,
   secrets,
+  marks,
 }: {
   bucket: string;
   secrets: readonly Secret[];
+  marks: ReturnType<typeof useAskFirst>;
 }) {
   const ancestors = ancestorsOf(bucket);
   const groups = ancestors
@@ -292,6 +314,7 @@ function Inherited({
                   secret={secret}
                   saving={false}
                   highlighted={false}
+                  marks={marks}
                 />
               ))}
             </ul>
@@ -504,7 +527,10 @@ function StoredSecrets({
         className="mb-2 h-8 pr-4"
         trailing={
           <>
-            <span className="ml-auto hidden w-28 text-right text-xs text-muted-foreground sm:block">
+            <span className="ml-auto w-12 text-center text-xs text-muted-foreground">
+              Ask first
+            </span>
+            <span className="hidden w-28 text-right text-xs text-muted-foreground sm:block">
               Updated
             </span>
             <span className="hidden w-8 sm:block" />
@@ -522,6 +548,7 @@ function StoredSecrets({
               saving={isSaving}
               confirming={page.confirming.has(path)}
               highlighted={highlighted === path}
+              marks={page.askFirst}
               actions={
                 !isSaving && (
                   <SecretMenu
@@ -552,7 +579,13 @@ function BucketSecrets({ page }: { page: Page }) {
     <>
       {secrets.isError && failure}
       <StoredSecrets page={page} list={list} />
-      {list.length > 0 && <Inherited bucket={page.selected} secrets={list} />}
+      {list.length > 0 && (
+        <Inherited
+          bucket={page.selected}
+          secrets={list}
+          marks={page.askFirst}
+        />
+      )}
     </>
   );
 }
@@ -564,14 +597,15 @@ function BucketPane({ page }: { page: Page }) {
     <>
       <div className="mb-6 flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <h2 className="font-mono text-lg font-semibold tracking-tight wrap-anywhere">
-            {selected}
+          <h2 className="text-lg font-semibold tracking-tight">
+            <SlashPath>{selected}</SlashPath>
           </h2>
           <p className="text-sm text-muted-foreground">
             {reachText(selected, page.parents.has(selected), 'its secrets')}
           </p>
         </div>
       </div>
+      <BucketAskFirstCard marks={page.askFirst} path={selected} />
       <BucketSecrets page={page} />
     </>
   );
@@ -622,9 +656,13 @@ function TreePane({ page }: { page: Page }) {
           selected={drilled || page.wide ? selected : null}
           counts={counts}
           loading={secrets.isPending}
+          marked={(path) => page.askFirst.coverage('bucket', path) !== null}
         />
       )}
       <p className="mt-4 px-1 text-xs text-muted-foreground">
+        Ask first. Runs that need these secrets wait for your approval.
+      </p>
+      <p className="mt-2 px-1 text-xs text-muted-foreground">
         Buckets are created and deleted on the{' '}
         <Link
           to="/buckets"
@@ -693,6 +731,8 @@ export function VaultPage() {
         in Audit.
       </p>
       <div className="mb-6 empty:hidden">
+        <OrphanMarksAlert marks={page.askFirst} />
+        <AskFirstFeedback marks={page.askFirst} />
         <ImportStatus page={page} />
         {ui.feedback && (
           <WriteFeedback
