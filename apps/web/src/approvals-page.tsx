@@ -1,4 +1,7 @@
-import type { ApprovalView } from '@nook/contract';
+import type {
+  ApprovalList as ApprovalCollection,
+  ApprovalView,
+} from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import { Hourglass, Repeat2, ShieldCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -20,7 +23,12 @@ import {
 } from '@/components/ui/item';
 import { Skeleton } from '@/components/ui/skeleton';
 import { describeFailure } from './api-client';
-import { durationLabel, endTime, timeLeft } from './approval-screen';
+import {
+  coveredSecrets,
+  durationLabel,
+  endTime,
+  timeLeft,
+} from './approval-screen';
 import { useApprovals } from './approvals-api';
 import { LoadFailure } from './failure';
 import { useDesktop } from './hooks/use-desktop';
@@ -30,7 +38,10 @@ import { useCountdown } from './use-countdown';
 function ApprovalPaths({ view }: { view: ApprovalView }) {
   return (
     <div className="flex flex-col text-xs">
-      {view.verified.secrets.map(({ path }) => (
+      {(view.state === 'approved'
+        ? coveredSecrets(view)
+        : view.verified.secrets
+      ).map(({ path }) => (
         <SlashPath key={path}>{path}</SlashPath>
       ))}
     </div>
@@ -84,17 +95,16 @@ function ApprovalSummary({
     </ItemContent>
   );
 }
-function ApprovalRow({ view }: { view: ApprovalView }) {
-  const msLeft = useCountdown(
-    view.state === 'pending' ? view.expiresAt : undefined,
-  );
-  if (view.state === 'pending' && msLeft === 0) return null;
+function ApprovalRow({ view, now }: { view: ApprovalView; now: number }) {
   return (
     <Item variant="outline" className="items-start" data-approval={view.id}>
       <ItemMedia variant="icon" className="hidden sm:flex">
         <ApprovalIcon remembered={view.state === 'approved'} />
       </ItemMedia>
-      <ApprovalSummary view={view} msLeft={msLeft} />
+      <ApprovalSummary
+        view={view}
+        msLeft={Math.max(0, Date.parse(view.expiresAt) - now)}
+      />
       <ReviewApproval view={view} />
     </Item>
   );
@@ -103,10 +113,12 @@ function ApprovalSection({
   title,
   description,
   views,
+  now,
 }: {
   title: string;
   description: string;
   views: readonly ApprovalView[];
+  now: number;
 }) {
   return (
     <section>
@@ -119,7 +131,7 @@ function ApprovalSection({
       </div>
       <div className="flex flex-col gap-2">
         {views.map((view) => (
-          <ApprovalRow key={view.id} view={view} />
+          <ApprovalRow key={view.id} view={view} now={now} />
         ))}
       </div>
     </section>
@@ -128,9 +140,11 @@ function ApprovalSection({
 function ApprovalList({
   pending,
   remembered,
+  now,
 }: {
   pending: readonly ApprovalView[];
   remembered: readonly ApprovalView[];
+  now: number;
 }) {
   if (pending.length === 0 && remembered.length === 0)
     return (
@@ -156,27 +170,50 @@ function ApprovalList({
         title="Waiting for you"
         description="Each request expires 10 minutes after the run asked."
         views={pending}
+        now={now}
       />
       <ApprovalSection
         title="Remembered"
         description="Any later run on the same machine uses these secrets without asking until the approval ends, whichever agent runs it."
         views={remembered}
+        now={now}
       />
     </div>
   );
 }
+function deadline(view: ApprovalView) {
+  return Date.parse(
+    view.state === 'approved' ? view.validUntil : view.expiresAt,
+  );
+}
+function useVisibleApprovals(data: typeof ApprovalCollection.Type | undefined) {
+  const now = Date.now();
+  const { pending = [], remembered = [] } = data ?? {};
+  const all = [...pending, ...remembered];
+  const next = Math.min(...all.map(deadline).filter((at) => at > now));
+  // One local clock owns rows, counts and the empty state. The nearest future
+  // deadline keeps pending countdowns current and removes remembered approvals.
+  useCountdown(
+    Number.isFinite(next) ? new Date(next).toISOString() : undefined,
+  );
+  return {
+    pending: pending.filter((view) => deadline(view) > now),
+    remembered: remembered.filter((view) => deadline(view) > now),
+    now,
+  };
+}
 export function ApprovalsPage() {
   const list = useApprovals();
+  const visible = useVisibleApprovals(list.data);
   return (
     <div className="w-full max-w-4xl px-4 pt-6 pb-24 sm:px-6 md:px-12 md:pt-8">
       <h1 className="mb-2 text-xl font-semibold tracking-tight">Approvals</h1>
-      {list.data &&
-        (list.data.pending.length > 0 || list.data.remembered.length > 0) && (
-          <p className="mb-8 max-w-2xl text-sm text-muted-foreground">
-            Runs that wait for you before they use secrets marked Ask first, and
-            the approvals that let later runs skip asking.
-          </p>
-        )}
+      {(visible.pending.length > 0 || visible.remembered.length > 0) && (
+        <p className="mb-8 max-w-2xl text-sm text-muted-foreground">
+          Runs that wait for you before they use secrets marked Ask first, and
+          the approvals that let later runs skip asking.
+        </p>
+      )}
       {list.isError && (
         <LoadFailure
           title="Couldn’t load approvals"
@@ -187,7 +224,7 @@ export function ApprovalsPage() {
         />
       )}
       {list.data ? (
-        <ApprovalList {...list.data} />
+        <ApprovalList {...visible} />
       ) : (
         list.isPending && <Skeleton className="mt-6 h-64 w-full" />
       )}

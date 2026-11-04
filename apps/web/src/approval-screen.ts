@@ -5,28 +5,66 @@ import type {
 import { formatTime } from './time';
 
 export type Choice = Remember | 'deny';
-export type Submitting = { kind: 'submitting'; choice: Choice };
-export type Screen = { view: ApprovalView } & (
-  | { kind: 'pending' }
+type View<State extends ApprovalView['state']> = ApprovalView & {
+  state: State;
+};
+export type Submitting = {
+  kind: 'submitting';
+  choice: Choice;
+  view: View<'pending'>;
+};
+export type Screen =
+  | { kind: 'pending'; view: View<'pending'> }
   | Submitting
-  | { kind: 'approved' | 'denied' | 'withdrawn' | 'settled' }
-  | { kind: 'expired'; unsaved: boolean; choice?: Choice }
-);
+  | { kind: 'approved'; view: View<'approved'> }
+  | { kind: 'denied'; view: View<'denied'> }
+  | { kind: 'withdrawn'; view: View<'withdrawn'> }
+  | { kind: 'settled'; view: View<'settled'> }
+  | {
+      kind: 'expired';
+      view: View<'pending' | 'expired'>;
+      unsaved: boolean;
+      choice?: Choice;
+    };
+type Local = { submitting?: Choice; unsaved?: boolean; choice?: Choice };
 
-export function approvalScreen(
-  view: ApprovalView,
+function pendingScreen(
+  view: View<'pending'>,
   now: number,
-  local: { submitting?: Choice; unsaved?: boolean; choice?: Choice },
+  local: Local,
 ): Screen {
   if (local.submitting)
     return { kind: 'submitting', choice: local.submitting, view };
   if (local.unsaved)
     return { kind: 'expired', unsaved: true, choice: local.choice, view };
-  if (view.state === 'pending' && Date.parse(view.expiresAt) <= now)
+  if (Date.parse(view.expiresAt) <= now)
     return { kind: 'expired', unsaved: false, view };
-  if (view.state === 'expired')
-    return { kind: 'expired', unsaved: false, view };
-  return { kind: view.state, view };
+  return { kind: 'pending', view };
+}
+
+export function approvalScreen(
+  view: ApprovalView,
+  now: number,
+  local: Local,
+): Screen {
+  switch (view.state) {
+    case 'pending':
+      return pendingScreen({ ...view, state: view.state }, now, local);
+    case 'expired':
+      return {
+        kind: 'expired',
+        unsaved: false,
+        view: { ...view, state: view.state },
+      };
+    case 'approved':
+      return { kind: view.state, view };
+    case 'denied':
+      return { kind: view.state, view };
+    case 'withdrawn':
+      return { kind: view.state, view: { ...view, state: view.state } };
+    case 'settled':
+      return { kind: view.state, view: { ...view, state: view.state } };
+  }
 }
 export function endsAt(remember: Remember, now: number): number | null {
   if (remember === 'once') return null;
@@ -38,6 +76,11 @@ export const durationLabel = {
   '12h': '12 hours',
 };
 export const endTime = formatTime;
+export function submittingLabel({ choice }: Submitting) {
+  if (choice === 'deny') return 'Denying…';
+  if (choice === 'once') return 'Approving this time…';
+  return `Approving for ${durationLabel[choice]}…`;
+}
 export function timeLeft(ms: number) {
   const seconds = Math.ceil(ms / 1000);
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} left`;
@@ -49,7 +92,16 @@ export function approvalScope(
 ) {
   if (remember === 'once')
     return 'Only this run gets the secrets. The next run asks again.';
-  const secrets =
-    view.verified.secrets.length === 1 ? 'this secret' : 'these secrets';
-  return `Any later run on ${view.verified.machine.name} uses ${secrets} without asking until ${endTime(until ?? Date.now())}, whichever agent runs it. Other secrets still ask.`;
+  const covered = coveredSecrets(view);
+  const secrets = covered.length === 1 ? 'this secret' : 'these secrets';
+  // Mixed requests still show every requested path in the verified details.
+  // Name the covered subset here so "these secrets" cannot include unmarked paths.
+  const paths =
+    covered.length === view.verified.secrets.length
+      ? ''
+      : ` (${covered.map(({ path }) => path).join(', ')})`;
+  return `Any later run on ${view.verified.machine.name} uses ${secrets}${paths} without asking until ${endTime(until ?? Date.now())}, whichever agent runs it. Other secrets still ask.`;
+}
+export function coveredSecrets(view: ApprovalView) {
+  return view.verified.secrets.filter(({ coveredBy }) => coveredBy !== null);
 }

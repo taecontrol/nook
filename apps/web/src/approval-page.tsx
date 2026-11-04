@@ -40,6 +40,7 @@ import {
   endTime,
   type Screen,
   type Submitting,
+  submittingLabel,
   timeLeft,
 } from './approval-screen';
 import { useApproval } from './approvals-api';
@@ -190,10 +191,7 @@ function Decisions({
     choice === 'once'
       ? 'Approve this time'
       : `Approve for ${durationLabel[choice]}`;
-  const busyLabel =
-    submitting?.choice === 'once'
-      ? 'Approving this time…'
-      : `Approving for ${durationLabel[choice]}…`;
+  const busyLabel = submitting && submittingLabel(submitting);
   return (
     <div className="sticky bottom-0 z-10 flex gap-3 border-t bg-card p-5 sm:justify-end sm:p-6">
       <Button
@@ -202,7 +200,7 @@ function Decisions({
         onClick={() => decide('deny')}
       >
         {denying && <Spinner />}
-        {denying ? 'Denying…' : 'Deny'}
+        {denying ? busyLabel : 'Deny'}
       </Button>
       <Button
         className="flex-1 sm:flex-none"
@@ -343,14 +341,16 @@ function UnsavedDecision({
     </Alert>
   );
 }
-function ResultFacts({ view }: { view: ApprovalView }) {
+type ResultScreen = Exclude<Screen, { kind: 'pending' | 'submitting' }>;
+function ResultFacts({ screen }: { screen: ResultScreen }) {
+  const { view } = screen;
   return (
     <dl className="flex flex-col gap-3">
-      {view.state === 'approved' && (
+      {screen.kind === 'approved' && (
         <Fact name="Approved">
-          {view.remember === 'once'
+          {screen.view.remember === 'once'
             ? durationLabel.once
-            : `${durationLabel[view.remember]}, until ${endTime(view.validUntil)}`}
+            : `${durationLabel[screen.view.remember]}, until ${endTime(screen.view.validUntil)}`}
         </Fact>
       )}
       <Fact name="Machine">{view.verified.machine.name}</Fact>
@@ -364,14 +364,12 @@ function ResultFacts({ view }: { view: ApprovalView }) {
     </dl>
   );
 }
-function ResultCard({ screen }: { screen: Screen }) {
+function ResultCard({ screen }: { screen: ResultScreen }) {
   const { view } = screen;
-  if (screen.kind === 'pending' || screen.kind === 'submitting') return null;
-  const approved = view.state === 'approved' ? view : undefined;
   const result =
-    screen.kind === 'approved' && approved
-      ? approvedResult(approved)
-      : results[screen.kind as keyof typeof results];
+    screen.kind === 'approved'
+      ? approvedResult(screen.view)
+      : results[screen.kind];
   return (
     <Card className="gap-0 py-0 shadow-none" aria-live="polite">
       <CardHeader className="gap-4 p-6">
@@ -387,9 +385,24 @@ function ResultCard({ screen }: { screen: Screen }) {
       </CardHeader>
       <CardContent className="flex flex-col gap-5 px-6 pb-6">
         {screen.kind === 'expired' && <UnsavedDecision screen={screen} />}
-        <ResultFacts view={view} />
+        <ResultFacts screen={screen} />
       </CardContent>
     </Card>
+  );
+}
+function ApprovalCard({
+  screen,
+  failure,
+  decide,
+}: {
+  screen: Screen;
+  failure?: 'network';
+  decide: (choice: Remember | 'deny') => void;
+}) {
+  return screen.kind === 'pending' || screen.kind === 'submitting' ? (
+    <PendingCard screen={screen} failure={failure} decide={decide} />
+  ) : (
+    <ResultCard screen={screen} />
   );
 }
 export function ApprovalPage() {
@@ -438,15 +451,7 @@ export function ApprovalPage() {
             onRetry={() => void load.refetch()}
           />
         ) : screen ? (
-          waiting ? (
-            <PendingCard
-              screen={screen as Screen & { kind: 'pending' | 'submitting' }}
-              failure={failure}
-              decide={decide}
-            />
-          ) : (
-            <ResultCard screen={screen} />
-          )
+          <ApprovalCard screen={screen} failure={failure} decide={decide} />
         ) : (
           <Skeleton className="h-96 w-full" />
         )}
