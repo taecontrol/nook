@@ -893,7 +893,7 @@ it('E22: a saving replacement row has no menu after the sheet has completely clo
     await expect.poll(() => visit.page.getByRole('dialog').count()).toBe(0);
     const row = secretRow(visit.page, revealPath);
     await expect.poll(() => row.innerText()).toContain('Saving…');
-    expect(await row.locator('button').count()).toBe(0);
+    expect(await row.getByRole('button').count()).toBe(0);
     expect(revealRequests(visit.requests)).toEqual([]);
     gate.resolve();
     await expect.poll(() => row.getByRole('button').count()).toBe(1);
