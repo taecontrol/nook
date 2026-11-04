@@ -128,9 +128,9 @@ export async function expectNoDecisionControls(page: Page) {
 
 // Inspect rendered glyphs across text nodes: a <wbr>, CSS break-all, or nested
 // spans must not conceal a line break inside a path segment.
-export async function expectSlashBreaks(element: Locator) {
-  const breaks = await element.evaluate((element) => {
-    const glyphs: { text: string; top: number }[] = [];
+export async function expectSlashBreaks(element: Locator, path?: string) {
+  const glyphs = await element.evaluate((element) => {
+    const glyphs: { text: string; top: number; width: number }[] = [];
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const text = node.textContent ?? '';
@@ -139,15 +139,32 @@ export async function expectSlashBreaks(element: Locator) {
         range.setStart(node, i);
         range.setEnd(node, i + 1);
         const box = range.getBoundingClientRect();
-        if (box.width > 0) glyphs.push({ text: text[i], top: box.top });
+        glyphs.push({ text: text[i], top: box.top, width: box.width });
       }
     }
-    return glyphs.flatMap((glyph, i) =>
-      i && Math.abs(glyph.top - glyphs[i - 1].top) > 2
-        ? [`${glyphs[i - 1].text}${glyph.text}`]
-        : [],
-    );
+    return glyphs;
   });
+  // A scope sentence contains prose too; inspect just its path without changing
+  // the DOM or requiring the path to already have its own element.
+  const start =
+    path === undefined
+      ? 0
+      : glyphs
+          .map((g) => g.text)
+          .join('')
+          .indexOf(path);
+  expect(
+    start,
+    'The rendered element contains the path being checked',
+  ).toBeGreaterThanOrEqual(0);
+  const visible = glyphs
+    .slice(start, path === undefined ? undefined : start + path.length)
+    .filter((glyph) => glyph.width > 0);
+  const breaks = visible.flatMap((glyph, i) =>
+    i && Math.abs(glyph.top - visible[i - 1].top) > 2
+      ? [`${visible[i - 1].text}${glyph.text}`]
+      : [],
+  );
   expect(
     breaks.every((pair) => pair.includes('/')),
     'Rendered paths break only at /, never inside a segment',

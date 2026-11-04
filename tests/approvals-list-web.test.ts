@@ -220,6 +220,81 @@ it('E44: the badge refreshes on open, genuine visibility changes and navigation,
 });
 
 it.each(['pending', 'remembered'] as const)(
+  'E36/E44: consecutive %s deadlines expire both rows and counts into the empty state without extra requests',
+  async (kind) => {
+    const first = await webPending(app);
+    const second = await webPending(app);
+    const db = await app.mf.getD1Database('DB');
+    const column = kind === 'pending' ? 'expires_at' : 'valid_until';
+    for (const [request, seconds] of [
+      [first, 62],
+      [second, 63],
+    ] as const) {
+      if (kind === 'remembered')
+        expect((await decide(app, request.id, '1h')).status).toBe(200);
+      await db
+        .prepare(`UPDATE approval_requests SET ${column}=? WHERE id=?`)
+        .bind(approvalNow.getTime() + seconds * 1000, request.id)
+        .run();
+    }
+    const ui = await approvalBrowserPage(browser);
+    const { page } = ui;
+    const requests: string[] = [];
+    page.on('request', (r) => requests.push(r.url()));
+    try {
+      await page.goto(`${app.origin}/approvals`);
+      const firstRow = page.locator(`[data-approval="${first.id}"]`);
+      const secondRow = page.locator(`[data-approval="${second.id}"]`);
+      await firstRow.waitFor();
+      await secondRow.waitFor();
+      const section = page.locator('section').filter({ has: secondRow });
+      const title = kind === 'pending' ? 'Waiting for you' : 'Remembered';
+      expect(await section.getByRole('heading').innerText()).toMatch(
+        new RegExp(`${title}\\s*2`, 'i'),
+      );
+      await page.waitForLoadState('networkidle');
+      const count = requests.length;
+      await page.clock.setSystemTime(approvalNow);
+      await page.clock.pauseAt(new Date(approvalNow.getTime() + 60_000));
+      await page.clock.runFor(1000);
+      expect(await firstRow.count()).toBe(1);
+      expect(await secondRow.count()).toBe(1);
+      await page.clock.runFor(1000);
+      await expect.poll(() => firstRow.count()).toBe(0);
+      expect(await secondRow.count()).toBe(1);
+      expect(await section.getByRole('heading').innerText()).toMatch(
+        new RegExp(`${title}\\s*1`, 'i'),
+      );
+      if (kind === 'pending')
+        expect(await secondRow.innerText()).toContain('0:01 left');
+      await page.clock.runFor(5000);
+      await expect
+        .poll(
+          () =>
+            page.getByText('Nothing waiting for you', { exact: true }).count(),
+          {
+            message:
+              'The second consecutive local expiry shows the empty state',
+          },
+        )
+        .toBe(1);
+      expect(await page.locator('[data-approval]').count()).toBe(0);
+      expect(
+        await page
+          .getByRole('heading', { name: /Waiting for you|Remembered/ })
+          .count(),
+      ).toBe(0);
+      await page.clock.runFor(120_000);
+      expect(requests, 'Local expiry must not poll or refetch').toHaveLength(
+        count,
+      );
+    } finally {
+      await ui.close();
+    }
+  },
+);
+
+it.each(['pending', 'remembered'] as const)(
   'E36/E44: the last %s row expires into the empty state locally without extra requests',
   async (kind) => {
     const request = await webPending(app);

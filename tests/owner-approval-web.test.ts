@@ -669,30 +669,57 @@ it.each(['1h', 'deny'] as const)(
   },
 );
 
-it('E32/E36: a mixed request shows every requested secret but remembers only the covered scope', async () => {
-  const request = await webPending(app, { secrets: [stripe, cloudflare] });
-  await page.goto(request.url);
-  await expectPendingPage(page);
-  const verified = page.getByRole('region', { name: 'Verified by Nook' });
-  for (const path of [stripe, cloudflare])
-    expect(await verified.getByText(path, { exact: true }).count()).toBe(1);
-  expect(await verified.innerText()).toContain('Not marked Ask first');
-  await duration(page, '1 hour').click();
-  const scope = `Any later run on omarchy uses this secret (${stripe}) without asking until 11:42, whichever agent runs it. Other secrets still ask.`;
-  expect(await page.getByText(scope, { exact: true }).count()).toBe(1);
-  await approveButton(page).click();
-  await page
-    .getByRole('heading', { name: 'Approved for 1 hour', exact: true })
-    .waitFor();
-  expect(await page.locator('[data-slot="card-description"]').innerText()).toBe(
-    `This run got its secrets. ${scope}`,
-  );
-  await page.getByRole('link', { name: 'All approvals', exact: true }).click();
-  const remembered = page.locator(`[data-approval="${request.id}"]`);
-  await remembered.waitFor();
-  expect(await remembered.innerText()).toContain(stripe);
-  expect(await remembered.innerText()).not.toContain(cloudflare);
-});
+const longSecretName = 'X'.repeat(64);
+const longSecretPath = `work/acme/${longSecretName}`;
+it.each([
+  { covered: [stripe], scope: `this secret (${stripe})` },
+  { covered: [longSecretPath], scope: `this secret (${longSecretPath})` },
+  {
+    covered: [stripe, longSecretPath],
+    scope: `these secrets (${stripe}, ${longSecretPath})`,
+  },
+])(
+  'E32/E35/E36: a mixed request shows every requested secret but remembers only the covered scope: $scope',
+  async ({ covered, scope: coveredScope }) => {
+    expect(
+      (await createSecret(app, secretInput({ name: longSecretName }))).status,
+    ).toBe(201);
+    const request = await webPending(app, {
+      secrets: [...covered, cloudflare],
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(request.url);
+    await expectPendingPage(page);
+    const verified = page.getByRole('region', { name: 'Verified by Nook' });
+    for (const path of [...covered, cloudflare])
+      expect(await verified.getByText(path, { exact: true }).count()).toBe(1);
+    expect(await verified.innerText()).toContain('Not marked Ask first');
+    await duration(page, '1 hour').click();
+    const scope = `Any later run on omarchy uses ${coveredScope} without asking until 11:42, whichever agent runs it. Other secrets still ask.`;
+    const pendingScope = page.getByText(scope, { exact: true });
+    expect(await pendingScope.count()).toBe(1);
+    await expectNoOverflow(page);
+    for (const path of covered) await expectSlashBreaks(pendingScope, path);
+    await approveButton(page).click();
+    await page
+      .getByRole('heading', { name: 'Approved for 1 hour', exact: true })
+      .waitFor();
+    const approvedScope = page.locator('[data-slot="card-description"]');
+    expect(await approvedScope.innerText()).toBe(
+      `This run got its secrets. ${scope}`,
+    );
+    await expectNoOverflow(page);
+    for (const path of covered) await expectSlashBreaks(approvedScope, path);
+    await page
+      .getByRole('link', { name: 'All approvals', exact: true })
+      .click();
+    const remembered = page.locator(`[data-approval="${request.id}"]`);
+    await remembered.waitFor();
+    for (const path of covered)
+      expect(await remembered.innerText()).toContain(path);
+    expect(await remembered.innerText()).not.toContain(cloudflare);
+  },
+);
 
 it('E31/E32: approval end times use the browser time zone in Kolkata', async () => {
   await ui.close();
