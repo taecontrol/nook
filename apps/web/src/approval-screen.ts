@@ -53,7 +53,8 @@ export function approvalScreen(
     case 'expired':
       return {
         kind: 'expired',
-        unsaved: false,
+        unsaved: !!local.unsaved,
+        choice: local.choice,
         view: { ...view, state: view.state },
       };
     case 'approved':

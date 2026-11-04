@@ -24,6 +24,19 @@ const pending: ApprovalView = {
   expiresAt: '2026-11-04T10:52:00.000Z',
 };
 
+it('a late expired detail keeps the unsaved decision alert and its choice', () => {
+  const screen = approvalScreen(
+    { ...pending, state: 'expired' },
+    Date.parse(pending.expiresAt),
+    { unsaved: true, choice: '1h' },
+  );
+  expect(screen).toMatchObject({
+    kind: 'expired',
+    unsaved: true,
+    choice: '1h',
+  });
+});
+
 it('Screen narrows its view by kind, including approved metadata and submitting choice', () => {
   const approved: ApprovalView = {
     ...pending,
