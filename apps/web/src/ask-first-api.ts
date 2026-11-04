@@ -53,7 +53,11 @@ function project(
     if (write.input.on)
       visible.push({ ...write.input.mark, exists: previous?.exists ?? true });
   }
-  return visible;
+  // Match the owner's list order: ancestor bucket marks precede explicit
+  // child marks, including while a newly enabled ancestor is still in flight.
+  return visible.sort(
+    (a, b) => a.kind.localeCompare(b.kind) || a.path.localeCompare(b.path),
+  );
 }
 function observed(mutation: Mutation): Write {
   return {

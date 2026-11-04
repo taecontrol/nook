@@ -161,9 +161,7 @@ it.each(['secret', 'bucket'] as const)(
       await expect
         .poll(async () => (await marks()).marks.some((m) => m.path === path))
         .toBe(true);
-      await expect
-        .poll(() => control.getAttribute('aria-checked'))
-        .toBe('true');
+      expect(await control.getAttribute('aria-checked')).toBe('true');
       await page.unroute(url);
       await control.click();
       await expect.poll(async () => (await marks()).marks.length).toBe(0);
@@ -296,7 +294,7 @@ it('E37: rapid toggles stay optimistic, serialize writes per path and preserve t
     putGate.resolve();
     await expect.poll(() => writes).toEqual(['PUT', 'DELETE']);
     await expect.poll(async () => (await marks()).marks.length).toBe(0);
-    await expect.poll(() => control.getAttribute('aria-checked')).toBe('false');
+    expect(await control.getAttribute('aria-checked')).toBe('false');
   } finally {
     readGate.resolve();
     putGate.resolve();
@@ -445,6 +443,40 @@ it('E38: a failed Remove mark restores the orphan alert and reports an error', a
       exists: false,
     });
     expect(await page.getByRole('alert').count()).toBeGreaterThan(1);
+  } finally {
+    gate.resolve();
+  }
+});
+
+it('E37: an optimistic bucket mark covers an already marked secret and failed PUT restores its explicit switch', async () => {
+  await setMark(app, stripe, 'secret');
+  await openVault();
+  const control = secretSwitch();
+  await expect.poll(() => control.count()).toBe(1);
+  expect(await control.getAttribute('aria-checked')).toBe('true');
+  expect(await control.isEnabled()).toBe(true);
+  const gate = deferred();
+  const started = deferred();
+  await page.route('**/api/ask-first/bucket/work%2Facme', async (route) => {
+    started.resolve();
+    await gate.promise;
+    await route
+      .fulfill({ status: 503, json: { _tag: 'ServiceUnavailable' } })
+      .catch(() => {});
+  });
+  try {
+    await bucketCard().getByRole('switch').click();
+    await started.promise;
+    await expect.poll(() => control.isDisabled()).toBe(true);
+    expect(await secretRow(page, stripe).innerText()).toContain(
+      'Ask first, from work/acme',
+    );
+    gate.resolve();
+    await expect.poll(() => control.isEnabled()).toBe(true);
+    expect(await control.getAttribute('aria-checked')).toBe('true');
+    expect(await secretRow(page, stripe).innerText()).toContain(
+      'Ask first, on this secret',
+    );
   } finally {
     gate.resolve();
   }
