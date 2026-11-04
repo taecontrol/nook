@@ -195,7 +195,7 @@ it('follows a changed OS color scheme without reloading the document', async () 
   }
 });
 
-it('E13: a cold open calls only whoami once through history, menu and focus interactions', async () => {
+it('E13: identity loads once while only the approvals badge refreshes through history, menu and focus interactions', async () => {
   const context = await browser.newContext();
   const page = await context.newPage();
   const apiRequests: string[] = [];
@@ -215,8 +215,9 @@ it('E13: a cold open calls only whoami once through history, menu and focus inte
     await expect
       .poll(() => page.getByRole('heading').allTextContents())
       .toContain("You're signed in");
-    // Same-document history, menu and focus interactions preserve the cold-open
-    // request count. The real QueryClient keeper separately proves cache reuse.
+    await page.waitForLoadState('networkidle');
+    // Identity stays cached; navigation refreshes the approval count (D3).
+    // E44 separately proves genuine visibility refresh and no periodic polling.
     await page.evaluate(() => {
       history.pushState(null, '', '/?visit=2');
       dispatchEvent(new PopStateEvent('popstate'));
@@ -230,7 +231,12 @@ it('E13: a cold open calls only whoami once through history, menu and focus inte
     await expect
       .poll(() => page.getByRole('heading').allTextContents())
       .toContain("You're signed in");
-    expect(apiRequests).toEqual(['/api/whoami']);
+    await page.waitForLoadState('networkidle');
+    expect([...apiRequests].sort()).toEqual([
+      '/api/approvals',
+      '/api/approvals',
+      '/api/whoami',
+    ]);
   } finally {
     await closePage(page, context);
   }
