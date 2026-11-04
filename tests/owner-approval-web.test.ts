@@ -577,3 +577,31 @@ it('E34: AlreadyHandled cancels an older pending detail read before refreshing t
     old.resolve();
   }
 });
+
+it('E35: long unbroken secret, machine and directory names stay inside the phone while paths still break only at /', async () => {
+  const name = 'X'.repeat(64);
+  const path = `work/acme/${name}`;
+  const machine = `owner-machine-${'m'.repeat(50)}`;
+  const workingDirectory = `/home/${'working-directory-claim'.repeat(12)}`;
+  expect((await createSecret(app, secretInput({ name }))).status).toBe(201);
+  await (await app.mf.getD1Database('DB'))
+    .prepare('UPDATE machine_tokens SET machine_name=? WHERE id=?')
+    .bind(machine, app.machine.id)
+    .run();
+  const request = await webPending(app, { secrets: [path], workingDirectory });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(request.url);
+  await expectPendingPage(page);
+  await expectNoOverflow(page);
+  await expectSlashBreaks(page.getByText(path, { exact: true }));
+  await expectSlashBreaks(page.getByText(workingDirectory, { exact: true }));
+  await duration(page, '1 hour').click();
+  await approveButton(page).click();
+  await page
+    .getByRole('heading', { name: 'Approved for 1 hour', exact: true })
+    .waitFor();
+  await expectNoOverflow(page);
+  await page.getByRole('link', { name: 'All approvals', exact: true }).click();
+  await page.getByText(machine, { exact: true }).waitFor();
+  await expectNoOverflow(page);
+});

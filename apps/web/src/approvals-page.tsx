@@ -65,7 +65,9 @@ function ApprovalRow({ view }: { view: ApprovalView }) {
       </ItemMedia>
       <ItemContent className="min-w-0">
         <ItemTitle>
-          {view.verified.machine.name}
+          <span className="min-w-0 wrap-anywhere">
+            {view.verified.machine.name}
+          </span>
           <Badge variant="secondary">
             {approved
               ? `Ends ${endTime(approved.validUntil)}`

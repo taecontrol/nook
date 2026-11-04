@@ -59,7 +59,7 @@ function Fact({ name, children }: { name: string; children: ReactNode }) {
   return (
     <div className="flex justify-between gap-4 text-sm">
       <dt className="shrink-0 text-muted-foreground">{name}</dt>
-      <dd className="min-w-0 text-right">{children}</dd>
+      <dd className="min-w-0 text-right wrap-anywhere">{children}</dd>
     </div>
   );
 }
@@ -169,7 +169,7 @@ function DurationChoice({
           );
         })}
       </RadioGroup>
-      <p className="text-sm leading-5 text-muted-foreground">
+      <p className="text-sm leading-5 text-muted-foreground wrap-anywhere">
         {approvalScope(view, choice, endsAt(choice, Date.now()))}
       </p>
     </div>
@@ -228,7 +228,7 @@ function PendingCard({
   const { view } = screen;
   return (
     <Card className="gap-0 py-0 shadow-none">
-      <CardHeader className="gap-2 p-5 sm:p-6">
+      <CardHeader className="gap-2 p-5 pb-4 sm:p-6">
         <div className="flex items-center gap-3">
           <Mark icon={KeyRound} />
           <CardTitle role="heading" aria-level={1}>
@@ -237,7 +237,9 @@ function PendingCard({
         </div>
         <CardDescription>
           An agent on{' '}
-          <span className="text-foreground">{view.verified.machine.name}</span>{' '}
+          <span className="text-foreground wrap-anywhere">
+            {view.verified.machine.name}
+          </span>{' '}
           is waiting in{' '}
           <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">
             nook run
@@ -247,8 +249,8 @@ function PendingCard({
       </CardHeader>
       <CardContent className="flex flex-col gap-4 px-5 pb-5 sm:px-6 sm:pb-6">
         <Verified view={view} />
-        <section className="rounded-lg border border-dashed bg-muted/20 p-4">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <section className="rounded-lg border border-dashed bg-muted/20 px-4 py-3">
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Purpose
             </h2>
@@ -379,7 +381,9 @@ function ResultCard({ screen }: { screen: Screen }) {
             {result.title}
           </CardTitle>
         </div>
-        <CardDescription>{result.copy(view)}</CardDescription>
+        <CardDescription>
+          <span className="wrap-anywhere">{result.copy(view)}</span>
+        </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-5 px-6 pb-6">
         {screen.kind === 'expired' && <UnsavedDecision screen={screen} />}

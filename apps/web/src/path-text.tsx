@@ -1,11 +1,11 @@
 import { cn } from 'cn';
 import { Fragment } from 'react';
 
-/** Wrap at path separators, preserving each segment (including hyphens). */
+/** Wrap at separators; a segment wider than the field scrolls in place. */
 export function SlashPath({ children }: { children: string }) {
   const parts = children.split('/');
   return (
-    <span className="font-mono wrap-normal break-normal">
+    <span className="inline-block max-w-full overflow-x-auto align-bottom font-mono wrap-normal break-normal">
       {parts.map((part, index) => (
         <Fragment key={parts.slice(0, index + 1).join('/')}>
           <span className="whitespace-nowrap">
