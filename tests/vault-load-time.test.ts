@@ -84,6 +84,17 @@ it('Vault timing waits for Ask first switches and inherited coverage after secre
         )
         .count(),
     ).toBe(1);
+    const scripts = await page.evaluate(
+      () =>
+        performance
+          .getEntriesByType('resource')
+          .filter((entry) => new URL(entry.name).pathname.endsWith('.js'))
+          .length,
+    );
+    expect(
+      scripts,
+      'Vault must not exceed the 23 script requests observed at baseline 14d4913',
+    ).toBeLessThanOrEqual(23);
   } finally {
     gate.resolve();
     await measurement.catch(() => {});

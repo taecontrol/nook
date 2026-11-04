@@ -41,6 +41,12 @@ export default defineConfig({
               test: /node_modules/,
             },
             { name: 'initial-app', tags: ['$initial'] },
+            {
+              // Small lazy icon files otherwise occupy the phone's connections
+              // ahead of Vault's data. Initial icons are already grouped above.
+              name: 'lazy-icons',
+              test: /node_modules[\\/]lucide-react[\\/]dist[\\/]esm[\\/]icons[\\/]/,
+            },
           ],
         },
       },
