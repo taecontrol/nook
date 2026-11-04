@@ -82,6 +82,10 @@ export function useApproval(id: string) {
               payload: { remember: choice },
             }),
       );
+      await queries.cancelQueries({
+        queryKey: approvalOptions(id).queryKey,
+        exact: true,
+      });
       queries.setQueryData(approvalOptions(id).queryKey, view);
       void queries.invalidateQueries({ queryKey: approvalsOptions.queryKey });
     } catch (error) {
