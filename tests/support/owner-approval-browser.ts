@@ -76,8 +76,9 @@ export async function webPending(
 export async function approvalBrowserPage(
   browser: Browser,
   viewport = { width: 1440, height: 900 },
+  timezoneId = 'UTC',
 ) {
-  const context = await browser.newContext({ viewport, timezoneId: 'UTC' });
+  const context = await browser.newContext({ viewport, timezoneId });
   const page = await context.newPage();
   page.setDefaultTimeout(5000);
   await page.clock.install({ time: approvalNow });

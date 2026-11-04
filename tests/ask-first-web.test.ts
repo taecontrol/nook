@@ -53,6 +53,68 @@ async function marks() {
   };
 }
 
+it.each(['PUT', 'DELETE'] as const)(
+  'E37: a queued toggle reconciles with the server and retains an error when %s fails',
+  async (failedMethod) => {
+    await openVault();
+    const control = secretSwitch();
+    await control.waitFor();
+    const gate = deferred();
+    const started = deferred();
+    const writes: string[] = [];
+    await page.route(
+      `**/api/ask-first/secret/${encodeURIComponent(stripe)}`,
+      async (route) => {
+        const method = route.request().method();
+        writes.push(method);
+        if (method === 'PUT') {
+          started.resolve();
+          await gate.promise;
+        }
+        if (method === failedMethod)
+          await route
+            .fulfill({ status: 503, json: { _tag: 'ServiceUnavailable' } })
+            .catch(() => {});
+        else await route.continue().catch(() => {});
+      },
+    );
+    try {
+      await control.click();
+      await started.promise;
+      await expect
+        .poll(() => control.getAttribute('aria-checked'))
+        .toBe('true');
+      await control.click();
+      await expect
+        .poll(() => control.getAttribute('aria-checked'))
+        .toBe('false');
+      expect(writes, 'The second intent waits for the first write').toEqual([
+        'PUT',
+      ]);
+      const reconciled = page.waitForResponse(
+        (r) => new URL(r.url()).pathname === '/api/ask-first',
+      );
+      gate.resolve();
+      await (await reconciled).finished();
+      await expect.poll(() => writes).toEqual(['PUT', 'DELETE']);
+      const serverOn = failedMethod === 'DELETE';
+      await expect
+        .poll(() => control.getAttribute('aria-checked'))
+        .toBe(String(serverOn));
+      expect((await marks()).marks.some((m) => m.path === stripe)).toBe(
+        serverOn,
+      );
+      await page
+        .getByRole('alert')
+        .filter({ hasText: 'Couldn’t change Ask first' })
+        .waitFor();
+      expect(await control.isEnabled()).toBe(true);
+    } finally {
+      gate.resolve();
+    }
+  },
+);
+
 it('E37: secret rows and the opened bucket card have Ask first switches, while marked tree rows have only hand icons', async () => {
   await setMark(app, 'work/acme/prod');
   await openVault();
@@ -507,4 +569,34 @@ it('E37: Vault intent preloads marks without adding a read when the page opens',
   await expect.poll(() => secretSwitch().isDisabled()).toBe(true);
   expect(await secretSwitch().getAttribute('aria-checked')).toBe('true');
   expect(reads).toHaveLength(1);
+});
+
+it('E37: Vault intent starts marks and secrets together before lazy controls have downloaded', async () => {
+  await page.goto(app.origin);
+  await page
+    .getByRole('region', { name: 'Owner access', exact: true })
+    .waitFor();
+  await page.waitForLoadState('networkidle');
+  const gate = deferred();
+  const reads: string[] = [];
+  page.on('request', (r) => {
+    if (['/api/ask-first', '/api/secrets'].includes(new URL(r.url()).pathname))
+      reads.push(new URL(r.url()).pathname);
+  });
+  await page.route('**/*.js', async (route) => {
+    await gate.promise;
+    await route.continue().catch(() => {});
+  });
+  try {
+    await page.getByRole('link', { name: 'Vault', exact: true }).hover();
+    await expect
+      .poll(() => reads, {
+        message: 'Marks preload must not wait for the lazy controls module',
+      })
+      .toContain('/api/ask-first');
+    expect(reads).toContain('/api/secrets');
+  } finally {
+    gate.resolve();
+    await page.waitForLoadState('networkidle');
+  }
 });

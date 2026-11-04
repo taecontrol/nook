@@ -605,3 +605,170 @@ it('E35: long unbroken secret, machine and directory names stay inside the phone
   await page.getByText(machine, { exact: true }).waitFor();
   await expectNoOverflow(page);
 });
+
+it.each(['1h', 'deny'] as const)(
+  'E32/E34: a successful %s decision survives an older pending detail response without returning controls',
+  async (choice) => {
+    const request = await webPending(app);
+    await page.goto(request.url);
+    await expectPendingPage(page);
+    await page
+      .getByRole('link', { name: 'All approvals', exact: true })
+      .click();
+    await page.getByRole('link', { name: 'Review', exact: true }).waitFor();
+    await page.clock.setFixedTime(new Date(approvalNow.getTime() + 31_000));
+    const old = deferred();
+    const read = deferred();
+    const released = deferred();
+    await page.route(`**/api/approvals/${request.id}`, async (route) => {
+      const response = await route.fetch();
+      expect(await response.json()).toMatchObject({ state: 'pending' });
+      read.resolve();
+      await old.promise;
+      await route.fulfill({ response }).catch(() => {});
+      released.resolve();
+    });
+    try {
+      await page.getByRole('link', { name: 'Review', exact: true }).click();
+      await read.promise;
+      await expectPendingPage(page);
+      if (choice === '1h') await duration(page, '1 hour').click();
+      await (choice === 'deny'
+        ? page.getByRole('button', { name: 'Deny', exact: true })
+        : approveButton(page)
+      ).click();
+      const result = page.getByRole('heading', {
+        name: choice === 'deny' ? 'Run denied' : 'Approved for 1 hour',
+        exact: true,
+      });
+      await result.waitFor();
+      await expectNoDecisionControls(page);
+      await page.evaluate(() => {
+        document.documentElement.dataset.controlsReturned = 'false';
+        new MutationObserver(() => {
+          if (document.querySelector('[role="radio"]'))
+            document.documentElement.dataset.controlsReturned = 'true';
+        }).observe(document, { childList: true, subtree: true });
+      });
+      old.resolve();
+      await released.promise;
+      await page.waitForLoadState('networkidle');
+      expect(
+        await result.count(),
+        'An older pending GET cannot undo a confirmed decision',
+      ).toBe(1);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.dataset.controlsReturned,
+        ),
+      ).toBe('false');
+      await expectNoDecisionControls(page);
+    } finally {
+      old.resolve();
+    }
+  },
+);
+
+it('E32/E36: a mixed request shows every requested secret but remembers only the covered scope', async () => {
+  const request = await webPending(app, { secrets: [stripe, cloudflare] });
+  await page.goto(request.url);
+  await expectPendingPage(page);
+  const verified = page.getByRole('region', { name: 'Verified by Nook' });
+  for (const path of [stripe, cloudflare])
+    expect(await verified.getByText(path, { exact: true }).count()).toBe(1);
+  expect(await verified.innerText()).toContain('Not marked Ask first');
+  await duration(page, '1 hour').click();
+  const scope = `Any later run on omarchy uses this secret (${stripe}) without asking until 11:42, whichever agent runs it. Other secrets still ask.`;
+  expect(await page.getByText(scope, { exact: true }).count()).toBe(1);
+  await approveButton(page).click();
+  await page
+    .getByRole('heading', { name: 'Approved for 1 hour', exact: true })
+    .waitFor();
+  expect(await page.locator('[data-slot="card-description"]').innerText()).toBe(
+    `This run got its secrets. ${scope}`,
+  );
+  await page.getByRole('link', { name: 'All approvals', exact: true }).click();
+  const remembered = page.locator(`[data-approval="${request.id}"]`);
+  await remembered.waitFor();
+  expect(await remembered.innerText()).toContain(stripe);
+  expect(await remembered.innerText()).not.toContain(cloudflare);
+});
+
+it('E31/E32: approval end times use the browser time zone in Kolkata', async () => {
+  await ui.close();
+  ui = await approvalBrowserPage(browser, undefined, 'Asia/Kolkata');
+  page = ui.page;
+  const request = await webPending(app);
+  await page.goto(request.url);
+  await expectPendingPage(page);
+  expect(await page.getByText('Until 17:12', { exact: true }).count()).toBe(1);
+  expect(await page.getByText('Until 04:12', { exact: true }).count()).toBe(1);
+  await duration(page, '1 hour').click();
+  expect(await page.locator('body').innerText()).toContain(
+    'without asking until 17:12',
+  );
+  await approveButton(page).click();
+  await page
+    .getByRole('heading', { name: 'Approved for 1 hour', exact: true })
+    .waitFor();
+  expect(
+    await page.getByText('1 hour, until 17:12', { exact: true }).count(),
+  ).toBe(1);
+  expect(await page.locator('body').innerText()).toContain(
+    'without asking until 17:12',
+  );
+});
+
+it('E34: decision-time NotFound replaces the pending form with its load failure message', async () => {
+  const request = await webPending(app);
+  await page.goto(request.url);
+  await expectPendingPage(page);
+  await (await app.mf.getD1Database('DB'))
+    .prepare('DELETE FROM approval_requests WHERE id=?')
+    .bind(request.id)
+    .run();
+  const answered = page.waitForResponse((r) =>
+    r.url().endsWith(`/${request.id}/approve`),
+  );
+  await approveButton(page).click();
+  expect((await answered).status()).toBe(404);
+  await page
+    .getByText('This approval request was not found.', { exact: true })
+    .waitFor();
+  expect(
+    await page.getByText('Couldn’t load approval', { exact: true }).count(),
+  ).toBe(1);
+  await expectNoDecisionControls(page);
+  expect(
+    await page
+      .getByRole('button', { name: 'Try again', exact: true })
+      .isEnabled(),
+  ).toBe(true);
+});
+
+it('E34: AlreadyHandled with a failed recovery load hides stale decisions and retries the terminal state', async () => {
+  const request = await webPending(app);
+  await page.goto(request.url);
+  await expectPendingPage(page);
+  expect((await withdraw(app, app.token, request.id)).status).toBe(204);
+  await page.route(`**/api/approvals/${request.id}`, (route) =>
+    route.fulfill({ status: 503, json: { _tag: 'ServiceUnavailable' } }),
+  );
+  const answered = page.waitForResponse((r) =>
+    r.url().endsWith(`/${request.id}/approve`),
+  );
+  await approveButton(page).click();
+  expect((await answered).status()).toBe(409);
+  await page.getByText('Couldn’t load approval', { exact: true }).waitFor();
+  expect(await page.locator('body').innerText()).toContain(
+    'Try again in a moment.',
+  );
+  await expectNoDecisionControls(page);
+  expect(await page.getByRole('button', { name: /Approving/ }).count()).toBe(0);
+  await page.unroute(`**/api/approvals/${request.id}`);
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await page
+    .getByRole('heading', { name: 'The agent cancelled this run', exact: true })
+    .waitFor();
+  await expectNoDecisionControls(page);
+});
