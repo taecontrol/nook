@@ -599,7 +599,10 @@ test('E27: nook run records exactly one use visible to the owner', async ({
     await expect(
       screen.getByRole('heading', { name: 'Audit', exact: true }),
     ).toBeVisible();
-    const row = browser.locator('[data-entry]');
+    // Other journeys retain their own audit history in this shared installation.
+    const row = browser.locator('[data-entry]').filter({
+      hasText: 'verify the owner audit journey',
+    });
     await expect(row).toHaveCount(1);
     await expect(row).toContainText('verify the owner audit journey');
     await expect(row).toContainText('journey-machine');
