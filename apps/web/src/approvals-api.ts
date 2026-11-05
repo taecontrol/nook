@@ -1,4 +1,8 @@
-import type { ApprovalRemember as Remember } from '@nook/contract';
+import type {
+  ApprovalList,
+  ApprovalView,
+  ApprovalRemember as Remember,
+} from '@nook/contract';
 import {
   type QueryClient,
   queryOptions,
@@ -32,14 +36,34 @@ export function preloadApproval(queries: QueryClient, id: string): void {
   void queries.prefetchQuery(approvalOptions(id));
 }
 export function usePendingCount(): number | undefined {
-  const query = useQuery({
-    ...approvalsOptions,
-    select: (data) => data.pending.length,
-  });
-  return query.isError ? undefined : query.data;
+  const query = useApprovals();
+  return query.isError || !query.data
+    ? undefined
+    : query.visible.pending.length;
 }
 export function useApprovals() {
-  return useQuery(approvalsOptions);
+  const query = useQuery(approvalsOptions);
+  return { ...query, visible: useVisibleApprovals(query.data) };
+}
+function deadline(view: ApprovalView) {
+  return Date.parse(
+    view.state === 'approved' ? view.validUntil : view.expiresAt,
+  );
+}
+function useVisibleApprovals(data: typeof ApprovalList.Type | undefined) {
+  const now = Date.now();
+  const { pending = [], remembered = [] } = data ?? {};
+  const all = [...pending, ...remembered];
+  const next = Math.min(...all.map(deadline).filter((at) => at > now));
+  // Rows, section counts and the sidebar badge share browser-clock expiry.
+  useCountdown(
+    Number.isFinite(next) ? new Date(next).toISOString() : undefined,
+  );
+  return {
+    pending: pending.filter((view) => deadline(view) > now),
+    remembered: remembered.filter((view) => deadline(view) > now),
+    now,
+  };
 }
 export function useApproval(id: string) {
   const queries = useQueryClient();

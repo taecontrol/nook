@@ -1,7 +1,4 @@
-import type {
-  ApprovalList as ApprovalCollection,
-  ApprovalView,
-} from '@nook/contract';
+import type { ApprovalView } from '@nook/contract';
 import { Link } from '@tanstack/react-router';
 import { Hourglass, Repeat2, ShieldCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -33,7 +30,6 @@ import { useApprovals } from './approvals-api';
 import { LoadFailure } from './failure';
 import { useDesktop } from './hooks/use-desktop';
 import { SlashPath } from './path-text';
-import { useCountdown } from './use-countdown';
 
 function ApprovalPaths({ view }: { view: ApprovalView }) {
   return (
@@ -181,30 +177,9 @@ function ApprovalList({
     </div>
   );
 }
-function deadline(view: ApprovalView) {
-  return Date.parse(
-    view.state === 'approved' ? view.validUntil : view.expiresAt,
-  );
-}
-function useVisibleApprovals(data: typeof ApprovalCollection.Type | undefined) {
-  const now = Date.now();
-  const { pending = [], remembered = [] } = data ?? {};
-  const all = [...pending, ...remembered];
-  const next = Math.min(...all.map(deadline).filter((at) => at > now));
-  // One local clock owns rows, counts and the empty state. The nearest future
-  // deadline keeps pending countdowns current and removes remembered approvals.
-  useCountdown(
-    Number.isFinite(next) ? new Date(next).toISOString() : undefined,
-  );
-  return {
-    pending: pending.filter((view) => deadline(view) > now),
-    remembered: remembered.filter((view) => deadline(view) > now),
-    now,
-  };
-}
 export function ApprovalsPage() {
   const list = useApprovals();
-  const visible = useVisibleApprovals(list.data);
+  const { visible } = list;
   return (
     <div className="w-full max-w-4xl px-4 pt-6 pb-24 sm:px-6 md:px-12 md:pt-8">
       <h1 className="mb-2 text-xl font-semibold tracking-tight">Approvals</h1>
