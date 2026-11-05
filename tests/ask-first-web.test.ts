@@ -25,6 +25,13 @@ import {
   secretRow,
 } from './support/vault-browser.ts';
 
+import {
+  createImport,
+  importSettled,
+  importSheet,
+  reviewPaste,
+} from './support/vault-import-browser.ts';
+
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
 let app: ApprovalApp;
@@ -822,4 +829,27 @@ it('E37: Vault intent starts marks and secrets together before lazy controls hav
     gate.resolve();
     await page.waitForLoadState('networkidle');
   }
+});
+
+it('E38: importing a recreated marked secret clears its cached orphan alert', async () => {
+  await setMark(app, stripe, 'secret');
+  const secret = (await listSecrets(app)).find(
+    (entry) => entry.path === stripe,
+  );
+  if (!secret) throw new Error('Missing synthetic secret');
+  expect((await deleteSecret(app, stripe, secret.version)).status).toBe(204);
+  await openVault();
+  const orphan = page
+    .getByRole('alert')
+    .filter({ hasText: 'Ask first is on a deleted secret' });
+  await orphan.waitFor();
+  await reviewPaste(page, 'STRIPE_KEY=synthetic-imported-value');
+  await createImport(page, 1);
+  await importSettled(page);
+  await importSheet(page)
+    .getByRole('button', { name: 'Done', exact: true })
+    .click();
+  await secretRow(page, stripe).waitFor();
+  await expect.poll(() => orphan.count()).toBe(0);
+  expect(await secretSwitch().getAttribute('aria-checked')).toBe('true');
 });
