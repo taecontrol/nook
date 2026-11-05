@@ -71,6 +71,7 @@ export function runSecrets(
       input,
       paths,
       approval: decision.approval,
+      ownRequestId: decision.ownRequestId,
       guard: marksUnchanged(sql, marks),
       settle: decision.settle,
     });
@@ -146,6 +147,7 @@ function valuesDecision(
       return {
         kind: 'deliver' as const,
         approval: null,
+        ownRequestId: own?.id ?? null,
         settle: own?.status === 'pending' ? own.id : null,
       };
     const sql = yield* D1Client.D1Client;
@@ -178,6 +180,7 @@ function valuesDecision(
     });
     let decision = decideValues({ ...read, covered, payload: input });
     let now = read.now;
+    let ownRequestId = read.own?.id ?? null;
     if (decision.kind === 'create') {
       const created = yield* approvals.create({
         machine,
@@ -188,6 +191,7 @@ function valuesDecision(
         client: request.client,
       });
       now = created.now;
+      ownRequestId = created.row.id;
       decision = decideValues({
         now,
         own: created.row,
@@ -196,17 +200,23 @@ function valuesDecision(
         payload: input,
       });
     }
-    return yield* decisionResult(decision, now, request.origin);
+    return yield* decisionResult(decision, now, request.origin, ownRequestId);
   });
 }
-function decisionResult(decision: ValuesDecision, now: number, origin: string) {
+function decisionResult(
+  decision: ValuesDecision,
+  now: number,
+  origin: string,
+  ownRequestId: string | null,
+) {
   if (decision.kind === 'refuse') return Effect.fail(decision.error);
   if (decision.kind === 'pending')
     return Effect.succeed({
       kind: 'pending' as const,
       answer: pendingAnswer(decision.request, now, origin),
     });
-  if (decision.kind === 'deliver') return Effect.succeed(decision);
+  if (decision.kind === 'deliver')
+    return Effect.succeed({ ...decision, ownRequestId });
   return Effect.fail(new HttpApiError.ServiceUnavailable());
 }
 function decrypt(
