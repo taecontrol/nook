@@ -18,3 +18,10 @@ export const askFirstOptions = queryOptions({
 export function preloadAskFirst(queries: QueryClient): void {
   void queries.prefetchQuery(askFirstOptions);
 }
+
+export async function refreshAskFirst(queries: QueryClient) {
+  const filters = { queryKey: askFirstOptions.queryKey };
+  // A pre-write preload can still be in flight without an active observer.
+  await queries.cancelQueries(filters);
+  await queries.invalidateQueries(filters);
+}

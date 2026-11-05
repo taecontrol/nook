@@ -694,24 +694,21 @@ it('E21: an expired session after a lost committed response stays unconfirmed un
     },
   });
   const { page } = visit;
+  const unconfirmed = page
+    .getByRole('alert')
+    .filter({ hasText: 'could not confirm' });
   try {
     const sheet = await createDraft(page);
     await sheet
       .getByRole('button', { name: 'Save secret', exact: true })
       .click();
-    await page
-      .getByRole('alert')
-      .filter({ hasText: 'could not confirm' })
-      .waitFor();
-    expect(await page.getByRole('alert').innerText()).not.toMatch(
-      /nothing was stored/i,
-    );
+    await unconfirmed.waitFor();
+    expect(await unconfirmed.innerText()).not.toMatch(/nothing was stored/i);
     expect(
       await secretRow(page, 'work/acme/RESEND_API_KEY').innerText(),
     ).toContain('Confirming');
     await visit.app.setBindings(visit.app.bindings);
-    await page
-      .getByRole('alert')
+    await unconfirmed
       .getByRole('button', { name: 'Try again', exact: true })
       .click();
     await page
