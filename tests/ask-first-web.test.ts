@@ -415,6 +415,77 @@ it('E37: a failed DELETE restores the server mark and an error instead of leavin
   }
 });
 
+it('E38: a bucket recreation cancels an older inactive marks preload', async () => {
+  const path = 'work/old-client';
+  expect((await jsonRequest(app, '/api/buckets', { path })).ok).toBe(true);
+  await setMark(app, path);
+  expect(
+    (
+      await jsonRequest(
+        app,
+        `/api/buckets/${encodeURIComponent(path)}`,
+        undefined,
+        {},
+        'DELETE',
+      )
+    ).status,
+  ).toBe(204);
+  await page.goto(`${app.origin}/buckets`);
+  const field = page.getByRole('textbox', { name: 'New bucket path' });
+  await field.waitFor();
+  const old = deferred();
+  const read = deferred();
+  let held = false;
+  await page.route('**/api/ask-first', async (route) => {
+    if (held) return route.continue();
+    held = true;
+    const response = await route.fetch();
+    expect(await response.json()).toMatchObject({
+      marks: [{ kind: 'bucket', path, exists: false }],
+    });
+    read.resolve();
+    await old.promise;
+    await route.fulfill({ response }).catch(() => {});
+  });
+  try {
+    await page.getByRole('link', { name: 'Vault', exact: true }).hover();
+    await read.promise;
+    await field.fill(path);
+    const saved = page.waitForResponse(
+      (r) =>
+        r.request().method() === 'POST' &&
+        new URL(r.url()).pathname === '/api/buckets',
+    );
+    await field.press('Enter');
+    expect((await saved).ok()).toBe(true);
+    await page
+      .getByRole('button', { name: `Actions for ${path}`, exact: true })
+      .waitFor();
+    old.resolve();
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('link', { name: 'Vault', exact: true }).click();
+    await page.locator(`[data-path="${path}"] a`).click();
+    await expect
+      .poll(() => bucketCard().getByRole('switch').getAttribute('aria-checked'))
+      .toBe('true');
+    await expect
+      .poll(
+        () =>
+          page
+            .getByRole('alert')
+            .filter({ hasText: 'Ask first is on a deleted bucket' })
+            .count(),
+        {
+          message:
+            'A pre-write preload cannot restore an orphan alert after recreation',
+        },
+      )
+      .toBe(0);
+  } finally {
+    old.resolve();
+  }
+});
+
 it.each(['create', 'delete'] as const)(
   'E38: a bucket %s updates orphan marks before the cached list becomes stale',
   async (operation) => {
