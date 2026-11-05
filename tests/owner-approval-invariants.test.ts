@@ -5,6 +5,7 @@ import { jsonRequest } from './support/authorizations.ts';
 import { issueGrant } from './support/grants.ts';
 import { deferred, listMachines } from './support/machines.ts';
 import {
+  acmePath,
   age,
   approvalFixture,
   ask,
@@ -56,6 +57,120 @@ it('E21: removing the last mark cannot allow a changed retry payload to deliver 
     await app.close();
   }
 });
+it.each(
+  (['unmarked', 'remembered'] as const).flatMap((route) =>
+    (
+      [
+        'different payload',
+        'identical payload',
+        'kept mark',
+        'denial',
+        'withdrawal',
+      ] as const
+    ).map((change) => ({ route, change })),
+  ),
+)(
+  'E21/E25/E26: $route delivery revalidates an attempt created after its read ($change)',
+  async ({ route, change }) => {
+    let active = false;
+    let batches = 0;
+    const reached = deferred();
+    const resume = deferred();
+    const app = await approvalFixture(async (label) => {
+      if (
+        active &&
+        label === '/before-batch' &&
+        ++batches === (route === 'remembered' ? 3 : 2)
+      ) {
+        active = false;
+        reached.resolve();
+        await resume.promise;
+      }
+      return true;
+    });
+    let inFlight: Promise<Response> | undefined;
+    try {
+      if (route === 'remembered') {
+        await setMark(app, stripe, 'secret');
+        const remembered = await pending(app, app.token);
+        expect((await decide(app, remembered.id, '1h')).status).toBe(200);
+      }
+      const id = randomUUID();
+      const secrets = [stripe, acmePath];
+      active = true;
+      inFlight = ask(app, app.token, id, { secrets });
+      await reached.promise;
+      // The competing request creates its row through the values API while A
+      // waits just before delivery. Removing this mark restores A's snapshot.
+      await setMark(app);
+      const competing = await pending(app, app.token, id, {
+        secrets,
+        ...(change === 'different payload'
+          ? { purpose: 'different concurrent run' }
+          : {}),
+      });
+      if (change === 'denial')
+        expect((await decide(app, competing.id, 'deny')).status).toBe(200);
+      if (change === 'withdrawal')
+        expect((await withdraw(app, app.token, competing.id)).status).toBe(204);
+      if (change !== 'kept mark')
+        expect((await mark(app, 'work', 'bucket', 'DELETE')).status).toBe(204);
+      const before = await requests(app);
+      const audit = await auditRows(app);
+      resume.resolve();
+      const response = await inFlight;
+      expect.soft(response.status).toBe(503);
+      const body = await response.json();
+      expect.soft(body).toMatchObject({
+        _tag: 'ServiceUnavailable',
+      });
+      expect.soft(body).not.toHaveProperty('values');
+      expect.soft(await requests(app)).toEqual(before);
+      expect.soft(await auditRows(app)).toEqual(audit);
+
+      const retry = await ask(app, app.token, id, { secrets });
+      if (change === 'identical payload') {
+        expect(retry.status).toBe(200);
+        expect(await retry.json()).toHaveProperty('values');
+        expect(await view(app, competing.id)).toMatchObject({
+          state: 'settled',
+        });
+        expect(
+          (await auditRows(app))
+            .filter((row) => row.outcome === 'delivered')
+            .map((row) => row.path)
+            .sort(),
+        ).toEqual([...secrets].sort());
+      } else if (change === 'kept mark') {
+        expect(retry.status).toBe(200);
+        const body = await retry.json();
+        expect(body).toHaveProperty('approval.id', competing.id);
+        expect(body).not.toHaveProperty('values');
+      } else {
+        const expected = {
+          'different payload': { status: 400, body: { _tag: 'InvalidRun' } },
+          denial: { status: 403, body: { _tag: 'ApprovalDenied' } },
+          withdrawal: {
+            status: 410,
+            body: { _tag: 'ApprovalExpired', reason: 'withdrawn' },
+          },
+        }[change];
+        expect(retry.status).toBe(expected.status);
+        const body = await retry.json();
+        expect(body).toMatchObject(expected.body);
+        expect(body).not.toHaveProperty('values');
+      }
+      if (change !== 'identical payload') {
+        expect(await requests(app)).toEqual(before);
+        expect(await auditRows(app)).toEqual(audit);
+      }
+    } finally {
+      resume.resolve();
+      await inFlight;
+      await app.close();
+    }
+  },
+);
 it('E8: an owner denial remains terminal for its attempt after the last mark is removed', async () => {
   const app = await approvalFixture();
   try {
