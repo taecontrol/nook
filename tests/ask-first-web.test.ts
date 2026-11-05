@@ -1,6 +1,7 @@
 import type { Browser, Page } from 'playwright';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
+import { jsonRequest } from './support/authorizations.ts';
 import { seedGrantTree } from './support/grants.ts';
 import { deferred } from './support/machines.ts';
 import { setMark, stripe } from './support/owner-approval.ts';
@@ -12,8 +13,17 @@ import {
   expectSlashBreaks,
 } from './support/owner-approval-browser.ts';
 import { expectNoOverflow } from './support/page-checks.ts';
-import { createSecret, secretInput } from './support/vault.ts';
-import { secretRow } from './support/vault-browser.ts';
+import {
+  createSecret,
+  deleteSecret,
+  listSecrets,
+  secretInput,
+} from './support/vault.ts';
+import {
+  createDraft,
+  openSecretMenu,
+  secretRow,
+} from './support/vault-browser.ts';
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
@@ -404,6 +414,148 @@ it('E37: a failed DELETE restores the server mark and an error instead of leavin
     gate.resolve();
   }
 });
+
+it.each(['create', 'delete'] as const)(
+  'E38: a bucket %s updates orphan marks before the cached list becomes stale',
+  async (operation) => {
+    const path = 'work/old-client';
+    expect((await jsonRequest(app, '/api/buckets', { path })).ok).toBe(true);
+    await setMark(app, path);
+    if (operation === 'create')
+      expect(
+        (
+          await jsonRequest(
+            app,
+            `/api/buckets/${encodeURIComponent(path)}`,
+            undefined,
+            {},
+            'DELETE',
+          )
+        ).status,
+      ).toBe(204);
+    await openVault();
+    const alert = page
+      .getByRole('alert')
+      .filter({ hasText: 'Ask first is on a deleted bucket' });
+    await expect
+      .poll(() => page.getByRole('switch').count())
+      .toBeGreaterThan(0);
+    expect(await alert.count()).toBe(operation === 'create' ? 1 : 0);
+    await page
+      .locator('[data-sidebar="menu-button"]')
+      .filter({ hasText: /^Buckets$/ })
+      .click();
+    if (operation === 'create') {
+      const field = page.getByRole('textbox', { name: 'New bucket path' });
+      await field.fill(path);
+      const saved = page.waitForResponse(
+        (r) =>
+          r.request().method() === 'POST' &&
+          new URL(r.url()).pathname === '/api/buckets',
+      );
+      await field.press('Enter');
+      expect((await saved).ok()).toBe(true);
+    } else {
+      await page
+        .getByRole('button', { name: `Actions for ${path}`, exact: true })
+        .click();
+      await page
+        .getByRole('menuitem', { name: 'Delete bucket…', exact: true })
+        .click();
+      const removed = page.waitForResponse(
+        (r) =>
+          r.request().method() === 'DELETE' &&
+          new URL(r.url()).pathname ===
+            `/api/buckets/${encodeURIComponent(path)}`,
+      );
+      await page
+        .getByRole('button', { name: 'Delete bucket', exact: true })
+        .click();
+      expect((await removed).status()).toBe(204);
+    }
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('link', { name: 'Vault', exact: true }).click();
+    expect((await marks()).marks).toContainEqual({
+      kind: 'bucket',
+      path,
+      exists: operation === 'create',
+    });
+    expect(await page.evaluate(() => Date.now())).toBe(approvalNow.getTime());
+    if (operation === 'create') {
+      await page.locator(`[data-path="${path}"] a`).click();
+      const control = bucketCard().getByRole('switch');
+      expect(await control.getAttribute('aria-checked')).toBe('true');
+    }
+    await expect
+      .poll(() => alert.count(), {
+        message:
+          'Orphan alerts follow the completed bucket write within the 30-second cache window',
+      })
+      .toBe(operation === 'delete' ? 1 : 0);
+  },
+);
+
+it.each(['create', 'delete'] as const)(
+  'E38: a secret %s updates orphan marks before the cached list becomes stale',
+  async (operation) => {
+    await setMark(app, stripe, 'secret');
+    if (operation === 'create') {
+      const secret = (await listSecrets(app)).find(
+        (secret) => secret.path === stripe,
+      );
+      if (!secret) throw new Error('The marked synthetic secret must exist.');
+      expect((await deleteSecret(app, stripe, secret.version)).status).toBe(
+        204,
+      );
+    }
+    await openVault();
+    const alert = page
+      .getByRole('alert')
+      .filter({ hasText: 'Ask first is on a deleted secret' });
+    await expect
+      .poll(() => page.getByRole('switch').count())
+      .toBeGreaterThan(0);
+    expect(await alert.count()).toBe(operation === 'create' ? 1 : 0);
+    if (operation === 'create') {
+      const sheet = await createDraft(page, { name: 'STRIPE_KEY' });
+      const saved = page.waitForResponse(
+        (r) =>
+          r.request().method() === 'POST' &&
+          new URL(r.url()).pathname === '/api/secrets',
+      );
+      await sheet
+        .getByRole('button', { name: 'Save secret', exact: true })
+        .click();
+      expect((await saved).status()).toBe(201);
+    } else {
+      await openSecretMenu(page, stripe, 'Delete secret…');
+      const removed = page.waitForResponse(
+        (r) =>
+          r.request().method() === 'DELETE' &&
+          new URL(r.url()).pathname ===
+            `/api/secrets/${encodeURIComponent(stripe)}`,
+      );
+      await page
+        .getByRole('button', { name: 'Delete secret', exact: true })
+        .click();
+      expect((await removed).status()).toBe(204);
+    }
+    expect((await marks()).marks).toContainEqual({
+      kind: 'secret',
+      path: stripe,
+      exists: operation === 'create',
+    });
+    expect(await page.evaluate(() => Date.now())).toBe(approvalNow.getTime());
+    await expect
+      .poll(() => alert.count(), {
+        message:
+          'Orphan alerts follow the completed secret write within the 30-second cache window',
+      })
+      .toBe(operation === 'delete' ? 1 : 0);
+    if (operation === 'create')
+      expect(await secretSwitch().getAttribute('aria-checked')).toBe('true');
+  },
+);
 
 it('E38: a deleted bucket mark appears above Vault with Remove mark and disappears optimistically', async () => {
   await seedGrantTree(app, ['work/old-client']);
