@@ -346,6 +346,10 @@ it('E37: rapid toggles stay optimistic, serialize writes per path and preserve t
     // A normal route remount refreshes the list, without an invented product API.
     await page.clock.setFixedTime(new Date(approvalNow.getTime() + 31_000));
     await page.getByRole('link', { name: 'Memory', exact: true }).click();
+    // A click can finish while the lazy Memory page still leaves Vault mounted.
+    await page
+      .getByRole('navigation', { name: 'Memory buckets', exact: true })
+      .waitFor();
     await page.getByRole('link', { name: 'Vault', exact: true }).click();
     await readStarted.promise;
     await page.locator('[data-path="work/acme"] a').click();
