@@ -131,6 +131,7 @@ const router = createRouter({
     createRoute({
       getParentRoute: () => root,
       path: '/approvals/$id',
+      remountDeps: ({ params }) => params.id,
       loader: ({ context, params }) => {
         preloadApproval(context.queryClient, params.id);
       },

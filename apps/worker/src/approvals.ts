@@ -180,6 +180,7 @@ export type Delivery = {
   input: RunSecrets;
   paths: readonly string[];
   approval: ApprovalReference | null;
+  ownRequestId: string | null;
   guard: Fragment;
   settle: string | null;
 };
@@ -247,12 +248,15 @@ export const machineApprovals = Effect.gen(function* () {
         return { row, now: clock[0].now };
       }),
     deliver: (delivery: Delivery) => {
-      const { machine, input, paths, approval, guard, settle } = delivery;
+      const { machine, input, paths, approval, ownRequestId, guard, settle } =
+        delivery;
       const approvalGuard = approval
         ? sql`EXISTS(SELECT 1 FROM approval_requests a WHERE a.id=${approval.id} AND a.machine_id=${machine.id} AND a.status='approved' AND a.remember=${approval.remember} AND a.valid_until>unixepoch('subsec')*1000)`
         : sql`1`;
+      // Match absence too: a newly created attempt needs payload validation and
+      // may need settlement before this run can deliver.
       const attemptAllowed = input.approval
-        ? sql`NOT EXISTS(SELECT 1 FROM approval_requests WHERE machine_id=${machine.id} AND attempt_id=${input.approval.attemptId} AND status IN ('denied','withdrawn'))`
+        ? sql`(SELECT id FROM approval_requests WHERE machine_id=${machine.id} AND attempt_id=${input.approval.attemptId}) IS ${ownRequestId} AND NOT EXISTS(SELECT 1 FROM approval_requests WHERE machine_id=${machine.id} AND attempt_id=${input.approval.attemptId} AND status IN ('denied','withdrawn'))`
         : sql`1`;
       const access = sql`(${attemptAllowed}) AND EXISTS(SELECT 1 FROM machine_tokens WHERE id=${machine.id} AND grant_json=${machine.grantJson}) AND (${guard}) AND (${approvalGuard})`;
       const statements = [

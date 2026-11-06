@@ -308,6 +308,11 @@ it.each(['pending', 'remembered'] as const)(
       await page.goto(`${app.origin}/approvals`);
       const row = page.locator(`[data-approval="${request.id}"]`);
       await row.waitFor();
+      const badge = page
+        .locator('[data-sidebar="menu-item"]')
+        .filter({ has: page.getByRole('link', { name: /^Approvals/ }) })
+        .locator('[data-sidebar="menu-badge"]');
+      expect(await badge.count()).toBe(kind === 'pending' ? 1 : 0);
       const section = page.locator('section').filter({ has: row });
       expect(await section.getByRole('heading').innerText()).toMatch(
         kind === 'pending' ? /Waiting for you\s*1/i : /Remembered\s*1/i,
@@ -331,6 +336,11 @@ it.each(['pending', 'remembered'] as const)(
         )
         .toBe(1);
       expect(await row.count()).toBe(0);
+      await expect
+        .poll(() => badge.count(), {
+          message: 'The pending-count badge expires with the last row',
+        })
+        .toBe(0);
       expect(
         await page
           .getByRole('heading', { name: /Waiting for you|Remembered/ })
