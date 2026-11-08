@@ -985,9 +985,13 @@ require a real Cloudflare installation and are not claimed by local verification
 Issue #82 slice 1 is exercised through the built Worker, migrated local D1,
 and the real CLI in a private keyring. `owner-approval-worker.test.ts` covers
 E1–E30's marks, inheritance, grant-first decisions, remembered subsets,
-retry keys, windows, limits and cleanup. `owner-approval-invariants.test.ts`
-holds D1 checkpoint boundaries to prove both commit orders for owner
-decisions and withdrawal, and that mark or grant changes defeat delivery.
+retry keys, windows, limits and cleanup. It also proves both commit orders
+for owner decisions and withdrawal (each is one batch, so committing them in
+turn is the overlap), and holds a D1 checkpoint to prove that a mark or grant
+committed between the read and delivery defeats it.
+`owner-approval-invariants.test.ts` holds D1 checkpoint boundaries to prove
+that a competing attempt, a withdrawal or a mark committed after a remembered
+or approved read defeats delivery.
 Unmarked runs retain one authentication statement, one read batch and one
 audit batch. A capable CLI's retry payload is checked in that read batch,
 even after the last mark is removed.

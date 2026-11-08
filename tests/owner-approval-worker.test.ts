@@ -442,13 +442,16 @@ it.each([
     expect(await auditRows(app)).toEqual(audit);
   },
 );
-it('E23: a late owner decision returns Expired and leaves the row undecided', async () => {
-  await setMark(app);
-  const first = await pending(app, app.token);
-  await age(app, first.id, 'expires_at', 600_001);
-  expect((await decide(app, first.id)).status).toBe(410);
-  expect((await requests(app))[0].status).toBe('pending');
-});
+it.each(['once', 'deny'] as const)(
+  'E9/E23: a late owner %s returns Expired and leaves the row undecided',
+  async (choice) => {
+    await setMark(app);
+    const first = await pending(app, app.token);
+    await age(app, first.id, 'expires_at', 600_001);
+    expect((await decide(app, first.id, choice)).status).toBe(410);
+    expect((await requests(app))[0].status).toBe('pending');
+  },
+);
 it.each(['once', 'deny', 'withdraw'] as const)(
   'E24: a committed %s wins against a competing withdrawal or decision',
   async (firstChoice) => {
