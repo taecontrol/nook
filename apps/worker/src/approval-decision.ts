@@ -74,16 +74,18 @@ function ownWaiting(
 ): ValuesResult {
   if (own.status === 'pending' && own.expires_at > now)
     return { kind: 'pending', request: own };
-  if (
-    own.status === 'approved' &&
-    own.valid_until > now &&
-    covers(own.covered_json, covered)
-  )
+  if (own.status === 'approved' && own.valid_until > now) {
+    if (!covers(own.covered_json, covered))
+      return {
+        kind: 'refuse',
+        error: new ApprovalExpired({ reason: 'changed' }),
+      };
     return {
       kind: 'deliver',
       approval: { id: own.id, remember: own.remember },
       settle: null,
     };
+  }
   return {
     kind: 'refuse',
     error: new ApprovalExpired({ reason: 'expired' }),

@@ -257,7 +257,7 @@ it.each([false, true])(
       afterPending && call === 1
         ? {
             status: 200,
-            body: { approval: { ...shortPending.approval, expiresIn: 3 } },
+            body: { approval: { ...shortPending.approval, expiresIn: 10 } },
           }
         : { status: 410, body: { _tag: 'ApprovalExpired', reason: 'changed' } },
     );
@@ -277,10 +277,10 @@ it.each([false, true])(
   },
 );
 it.each([
-  {
-    tag: 'ApprovalExpired',
+  ...(['expired', 'withdrawn'] as const).map((reason) => ({
+    tag: `ApprovalExpired (${reason})`,
     code: 75,
-    message: 'Run again to ask again',
+    message: 'The approval request expired. Run again to ask again.',
     // The local deadline lies beyond the test, so only the 410 ends the wait.
     answer: (call: number) =>
       call === 1
@@ -288,9 +288,9 @@ it.each([
             status: 200,
             body: { approval: { ...shortPending.approval, expiresIn: 600 } },
           }
-        : { status: 410, body: { _tag: 'ApprovalExpired', reason: 'expired' } },
+        : { status: 410, body: { _tag: 'ApprovalExpired', reason } },
     asks: 2,
-  },
+  })),
   {
     tag: 'ApprovalLimit',
     code: 75,

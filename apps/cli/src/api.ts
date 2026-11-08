@@ -1,4 +1,4 @@
-import { MachineApi } from '@nook/contract';
+import { type ApprovalExpired, MachineApi } from '@nook/contract';
 import { Effect, Schema } from 'effect';
 import {
   FetchHttpClient,
@@ -93,11 +93,15 @@ function serverFailure(error: unknown) {
     return Effect.succeed(
       new ServerFailure('Unavailable', undefined, [], true),
     );
+  return Effect.succeed(declaredFailure(error));
+}
+function declaredFailure(error: unknown) {
   const typed = error as {
     _tag?: string;
     message?: string;
     paths?: readonly string[];
     expiredAt?: string;
+    reason?: ApprovalExpired['reason'];
   };
   const tag = typed._tag ?? 'Unavailable';
   const transient = [
@@ -105,13 +109,12 @@ function serverFailure(error: unknown) {
     'TimeoutError',
     'Unavailable',
   ].includes(tag);
-  return Effect.succeed(
-    new ServerFailure(
-      tag,
-      transient ? undefined : typed.message,
-      ['SecretsForbidden', 'ApprovalDenied'].includes(tag) ? typed.paths : [],
-      transient,
-      tag === 'Unauthorized' ? typed.expiredAt : undefined,
-    ),
+  return new ServerFailure(
+    tag,
+    transient ? undefined : typed.message,
+    ['SecretsForbidden', 'ApprovalDenied'].includes(tag) ? typed.paths : [],
+    transient,
+    tag === 'Unauthorized' ? typed.expiredAt : undefined,
+    tag === 'ApprovalExpired' ? typed.reason : undefined,
   );
 }

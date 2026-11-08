@@ -113,7 +113,7 @@ export class ApprovalExpired extends Schema.Error<ApprovalExpired>(
 )(
   {
     _tag: Schema.tag('ApprovalExpired'),
-    reason: Schema.Literals(['expired', 'withdrawn']),
+    reason: Schema.Literals(['expired', 'withdrawn', 'changed']),
   },
   { httpApiStatus: 410 },
 ) {}

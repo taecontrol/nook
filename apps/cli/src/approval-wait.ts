@@ -18,7 +18,12 @@ export function approvalFailure(error: RequestFailure) {
         77,
       );
     case 'ApprovalExpired':
-      return expired();
+      return error.server.approvalReason === 'changed'
+        ? new ApprovalStopped(
+            'The secrets that need approval changed while you waited. Run again to ask again.',
+            75,
+          )
+        : expired();
     case 'ApprovalLimit':
       return new ApprovalStopped(
         error.publicMessage ??
