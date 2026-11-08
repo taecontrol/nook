@@ -77,11 +77,7 @@ it.each(
     const reached = deferred();
     const resume = deferred();
     const app = await approvalFixture(async (label) => {
-      if (
-        active &&
-        label === '/before-batch' &&
-        ++batches === (route === 'remembered' ? 3 : 2)
-      ) {
+      if (active && label === '/before-batch' && ++batches === 2) {
         active = false;
         reached.resolve();
         await resume.promise;
@@ -229,11 +225,7 @@ it.each(['remembered', 'unmarked'] as const)(
     const reached = deferred();
     const resume = deferred();
     const app = await approvalFixture(async (label) => {
-      if (
-        active &&
-        label === '/before-batch' &&
-        ++batches === (route === 'remembered' ? 3 : 2)
-      ) {
+      if (active && label === '/before-batch' && ++batches === 2) {
         active = false;
         reached.resolve();
         await resume.promise;
@@ -375,7 +367,7 @@ it.each(['mark', 'grant'])(
     const reached = deferred();
     const resume = deferred();
     const app = await approvalFixture(async (label) => {
-      if (active && label === '/before-batch' && ++batches === 3) {
+      if (active && label === '/before-batch' && ++batches === 2) {
         active = false;
         reached.resolve();
         await resume.promise;
