@@ -24,6 +24,7 @@ import {
   useInsert,
 } from './audit.ts';
 import { unavailable } from './http-errors.ts';
+import type { OwnerFacts } from './owner-request.ts';
 
 const rowFacts = {
   id: Schema.String,
@@ -90,14 +91,6 @@ const StoredApproved = Schema.Struct({
   covered_json: rowFacts.covered_json,
 });
 export type StoredApproved = typeof StoredApproved.Type;
-export type OwnerFacts = { ip: string | null; country: string | null };
-export function ownerFacts(request: Request): OwnerFacts {
-  return {
-    ip: request.headers.get('CF-Connecting-IP') || null,
-    country:
-      (request as Request & { cf?: { country?: string } }).cf?.country || null,
-  };
-}
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(StoredRequest));
 function decodeRead(rows: readonly unknown[]) {
   return decodeRows(rows).pipe(unavailable);

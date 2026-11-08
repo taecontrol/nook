@@ -21,9 +21,9 @@ import {
   validateSecretPath,
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
-import { HttpApiError } from 'effect/http-api';
 import type { Fragment } from 'effect/sql/Statement';
 import { unavailable } from './http-errors.ts';
+import { type OwnerFacts, requireOwner } from './owner-request.ts';
 
 export type AuditMachine = { id: string; machine: string; grant: BucketGrant };
 const Facts = Schema.Struct({
@@ -127,12 +127,10 @@ function anyEntry(row: typeof AnyRow.Type): AuditEntry {
 export type FileActor = {
   principal: Principal;
   client: MemoryClient;
-  ip?: string | null;
-  country?: string | null;
-};
+} & Partial<OwnerFacts>;
 export function ownerFileActor(
   client: MemoryClient = { name: 'unknown', version: null },
-  facts: Pick<FileActor, 'ip' | 'country'> = {},
+  facts: Partial<OwnerFacts> = {},
 ): FileActor {
   return { principal: { kind: 'owner' }, client, ...facts };
 }
@@ -254,7 +252,7 @@ export function requestApprovalEventInsert(
   id: string,
   outcome: 'approval_granted' | 'approval_denied' | 'approval_withdrawn',
   guard: Fragment,
-  facts: { ip: string | null; country: string | null } = {
+  facts: OwnerFacts = {
     ip: null,
     country: null,
   },
@@ -315,10 +313,7 @@ export function claimColumns(claim: AgentSessionClaim | undefined) {
 export const auditStore = Effect.gen(function* () {
   const sql = yield* D1Client.D1Client;
   return {
-    recordReveal: (
-      path: string,
-      facts: { ip: string | null; country: string | null },
-    ) =>
+    recordReveal: (path: string, facts: OwnerFacts) =>
       sql`INSERT INTO audit_entries(id, at, outcome, path, bucket, purpose, ip, country) VALUES (${crypto.randomUUID()}, ${new Date().toISOString()}, 'revealed', ${path}, ${splitSecretPath(path).bucket}, 'Revealed in web app', ${facts.ip}, ${facts.country})`.pipe(
         unavailable,
         Effect.asVoid,
@@ -343,8 +338,7 @@ export const auditStore = Effect.gen(function* () {
     },
     list: (grant: BucketGrant, input: AuditFilters) =>
       Effect.gen(function* () {
-        if (grant !== 'all')
-          return yield* Effect.fail(new HttpApiError.Forbidden());
+        yield* requireOwner(grant);
         const { bucket, secret, session, cursor } = yield* filters(input);
         const boundary = cursor
           ? sql`(at < ${cursor.at} OR (at = ${cursor.at} AND id < ${cursor.id}))`

@@ -25,6 +25,7 @@ import { Effect, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
 import { SqlSchema } from 'effect/sql';
 import { unavailable } from './http-errors.ts';
+import { requireOwner } from './owner-request.ts';
 
 const RequestRow = Schema.Struct({
   device_hash: Schema.String,
@@ -169,11 +170,6 @@ function identity(row: typeof TokenRow.Type) {
       expiresAt: expiryIso(row.access_expires_at),
     })),
   );
-}
-function requireAll(grant: BucketGrant) {
-  return grant === 'all'
-    ? Effect.void
-    : Effect.fail(new HttpApiError.Forbidden());
 }
 export const machineOperations = Effect.gen(function* () {
   const sql = yield* D1Client.D1Client;
@@ -338,7 +334,7 @@ export const machineOperations = Effect.gen(function* () {
       }),
     list: (grant: BucketGrant) =>
       Effect.gen(function* () {
-        yield* requireAll(grant);
+        yield* requireOwner(grant);
         const rows = yield* listRows().pipe(unavailable);
         return {
           machines: rows.map(machine),
@@ -351,7 +347,7 @@ export const machineOperations = Effect.gen(function* () {
       previous: unknown,
     ) =>
       Effect.gen(function* () {
-        yield* requireAll(caller);
+        yield* requireOwner(caller);
         const next = yield* decodeGrant(grant);
         const prior = yield* decodeGrant(previous);
         const nextJson = JSON.stringify(normalizeGrant(next));
@@ -369,7 +365,7 @@ export const machineOperations = Effect.gen(function* () {
       }),
     revoke: (grant: BucketGrant, id: string) =>
       Effect.gen(function* () {
-        yield* requireAll(grant);
+        yield* requireOwner(grant);
         yield* sql
           .batch([sql`DELETE FROM machine_tokens WHERE id=${id}`])
           .pipe(unavailable);
