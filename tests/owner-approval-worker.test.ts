@@ -499,9 +499,13 @@ it.each(['mark', 'grant'])(
       expect(
         (await auditRows(observed)).some((r) => r.outcome === 'delivered'),
       ).toBe(false);
-      expect((await ask(observed, observed.token)).status).toBe(
-        change === 'mark' ? 200 : 403,
-      );
+      const retry = await ask(observed, observed.token);
+      if (change === 'mark') {
+        expect(retry.status).toBe(200);
+        const body = await retry.json();
+        expect(body).toHaveProperty('approval.id');
+        expect(body).not.toHaveProperty('values');
+      } else expect(retry.status).toBe(403);
     } finally {
       resume.resolve();
       await observed.close();

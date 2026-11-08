@@ -265,7 +265,10 @@ it('E26: a mark committed after the covered decision read defeats the guarded de
     expect((await auditRows(app)).some((r) => r.outcome === 'delivered')).toBe(
       false,
     );
-    expect((await ask(app, app.token, id)).status).toBe(200);
+    // The once approval still covers the new mark, so the retry delivers.
+    const retry = await ask(app, app.token, id);
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toHaveProperty('values');
   } finally {
     resume.resolve();
     await inFlight;
