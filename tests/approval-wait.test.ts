@@ -215,12 +215,16 @@ it.each([
   '%s bounds a stalled first values request to three more seconds and exits %i',
   async (signal, expectedCode) => {
     let code = 0;
+    let withdrawals = 0;
     await Effect.runPromise(
       Effect.gen(function* () {
         const fiber = yield* Effect.scoped(
           requestValues({
             ask: Effect.never,
-            withdraw: () => Effect.die('No request id is known'),
+            withdraw: () =>
+              Effect.sync(() => {
+                withdrawals++;
+              }),
             status: () => {},
             signal: Effect.sleep('1 second').pipe(Effect.as(signal)),
           }),
@@ -239,5 +243,6 @@ it.each([
       }).pipe(Effect.provide(TestClock.layer())),
     );
     expect(code).toBe(expectedCode);
+    expect(withdrawals, 'No request id is known').toBe(0);
   },
 );
