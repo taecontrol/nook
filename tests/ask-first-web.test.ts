@@ -444,6 +444,47 @@ it('E38: a bucket recreation cancels an older inactive marks preload', async () 
   }
 });
 
+it('E38: a changed bucket read refreshes cached orphan warnings without an Ask-first-specific write callback', async () => {
+  const path = 'work/old-client';
+  expect((await jsonRequest(app, '/api/buckets', { path })).ok).toBe(true);
+  await setMark(app, path);
+  await openVault();
+  await page.getByRole('switch').first().waitFor();
+  const orphan = page
+    .getByRole('alert')
+    .filter({ hasText: 'Ask first is on a deleted bucket' });
+  expect(await orphan.count()).toBe(0);
+  await page
+    .locator('[data-sidebar="menu-button"]')
+    .filter({ hasText: /^Buckets$/ })
+    .click();
+  await page.getByRole('textbox', { name: 'New bucket path' }).waitFor();
+  // A different client removes the bucket. Only a normal bucket read in this
+  // browser learns that it changed; no local write callback runs at all.
+  expect(
+    (
+      await jsonRequest(
+        app,
+        `/api/buckets/${encodeURIComponent(path)}`,
+        undefined,
+        {},
+        'DELETE',
+      )
+    ).status,
+  ).toBe(204);
+  const refreshed = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === '/api/buckets',
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+  expect((await refreshed).status()).toBe(200);
+  await expect
+    .poll(() => page.getByRole('button', { name: `Actions for ${path}` }).count())
+    .toBe(0);
+  await page.getByRole('link', { name: 'Vault', exact: true }).click();
+  await expect.poll(() => orphan.count()).toBe(1);
+  expect(await page.evaluate(() => Date.now())).toBe(approvalNow.getTime());
+});
+
 it.each(['create', 'delete'] as const)(
   'E38: a bucket %s updates orphan marks before the cached list becomes stale',
   async (operation) => {
