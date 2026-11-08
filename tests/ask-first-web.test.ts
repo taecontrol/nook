@@ -475,10 +475,14 @@ it('E38: a changed bucket read refreshes cached orphan warnings without an Ask-f
   const refreshed = page.waitForResponse(
     (r) => new URL(r.url()).pathname === '/api/buckets',
   );
-  await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event('visibilitychange')),
+  );
   expect((await refreshed).status()).toBe(200);
   await expect
-    .poll(() => page.getByRole('button', { name: `Actions for ${path}` }).count())
+    .poll(() =>
+      page.getByRole('button', { name: `Actions for ${path}` }).count(),
+    )
     .toBe(0);
   await page.getByRole('link', { name: 'Vault', exact: true }).click();
   await expect.poll(() => orphan.count()).toBe(1);
@@ -743,6 +747,32 @@ it('E37: Vault intent preloads marks without adding a read when the page opens',
   await expect.poll(() => secretSwitch().isDisabled()).toBe(true);
   expect(await secretSwitch().getAttribute('aria-checked')).toBe('true');
   expect(reads).toHaveLength(1);
+});
+
+it('E37: stale Vault intent reuses one marks read when bucket and secret data are unchanged', async () => {
+  await setMark(app);
+  await openVault();
+  await secretSwitch().waitFor();
+  await page.waitForLoadState('networkidle');
+  await page.getByRole('link', { name: 'Memory', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Memory buckets' }).waitFor();
+  await page.clock.setFixedTime(new Date(approvalNow.getTime() + 31_000));
+  const reads: string[] = [];
+  page.on('request', (r) => {
+    if (new URL(r.url()).pathname === '/api/ask-first') reads.push(r.url());
+  });
+  const loaded = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === '/api/ask-first',
+  );
+  await page.getByRole('link', { name: 'Vault', exact: true }).hover();
+  await loaded;
+  await page.waitForLoadState('networkidle');
+  await page.getByRole('link', { name: 'Vault', exact: true }).click();
+  await page.locator('[data-path="work/acme"] a').click();
+  await secretSwitch().waitFor();
+  await page.waitForLoadState('networkidle');
+  expect(reads).toHaveLength(1);
+  expect(await secretSwitch().getAttribute('aria-checked')).toBe('true');
 });
 
 it('E37: Vault intent starts marks and secrets together before lazy controls have downloaded', async () => {

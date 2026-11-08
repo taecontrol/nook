@@ -7,7 +7,6 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import { runApi as run } from './api-client';
-import { refreshAskFirst } from './ask-first-query';
 import { sortBuckets } from './paths';
 import { createWriteGate } from './write-gate';
 
@@ -34,13 +33,11 @@ type BucketWrite = {
   added: string[];
 };
 async function refreshBuckets(queryClient: QueryClient) {
-  const marks = refreshAskFirst(queryClient);
   const filters = { queryKey: bucketsOptions.queryKey };
   await queryClient.invalidateQueries({ ...filters, refetchType: 'none' });
   // Disabled observers still need one recovery read after the write result.
   if (queryClient.getQueryCache().find(filters)?.getObserversCount())
     await queryClient.prefetchQuery(bucketsOptions);
-  await marks;
 }
 
 function useCreateBucket() {

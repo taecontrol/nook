@@ -10,7 +10,7 @@ import {
 } from '@tanstack/react-router';
 import { createRoot } from 'react-dom/client';
 import { preloadApproval, preloadApprovals } from './approvals-api';
-import { preloadAskFirst } from './ask-first-query';
+import { observeAskFirstExistence, preloadAskFirst } from './ask-first-query';
 import { preloadAudit } from './audit-api';
 import { preloadBuckets } from './buckets-api';
 import { Home } from './home';
@@ -29,6 +29,7 @@ theme.addEventListener('change', (event) =>
 );
 
 const queryClient = new QueryClient();
+observeAskFirstExistence(queryClient);
 const root = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   component: Outlet,
   notFoundComponent: () => null,
