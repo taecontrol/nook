@@ -1,3 +1,4 @@
+import type { ApprovalExpired } from '@nook/contract';
 import { Effect } from 'effect';
 
 export class CliFailure extends Error {}
@@ -47,6 +48,7 @@ export class ServerFailure {
     readonly paths: readonly string[] = [],
     readonly retryable: boolean = false,
     readonly expiredAt?: string,
+    readonly approvalReason?: ApprovalExpired['reason'],
   ) {}
 }
 export class RequestFailure extends CliFailure {

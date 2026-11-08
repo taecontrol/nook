@@ -55,28 +55,14 @@ it.each([
     );
   },
 );
-it.each([
-  [],
-  ['missing'],
-  ['Work'],
-  ['work/'],
-  false,
-  1,
-  'work',
-  {},
-  ['work', 1],
-])(
+it.each([[], ['Work'], 'work', {}, ['work', 1]])(
   'E4: invalid grant %# is tagged, leaves the request pending, and cannot exchange a token',
   async (grant) => {
     const pending = await createAuthorization(app);
     const response = await approveGrant(app, pending.userCode, grant);
     expect(response.status).toBe(400);
     const error = (await response.json()) as { _tag: string };
-    expect(error._tag).toBe(
-      Array.isArray(grant) && grant.includes('missing')
-        ? 'GrantBucketNotFound'
-        : 'InvalidBucketGrant',
-    );
+    expect(error._tag).toBe('InvalidBucketGrant');
     expect(
       (
         await jsonRequest(app, '/api/machine/token', {

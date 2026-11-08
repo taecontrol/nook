@@ -67,11 +67,14 @@ nook: work/acme/STRIPE_KEY needs the owner's approval.
 
 - **Approved.** The command runs.
 - **Denied.** `The owner denied work/acme/STRIPE_KEY. Nothing was delivered.` Exit code 77.
-- **Timeout,** or the server is unreachable until the deadline: `The approval request expired. Run again to ask again.` Exit code 75.
-- **Cancelled.** When the agent stops the command (SIGINT or SIGTERM), `nook run` withdraws the request (best effort) and exits with 130 or 143.
+- **Expired or withdrawn on the server,** or the server is unreachable until the deadline: `The approval request expired. Run again to ask again.` Exit code 75.
+- **Covered paths changed.** If this attempt's approval is still valid but a new mark covers another requested path, the server returns `ApprovalExpired` with reason `changed`. The CLI prints `The secrets that need approval changed while you waited. Run again to ask again.` and exits 75. Nothing is delivered.
+- **Cancelled.** SIGINT exits with 130; SIGTERM exits with 143. If the request id is known, `nook run` withdraws it best effort and prints `The approval request was withdrawn. Nothing was delivered.` If the signal arrives during the first values request, the CLI prints `Cancelling the run…` on stderr and waits up to 3 seconds for its answer. A pending answer reveals the id, so the CLI withdraws that request. A values answer is discarded without starting the command. If no answer arrives in time, the CLI leaves the unknown request alone; an undecided request expires after 10 minutes, as usual. When no id is known, including after a values answer, the CLI prints `The run was cancelled. Nothing was delivered.`
 - **Remembered.** A later run on the same machine, needing some of the approved secrets, is delivered on its first call and prints nothing extra, whichever agent runs it.
-- **Window passed.** If the *only this time* window passes before this attempt receives its values, the next ask fails with `ApprovalExpired` and exits 75.
+- **Window passed.** If the *only this time* window passes before this attempt receives its values, the next ask fails with `ApprovalExpired` with reason `expired` and exits 75 with the existing expiry message, even if another mark was added meanwhile.
 - **Released CLI.** An old CLI asking for a covered secret prints `work/acme/STRIPE_KEY needs the owner's approval, and this nook version cannot ask. Update nook.` and exits 1.
+
+The released v0.6.0 CLI does not distinguish `ApprovalExpired { reason: 'changed' }`: it prints `The approval request expired. Run again to ask again.` on stderr and exits 75, both on the first answer and after a pending answer. The owner accepts this released-client wording.
 
 **Owner.** The owner opens the link on any device. Access protects the page.
 - The page shows the machine (verified), each secret together with the mark that covers it, the purpose (*"claimed by the agent, not verified"*), the executable, the working directory, the agent session (as reported, for context only), the client version, and the time left.
@@ -95,7 +98,7 @@ The CLI waits by sending the same request again under the same `attemptId`.
 - The success type of `values` becomes `DeliveredSecrets | ApprovalPending`.
 - New errors:
   - `ApprovalDenied` (403);
-  - `ApprovalExpired` (410), with reason `expired` or `withdrawn`;
+  - `ApprovalExpired` (410), with reason `expired`, `withdrawn`, or `changed`;
   - `ApprovalLimit` (429), when too many requests are pending.
 - `DELETE /api/machine/approvals/:id` withdraws a pending request that belongs to the calling machine. It always returns 204.
 - A request without `approval` for a covered secret gets `VaultNotConfigured` with the update message, and the refusal is audited. That tag answers 503, a server-error status for a policy refusal, until old CLIs are gone.
@@ -138,7 +141,8 @@ No MCP tool and no machine route reads or writes marks or decisions.
    - A payload that differs from the attempt's own row is `InvalidRun`.
    - Denied is `ApprovalDenied`; withdrawn is `ApprovalExpired` with reason `withdrawn`. Both are terminal, including after the last mark is removed or another approval matches.
    - If nothing is covered any more, or a remembered approval matches, deliver (this includes an attempt whose own row is `settled`, or approved but past `valid_until`).
-   - Otherwise, a pending row past `expires_at`, a settled row, or an approved row past `valid_until` is `ApprovalExpired`.
+   - Otherwise, a pending row past `expires_at`, a settled row, or an approved row past `valid_until` is `ApprovalExpired` with reason `expired`.
+   - A still-valid own approval that does not cover every currently covered path is `ApprovalExpired` with reason `changed`. The attempt remains unchanged, with no values or delivery audit rows.
    - On a match, deliver.
    - If the attempt's own row is pending, return pending.
    - Otherwise, insert the request (bounded per machine and in total) and return pending.
@@ -148,7 +152,7 @@ The owner's decision is a conditional `UPDATE … WHERE status='pending' AND exp
 
 **Agent session.** The approval logic ignores it. The claim that #117 resolves is stored on the request and shown to the owner as unverified context (ADR-0019).
 
-**Only this time.** The approval stays valid for its own attempt until 2 minutes after the decision, so a retry after a lost response is delivered again and audited again. After that it is `ApprovalExpired`.
+**Only this time.** The approval stays valid for its own attempt until 2 minutes after the decision, so a retry after a lost response is delivered again and audited again. After that it is `ApprovalExpired` with reason `expired`.
 
 ### Invariants and owners
 
@@ -200,7 +204,7 @@ The owner's decision is a conditional `UPDATE … WHERE status='pending' AND exp
 - marks in their own table, keyed by path;
 - the agent session never affects matching;
 - refusing a request without `approval`;
-- exit codes 75 (expired) and 77 (denied);
+- exit codes 75 (`expired`, `withdrawn`, or `changed`) and 77 (denied);
 - the 10-minute expiry;
 - the three remember options.
 
@@ -220,15 +224,19 @@ The owner's decision is a conditional `UPDATE … WHERE status='pending' AND exp
 - a remembered approval is reused by a later attempt from any agent session on the same machine, and refused for another machine, a secret outside the set, and after its window;
 - deleting an empty marked bucket and recreating it keeps the mark;
 - the pending-request limit returns `ApprovalLimit`;
-- a payload fixture from the latest released CLI (v0.3.2 today) gets the update message and no value;
+- a payload fixture from v0.3.2, before approval support, gets the update message and no value;
+- the actual v0.6.0 CLI and its released contract print the existing expiry message and exit 75 for `changed`, both on the first answer and while waiting;
 - unmarked responses are unchanged;
 - a table-driven test of the decision covers:
   - lost responses;
   - concurrent decisions;
   - a mark change racing delivery;
   - a mark added or removed while the CLI waits;
+  - a newly marked requested path after approval returns `changed` while the own approval is valid, and `expired` once its window has passed;
   - sibling prefixes (`work/acme` does not cover `work/acme2`);
 - CLI tests with a fake server and TestClock check the exit codes, the stderr text, and the `DELETE` sent on SIGTERM, and scrub the real `CLAUDE_CODE_SESSION_ID` and `CODEX_SESSION_ID`;
+- signals during the first values request start no child: a late pending answer is withdrawn, late values are discarded, and a stalled answer ends after a three-second grace period without withdrawing an unknown request;
+- a fake-server `changed` answer exits 75 with the changed-coverage message and starts no child; `expired` and `withdrawn` keep their existing expiry message;
 - a browser acceptance test of the approval page checks the unverified label and the expired, withdrawn, and already-handled states.
 
 **Re-enter design if:**

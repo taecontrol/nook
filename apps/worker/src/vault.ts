@@ -21,11 +21,11 @@ import {
   visiblePaths,
 } from '@nook/contract';
 import { Effect, Redacted, Schema } from 'effect';
-import { HttpApiError } from 'effect/http-api';
 import { SqlSchema } from 'effect/sql';
 import { type AuditMachine, auditStore, claimColumns } from './audit.ts';
 import { authorizeBucket, bucketExists, bucketNotFound } from './buckets.ts';
 import { unavailable } from './http-errors.ts';
+import { type OwnerFacts, requireOwner } from './owner-request.ts';
 import { open, parseKeyring, seal } from './vault-keyring.ts';
 
 const Row = Schema.Struct({
@@ -213,10 +213,7 @@ export function ownerVault(binding = '', grant: BucketGrant = 'all') {
         sql`SELECT bucket, name, description, updated_at, version FROM secrets ORDER BY bucket, name`,
     });
     return {
-      reveal: (
-        path: string,
-        facts: { ip: string | null; country: string | null },
-      ) =>
+      reveal: (path: string, facts: OwnerFacts) =>
         Effect.gen(function* () {
           const { bucket, name } = yield* target(grant, path, false);
           const rows =
@@ -241,12 +238,14 @@ export function ownerVault(binding = '', grant: BucketGrant = 'all') {
         }),
       list: (bucket: string) => read(grant, bucket),
       listAll: () =>
-        grant === 'all'
-          ? listRows().pipe(
+        requireOwner(grant).pipe(
+          Effect.andThen(() =>
+            listRows().pipe(
               unavailable,
               Effect.map((rows) => ({ secrets: rows.map(metadata) })),
-            )
-          : Effect.fail(new HttpApiError.Forbidden()),
+            ),
+          ),
+        ),
       create: (input: CreateSecret) => create(input),
       replace: (path: string, input: ReplaceSecret) =>
         Effect.gen(function* () {

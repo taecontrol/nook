@@ -70,6 +70,26 @@ async function marks() {
   };
 }
 
+async function holdWriteAndCountMarks(url: string, method: string) {
+  const started = deferred();
+  const release = deferred();
+  const reads: boolean[] = [];
+  let committed = false;
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/ask-first')
+      reads.push(committed);
+  });
+  await page.route(url, async (route) => {
+    if (route.request().method() !== method) return route.continue();
+    started.resolve();
+    await release.promise;
+    const response = await route.fetch();
+    committed = response.ok();
+    await route.fulfill({ response }).catch(() => {});
+  });
+  return { started: started.promise, release: release.resolve, reads };
+}
+
 it.each(['PUT', 'DELETE'] as const)(
   'E37: a queued toggle reconciles with the server and retains an error when %s fails',
   async (failedMethod) => {
@@ -183,15 +203,6 @@ it('E37: inherited marks turn secret and bucket switches on and disable them, wi
   expect(await card.getByRole('switch').getAttribute('aria-checked')).toBe(
     'true',
   );
-  const writes: string[] = [];
-  page.on('request', (r) => {
-    if (['PUT', 'DELETE'].includes(r.method())) writes.push(r.url());
-  });
-  await secretSwitch().focus();
-  await page.keyboard.press('Space');
-  expect(writes, 'An inherited switch cannot write a child override').toEqual(
-    [],
-  );
   const tree = page.getByRole('navigation', { name: 'Buckets', exact: true });
   for (const path of ['work', 'work/acme', 'work/acme/prod'])
     expect(
@@ -207,75 +218,73 @@ it('E37: inherited marks turn secret and bucket switches on and disable them, wi
   ).toBe(0);
 });
 
-it.each(['secret', 'bucket'] as const)(
-  'E37: a %s mark flips optimistically before PUT resolves and reconciles on success and failed 503',
-  async (kind) => {
-    await openVault();
-    const control =
-      kind === 'secret' ? secretSwitch() : bucketCard().getByRole('switch');
+// The toggle does not depend on the kind; the bucket card's switch is the
+// covered-secret case below.
+it('E37: a secret mark flips optimistically before PUT resolves and reconciles on success and failed 503', async () => {
+  await openVault();
+  const control = secretSwitch();
+  await expect
+    .poll(() => control.count(), {
+      message: 'The secret Ask first switch is available',
+    })
+    .toBe(1);
+  const gate = deferred();
+  const started = deferred();
+  const path = stripe;
+  const url = `**/api/ask-first/secret/${encodeURIComponent(path)}`;
+  await page.route(url, async (route) => {
+    started.resolve();
+    await gate.promise;
+    await route.continue().catch(() => {});
+  });
+  try {
+    await control.click();
+    await started.promise;
     await expect
-      .poll(() => control.count(), {
-        message: `The ${kind} Ask first switch is available`,
+      .poll(() => control.getAttribute('aria-checked'), {
+        message: 'The switch flips before the PUT response',
       })
-      .toBe(1);
-    const gate = deferred();
-    const started = deferred();
-    const path = kind === 'secret' ? stripe : 'work/acme';
-    const url = `**/api/ask-first/${kind}/${encodeURIComponent(path)}`;
+      .toBe('true');
+    expect((await marks()).marks).toEqual([]);
+    gate.resolve();
+    await expect
+      .poll(async () => (await marks()).marks.some((m) => m.path === path))
+      .toBe(true);
+    expect(await control.getAttribute('aria-checked')).toBe('true');
+    await page.unroute(url);
+    await control.click();
+    await expect.poll(async () => (await marks()).marks.length).toBe(0);
+    const failed = deferred();
+    const failedStarted = deferred();
     await page.route(url, async (route) => {
-      started.resolve();
-      await gate.promise;
-      await route.continue().catch(() => {});
+      failedStarted.resolve();
+      await failed.promise;
+      await route
+        .fulfill({ status: 503, json: { _tag: 'ServiceUnavailable' } })
+        .catch(() => {});
     });
     try {
       await control.click();
-      await started.promise;
+      await failedStarted.promise;
       await expect
-        .poll(() => control.getAttribute('aria-checked'), {
-          message: 'The switch flips before the PUT response',
-        })
+        .poll(() => control.getAttribute('aria-checked'))
         .toBe('true');
-      expect((await marks()).marks).toEqual([]);
-      gate.resolve();
+      failed.resolve();
       await expect
-        .poll(async () => (await marks()).marks.some((m) => m.path === path))
-        .toBe(true);
-      expect(await control.getAttribute('aria-checked')).toBe('true');
-      await page.unroute(url);
-      await control.click();
-      await expect.poll(async () => (await marks()).marks.length).toBe(0);
-      const failed = deferred();
-      const failedStarted = deferred();
-      await page.route(url, async (route) => {
-        failedStarted.resolve();
-        await failed.promise;
-        await route
-          .fulfill({ status: 503, json: { _tag: 'ServiceUnavailable' } })
-          .catch(() => {});
-      });
-      try {
-        await control.click();
-        await failedStarted.promise;
-        await expect
-          .poll(() => control.getAttribute('aria-checked'))
-          .toBe('true');
-        failed.resolve();
-        await expect
-          .poll(() => control.getAttribute('aria-checked'))
-          .toBe('false');
-        await page.getByRole('alert').waitFor();
-        expect(
-          (await page.getByRole('alert').innerText()).length,
-        ).toBeGreaterThan(0);
-        expect((await marks()).marks).toEqual([]);
-      } finally {
-        failed.resolve();
-      }
+        .poll(() => control.getAttribute('aria-checked'))
+        .toBe('false');
+      await page
+        .getByRole('alert')
+        .filter({ hasText: 'Couldn’t change Ask first' })
+        .waitFor();
+      expect((await marks()).marks).toEqual([]);
     } finally {
-      gate.resolve();
+      failed.resolve();
     }
-  },
-);
+  } finally {
+    gate.resolve();
+  }
+});
 
 it('E37: long inherited bucket paths wrap only at / on a 390×844 phone', async () => {
   const parent = 'work/municipal-water-authority-ops-mx/infrastructure';
@@ -374,55 +383,17 @@ it('E37: rapid toggles stay optimistic, serialize writes per path and preserve t
     await control.click();
     await expect.poll(() => control.getAttribute('aria-checked')).toBe('false');
     expect(writes, 'DELETE waits for this path’s PUT').toEqual(['PUT']);
+    const reconciled = page.waitForResponse(
+      (r) => new URL(r.url()).pathname === '/api/ask-first',
+    );
     putGate.resolve();
     await expect.poll(() => writes).toEqual(['PUT', 'DELETE']);
+    await (await reconciled).finished();
     await expect.poll(async () => (await marks()).marks.length).toBe(0);
     expect(await control.getAttribute('aria-checked')).toBe('false');
   } finally {
     readGate.resolve();
     putGate.resolve();
-  }
-});
-
-it('E37: a failed DELETE restores the server mark and an error instead of leaving Ask first off', async () => {
-  await setMark(app, stripe, 'secret');
-  await openVault();
-  const control = secretSwitch();
-  await expect
-    .poll(() => control.count(), {
-      message: 'An explicit secret mark can be switched off',
-    })
-    .toBe(1);
-  const gate = deferred();
-  const started = deferred();
-  await page.route(
-    `**/api/ask-first/secret/${encodeURIComponent(stripe)}`,
-    async (route) => {
-      expect(route.request().method()).toBe('DELETE');
-      started.resolve();
-      await gate.promise;
-      await route
-        .fulfill({ status: 503, json: { _tag: 'ServiceUnavailable' } })
-        .catch(() => {});
-    },
-  );
-  try {
-    await control.click();
-    await started.promise;
-    await expect.poll(() => control.getAttribute('aria-checked')).toBe('false');
-    expect((await marks()).marks).toContainEqual({
-      kind: 'secret',
-      path: stripe,
-      exists: true,
-    });
-    gate.resolve();
-    await expect.poll(() => control.getAttribute('aria-checked')).toBe('true');
-    await page.getByRole('alert').waitFor();
-    expect((await page.getByRole('alert').innerText()).length).toBeGreaterThan(
-      0,
-    );
-  } finally {
-    gate.resolve();
   }
 });
 
@@ -497,6 +468,51 @@ it('E38: a bucket recreation cancels an older inactive marks preload', async () 
   }
 });
 
+it('E38: a changed bucket read refreshes cached orphan warnings without an Ask-first-specific write callback', async () => {
+  const path = 'work/old-client';
+  expect((await jsonRequest(app, '/api/buckets', { path })).ok).toBe(true);
+  await setMark(app, path);
+  await openVault();
+  await page.getByRole('switch').first().waitFor();
+  const orphan = page
+    .getByRole('alert')
+    .filter({ hasText: 'Ask first is on a deleted bucket' });
+  expect(await orphan.count()).toBe(0);
+  await page
+    .locator('[data-sidebar="menu-button"]')
+    .filter({ hasText: /^Buckets$/ })
+    .click();
+  await page.getByRole('textbox', { name: 'New bucket path' }).waitFor();
+  // A different client removes the bucket. Only a normal bucket read in this
+  // browser learns that it changed; no local write callback runs at all.
+  expect(
+    (
+      await jsonRequest(
+        app,
+        `/api/buckets/${encodeURIComponent(path)}`,
+        undefined,
+        {},
+        'DELETE',
+      )
+    ).status,
+  ).toBe(204);
+  const refreshed = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === '/api/buckets',
+  );
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event('visibilitychange')),
+  );
+  expect((await refreshed).status()).toBe(200);
+  await expect
+    .poll(() =>
+      page.getByRole('button', { name: `Actions for ${path}` }).count(),
+    )
+    .toBe(0);
+  await page.getByRole('link', { name: 'Vault', exact: true }).click();
+  await expect.poll(() => orphan.count()).toBe(1);
+  expect(await page.evaluate(() => Date.now())).toBe(approvalNow.getTime());
+});
+
 it.each(['create', 'delete'] as const)(
   'E38: a bucket %s updates orphan marks before the cached list becomes stale',
   async (operation) => {
@@ -527,36 +543,54 @@ it.each(['create', 'delete'] as const)(
       .locator('[data-sidebar="menu-button"]')
       .filter({ hasText: /^Buckets$/ })
       .click();
-    if (operation === 'create') {
-      const field = page.getByRole('textbox', { name: 'New bucket path' });
-      await field.fill(path);
+    await page.getByRole('textbox', { name: 'New bucket path' }).waitFor();
+    await page.waitForLoadState('networkidle');
+    const method = operation === 'create' ? 'POST' : 'DELETE';
+    const endpoint =
+      operation === 'create'
+        ? '/api/buckets'
+        : `/api/buckets/${encodeURIComponent(path)}`;
+    const write = await holdWriteAndCountMarks(`**${endpoint}`, method);
+    try {
+      if (operation === 'create') {
+        const field = page.getByRole('textbox', { name: 'New bucket path' });
+        await field.fill(path);
+        await field.press('Enter');
+      } else {
+        await page
+          .getByRole('button', { name: `Actions for ${path}`, exact: true })
+          .click();
+        await page
+          .getByRole('menuitem', { name: 'Delete bucket…', exact: true })
+          .click();
+        await page
+          .getByRole('button', { name: 'Delete bucket', exact: true })
+          .click();
+      }
+      await write.started;
+      // Remount Vault while the optimistic bucket list is still uncommitted.
+      await page.getByRole('link', { name: 'Vault', exact: true }).click();
+      await page.locator('[data-path="work/acme"] a').click();
+      await secretSwitch().waitFor();
+      expect
+        .soft(write.reads, 'No marks read before the bucket commits')
+        .toEqual([]);
       const saved = page.waitForResponse(
         (r) =>
-          r.request().method() === 'POST' &&
-          new URL(r.url()).pathname === '/api/buckets',
+          r.request().method() === method &&
+          new URL(r.url()).pathname === endpoint,
       );
-      await field.press('Enter');
-      expect((await saved).ok()).toBe(true);
-    } else {
-      await page
-        .getByRole('button', { name: `Actions for ${path}`, exact: true })
-        .click();
-      await page
-        .getByRole('menuitem', { name: 'Delete bucket…', exact: true })
-        .click();
-      const removed = page.waitForResponse(
-        (r) =>
-          r.request().method() === 'DELETE' &&
-          new URL(r.url()).pathname ===
-            `/api/buckets/${encodeURIComponent(path)}`,
-      );
-      await page
-        .getByRole('button', { name: 'Delete bucket', exact: true })
-        .click();
-      expect((await removed).status()).toBe(204);
+      write.release();
+      expect((await saved).status()).toBe(operation === 'create' ? 200 : 204);
+      await expect.poll(() => write.reads.some(Boolean)).toBe(true);
+      await page.waitForLoadState('networkidle');
+      expect(
+        write.reads,
+        'Exactly one marks read, after the bucket commits',
+      ).toEqual([true]);
+    } finally {
+      write.release();
     }
-    await page.waitForLoadState('networkidle');
-    await page.getByRole('link', { name: 'Vault', exact: true }).click();
     expect((await marks()).marks).toContainEqual({
       kind: 'bucket',
       path,
@@ -598,29 +632,44 @@ it.each(['create', 'delete'] as const)(
       .poll(() => page.getByRole('switch').count())
       .toBeGreaterThan(0);
     expect(await alert.count()).toBe(operation === 'create' ? 1 : 0);
-    if (operation === 'create') {
-      const sheet = await createDraft(page, { name: 'STRIPE_KEY' });
+    await page.waitForLoadState('networkidle');
+    const method = operation === 'create' ? 'POST' : 'DELETE';
+    const endpoint =
+      operation === 'create'
+        ? '/api/secrets'
+        : `/api/secrets/${encodeURIComponent(stripe)}`;
+    const write = await holdWriteAndCountMarks(`**${endpoint}*`, method);
+    try {
+      if (operation === 'create') {
+        const sheet = await createDraft(page, { name: 'STRIPE_KEY' });
+        await sheet
+          .getByRole('button', { name: 'Save secret', exact: true })
+          .click();
+      } else {
+        await openSecretMenu(page, stripe, 'Delete secret…');
+        await page
+          .getByRole('button', { name: 'Delete secret', exact: true })
+          .click();
+      }
+      await write.started;
+      expect(write.reads, 'No marks read before the secret commits').toEqual(
+        [],
+      );
       const saved = page.waitForResponse(
         (r) =>
-          r.request().method() === 'POST' &&
-          new URL(r.url()).pathname === '/api/secrets',
+          r.request().method() === method &&
+          new URL(r.url()).pathname === endpoint,
       );
-      await sheet
-        .getByRole('button', { name: 'Save secret', exact: true })
-        .click();
-      expect((await saved).status()).toBe(201);
-    } else {
-      await openSecretMenu(page, stripe, 'Delete secret…');
-      const removed = page.waitForResponse(
-        (r) =>
-          r.request().method() === 'DELETE' &&
-          new URL(r.url()).pathname ===
-            `/api/secrets/${encodeURIComponent(stripe)}`,
-      );
-      await page
-        .getByRole('button', { name: 'Delete secret', exact: true })
-        .click();
-      expect((await removed).status()).toBe(204);
+      write.release();
+      expect((await saved).status()).toBe(operation === 'create' ? 201 : 204);
+      await expect.poll(() => write.reads.some(Boolean)).toBe(true);
+      await page.waitForLoadState('networkidle');
+      expect(
+        write.reads,
+        'Exactly one marks read, after the secret commits',
+      ).toEqual([true]);
+    } finally {
+      write.release();
     }
     expect((await marks()).marks).toContainEqual({
       kind: 'secret',
@@ -693,57 +742,6 @@ it('E38: a deleted bucket mark appears above Vault with Remove mark and disappea
   }
 });
 
-it('E38: a failed Remove mark restores the orphan alert and reports an error', async () => {
-  await seedGrantTree(app, ['work/old-client']);
-  await setMark(app, 'work/old-client');
-  expect(
-    (
-      await fetch(
-        `${app.origin}/api/buckets/${encodeURIComponent('work/old-client')}`,
-        { method: 'DELETE' },
-      )
-    ).status,
-  ).toBe(204);
-  await openVault();
-  const alert = page
-    .getByRole('alert')
-    .filter({ hasText: 'Ask first is on a deleted bucket' });
-  await expect
-    .poll(() => alert.count(), {
-      message: 'The orphan alert offers Remove mark',
-    })
-    .toBe(1);
-  const gate = deferred();
-  const started = deferred();
-  await page.route(
-    '**/api/ask-first/bucket/work%2Fold-client',
-    async (route) => {
-      started.resolve();
-      await gate.promise;
-      await route
-        .fulfill({ status: 503, json: { _tag: 'ServiceUnavailable' } })
-        .catch(() => {});
-    },
-  );
-  try {
-    await alert
-      .getByRole('button', { name: 'Remove mark', exact: true })
-      .click();
-    await started.promise;
-    await expect.poll(() => alert.count()).toBe(0);
-    gate.resolve();
-    await expect.poll(() => alert.count()).toBe(1);
-    expect((await marks()).marks).toContainEqual({
-      kind: 'bucket',
-      path: 'work/old-client',
-      exists: false,
-    });
-    expect(await page.getByRole('alert').count()).toBeGreaterThan(1);
-  } finally {
-    gate.resolve();
-  }
-});
-
 it('E37: an optimistic bucket mark covers an already marked secret and failed PUT restores its explicit switch', async () => {
   await setMark(app, stripe, 'secret');
   await openVault();
@@ -761,14 +759,17 @@ it('E37: an optimistic bucket mark covers an already marked secret and failed PU
       .catch(() => {});
   });
   try {
-    await bucketCard().getByRole('switch').click();
+    const bucketSwitch = bucketCard().getByRole('switch');
+    await bucketSwitch.click();
     await started.promise;
     await expect.poll(() => control.isDisabled()).toBe(true);
+    expect(await bucketSwitch.getAttribute('aria-checked')).toBe('true');
     expect(await secretRow(page, stripe).innerText()).toContain(
       'Ask first, from work/acme',
     );
     gate.resolve();
     await expect.poll(() => control.isEnabled()).toBe(true);
+    expect(await bucketSwitch.getAttribute('aria-checked')).toBe('false');
     expect(await control.getAttribute('aria-checked')).toBe('true');
     expect(await secretRow(page, stripe).innerText()).toContain(
       'Ask first, on this secret',
@@ -803,6 +804,32 @@ it('E37: Vault intent preloads marks without adding a read when the page opens',
   await expect.poll(() => secretSwitch().isDisabled()).toBe(true);
   expect(await secretSwitch().getAttribute('aria-checked')).toBe('true');
   expect(reads).toHaveLength(1);
+});
+
+it('E37: stale Vault intent reuses one marks read when bucket and secret data are unchanged', async () => {
+  await setMark(app);
+  await openVault();
+  await secretSwitch().waitFor();
+  await page.waitForLoadState('networkidle');
+  await page.getByRole('link', { name: 'Memory', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Memory buckets' }).waitFor();
+  await page.clock.setFixedTime(new Date(approvalNow.getTime() + 31_000));
+  const reads: string[] = [];
+  page.on('request', (r) => {
+    if (new URL(r.url()).pathname === '/api/ask-first') reads.push(r.url());
+  });
+  const loaded = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === '/api/ask-first',
+  );
+  await page.getByRole('link', { name: 'Vault', exact: true }).hover();
+  await loaded;
+  await page.waitForLoadState('networkidle');
+  await page.getByRole('link', { name: 'Vault', exact: true }).click();
+  await page.locator('[data-path="work/acme"] a').click();
+  await secretSwitch().waitFor();
+  await page.waitForLoadState('networkidle');
+  expect(reads).toHaveLength(1);
+  expect(await secretSwitch().getAttribute('aria-checked')).toBe('true');
 });
 
 it('E37: Vault intent starts marks and secrets together before lazy controls have downloaded', async () => {

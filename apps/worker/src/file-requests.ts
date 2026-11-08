@@ -5,16 +5,13 @@ import {
 } from '@nook/contract';
 import { type FileActor, ownerFileActor } from './audit.ts';
 import { clientFrom } from './client-provenance.ts';
+import { ownerFacts } from './owner-request.ts';
 import { fileRoutes, matches } from './routes.ts';
 
 export function fileActor(request: Request): FileActor {
-  const source = request as Request & { cf?: { country?: string } };
   return ownerFileActor(
     clientFrom(undefined, request.headers.get('User-Agent')),
-    {
-      ip: request.headers.get('CF-Connecting-IP') || null,
-      country: source.cf?.country || null,
-    },
+    ownerFacts(request),
   );
 }
 function lengthGate(request: Request) {

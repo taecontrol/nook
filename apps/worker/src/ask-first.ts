@@ -1,24 +1,16 @@
 import { D1Client } from '@effect/sql-d1';
 import {
   type AskFirstMark,
-  type BucketGrant,
   InvalidBucketPath,
   InvalidSecret,
   validateBucketPath,
   validateSecretPath,
 } from '@nook/contract';
-import { Effect, Schema } from 'effect';
-import { HttpApiError } from 'effect/http-api';
+import { Effect } from 'effect';
 import { unavailable } from './http-errors.ts';
 
-const Mark = Schema.Struct({
-  kind: Schema.Literals(['bucket', 'secret']),
-  path: Schema.String,
-});
 export function marksRead(sql: D1Client.D1Client) {
-  return sql<
-    typeof Mark.Type
-  >`SELECT kind,path FROM ask_first_marks ORDER BY kind,path`;
+  return sql<AskFirstMark>`SELECT kind,path FROM ask_first_marks ORDER BY kind,path`;
 }
 export function marksUnchanged(
   sql: D1Client.D1Client,
@@ -27,8 +19,6 @@ export function marksUnchanged(
   const json = JSON.stringify(marks);
   return sql`(SELECT count(*) FROM ask_first_marks)=json_array_length(${json}) AND NOT EXISTS (SELECT 1 FROM json_each(${json}) m WHERE NOT EXISTS (SELECT 1 FROM ask_first_marks a WHERE a.kind=json_extract(m.value,'$.kind') AND a.path=json_extract(m.value,'$.path')))`;
 }
-export const requireOwner = (grant: BucketGrant) =>
-  grant === 'all' ? Effect.void : Effect.fail(new HttpApiError.Forbidden());
 function validateMark(mark: AskFirstMark) {
   const message =
     mark.kind === 'bucket'

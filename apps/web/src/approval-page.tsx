@@ -1,5 +1,5 @@
-import type {
-  ApprovalView,
+import {
+  type ApprovalView,
   ApprovalRemember as Remember,
 } from '@nook/contract';
 import { Link, useParams } from '@tanstack/react-router';
@@ -33,8 +33,10 @@ import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { ApiError, describeFailure } from './api-client';
+import { useApproval } from './approval-api';
 import {
   approvalScope,
+  type Choice,
   durationLabel,
   endsAt,
   endTime,
@@ -43,19 +45,11 @@ import {
   submittingLabel,
   timeLeft,
 } from './approval-screen';
-import { useApproval } from './approvals-api';
+import { AskFirstLabel } from './ask-first-label';
+import { Cmd, Mark } from './authorize-parts';
 import { LoadFailure } from './failure';
 import { SlashPath } from './path-text';
 
-function Mark({ icon: Icon }: { icon: typeof KeyRound }) {
-  return (
-    <Avatar className="size-10 rounded-lg">
-      <AvatarFallback className="rounded-lg">
-        <Icon className="size-5" />
-      </AvatarFallback>
-    </Avatar>
-  );
-}
 function Fact({ name, children }: { name: string; children: ReactNode }) {
   return (
     <div className="flex justify-between gap-4 text-sm">
@@ -85,13 +79,7 @@ function Verified({ view }: { view: ApprovalView }) {
               <SlashPath>{path}</SlashPath>
               <p className="mt-1 text-xs text-muted-foreground">
                 {coveredBy ? (
-                  coveredBy.kind === 'bucket' ? (
-                    <>
-                      Ask first, from <SlashPath>{coveredBy.path}</SlashPath>
-                    </>
-                  ) : (
-                    'Ask first, on this secret'
-                  )
+                  <AskFirstLabel mark={coveredBy} />
                 ) : (
                   'Not marked Ask first'
                 )}
@@ -172,7 +160,7 @@ function DurationChoice({
         onValueChange={(value) => setChoice(value as Remember)}
         disabled={disabled}
       >
-        {(['once', '1h', '12h'] as const).map((value) => {
+        {Remember.literals.map((value) => {
           const until = endsAt(value, Date.now());
           return (
             <Item key={value} variant="outline" size="sm" asChild>
@@ -204,7 +192,7 @@ function Decisions({
 }: {
   choice: Remember;
   submitting?: Submitting;
-  decide: (choice: Remember | 'deny') => void;
+  decide: (choice: Choice) => void;
 }) {
   const denying = submitting?.choice === 'deny';
   const approving = !!submitting && !denying;
@@ -241,7 +229,7 @@ function PendingCard({
 }: {
   screen: Screen & { kind: 'pending' | 'submitting' };
   failure?: 'network';
-  decide: (choice: Remember | 'deny') => void;
+  decide: (choice: Choice) => void;
 }) {
   const [choice, setChoice] = useState<Remember>('once');
   const { view } = screen;
@@ -259,11 +247,8 @@ function PendingCard({
           <span className="text-foreground wrap-anywhere">
             {view.verified.machine.name}
           </span>{' '}
-          is waiting in{' '}
-          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">
-            nook run
-          </code>
-          . Approve only if you expect this run.
+          is waiting in <Cmd>nook run</Cmd>. Approve only if you expect this
+          run.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4 px-5 pb-5 sm:px-6 sm:pb-6">
@@ -426,7 +411,7 @@ function ApprovalCard({
 }: {
   screen: Screen;
   failure?: 'network';
-  decide: (choice: Remember | 'deny') => void;
+  decide: (choice: Choice) => void;
 }) {
   return screen.kind === 'pending' || screen.kind === 'submitting' ? (
     <PendingCard screen={screen} failure={failure} decide={decide} />

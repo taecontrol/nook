@@ -985,9 +985,18 @@ require a real Cloudflare installation and are not claimed by local verification
 Issue #82 slice 1 is exercised through the built Worker, migrated local D1,
 and the real CLI in a private keyring. `owner-approval-worker.test.ts` covers
 E1–E30's marks, inheritance, grant-first decisions, remembered subsets,
-retry keys, windows, limits and cleanup. `owner-approval-invariants.test.ts`
-holds D1 checkpoint boundaries to prove both commit orders for owner
-decisions and withdrawal, and that mark or grant changes defeat delivery.
+retry keys, windows, limits and cleanup. It also proves both commit orders
+for owner decisions and withdrawal (each is one batch, so committing them in
+turn is the overlap), and holds a D1 checkpoint to prove that a mark or grant
+committed between the read and delivery defeats it.
+For #131, the new-mark cases approve an attempt requesting two paths while
+only one is marked, then mark the second path. Both once and 1-hour approvals
+receive HTTP 410 `ApprovalExpired { reason: 'changed' }` while still valid,
+without values, state changes or delivery audit rows. Expired windows keep
+reason `expired` even after the same mark change.
+`owner-approval-invariants.test.ts` holds D1 checkpoint boundaries to prove
+that a competing attempt, a withdrawal or a mark committed after a remembered
+or approved read defeats delivery.
 Unmarked runs retain one authentication statement, one read batch and one
 audit batch. A capable CLI's retry payload is checked in that read batch,
 even after the last mark is removed.
@@ -999,11 +1008,28 @@ and real SIGINT/SIGTERM withdraw before exiting 130/143. Fake HTTP failures
 prove that retries begin only after a pending response and keep the same
 attempt. `approval-wait.test.ts` uses Effect TestClock for the ten-minute
 local deadline, retry pacing and the three-second withdrawal bound.
+The real CLI also receives SIGINT and SIGTERM while its first values request
+is held. The fake server releases its answer only after the CLI prints
+`Cancelling the run…` on stderr, proving it has handled the signal without
+a timed sleep. A late pending answer is withdrawn; a late values answer is
+discarded. Both exit 130/143 without starting a command. TestClock proves
+that a stalled first answer gets at most three more seconds and that no
+withdrawal is sent without a known request id. With no id, the CLI prints
+`The run was cancelled. Nothing was delivered.` An undecided request left
+on the server expires after the usual ten minutes.
+The changed-coverage fake-server cases check the first answer and the wait
+loop: both exit 75, start no command, and print exactly
+`The secrets that need approval changed while you waited. Run again to ask again.`
+The server's `expired` and `withdrawn` answers retain their existing message.
 
 `owner-approval-migration.test.ts` runs the previous Worker's actual source
 against migration 0016 and checks its audit inserts, claims and indexes.
 `owner-approval-released-cli.test.ts` executes v0.3.2's actual error-mapping
-functions. `owner-approval-audit-web.test.ts` renders every new event in
+functions. It also bundles the actual v0.6.0 CLI with its own released contract
+and runs it in a private keyring against a synthetic server. For `changed`,
+it prints `The approval request expired. Run again to ask again.` on stderr
+and exits 75, both on the first answer and after a pending response.
+`owner-approval-audit-web.test.ts` renders every new event in
 Chromium and proves the existing bucket and secret filters, owner IP and
 country, and approval id and duration details. All values and identities are
 synthetic. Approval pages and Vault controls belong to slice 2 (#120).

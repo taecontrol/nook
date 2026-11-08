@@ -9,7 +9,6 @@ import {
 import { Redacted } from 'effect';
 import { useRef } from 'react';
 import { ApiError, describeFailure, runApi, writeOutcome } from './api-client';
-import { refreshAskFirst } from './ask-first-query';
 import { preloadBuckets } from './buckets-api';
 import type { WriteOp } from './vault-state';
 import { createWriteGate, observedWrites } from './write-gate';
@@ -240,11 +239,7 @@ export function readVaultWrites(queries: QueryClient) {
     .map((mutation) => resolved(observeWrite(mutation), revision, secrets));
 }
 export async function refreshVault(queries: QueryClient) {
-  const [secrets] = await Promise.all([
-    queries.fetchQuery({ ...secretsOptions, staleTime: 0 }),
-    refreshAskFirst(queries),
-  ]);
-  return secrets;
+  return queries.fetchQuery({ ...secretsOptions, staleTime: 0 });
 }
 export function executeWrite(
   queries: QueryClient,
@@ -270,13 +265,10 @@ export function executeWrite(
       },
       onSettled: (_result, error) => {
         value = Redacted.make('');
-        const marks = !input.batch && refreshAskFirst(queries);
         if (!input.batch && !unconfirmed(error))
-          return Promise.all([
-            marks,
-            queries.invalidateQueries({ queryKey: secretsOptions.queryKey }),
-          ]);
-        return marks;
+          return queries.invalidateQueries({
+            queryKey: secretsOptions.queryKey,
+          });
       },
     });
   return mutation.execute(input).then(() => {});

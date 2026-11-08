@@ -54,12 +54,17 @@ it('E30: Audit renders and filters approval events, owner IP/country and deliver
       2,
     );
     expect(await page.getByText('Argentina', { exact: true }).count()).toBe(2);
+    // The granted entry shows the same facts, so look inside the delivery.
+    const delivered = auditEntries(page).filter({
+      has: page.getByText('Delivered', { exact: true }),
+    });
+    expect(await delivered.count()).toBe(1);
+    expect(await delivered.getByText(first.id, { exact: true }).count()).toBe(
+      1,
+    );
     expect(
-      await page.getByText(first.id, { exact: true }).count(),
-    ).toBeGreaterThan(0);
-    expect(
-      await page.getByText('Only this time', { exact: true }).count(),
-    ).toBeGreaterThan(0);
+      await delivered.getByText('Only this time', { exact: true }).count(),
+    ).toBe(1);
     await selectAudit(page, 'Secret', stripe);
     await expect.poll(() => auditEntries(page).count()).toBe(8);
     await selectAudit(page, 'Bucket', 'me');

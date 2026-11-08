@@ -1,5 +1,5 @@
 import type { ApprovalPending, DeliveredSecrets } from '@nook/contract';
-import { Clock, Effect, type Scope } from 'effect';
+import { Clock, Deferred, Effect, Fiber, type Scope } from 'effect';
 import { CliFailure, type RequestFailure } from './errors.ts';
 
 export class ApprovalStopped extends CliFailure {
@@ -18,7 +18,12 @@ export function approvalFailure(error: RequestFailure) {
         77,
       );
     case 'ApprovalExpired':
-      return expired();
+      return error.server.approvalReason === 'changed'
+        ? new ApprovalStopped(
+            'The secrets that need approval changed while you waited. Run again to ask again.',
+            75,
+          )
+        : expired();
     case 'ApprovalLimit':
       return new ApprovalStopped(
         error.publicMessage ??
@@ -40,7 +45,7 @@ export type WaitIo = {
     typeof DeliveredSecrets.Type | ApprovalPending,
     RequestFailure
   >;
-  withdraw: (id: string) => Effect.Effect<void>;
+  withdraw: (id: string) => Effect.Effect<void, unknown>;
   status: (line: string) => void;
   signal: Effect.Effect<'SIGINT' | 'SIGTERM', never, Scope.Scope>;
 };
@@ -68,6 +73,10 @@ function waitLoop(first: ApprovalPending['approval'], io: WaitIo) {
         return yield* Effect.fail(expired());
       const response = yield* io.ask.pipe(
         Effect.mapError(approvalFailure),
+        Effect.timeoutOrElse({
+          duration: deadline - (yield* Clock.currentTimeMillis),
+          orElse: () => Effect.fail(expired()),
+        }),
         Effect.catch((error) =>
           error instanceof ApprovalStopped || !error.server.retryable
             ? Effect.fail(error)
@@ -90,38 +99,72 @@ function waitLoop(first: ApprovalPending['approval'], io: WaitIo) {
 export function awaitApproval(first: ApprovalPending['approval'], io: WaitIo) {
   return Effect.gen(function* () {
     announce(first, io);
-    const timeout = Effect.gen(function* () {
-      yield* Effect.sleep(first.expiresIn * 1000);
-      return yield* Effect.fail(expired());
-    });
-    const result = yield* Effect.raceFirst(
-      Effect.raceFirst(waitLoop(first, io), timeout),
-      io.signal,
-    );
+    const result = yield* Effect.raceFirst(waitLoop(first, io), io.signal);
     if (typeof result !== 'string') return result;
-    yield* io.withdraw(first.id).pipe(
-      Effect.timeout('3 seconds'),
-      Effect.catchCause(() => Effect.void),
-    );
+    return yield* stop(result, first.id, io);
+  });
+}
+function stop(
+  signal: 'SIGINT' | 'SIGTERM',
+  id: string | undefined,
+  io: WaitIo,
+) {
+  return Effect.gen(function* () {
+    if (id)
+      yield* io.withdraw(id).pipe(
+        Effect.timeout('3 seconds'),
+        Effect.catchCause(() => Effect.void),
+      );
     return yield* Effect.fail(
       new ApprovalStopped(
-        'The approval request was withdrawn. Nothing was delivered.',
-        result === 'SIGINT' ? 130 : 143,
+        id
+          ? 'The approval request was withdrawn. Nothing was delivered.'
+          : 'The run was cancelled. Nothing was delivered.',
+        signal === 'SIGINT' ? 130 : 143,
       ),
     );
   });
 }
-export const processSignal: Effect.Effect<
-  'SIGINT' | 'SIGTERM',
-  never,
-  Scope.Scope
-> = Effect.callback<'SIGINT' | 'SIGTERM'>((resume) => {
-  const interrupt = () => resume(Effect.succeed('SIGINT'));
-  const terminate = () => resume(Effect.succeed('SIGTERM'));
-  process.once('SIGINT', interrupt);
-  process.once('SIGTERM', terminate);
-  return Effect.sync(() => {
-    process.off('SIGINT', interrupt);
-    process.off('SIGTERM', terminate);
+export function requestValues(io: WaitIo) {
+  return Effect.gen(function* () {
+    const asking = yield* io.ask.pipe(Effect.forkScoped);
+    const result = yield* Effect.raceFirst(Fiber.join(asking), io.signal);
+    if (typeof result === 'string') {
+      io.status('Cancelling the run…');
+      // The server may already have created a request. Give its first answer a
+      // short chance to reveal the id before withdrawing, without starting a child.
+      const response = yield* Fiber.join(asking).pipe(
+        Effect.timeout('3 seconds'),
+        Effect.catchCause(() => Effect.succeed(undefined)),
+      );
+      return yield* stop(
+        result,
+        response && 'approval' in response ? response.approval.id : undefined,
+        io,
+      );
+    }
+    return 'values' in result
+      ? result
+      : yield* awaitApproval(result.approval, io);
   });
+}
+// Registration is a scoped resource, separate from waiting for the signal.
+// Keep both listeners until the values phase ends, including during withdrawal.
+export const processSignal = Effect.gen(function* () {
+  const signal = yield* Deferred.make<'SIGINT' | 'SIGTERM'>();
+  const interrupt = () => Deferred.doneUnsafe(signal, Effect.succeed('SIGINT'));
+  const terminate = () =>
+    Deferred.doneUnsafe(signal, Effect.succeed('SIGTERM'));
+  yield* Effect.acquireRelease(
+    Effect.sync(() => {
+      process.on('SIGINT', interrupt);
+      process.on('SIGTERM', terminate);
+    }),
+    () =>
+      Effect.sync(() => {
+        process.off('SIGINT', interrupt);
+        process.off('SIGTERM', terminate);
+      }),
+  );
+  return Deferred.await(signal);
 });

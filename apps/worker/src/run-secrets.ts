@@ -1,6 +1,6 @@
 import { D1Client } from '@effect/sql-d1';
 import {
-  type AskFirstMark,
+  AskFirstMark,
   canRead,
   coveringMark,
   InvalidRun,
@@ -14,17 +14,12 @@ import {
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
+import { decideValues, type ValuesResult } from './approval-decision.ts';
 import {
-  decideValues,
-  ownTerminal,
-  type ValuesDecision,
-} from './approval-decision.ts';
-import {
-  attemptRead,
   machineApprovals,
   pendingAnswer,
-  readAttempt,
-  type StoredRequest,
+  readRunApprovals,
+  runApprovalReads,
 } from './approvals.ts';
 import { marksRead, marksUnchanged } from './ask-first.ts';
 import { type AuditMachine, approvalEventInsert, auditStore } from './audit.ts';
@@ -50,7 +45,7 @@ export function runSecrets(
     const paths = [...new Set(input.secrets)];
     yield* authorize(machine, input, paths);
     const sql = yield* D1Client.D1Client;
-    const { rows, marks, secrets, covered, own } = yield* readForRun(
+    const { rows, marks, secrets, covered, approvalRead } = yield* readForRun(
       machine,
       input,
       paths,
@@ -62,7 +57,8 @@ export function runSecrets(
       secrets,
       covered,
       request,
-      own,
+      approvalRead,
+      approvals,
     );
     if (decision.kind === 'pending') return decision.answer;
     const values = yield* decrypt(paths, rows, binding);
@@ -91,7 +87,7 @@ function readForRun(machine: RunMachine, input: RunSecrets, paths: string[]) {
         }),
         marksRead(sql),
         ...(input.approval
-          ? [attemptRead(sql, machine.id, input.approval.attemptId)]
+          ? runApprovalReads(sql, machine.id, input.approval.attemptId)
           : []),
       ])
       .pipe(unavailable);
@@ -103,20 +99,18 @@ function readForRun(machine: RunMachine, input: RunSecrets, paths: string[]) {
           message: missing.map((p) => `${p} was not found.`).join(' '),
         }),
       );
-    const marks = read[paths.length] as readonly AskFirstMark[];
+    const marks = yield* Schema.decodeUnknownEffect(Schema.Array(AskFirstMark))(
+      read[paths.length],
+    ).pipe(unavailable);
     const secrets = paths.map((path) => ({
       path,
       coveredBy: coveringMark(marks, path),
     }));
     const covered = secrets.filter((s) => s.coveredBy).map((s) => s.path);
-    const own = input.approval
-      ? yield* readAttempt(read[paths.length + 1])
+    const approvalRead = input.approval
+      ? yield* readRunApprovals(read.slice(paths.length + 1))
       : undefined;
-    if (own) {
-      const terminal = ownTerminal(own, input);
-      if (terminal) return yield* Effect.fail(terminal);
-    }
-    return { rows, marks, secrets, covered, own };
+    return { rows, marks, secrets, covered, approvalRead };
   });
 }
 function authorize(
@@ -140,16 +134,19 @@ function valuesDecision(
   secrets: readonly { path: string; coveredBy: AskFirstMark | null }[],
   covered: readonly string[],
   request: { origin: string; client: string | null },
-  own: StoredRequest | undefined,
+  read: Effect.Success<ReturnType<typeof readRunApprovals>> | undefined,
+  approvals: Effect.Success<typeof machineApprovals>,
 ) {
   return Effect.gen(function* () {
-    if (!covered.length)
-      return {
-        kind: 'deliver' as const,
-        approval: null,
-        ownRequestId: own?.id ?? null,
-        settle: own?.status === 'pending' ? own.id : null,
-      };
+    const snapshot = read ?? { now: 0, own: undefined, remembered: [] };
+    const decision = decideValues({ ...snapshot, covered, payload: input });
+    if (decision.kind !== 'create')
+      return yield* decisionResult(
+        decision,
+        snapshot.now,
+        request.origin,
+        snapshot.own?.id ?? null,
+      );
     const sql = yield* D1Client.D1Client;
     if (!input.approval) {
       yield* sql
@@ -173,38 +170,30 @@ function valuesDecision(
         }),
       );
     }
-    const approvals = yield* machineApprovals;
-    const read = yield* approvals.read({
-      machineId: machine.id,
+    const created = yield* approvals.create({
+      machine,
+      input,
+      secrets,
+      covered,
       attemptId: input.approval.attemptId,
+      client: request.client,
     });
-    let decision = decideValues({ ...read, covered, payload: input });
-    let now = read.now;
-    let ownRequestId = read.own?.id ?? null;
-    if (decision.kind === 'create') {
-      const created = yield* approvals.create({
-        machine,
-        input,
-        secrets,
-        covered,
-        attemptId: input.approval.attemptId,
-        client: request.client,
-      });
-      now = created.now;
-      ownRequestId = created.row.id;
-      decision = decideValues({
-        now,
+    return yield* decisionResult(
+      decideValues({
+        now: created.now,
         own: created.row,
         remembered: [],
         covered,
         payload: input,
-      });
-    }
-    return yield* decisionResult(decision, now, request.origin, ownRequestId);
+      }),
+      created.now,
+      request.origin,
+      created.row.id,
+    );
   });
 }
 function decisionResult(
-  decision: ValuesDecision,
+  decision: ValuesResult,
   now: number,
   origin: string,
   ownRequestId: string | null,
@@ -215,9 +204,7 @@ function decisionResult(
       kind: 'pending' as const,
       answer: pendingAnswer(decision.request, now, origin),
     });
-  if (decision.kind === 'deliver')
-    return Effect.succeed({ ...decision, ownRequestId });
-  return Effect.fail(new HttpApiError.ServiceUnavailable());
+  return Effect.succeed({ ...decision, ownRequestId });
 }
 function decrypt(
   paths: string[],

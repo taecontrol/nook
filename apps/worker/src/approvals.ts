@@ -3,8 +3,7 @@ import {
   ApprovalLimit,
   type ApprovalReference,
   type ApprovalView,
-  AskFirstMark,
-  ApprovalRemember as Remember,
+  type AskFirstMark,
   type RunSecrets,
   rememberDuration,
 } from '@nook/contract';
@@ -16,6 +15,7 @@ import {
   type OwnerChoice,
   viewState,
 } from './approval-decision.ts';
+import { StoredApproved, StoredRequest } from './approval-rows.ts';
 import {
   type AuditMachine,
   approvalEventInsert,
@@ -24,95 +24,55 @@ import {
   useInsert,
 } from './audit.ts';
 import { unavailable } from './http-errors.ts';
+import type { OwnerFacts } from './owner-request.ts';
 
-const rowFacts = {
-  id: Schema.String,
-  machine_id: Schema.String,
-  machine_name: Schema.String,
-  attempt_id: Schema.String,
-  agent: Schema.NullOr(Schema.String),
-  agent_session: Schema.NullOr(Schema.String),
-  agent_thread: Schema.NullOr(Schema.String),
-  secrets_json: Schema.fromJsonString(
-    Schema.Array(
-      Schema.Struct({
-        path: Schema.String,
-        coveredBy: Schema.NullOr(AskFirstMark),
-      }),
-    ),
-  ),
-  covered_json: Schema.fromJsonString(Schema.Array(Schema.String)),
-  purpose: Schema.String,
-  working_directory: Schema.String,
-  executable: Schema.String,
-  client: Schema.NullOr(Schema.String),
-  requested_at: Schema.Number,
-  expires_at: Schema.Number,
-};
-const StoredRequest = Schema.Union([
-  Schema.Struct({
-    ...rowFacts,
-    status: Schema.Literal('pending'),
-    remember: Schema.Null,
-    decided_at: Schema.Null,
-    valid_until: Schema.Null,
-  }),
-  Schema.Struct({
-    ...rowFacts,
-    status: Schema.Literal('approved'),
-    remember: Remember,
-    decided_at: Schema.Number,
-    valid_until: Schema.Number,
-  }),
-  Schema.Struct({
-    ...rowFacts,
-    status: Schema.Literal('denied'),
-    remember: Schema.Null,
-    decided_at: Schema.Number,
-    valid_until: Schema.Null,
-  }),
-  Schema.Struct({
-    ...rowFacts,
-    status: Schema.Literals(['withdrawn', 'settled']),
-    remember: Schema.Null,
-    decided_at: Schema.Null,
-    valid_until: Schema.Null,
-  }),
-]);
-export type StoredRequest = typeof StoredRequest.Type;
-const StoredApproved = Schema.Struct({
-  id: Schema.String,
-  machine_id: Schema.String,
-  status: Schema.Literal('approved'),
-  remember: Remember,
-  decided_at: Schema.Number,
-  valid_until: Schema.Number,
-  covered_json: rowFacts.covered_json,
-});
-export type StoredApproved = typeof StoredApproved.Type;
-export type OwnerFacts = { ip: string | null; country: string | null };
-export function ownerFacts(request: Request): OwnerFacts {
-  return {
-    ip: request.headers.get('CF-Connecting-IP') || null,
-    country:
-      (request as Request & { cf?: { country?: string } }).cf?.country || null,
-  };
-}
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(StoredRequest));
 function decodeRead(rows: readonly unknown[]) {
   return decodeRows(rows).pipe(unavailable);
 }
-// A retry must remain bound to its original payload even after its last mark is removed.
-// Join this indexed lookup to the existing ciphertext/marks batch; it adds no round trip.
-export function attemptRead(
+function now(sql: D1Client.D1Client) {
+  return sql`unixepoch('subsec')*1000`;
+}
+function clockRead(sql: D1Client.D1Client) {
+  return sql<{ now: number }>`SELECT ${now(sql)} AS now`;
+}
+function attemptRow(
   sql: D1Client.D1Client,
   machineId: string,
   attemptId: string,
 ) {
-  return sql`SELECT * FROM approval_requests WHERE machine_id=${machineId} AND attempt_id=${attemptId}`;
+  return sql`FROM approval_requests WHERE machine_id=${machineId} AND attempt_id=${attemptId}`;
 }
-export function readAttempt(rows: readonly unknown[]) {
-  return decodeRead(rows).pipe(Effect.map((decoded) => decoded[0]));
+function rememberedFor(sql: D1Client.D1Client) {
+  return sql`status='approved' AND remember<>'once' AND valid_until>${now(sql)}`;
+}
+// A retry stays bound to its original payload even after its last mark is removed.
+// Read the attempt, clock and remembered approvals in the ciphertext/marks batch.
+export function runApprovalReads(
+  sql: D1Client.D1Client,
+  machineId: string,
+  attemptId: string,
+) {
+  return [
+    sql`SELECT * ${attemptRow(sql, machineId, attemptId)}`,
+    clockRead(sql),
+    sql`SELECT id,machine_id,status,remember,decided_at,valid_until,covered_json FROM approval_requests WHERE machine_id=${machineId} AND ${rememberedFor(sql)} ORDER BY valid_until DESC,id`,
+  ] as const;
+}
+const RunApprovalRead = Schema.Tuple([
+  Schema.Array(StoredRequest),
+  Schema.Array(Schema.Struct({ now: Schema.Number })),
+  Schema.Array(StoredApproved),
+]);
+export function readRunApprovals(rows: readonly unknown[]) {
+  return Schema.decodeUnknownEffect(RunApprovalRead)(rows).pipe(
+    unavailable,
+    Effect.map(([own, clock, remembered]) => ({
+      own: own[0],
+      now: clock[0].now,
+      remembered,
+    })),
+  );
 }
 function toView(row: StoredRequest, now: number): ApprovalView {
   const facts = {
@@ -175,7 +135,7 @@ export function pendingAnswer(
     },
   };
 }
-export type Delivery = {
+type Delivery = {
   machine: AuditMachine & { grantJson: string };
   input: RunSecrets;
   paths: readonly string[];
@@ -187,29 +147,12 @@ export type Delivery = {
 export const machineApprovals = Effect.gen(function* () {
   const sql = yield* D1Client.D1Client;
   return {
-    read: (key: { machineId: string; attemptId: string }) =>
-      Effect.gen(function* () {
-        const [clock, own, remembered] = yield* sql
-          .batch([
-            sql<{ now: number }>`SELECT unixepoch('subsec')*1000 AS now`,
-            sql`SELECT * FROM approval_requests WHERE machine_id=${key.machineId} AND attempt_id=${key.attemptId}`,
-            sql`SELECT id,machine_id,status,remember,decided_at,valid_until,covered_json FROM approval_requests WHERE machine_id=${key.machineId} AND status='approved' AND remember<>'once' AND valid_until>unixepoch('subsec')*1000 ORDER BY valid_until DESC,id`,
-          ])
-          .pipe(unavailable);
-        return {
-          now: clock[0].now,
-          own: (yield* decodeRead(own))[0],
-          remembered: yield* Schema.decodeUnknownEffect(
-            Schema.Array(StoredApproved),
-          )(remembered).pipe(unavailable),
-        };
-      }),
     create: (request: {
       machine: AuditMachine;
       input: RunSecrets;
       secrets: readonly {
         path: string;
-        coveredBy: typeof AskFirstMark.Type | null;
+        coveredBy: AskFirstMark | null;
       }[];
       covered: readonly string[];
       attemptId: string;
@@ -220,8 +163,8 @@ export const machineApprovals = Effect.gen(function* () {
         const claim = claimColumns(request.input.agentSession);
         const [, , , rows, clock] = yield* sql
           .batch([
-            sql`DELETE FROM approval_requests WHERE max(expires_at,coalesce(valid_until,0))<unixepoch('subsec')*1000-86400000`,
-            sql`INSERT INTO approval_requests(id,machine_id,machine_name,attempt_id,agent,agent_session,agent_thread,secrets_json,covered_json,purpose,working_directory,executable,client) SELECT ${id},${request.machine.id},${request.machine.machine},${request.attemptId},${claim.agent},${claim.agent_session},${claim.agent_thread},${JSON.stringify(request.secrets)},${JSON.stringify(request.covered)},${request.input.purpose},${request.input.workingDirectory},${request.input.executable},${request.client} WHERE (SELECT count(*) FROM approval_requests WHERE status='pending' AND expires_at>unixepoch('subsec')*1000 AND machine_id=${request.machine.id})<5 AND (SELECT count(*) FROM approval_requests WHERE status='pending' AND expires_at>unixepoch('subsec')*1000)<50 ON CONFLICT(machine_id,attempt_id) DO NOTHING`,
+            sql`DELETE FROM approval_requests WHERE max(expires_at,coalesce(valid_until,0))<${now(sql)}-86400000`,
+            sql`INSERT INTO approval_requests(id,machine_id,machine_name,attempt_id,agent,agent_session,agent_thread,secrets_json,covered_json,purpose,working_directory,executable,client) SELECT ${id},${request.machine.id},${request.machine.machine},${request.attemptId},${claim.agent},${claim.agent_session},${claim.agent_thread},${JSON.stringify(request.secrets)},${JSON.stringify(request.covered)},${request.input.purpose},${request.input.workingDirectory},${request.input.executable},${request.client} WHERE (SELECT count(*) FROM approval_requests WHERE status='pending' AND expires_at>${now(sql)} AND machine_id=${request.machine.id})<5 AND (SELECT count(*) FROM approval_requests WHERE status='pending' AND expires_at>${now(sql)})<50 ON CONFLICT(machine_id,attempt_id) DO NOTHING`,
             approvalEventInsert(
               sql,
               {
@@ -233,8 +176,8 @@ export const machineApprovals = Effect.gen(function* () {
               },
               sql`EXISTS(SELECT 1 FROM approval_requests WHERE id=${id})`,
             ),
-            sql`SELECT * FROM approval_requests WHERE machine_id=${request.machine.id} AND attempt_id=${request.attemptId}`,
-            sql<{ now: number }>`SELECT unixepoch('subsec')*1000 AS now`,
+            sql`SELECT * ${attemptRow(sql, request.machine.id, request.attemptId)}`,
+            clockRead(sql),
           ])
           .pipe(unavailable);
         const row = (yield* decodeRead(rows))[0];
@@ -251,12 +194,12 @@ export const machineApprovals = Effect.gen(function* () {
       const { machine, input, paths, approval, ownRequestId, guard, settle } =
         delivery;
       const approvalGuard = approval
-        ? sql`EXISTS(SELECT 1 FROM approval_requests a WHERE a.id=${approval.id} AND a.machine_id=${machine.id} AND a.status='approved' AND a.remember=${approval.remember} AND a.valid_until>unixepoch('subsec')*1000)`
+        ? sql`EXISTS(SELECT 1 FROM approval_requests a WHERE a.id=${approval.id} AND a.machine_id=${machine.id} AND a.status='approved' AND a.remember=${approval.remember} AND a.valid_until>${now(sql)})`
         : sql`1`;
       // Match absence too: a newly created attempt needs payload validation and
       // may need settlement before this run can deliver.
       const attemptAllowed = input.approval
-        ? sql`(SELECT id FROM approval_requests WHERE machine_id=${machine.id} AND attempt_id=${input.approval.attemptId}) IS ${ownRequestId} AND NOT EXISTS(SELECT 1 FROM approval_requests WHERE machine_id=${machine.id} AND attempt_id=${input.approval.attemptId} AND status IN ('denied','withdrawn'))`
+        ? sql`(SELECT id ${attemptRow(sql, machine.id, input.approval.attemptId)}) IS ${ownRequestId} AND NOT EXISTS(SELECT 1 ${attemptRow(sql, machine.id, input.approval.attemptId)} AND status IN ('denied','withdrawn'))`
         : sql`1`;
       const access = sql`(${attemptAllowed}) AND EXISTS(SELECT 1 FROM machine_tokens WHERE id=${machine.id} AND grant_json=${machine.grantJson}) AND (${guard}) AND (${approvalGuard})`;
       const statements = [
@@ -274,7 +217,7 @@ export const machineApprovals = Effect.gen(function* () {
     withdraw: (machineId: string, id: string) =>
       sql
         .batch([
-          sql`UPDATE approval_requests SET status='withdrawn' WHERE id=${id} AND machine_id=${machineId} AND status='pending' AND expires_at>unixepoch('subsec')*1000`,
+          sql`UPDATE approval_requests SET status='withdrawn' WHERE id=${id} AND machine_id=${machineId} AND status='pending' AND expires_at>${now(sql)}`,
           requestApprovalEventInsert(
             sql,
             id,
@@ -292,10 +235,7 @@ export const ownerApprovals = Effect.gen(function* () {
   const readView = (id: string) =>
     Effect.gen(function* () {
       const [rows, clock] = yield* sql
-        .batch([
-          getRows(id),
-          sql<{ now: number }>`SELECT unixepoch('subsec')*1000 AS now`,
-        ])
+        .batch([getRows(id), clockRead(sql)])
         .pipe(unavailable);
       const row = (yield* decodeRead(rows))[0];
       if (!row) return yield* Effect.fail(new HttpApiError.NotFound());
@@ -307,9 +247,9 @@ export const ownerApprovals = Effect.gen(function* () {
       Effect.gen(function* () {
         const [pending, remembered, clock] = yield* sql
           .batch([
-            sql`SELECT * FROM approval_requests WHERE status='pending' AND expires_at>unixepoch('subsec')*1000 ORDER BY requested_at,id`,
-            sql`SELECT * FROM approval_requests WHERE status='approved' AND remember<>'once' AND valid_until>unixepoch('subsec')*1000 ORDER BY valid_until,id`,
-            sql<{ now: number }>`SELECT unixepoch('subsec')*1000 AS now`,
+            sql`SELECT * FROM approval_requests WHERE status='pending' AND expires_at>${now(sql)} ORDER BY requested_at,id`,
+            sql`SELECT * FROM approval_requests WHERE ${rememberedFor(sql)} ORDER BY valid_until,id`,
+            clockRead(sql),
           ])
           .pipe(unavailable);
         return {
@@ -327,7 +267,7 @@ export const ownerApprovals = Effect.gen(function* () {
         const window = remember ? rememberDuration[remember] : null;
         const [updated, , rows, clock] = yield* sql
           .batch([
-            sql`UPDATE approval_requests SET status=${choice.kind === 'approve' ? 'approved' : 'denied'},remember=${remember},decided_at=unixepoch('subsec')*1000,valid_until=CASE WHEN ${window} IS NULL THEN NULL ELSE unixepoch('subsec')*1000+${window} END WHERE id=${id} AND status='pending' AND expires_at>unixepoch('subsec')*1000 RETURNING id`,
+            sql`UPDATE approval_requests SET status=${choice.kind === 'approve' ? 'approved' : 'denied'},remember=${remember},decided_at=${now(sql)},valid_until=CASE WHEN ${window} IS NULL THEN NULL ELSE ${now(sql)}+${window} END WHERE id=${id} AND status='pending' AND expires_at>${now(sql)} RETURNING id`,
             requestApprovalEventInsert(
               sql,
               id,
@@ -338,7 +278,7 @@ export const ownerApprovals = Effect.gen(function* () {
               facts,
             ),
             getRows(id),
-            sql<{ now: number }>`SELECT unixepoch('subsec')*1000 AS now`,
+            clockRead(sql),
           ])
           .pipe(unavailable);
         const row = (yield* decodeRead(rows))[0];

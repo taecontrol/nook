@@ -1,27 +1,21 @@
-import type {
-  ApprovalList,
-  ApprovalView,
-  ApprovalRemember as Remember,
-} from '@nook/contract';
+import type { ApprovalList } from '@nook/contract';
 import {
   type QueryClient,
   queryOptions,
   useQuery,
-  useQueryClient,
 } from '@tanstack/react-query';
-import { useState } from 'react';
-import { ApiError, runApi } from './api-client';
-import { approvalScreen, type Choice } from './approval-screen';
+import { runApi } from './api-client';
+import { approvalTimeLeft } from './approval-time';
 import { useCountdown } from './use-countdown';
 
-const approvalsOptions = queryOptions({
+export const approvalsOptions = queryOptions({
   queryKey: ['approvals'],
   queryFn: ({ signal }) => runApi((api) => api.approvals.list(), signal),
   retry: false,
   staleTime: 30_000,
   refetchOnWindowFocus: 'always',
 });
-const approvalOptions = (id: string) =>
+export const approvalOptions = (id: string) =>
   queryOptions({
     queryKey: ['approval', id],
     queryFn: ({ signal }) =>
@@ -45,98 +39,22 @@ export function useApprovals() {
   const query = useQuery(approvalsOptions);
   return { ...query, visible: useVisibleApprovals(query.data) };
 }
-function deadline(view: ApprovalView) {
-  return Date.parse(
-    view.state === 'approved' ? view.validUntil : view.expiresAt,
-  );
-}
 function useVisibleApprovals(data: typeof ApprovalList.Type | undefined) {
   const now = Date.now();
   const { pending = [], remembered = [] } = data ?? {};
   const all = [...pending, ...remembered];
-  const next = Math.min(...all.map(deadline).filter((at) => at > now));
+  const next = Math.min(
+    ...all
+      .map((view) => now + approvalTimeLeft(view, now))
+      .filter((at) => at > now),
+  );
   // Rows, section counts and the sidebar badge share browser-clock expiry.
   useCountdown(
     Number.isFinite(next) ? new Date(next).toISOString() : undefined,
   );
   return {
-    pending: pending.filter((view) => deadline(view) > now),
-    remembered: remembered.filter((view) => deadline(view) > now),
+    pending: pending.filter((view) => approvalTimeLeft(view, now) > 0),
+    remembered: remembered.filter((view) => approvalTimeLeft(view, now) > 0),
     now,
-  };
-}
-export function useApproval(id: string) {
-  const queries = useQueryClient();
-  const load = useQuery(approvalOptions(id));
-  const [local, setLocal] = useState<{
-    submitting?: Choice;
-    unsaved?: boolean;
-    choice?: Choice;
-  }>({});
-  const [failure, setFailure] = useState<'network'>();
-  const [decisionError, setDecisionError] = useState<Error>();
-  const msLeft = useCountdown(
-    load.data?.state === 'pending' ? load.data.expiresAt : undefined,
-  );
-  async function recover(error: unknown, choice: Choice) {
-    if (error instanceof ApiError && error.tag === 'Expired') {
-      setLocal({ unsaved: true, choice });
-      return;
-    }
-    if (error instanceof ApiError && error.tag === 'NotFound') {
-      setDecisionError(error);
-      return;
-    }
-    if (error instanceof ApiError && error.tag === 'AlreadyHandled') {
-      await load.refetch({ throwOnError: true });
-      return;
-    }
-    setFailure('network');
-  }
-  async function decide(choice: Remember | 'deny') {
-    if (local.submitting) return;
-    setFailure(undefined);
-    setLocal({ submitting: choice });
-    try {
-      const view = await runApi((api) =>
-        choice === 'deny'
-          ? api.approvals.deny({ params: { id } })
-          : api.approvals.approve({
-              params: { id },
-              payload: { remember: choice },
-            }),
-      );
-      await queries.cancelQueries({
-        queryKey: approvalOptions(id).queryKey,
-        exact: true,
-      });
-      queries.setQueryData(approvalOptions(id).queryKey, view);
-      void queries.invalidateQueries({ queryKey: approvalsOptions.queryKey });
-    } catch (error) {
-      try {
-        await recover(error, choice);
-      } catch {
-        setFailure('network');
-      }
-    } finally {
-      setLocal((current) => ({ ...current, submitting: undefined }));
-    }
-  }
-  return {
-    screen: load.data
-      ? approvalScreen(load.data, Date.now(), local)
-      : undefined,
-    msLeft,
-    failure,
-    decide,
-    load: {
-      ...load,
-      error: decisionError ?? load.error,
-      isError: !!decisionError || load.isError,
-      refetch: () => {
-        setDecisionError(undefined);
-        return load.refetch();
-      },
-    },
   };
 }

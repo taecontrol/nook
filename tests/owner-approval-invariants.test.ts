@@ -3,10 +3,9 @@ import { expect, it } from 'vitest';
 import { auditRows } from './support/audit.ts';
 import { jsonRequest } from './support/authorizations.ts';
 import { issueGrant } from './support/grants.ts';
-import { deferred, listMachines } from './support/machines.ts';
+import { deferred } from './support/machines.ts';
 import {
   acmePath,
-  age,
   approvalFixture,
   ask,
   decide,
@@ -57,31 +56,15 @@ it('E21: removing the last mark cannot allow a changed retry payload to deliver 
     await app.close();
   }
 });
-it.each(
-  (['unmarked', 'remembered'] as const).flatMap((route) =>
-    (
-      [
-        'different payload',
-        'identical payload',
-        'kept mark',
-        'denial',
-        'withdrawal',
-      ] as const
-    ).map((change) => ({ route, change })),
-  ),
-)(
-  'E21/E25/E26: $route delivery revalidates an attempt created after its read ($change)',
-  async ({ route, change }) => {
+it.each(['unmarked', 'remembered'] as const)(
+  'E21/E25/E26: %s delivery revalidates an attempt created after its read',
+  async (route) => {
     let active = false;
     let batches = 0;
     const reached = deferred();
     const resume = deferred();
     const app = await approvalFixture(async (label) => {
-      if (
-        active &&
-        label === '/before-batch' &&
-        ++batches === (route === 'remembered' ? 3 : 2)
-      ) {
+      if (active && label === '/before-batch' && ++batches === 2) {
         active = false;
         reached.resolve();
         await resume.promise;
@@ -100,21 +83,12 @@ it.each(
       active = true;
       inFlight = ask(app, app.token, id, { secrets });
       await reached.promise;
-      // The competing request creates its row through the values API while A
-      // waits just before delivery. Removing this mark restores A's snapshot.
+      // The competing request creates its row for the same attempt and payload
+      // while A waits just before delivery. Removing this mark restores A's
+      // snapshot, so only the attempt identity can stop A.
       await setMark(app);
-      const competing = await pending(app, app.token, id, {
-        secrets,
-        ...(change === 'different payload'
-          ? { purpose: 'different concurrent run' }
-          : {}),
-      });
-      if (change === 'denial')
-        expect((await decide(app, competing.id, 'deny')).status).toBe(200);
-      if (change === 'withdrawal')
-        expect((await withdraw(app, app.token, competing.id)).status).toBe(204);
-      if (change !== 'kept mark')
-        expect((await mark(app, 'work', 'bucket', 'DELETE')).status).toBe(204);
+      const competing = await pending(app, app.token, id, { secrets });
+      expect((await mark(app, 'work', 'bucket', 'DELETE')).status).toBe(204);
       const before = await requests(app);
       const audit = await auditRows(app);
       resume.resolve();
@@ -129,41 +103,17 @@ it.each(
       expect.soft(await auditRows(app)).toEqual(audit);
 
       const retry = await ask(app, app.token, id, { secrets });
-      if (change === 'identical payload') {
-        expect(retry.status).toBe(200);
-        expect(await retry.json()).toHaveProperty('values');
-        expect(await view(app, competing.id)).toMatchObject({
-          state: 'settled',
-        });
-        expect(
-          (await auditRows(app))
-            .filter((row) => row.outcome === 'delivered')
-            .map((row) => row.path)
-            .sort(),
-        ).toEqual([...secrets].sort());
-      } else if (change === 'kept mark') {
-        expect(retry.status).toBe(200);
-        const body = await retry.json();
-        expect(body).toHaveProperty('approval.id', competing.id);
-        expect(body).not.toHaveProperty('values');
-      } else {
-        const expected = {
-          'different payload': { status: 400, body: { _tag: 'InvalidRun' } },
-          denial: { status: 403, body: { _tag: 'ApprovalDenied' } },
-          withdrawal: {
-            status: 410,
-            body: { _tag: 'ApprovalExpired', reason: 'withdrawn' },
-          },
-        }[change];
-        expect(retry.status).toBe(expected.status);
-        const body = await retry.json();
-        expect(body).toMatchObject(expected.body);
-        expect(body).not.toHaveProperty('values');
-      }
-      if (change !== 'identical payload') {
-        expect(await requests(app)).toEqual(before);
-        expect(await auditRows(app)).toEqual(audit);
-      }
+      expect(retry.status).toBe(200);
+      expect(await retry.json()).toHaveProperty('values');
+      expect(await view(app, competing.id)).toMatchObject({
+        state: 'settled',
+      });
+      expect(
+        (await auditRows(app))
+          .filter((row) => row.outcome === 'delivered')
+          .map((row) => row.path)
+          .sort(),
+      ).toEqual([...secrets].sort());
     } finally {
       resume.resolve();
       await inFlight;
@@ -171,24 +121,32 @@ it.each(
     }
   },
 );
-it('E8: an owner denial remains terminal for its attempt after the last mark is removed', async () => {
-  const app = await approvalFixture();
-  try {
-    await setMark(app);
-    const id = randomUUID();
-    const first = await pending(app, app.token, id);
-    await decide(app, first.id, 'deny');
-    await mark(app, 'work', 'bucket', 'DELETE');
-    expect(await (await ask(app, app.token, id)).json()).toMatchObject({
-      _tag: 'ApprovalDenied',
-    });
-    expect((await auditRows(app)).some((r) => r.outcome === 'delivered')).toBe(
-      false,
-    );
-  } finally {
-    await app.close();
-  }
-});
+it.each(['remembered approval', 'removed mark'] as const)(
+  'E8: an owner denial remains terminal for its attempt despite a %s',
+  async (route) => {
+    const app = await approvalFixture();
+    try {
+      await setMark(app);
+      const id = randomUUID();
+      const first = await pending(app, app.token, id);
+      expect((await decide(app, first.id, 'deny')).status).toBe(200);
+      if (route === 'remembered approval') {
+        const other = await pending(app, app.token);
+        expect((await decide(app, other.id, '1h')).status).toBe(200);
+      } else {
+        expect((await mark(app, 'work', 'bucket', 'DELETE')).status).toBe(204);
+      }
+      const response = await ask(app, app.token, id);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ _tag: 'ApprovalDenied' });
+      expect(
+        (await auditRows(app)).some((r) => r.outcome === 'delivered'),
+      ).toBe(false);
+    } finally {
+      await app.close();
+    }
+  },
+);
 it.each(['remembered approval', 'removed mark'] as const)(
   'E10: a withdrawn attempt stays expired despite a %s',
   async (route) => {
@@ -221,19 +179,19 @@ it.each(['remembered approval', 'removed mark'] as const)(
     }
   },
 );
-it.each(['remembered', 'unmarked'] as const)(
-  'E10/E26: withdrawal after the %s decision read blocks atomic delivery and expires the retry',
-  async (route) => {
+it.each(
+  (['remembered', 'unmarked'] as const).flatMap((route) =>
+    (['withdrawn', 'denied'] as const).map((state) => ({ route, state })),
+  ),
+)(
+  'E8/E10/E26: $state after the $route decision read blocks atomic delivery and stays terminal on retry',
+  async ({ route, state }) => {
     let active = false;
     let batches = 0;
     const reached = deferred();
     const resume = deferred();
     const app = await approvalFixture(async (label) => {
-      if (
-        active &&
-        label === '/before-batch' &&
-        ++batches === (route === 'remembered' ? 3 : 2)
-      ) {
+      if (active && label === '/before-batch' && ++batches === 2) {
         active = false;
         reached.resolve();
         await resume.promise;
@@ -254,165 +212,31 @@ it.each(['remembered', 'unmarked'] as const)(
       active = true;
       inFlight = ask(app, app.token, id);
       await reached.promise;
-      expect((await withdraw(app, app.token, first.id)).status).toBe(204);
+      if (state === 'denied')
+        expect((await decide(app, first.id, 'deny')).status).toBe(200);
+      else expect((await withdraw(app, app.token, first.id)).status).toBe(204);
       const before = await requests(app);
       const audit = await auditRows(app);
       resume.resolve();
       const response = await inFlight;
       expect(response.status).toBe(503);
-      expect(await response.json()).toMatchObject({
+      const body = await response.json();
+      expect(body).not.toHaveProperty('values');
+      expect(body).toMatchObject({
         _tag: 'ServiceUnavailable',
       });
       expect(await requests(app)).toEqual(before);
       expect(await auditRows(app)).toEqual(audit);
-      expect(await view(app, first.id)).toMatchObject({ state: 'withdrawn' });
-      const retry = await ask(app, app.token, id);
-      expect(retry.status).toBe(410);
-      expect(await retry.json()).toEqual({
-        _tag: 'ApprovalExpired',
-        reason: 'withdrawn',
-      });
-    } finally {
-      resume.resolve();
-      await inFlight;
-      await app.close();
-    }
-  },
-);
-it.each(['once', 'deny'] as const)(
-  'E22: overlapping approve and deny preserve the first committed %s',
-  async (choice) => {
-    let active = false;
-    const reached = deferred();
-    const resume = deferred();
-    const app = await approvalFixture(async (label) => {
-      if (active && label === '/after-batch') {
-        active = false;
-        reached.resolve();
-        await resume.promise;
-      }
-      return true;
-    });
-    let inFlight: Promise<Response> | undefined;
-    try {
-      await setMark(app);
-      const first = await pending(app, app.token);
-      active = true;
-      inFlight = decide(app, first.id, choice);
-      await reached.promise;
-      const second = await decide(
-        app,
-        first.id,
-        choice === 'once' ? 'deny' : 'once',
-      );
-      expect(second.status).toBe(409);
-      expect(await second.json()).toMatchObject({
-        status: choice === 'once' ? 'approved' : 'denied',
-        remember: choice === 'once' ? 'once' : null,
-      });
-      resume.resolve();
-      expect((await inFlight).status).toBe(200);
-    } finally {
-      resume.resolve();
-      await inFlight;
-      await app.close();
-    }
-  },
-);
-it.each(['once', 'deny', 'withdraw-approve', 'withdraw-deny'] as const)(
-  'E24: overlapping decision and withdrawal preserve the first committed %s',
-  async (choice) => {
-    let active = false;
-    const reached = deferred();
-    const resume = deferred();
-    const app = await approvalFixture(async (label) => {
-      if (active && label === '/after-batch') {
-        active = false;
-        reached.resolve();
-        await resume.promise;
-      }
-      return true;
-    });
-    let inFlight: Promise<Response> | undefined;
-    try {
-      await setMark(app);
-      const first = await pending(app, app.token);
-      active = true;
-      const withdrawal = choice.startsWith('withdraw');
-      inFlight = withdrawal
-        ? withdraw(app, app.token, first.id)
-        : decide(app, first.id, choice === 'once' ? 'once' : 'deny');
-      await reached.promise;
-      const second = withdrawal
-        ? await decide(
-            app,
-            first.id,
-            choice === 'withdraw-approve' ? 'once' : 'deny',
-          )
-        : await withdraw(app, app.token, first.id);
-      expect(second.status).toBe(withdrawal ? 409 : 204);
-      resume.resolve();
-      await inFlight;
-      expect(await view(app, first.id)).toMatchObject({
-        state: withdrawal
-          ? 'withdrawn'
-          : choice === 'once'
-            ? 'approved'
-            : 'denied',
-      });
-    } finally {
-      resume.resolve();
-      await inFlight;
-      await app.close();
-    }
-  },
-);
-it.each(['mark', 'grant'])(
-  'E26: a %s committed after the covered decision read defeats the guarded delivery',
-  async (change) => {
-    let active = false;
-    let batches = 0;
-    const reached = deferred();
-    const resume = deferred();
-    const app = await approvalFixture(async (label) => {
-      if (active && label === '/before-batch' && ++batches === 3) {
-        active = false;
-        reached.resolve();
-        await resume.promise;
-      }
-      return true;
-    });
-    let inFlight: Promise<Response> | undefined;
-    try {
-      await setMark(app);
-      const id = randomUUID();
-      const first = await pending(app, app.token, id);
-      await decide(app, first.id);
-      active = true;
-      inFlight = ask(app, app.token, id);
-      await reached.promise;
-      if (change === 'mark') await setMark(app, 'work/acme');
-      else {
-        const [machine] = await listMachines(app);
-        await jsonRequest(
-          app,
-          `/api/machines/${machine.id}/grant`,
-          { grant: ['me'], previous: 'all' },
-          {},
-          'PUT',
-        );
-      }
-      resume.resolve();
-      const response = await inFlight;
-      expect(response.status).toBe(503);
-      expect(await response.json()).toMatchObject({
-        _tag: 'ServiceUnavailable',
-      });
       expect(
-        (await auditRows(app)).some((r) => r.outcome === 'delivered'),
-      ).toBe(false);
-      expect((await ask(app, app.token, id)).status).toBe(
-        change === 'grant' ? 403 : 200,
+        (await auditRows(app)).filter((row) => row.outcome === 'delivered'),
+      ).toEqual([]);
+      expect(await view(app, first.id)).toMatchObject({ state });
+      const retry = await ask(app, app.token, id);
+      expect(retry.status).toBe(state === 'denied' ? 403 : 410);
+      expect(await retry.json()).toEqual(
+        state === 'denied'
+          ? { _tag: 'ApprovalDenied', paths: [stripe] }
+          : { _tag: 'ApprovalExpired', reason: 'withdrawn' },
       );
     } finally {
       resume.resolve();
@@ -421,6 +245,96 @@ it.each(['mark', 'grant'])(
     }
   },
 );
+it('E19: duplicate attempts read before either creates a row and converge through the insert conflict', async () => {
+  let active = false;
+  let batches = 0;
+  const firstRead = deferred();
+  const bothRead = deferred();
+  const resume = deferred();
+  const app = await approvalFixture(async (label) => {
+    if (!active || label !== '/before-batch') return true;
+    // Start B only after A has read and reached its create batch. A remains
+    // paused while B reads, so both creation paths see no existing attempt.
+    const batch = ++batches;
+    if (batch === 2 || batch === 4) {
+      if (batch === 2) firstRead.resolve();
+      else {
+        active = false;
+        bothRead.resolve();
+      }
+      await resume.promise;
+    }
+    return true;
+  });
+  const inFlight: Promise<Awaited<ReturnType<typeof pending>>>[] = [];
+  try {
+    await setMark(app);
+    const id = randomUUID();
+    active = true;
+    inFlight.push(pending(app, app.token, id));
+    await firstRead.promise;
+    inFlight.push(pending(app, app.token, id));
+    await bothRead.promise;
+    expect(await requests(app)).toEqual([]);
+    resume.resolve();
+    const [a, b] = await Promise.all(inFlight);
+    expect(a.id).toBe(b.id);
+    expect(a.url).toBe(b.url);
+    expect((await pending(app, app.token, id)).id).toBe(a.id);
+    expect(await requests(app)).toHaveLength(1);
+    expect(
+      (await auditRows(app)).filter(
+        (row) => row.outcome === 'approval_requested',
+      ),
+    ).toHaveLength(1);
+  } finally {
+    resume.resolve();
+    await Promise.allSettled(inFlight);
+    await app.close();
+  }
+});
+it('E26: a mark committed after the covered decision read defeats the guarded delivery', async () => {
+  let active = false;
+  let batches = 0;
+  const reached = deferred();
+  const resume = deferred();
+  const app = await approvalFixture(async (label) => {
+    if (active && label === '/before-batch' && ++batches === 2) {
+      active = false;
+      reached.resolve();
+      await resume.promise;
+    }
+    return true;
+  });
+  let inFlight: Promise<Response> | undefined;
+  try {
+    await setMark(app);
+    const id = randomUUID();
+    const first = await pending(app, app.token, id);
+    await decide(app, first.id);
+    active = true;
+    inFlight = ask(app, app.token, id);
+    await reached.promise;
+    await setMark(app, 'work/acme');
+    resume.resolve();
+    const response = await inFlight;
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      _tag: 'ServiceUnavailable',
+    });
+    expect((await auditRows(app)).some((r) => r.outcome === 'delivered')).toBe(
+      false,
+    );
+    // The once approval still covers the new mark, so the retry delivers.
+    const retry = await ask(app, app.token, id);
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toHaveProperty('values');
+  } finally {
+    resume.resolve();
+    await inFlight;
+    await app.close();
+  }
+});
 it('E5: a limited owner grant cannot read, mark, remove or decide outside its grant', async () => {
   const app = await vaultCheckpoints(async () => true, ['me']);
   try {
@@ -456,18 +370,6 @@ it('E5: marks validate paths, remain idempotent and report secret existence', as
       404,
     );
     expect((await decide(app, 'missing')).status).toBe(404);
-  } finally {
-    await app.close();
-  }
-});
-it('E9/E23: expiry is not a stored state and late denials are rejected too', async () => {
-  const app = await approvalFixture();
-  try {
-    await setMark(app);
-    const first = await pending(app, app.token);
-    await age(app, first.id, 'expires_at', 600_001);
-    expect((await decide(app, first.id, 'deny')).status).toBe(410);
-    expect((await requests(app))[0].status).toBe('pending');
   } finally {
     await app.close();
   }

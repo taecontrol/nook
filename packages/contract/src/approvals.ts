@@ -19,13 +19,23 @@ export function coveringMark(
   marks: readonly AskFirstMark[],
   path: string,
 ): AskFirstMark | null {
-  return (
-    marks.find((mark) =>
+  let selected: AskFirstMark | null = null;
+  for (const mark of marks) {
+    const matches =
       mark.kind === 'secret'
         ? mark.path === path
-        : path.startsWith(`${mark.path}/`),
-    ) ?? null
-  );
+        : path.startsWith(`${mark.path}/`);
+    if (!matches) continue;
+    // Matching buckets form one ancestor chain. Its outermost mark wins over
+    // child buckets and the exact secret, regardless of the caller's order.
+    if (
+      !selected ||
+      (mark.kind === 'bucket' &&
+        (selected.kind === 'secret' || mark.path.length < selected.path.length))
+    )
+      selected = mark;
+  }
+  return selected;
 }
 export const AskFirstList = Schema.Struct({
   marks: Schema.Array(
@@ -103,7 +113,7 @@ export class ApprovalExpired extends Schema.Error<ApprovalExpired>(
 )(
   {
     _tag: Schema.tag('ApprovalExpired'),
-    reason: Schema.Literals(['expired', 'withdrawn']),
+    reason: Schema.Literals(['expired', 'withdrawn', 'changed']),
   },
   { httpApiStatus: 410 },
 ) {}

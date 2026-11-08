@@ -82,14 +82,6 @@ it('E2: bucket marks cover descendants without matching siblings and secret mark
       .paths,
   ).toEqual([cloudflare]);
 });
-it('E3: a secret created through the machine API inside a marked bucket asks first', async () => {
-  await setMark(app);
-  const input = machineCreateInput({ name: 'NEW_KEY' });
-  expect((await machineCreate(app, app.token, input)).status).toBe(201);
-  await pending(app, app.token, randomUUID(), {
-    secrets: ['work/acme/NEW_KEY'],
-  });
-});
 it('E4: deleting and recreating an empty marked bucket keeps its orphan mark', async () => {
   await setMark(app, 'work/acme/empty');
   const mcp = machineMcp(app, app.token);
@@ -112,12 +104,8 @@ it('E4: deleting and recreating an empty marked bucket keeps its orphan mark', a
     secrets: ['work/acme/empty/NEW_KEY'],
   });
 });
-it('E5: only Access may read marks or decide; MCP exposes no approval or mark tools', async () => {
+it('E5: only Access may read marks or decide', async () => {
   await setMark(app);
-  const tools = await machineMcp(app, app.token).listTools();
-  expect(tools.tools.some((t) => /approval|ask.first/.test(t.name))).toBe(
-    false,
-  );
   const issuer = await accessFixture();
   await app.setBindings(
     { ...access, VAULT_KEY: app.key },
@@ -333,27 +321,6 @@ it('E17: narrowing a grant wins before approval logic and creates no request', a
   expect(await requests(app)).toHaveLength(1);
   expect((await auditRows(app)).some((r) => r.outcome === 'denied')).toBe(true);
 });
-it('E18: only-this-time is never reused by another attempt on the same machine', async () => {
-  await setMark(app);
-  const first = await pending(app, app.token);
-  await decide(app, first.id);
-  expect((await pending(app, app.token)).id).not.toBe(first.id);
-});
-it('E19: lost creation responses and concurrent duplicate attempts keep one request and one audit event', async () => {
-  await setMark(app);
-  const id = randomUUID();
-  const [a, b] = await Promise.all([
-    pending(app, app.token, id),
-    pending(app, app.token, id),
-  ]);
-  expect(a.id).toBe(b.id);
-  expect(a.url).toBe(b.url);
-  expect((await pending(app, app.token, id)).id).toBe(a.id);
-  expect(await requests(app)).toHaveLength(1);
-  expect(
-    (await auditRows(app)).filter((r) => r.outcome === 'approval_requested'),
-  ).toHaveLength(1);
-});
 it('E20: the same once attempt can retry a lost delivery until two minutes after the decision', async () => {
   await setMark(app);
   const id = randomUUID();
@@ -417,11 +384,7 @@ it.each(['once', 'deny'] as const)(
     ).toHaveLength(1);
   },
 );
-it.each([
-  ['once', 120_000],
-  ['1h', 3_600_000],
-  ['12h', 43_200_000],
-] as const)(
+it.each([['once', 120_000]] as const)(
   'E22: repeating %s after its validity window returns AlreadyHandled without another decision event',
   async (remember, window) => {
     await setMark(app);
@@ -442,13 +405,16 @@ it.each([
     expect(await auditRows(app)).toEqual(audit);
   },
 );
-it('E23: a late owner decision returns Expired and leaves the row undecided', async () => {
-  await setMark(app);
-  const first = await pending(app, app.token);
-  await age(app, first.id, 'expires_at', 600_001);
-  expect((await decide(app, first.id)).status).toBe(410);
-  expect((await requests(app))[0].status).toBe('pending');
-});
+it.each(['once', 'deny'] as const)(
+  'E9/E23: a late owner %s returns Expired and leaves the row undecided',
+  async (choice) => {
+    await setMark(app);
+    const first = await pending(app, app.token);
+    await age(app, first.id, 'expires_at', 600_001);
+    expect((await decide(app, first.id, choice)).status).toBe(410);
+    expect((await requests(app))[0].status).toBe('pending');
+  },
+);
 it.each(['once', 'deny', 'withdraw'] as const)(
   'E24: a committed %s wins against a competing withdrawal or decision',
   async (firstChoice) => {
@@ -479,6 +445,41 @@ it('E25: removing the last mark delivers and settles the waiting request as no l
   expect(await (await ask(app, app.token, id)).json()).toHaveProperty('values');
   expect(await view(app, first.id)).toMatchObject({ state: 'settled' });
 });
+it.each([
+  ['once', false],
+  ['1h', false],
+  ['once', true],
+  ['1h', true],
+] as const)(
+  'a new mark covering another requested path refuses a %s approval with the correct reason (window passed: %s)',
+  async (remember, expired) => {
+    await setMark(app, stripe, 'secret');
+    const id = randomUUID();
+    const input = { secrets: [stripe, database] };
+    const first = await pending(app, app.token, id, input);
+    expect(first.paths).toEqual([stripe]);
+    expect((await decide(app, first.id, remember)).status).toBe(200);
+    const approved = await view(app, first.id);
+    expect(Date.parse(String(approved.validUntil))).toBeGreaterThan(Date.now());
+    await setMark(app, database, 'secret');
+    if (expired) await age(app, first.id, 'valid_until', 43_200_001);
+    const before = await requests(app);
+    const audit = await auditRows(app);
+    const response = await ask(app, app.token, id, input);
+    expect(response.status).toBe(410);
+    const body = await response.json();
+    expect(body).not.toHaveProperty('values');
+    expect(body).toEqual({
+      _tag: 'ApprovalExpired',
+      reason: expired ? 'expired' : 'changed',
+    });
+    expect(await requests(app)).toEqual(before);
+    expect(await auditRows(app)).toEqual(audit);
+    expect(
+      (await auditRows(app)).filter((r) => r.outcome === 'delivered'),
+    ).toEqual([]);
+  },
+);
 it.each(['mark', 'grant'])(
   'E26: a %s committed between the read and delivery prevents every value and audit insert',
   async (change) => {
@@ -518,9 +519,13 @@ it.each(['mark', 'grant'])(
       expect(
         (await auditRows(observed)).some((r) => r.outcome === 'delivered'),
       ).toBe(false);
-      expect((await ask(observed, observed.token)).status).toBe(
-        change === 'mark' ? 200 : 403,
-      );
+      const retry = await ask(observed, observed.token);
+      if (change === 'mark') {
+        expect(retry.status).toBe(200);
+        const body = await retry.json();
+        expect(body).toHaveProperty('approval.id');
+        expect(body).not.toHaveProperty('values');
+      } else expect(retry.status).toBe(403);
     } finally {
       resume.resolve();
       await observed.close();

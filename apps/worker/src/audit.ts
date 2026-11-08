@@ -21,9 +21,9 @@ import {
   validateSecretPath,
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
-import { HttpApiError } from 'effect/http-api';
 import type { Fragment } from 'effect/sql/Statement';
 import { unavailable } from './http-errors.ts';
+import { type OwnerFacts, requireOwner } from './owner-request.ts';
 
 export type AuditMachine = { id: string; machine: string; grant: BucketGrant };
 const Facts = Schema.Struct({
@@ -127,12 +127,10 @@ function anyEntry(row: typeof AnyRow.Type): AuditEntry {
 export type FileActor = {
   principal: Principal;
   client: MemoryClient;
-  ip?: string | null;
-  country?: string | null;
-};
+} & Partial<OwnerFacts>;
 export function ownerFileActor(
   client: MemoryClient = { name: 'unknown', version: null },
-  facts: Pick<FileActor, 'ip' | 'country'> = {},
+  facts: Partial<OwnerFacts> = {},
 ): FileActor {
   return { principal: { kind: 'owner' }, client, ...facts };
 }
@@ -223,6 +221,9 @@ function approvalEntry(row: typeof ApprovalRow.Type): ApprovalAuditEntry {
 function randomId(sql: D1Client.D1Client) {
   return sql`lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-8' || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6)))`;
 }
+function pathBucket(sql: D1Client.D1Client) {
+  return sql`substr(p.value,1,length(p.value)-length(json_extract('["' || replace(p.value,'/','","') || '"]','$[#-1]'))-1)`;
+}
 export function useInsert(
   sql: D1Client.D1Client,
   machine: AuditMachine,
@@ -234,7 +235,7 @@ export function useInsert(
   const claim = claimColumns(input.agentSession);
   return sql<{
     id: string;
-  }>`INSERT INTO audit_entries(id,at,outcome,path,bucket,purpose,machine_id,machine_name,working_directory,executable,run_id,agent,agent_session,agent_thread,approval_id,approval_remember) SELECT ${randomId(sql)},${new Date().toISOString()},'delivered',p.value,substr(p.value,1,length(p.value)-length(json_extract('["' || replace(p.value,'/','","') || '"]','$[#-1]'))-1),${input.purpose},${machine.id},${machine.machine},${input.workingDirectory},${input.executable},${crypto.randomUUID()},${claim.agent},${claim.agent_session},${claim.agent_thread},${approval?.id ?? null},${approval?.remember ?? null} FROM json_each(${JSON.stringify(paths)}) p WHERE ${guard} RETURNING id`;
+  }>`INSERT INTO audit_entries(id,at,outcome,path,bucket,purpose,machine_id,machine_name,working_directory,executable,run_id,agent,agent_session,agent_thread,approval_id,approval_remember) SELECT ${randomId(sql)},${new Date().toISOString()},'delivered',p.value,${pathBucket(sql)},${input.purpose},${machine.id},${machine.machine},${input.workingDirectory},${input.executable},${crypto.randomUUID()},${claim.agent},${claim.agent_session},${claim.agent_thread},${approval?.id ?? null},${approval?.remember ?? null} FROM json_each(${JSON.stringify(paths)}) p WHERE ${guard} RETURNING id`;
 }
 export function approvalEventInsert(
   sql: D1Client.D1Client,
@@ -247,19 +248,19 @@ export function approvalEventInsert(
   },
   guard: Fragment,
 ) {
-  return sql`INSERT INTO audit_entries(id,at,outcome,path,bucket,purpose,machine_id,machine_name,working_directory,executable,run_id,approval_id) SELECT ${randomId(sql)},${new Date().toISOString()},${event.outcome},p.value,substr(p.value,1,length(p.value)-length(json_extract('["' || replace(p.value,'/','","') || '"]','$[#-1]'))-1),${event.input.purpose},${event.machine.id},${event.machine.machine},${event.input.workingDirectory},${event.input.executable},${crypto.randomUUID()},${event.approval?.id ?? null} FROM json_each(${JSON.stringify(event.paths)}) p WHERE ${guard}`;
+  return sql`INSERT INTO audit_entries(id,at,outcome,path,bucket,purpose,machine_id,machine_name,working_directory,executable,run_id,approval_id) SELECT ${randomId(sql)},${new Date().toISOString()},${event.outcome},p.value,${pathBucket(sql)},${event.input.purpose},${event.machine.id},${event.machine.machine},${event.input.workingDirectory},${event.input.executable},${crypto.randomUUID()},${event.approval?.id ?? null} FROM json_each(${JSON.stringify(event.paths)}) p WHERE ${guard}`;
 }
 export function requestApprovalEventInsert(
   sql: D1Client.D1Client,
   id: string,
   outcome: 'approval_granted' | 'approval_denied' | 'approval_withdrawn',
   guard: Fragment,
-  facts: { ip: string | null; country: string | null } = {
+  facts: OwnerFacts = {
     ip: null,
     country: null,
   },
 ) {
-  return sql`INSERT INTO audit_entries(id,at,outcome,path,bucket,purpose,machine_id,machine_name,working_directory,executable,run_id,approval_id,approval_remember,ip,country) SELECT lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-8' || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))),strftime('%Y-%m-%dT%H:%M:%fZ','now'),${outcome},p.value,substr(p.value,1,length(p.value)-length(json_extract('["' || replace(p.value,'/','","') || '"]','$[#-1]'))-1),a.purpose,a.machine_id,a.machine_name,a.working_directory,a.executable,a.id,a.id,a.remember,${facts.ip},${facts.country} FROM approval_requests a,json_each(a.covered_json) p WHERE a.id=${id} AND (${guard})`;
+  return sql`INSERT INTO audit_entries(id,at,outcome,path,bucket,purpose,machine_id,machine_name,working_directory,executable,run_id,approval_id,approval_remember,ip,country) SELECT ${randomId(sql)},strftime('%Y-%m-%dT%H:%M:%fZ','now'),${outcome},p.value,${pathBucket(sql)},a.purpose,a.machine_id,a.machine_name,a.working_directory,a.executable,a.id,a.id,a.remember,${facts.ip},${facts.country} FROM approval_requests a,json_each(a.covered_json) p WHERE a.id=${id} AND (${guard})`;
 }
 
 function encodeCursor(row: { at: string; id: string }) {
@@ -315,10 +316,7 @@ export function claimColumns(claim: AgentSessionClaim | undefined) {
 export const auditStore = Effect.gen(function* () {
   const sql = yield* D1Client.D1Client;
   return {
-    recordReveal: (
-      path: string,
-      facts: { ip: string | null; country: string | null },
-    ) =>
+    recordReveal: (path: string, facts: OwnerFacts) =>
       sql`INSERT INTO audit_entries(id, at, outcome, path, bucket, purpose, ip, country) VALUES (${crypto.randomUUID()}, ${new Date().toISOString()}, 'revealed', ${path}, ${splitSecretPath(path).bucket}, 'Revealed in web app', ${facts.ip}, ${facts.country})`.pipe(
         unavailable,
         Effect.asVoid,
@@ -343,8 +341,7 @@ export const auditStore = Effect.gen(function* () {
     },
     list: (grant: BucketGrant, input: AuditFilters) =>
       Effect.gen(function* () {
-        if (grant !== 'all')
-          return yield* Effect.fail(new HttpApiError.Forbidden());
+        yield* requireOwner(grant);
         const { bucket, secret, session, cursor } = yield* filters(input);
         const boundary = cursor
           ? sql`(at < ${cursor.at} OR (at = ${cursor.at} AND id < ${cursor.id}))`
