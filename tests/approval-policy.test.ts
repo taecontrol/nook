@@ -5,7 +5,7 @@ import {
   coveringMark,
 } from '../packages/contract/src/approvals.ts';
 
-it.each(['worker', 'web'] as const)(
+it.each(['worker', 'web', 'reversed'] as const)(
   '%s ordering chooses the outermost bucket before a secret mark',
   (caller) => {
     const chain: AskFirstMark[] = [
@@ -35,6 +35,7 @@ it.each(['worker', 'web'] as const)(
               : 0
           : a.kind.localeCompare(b.kind) || a.path.localeCompare(b.path);
       });
+      if (caller === 'reversed') marks.reverse();
       expect(coveringMark(marks, 'work/a-b/c2/d/e/f/KEY')).toEqual(
         matching[0] ?? null,
       );
