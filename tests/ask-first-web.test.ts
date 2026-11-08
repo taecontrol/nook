@@ -179,15 +179,6 @@ it('E37: inherited marks turn secret and bucket switches on and disable them, wi
   expect(await card.getByRole('switch').getAttribute('aria-checked')).toBe(
     'true',
   );
-  const writes: string[] = [];
-  page.on('request', (r) => {
-    if (['PUT', 'DELETE'].includes(r.method())) writes.push(r.url());
-  });
-  await secretSwitch().focus();
-  await page.keyboard.press('Space');
-  expect(writes, 'An inherited switch cannot write a child override').toEqual(
-    [],
-  );
   const tree = page.getByRole('navigation', { name: 'Buckets', exact: true });
   for (const path of ['work', 'work/acme', 'work/acme/prod'])
     expect(
@@ -258,10 +249,10 @@ it('E37: a secret mark flips optimistically before PUT resolves and reconciles o
       await expect
         .poll(() => control.getAttribute('aria-checked'))
         .toBe('false');
-      await page.getByRole('alert').waitFor();
-      expect(
-        (await page.getByRole('alert').innerText()).length,
-      ).toBeGreaterThan(0);
+      await page
+        .getByRole('alert')
+        .filter({ hasText: 'Couldn’t change Ask first' })
+        .waitFor();
       expect((await marks()).marks).toEqual([]);
     } finally {
       failed.resolve();

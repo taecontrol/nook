@@ -115,8 +115,14 @@ it.each([true, false])(
       ).toBeGreaterThan(previous);
       previous = index;
     }
-    if (withSession) expect(text).toContain(session.session);
-    else expect(text).not.toContain(session.session);
+    // The client is reported, so only a missing session reads Not reported.
+    if (withSession) {
+      expect(text).toContain(session.session);
+      expect(text).not.toContain('Not reported');
+    } else {
+      expect(text).not.toContain(session.session);
+      expect(text).toContain('Not reported');
+    }
     expect(
       await duration(page, 'Only this time').getAttribute('aria-checked'),
     ).toBe('true');
@@ -237,7 +243,7 @@ it('E33: the browser countdown expires without a reload, another document or a d
 });
 
 const states = [
-  ['approved', /^Approved/, 'Only this time', 'once'],
+  ['approved', 'Approved', 'Only this time', 'once'],
   ['approved', 'Approved for 12 hours', '22:42', '12h'],
   [
     'denied',
@@ -408,10 +414,10 @@ it.each(['network', '503'] as const)(
     await expectPendingPage(page);
     await duration(page, '1 hour').click();
     await approveButton(page).click();
-    await page.getByRole('alert').waitFor();
-    expect((await page.getByRole('alert').innerText()).length).toBeGreaterThan(
-      0,
-    );
+    await page
+      .getByRole('alert')
+      .filter({ hasText: "Couldn't confirm your choice" })
+      .waitFor();
     await expectPendingPage(page);
     expect(await approveButton(page).isEnabled()).toBe(true);
     expect(
