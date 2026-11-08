@@ -1,5 +1,5 @@
-import type { Page } from 'playwright';
-import { expect, it } from 'vitest';
+import type { Browser, Page } from 'playwright';
+import { afterAll, beforeAll, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import {
   approve,
@@ -11,9 +11,16 @@ import { closeBrowserPage } from './support/buckets-browser.ts';
 import { expectNoOverflow } from './support/page-checks.ts';
 import { runtime } from './support/runtime.ts';
 
+let browser: Browser;
+let closeBrowser: (() => Promise<void>) | undefined;
+beforeAll(async () => {
+  ({ browser, close: closeBrowser } = await launchTestBrowser());
+});
+afterAll(async () => {
+  await closeBrowser?.();
+});
 async function fixture() {
   const app = await ownerRuntime(await runtime());
-  const { browser, close: closeBrowser } = await launchTestBrowser();
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
   });
@@ -27,7 +34,6 @@ async function fixture() {
     page,
     close: async () => {
       await closeBrowserPage(page, context);
-      await closeBrowser();
       await app.close();
     },
   };
@@ -86,14 +92,15 @@ it('a revealed request expires automatically while the owner considers it', asyn
   const { app, page, close } = await fixture();
   try {
     const authorization = await createAuthorization(app);
-    await (await app.mf.getD1Database('DB'))
-      .prepare('UPDATE authorizations SET expires_at=?')
-      .bind(Date.now() + 3000)
-      .run();
+    // The browser clock decides when a revealed request expires, so drive it
+    // instead of racing a short server expiry.
+    await page.clock.install();
     await reveal(page, authorization.userCode);
     await page
       .getByRole('textbox', { name: 'Machine name', exact: true })
       .waitFor();
+    // Requests last ten minutes.
+    await page.clock.fastForward(601_000);
     await expect
       .poll(
         () =>
