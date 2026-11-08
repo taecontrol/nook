@@ -8,6 +8,7 @@ import {
   setupAgentCreateCli,
 } from './support/agent-create-cli.ts';
 import { acmePath, auditPageData, auditRows } from './support/audit.ts';
+import { deferred } from './support/machines.ts';
 import { decide, setMark, view } from './support/owner-approval.ts';
 import { createSecret, expectNoValue, secretInput } from './support/vault.ts';
 
@@ -95,19 +96,24 @@ async function fakeValues(
   answer: (
     call: number,
     payload: Record<string, unknown>,
-  ) => { status: number; body: unknown } | null,
+  ) =>
+    | { status: number; body: unknown }
+    | null
+    | Promise<{ status: number; body: unknown } | null>,
 ) {
   const bodies: Record<string, unknown>[] = [];
+  const withdrawals: string[] = [];
   const server = createServer(async (request, response) => {
     let text = '';
     for await (const chunk of request) text += String(chunk);
     if (!request.url?.endsWith('/values')) {
+      if (request.method === 'DELETE') withdrawals.push(request.url ?? '');
       response.writeHead(204).end();
       return;
     }
     const body = JSON.parse(text) as Record<string, unknown>;
     bodies.push(body);
-    const result = answer(bodies.length, body);
+    const result = await answer(bodies.length, body);
     if (!result) {
       response.destroy();
       return;
@@ -123,6 +129,7 @@ async function fakeValues(
   await configure(origin);
   return {
     bodies,
+    withdrawals,
     close: () =>
       new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
@@ -142,6 +149,56 @@ const shortPending = {
     interval: 2,
   },
 };
+it.each([
+  ['SIGINT', 130, 'pending'],
+  ['SIGTERM', 143, 'pending'],
+  ['SIGINT', 130, 'values'],
+  ['SIGTERM', 143, 'values'],
+] as const)(
+  '%s during the first values request exits %i after its %s answer and starts no child',
+  async (signal, code, answer) => {
+    const reached = deferred();
+    const release = deferred();
+    const fake = await fakeValues(async () => {
+      reached.resolve();
+      await release.promise;
+      return {
+        status: 200,
+        body:
+          answer === 'pending'
+            ? shortPending
+            : { values: [{ path: acmePath, value: 'synthetic-only' }] },
+      };
+    });
+    const running = keyring.start(args());
+    try {
+      await reached.promise;
+      expect(await running.kill(signal)).toBe(true);
+      // Keep the response in flight while Node handles the signal. Cancellation
+      // must not abandon a server-created request whose id is not known yet.
+      const exitedEarly = await Promise.race([
+        running.done.then(() => true),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 100)),
+      ]);
+      expect.soft(exitedEarly).toBe(false);
+      release.resolve();
+      const result = await running.done;
+      expect.soft(result.status).toBe(code);
+      expect.soft(result.stdout).toBe('');
+      expectNoValue(result.stderr, ['synthetic-only']);
+      expect.soft(fake.bodies).toHaveLength(1);
+      expect.soft(fake.withdrawals).toEqual(
+        answer === 'pending'
+          ? [`/api/machine/approvals/${shortPending.approval.id}`]
+          : [],
+      );
+    } finally {
+      release.resolve();
+      await running.done;
+      await fake.close();
+    }
+  },
+);
 it('E9/E11: a server unreachable after the pending answer still ends at the relative local deadline with run-again guidance', async () => {
   // Later pending answers would shorten the deadline again, so only the first
   // answer's expiresIn can end this wait.
