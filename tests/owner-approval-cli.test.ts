@@ -38,16 +38,19 @@ it('E6/E7/E13/E30: the real CLI waits privately, delivers the exact value, propa
   const input = secretInput({ name: 'GH_TOKEN' });
   await createSecret(app, input);
   await setMark(app);
-  await app.setBindings(app.bindings, { cf: { country: 'AR' } });
   const digest = createHash('sha256').update(input.value).digest('hex');
   const script = `const {createHash}=require('node:crypto');process.stdout.write(String(createHash('sha256').update(process.env.T).digest('hex')===${JSON.stringify(digest)}));process.exitCode=42`;
   const running = keyring.start(args(script), { CLAUDE_CODE_SESSION_ID: 's1' });
+  let finished = false;
+  void running.done.then(() => {
+    finished = true;
+  });
   await expect
     .poll(() => /\/approvals\/[0-9a-f-]+/.test(running.output()))
     .toBe(true);
   expect(running.output()).toContain(acmePath);
   expect(running.output()).toMatch(/\d+:\d{2} left/);
-  expect(running.output()).not.toContain('true');
+  expect(finished, 'The CLI waits for the owner').toBe(false);
   const id = /\/approvals\/([0-9a-f-]+)/.exec(running.output())?.[1] ?? '';
   expect((await auditRows(app)).map((r) => r.outcome)).toEqual([
     'approval_requested',
@@ -126,17 +129,18 @@ async function fakeValues(
       ),
   };
 }
+// expiresAt stays far ahead so only the relative expiresIn can end the wait.
 const shortPending = {
   approval: {
     id: '00000000-0000-4000-8000-000000000001',
     url: 'https://nook.test/approvals/request',
     paths: [acmePath],
-    expiresAt: '2026-11-02T12:00:00.000Z',
+    expiresAt: '2099-01-01T00:00:00.000Z',
     expiresIn: 1,
     interval: 2,
   },
 };
-it('E9/E11: pending until the local deadline exits 75 with run-again guidance', async () => {
+it('E9/E11: pending until the relative local deadline exits 75 with run-again guidance', async () => {
   const fake = await fakeValues(() => ({ status: 200, body: shortPending }));
   try {
     const result = await keyring.start(args()).done;
@@ -174,20 +178,31 @@ it('E11/E19: transient wait failures retry the identical attempt, then delivery 
   }
 });
 it.each([
-  ['ApprovalExpired', 75, 'Run again to ask again'],
-  ['ApprovalLimit', 75, 'Too many pending requests.'],
+  {
+    tag: 'ApprovalExpired',
+    code: 75,
+    message: 'Run again to ask again',
+    answer: (call: number) =>
+      call === 1
+        ? {
+            status: 200,
+            body: { approval: { ...shortPending.approval, expiresIn: 10 } },
+          }
+        : { status: 410, body: { _tag: 'ApprovalExpired', reason: 'expired' } },
+  },
+  {
+    tag: 'ApprovalLimit',
+    code: 75,
+    message: 'Too many pending requests.',
+    answer: () => ({
+      status: 429,
+      body: { _tag: 'ApprovalLimit', message: 'Too many pending requests.' },
+    }),
+  },
 ] as const)(
-  'E28: %s on the first ask maps to exit %i and its public reason',
-  async (tag, code, message) => {
-    const fake = await fakeValues(() => ({
-      status: tag === 'ApprovalExpired' ? 410 : 429,
-      body: {
-        _tag: tag,
-        paths: [acmePath],
-        reason: 'expired',
-        message: 'Too many pending requests.',
-      },
-    }));
+  'E9/E28: $tag maps to exit $code and its public reason',
+  async ({ code, message, answer }) => {
+    const fake = await fakeValues(answer);
     try {
       const result = await keyring.start(args()).done;
       expect(result.status).toBe(code);

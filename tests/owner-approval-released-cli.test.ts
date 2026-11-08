@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 import { expect, it } from 'vitest';
 import { testEnvironment } from '../scripts/lib/test-environment.ts';
 
-it('E29: the actual v0.3.2 failure mapping prints the approval update message and exits 1', async () => {
+it('E29: the actual v0.3.2 failure mapping prints the approval update message', async () => {
   const directory = await mkdtemp(resolve('.local', 'released-approval-'));
   try {
     const source = (path: string) =>
@@ -16,7 +16,7 @@ it('E29: the actual v0.3.2 failure mapping prints the approval update message an
     const outfile = resolve(directory, 'mapping.mjs');
     await build({
       stdin: {
-        contents: `import { runFailure } from 'released-run'; import { publicFailure } from 'released-api'; import { RequestFailure } from ${JSON.stringify(resolve('apps/cli/src/errors.ts'))}; export function mapped(message) { const server=publicFailure(JSON.stringify({_tag:'VaultNotConfigured',message}),503); const error=runFailure(new RequestFailure('Could not reach synthetic',server,server.message)); return {message:error.message,code:1}; }`,
+        contents: `import { runFailure } from 'released-run'; import { publicFailure } from 'released-api'; import { RequestFailure } from ${JSON.stringify(resolve('apps/cli/src/errors.ts'))}; export function mapped(message) { const server=publicFailure(JSON.stringify({_tag:'VaultNotConfigured',message}),503); const error=runFailure(new RequestFailure('Could not reach synthetic',server,server.message)); return error.message; }`,
         resolveDir: process.cwd(),
       },
       outfile,
@@ -43,7 +43,7 @@ it('E29: the actual v0.3.2 failure mapping prints the approval update message an
     const { mapped } = await import(outfile);
     const message =
       "work/acme/STRIPE_KEY needs the owner's approval, and this nook version cannot ask. Update nook.";
-    expect(mapped(message)).toEqual({ message, code: 1 });
+    expect(mapped(message)).toBe(message);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
