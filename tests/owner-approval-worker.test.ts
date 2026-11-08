@@ -321,21 +321,6 @@ it('E17: narrowing a grant wins before approval logic and creates no request', a
   expect(await requests(app)).toHaveLength(1);
   expect((await auditRows(app)).some((r) => r.outcome === 'denied')).toBe(true);
 });
-it('E19: lost creation responses and concurrent duplicate attempts keep one request and one audit event', async () => {
-  await setMark(app);
-  const id = randomUUID();
-  const [a, b] = await Promise.all([
-    pending(app, app.token, id),
-    pending(app, app.token, id),
-  ]);
-  expect(a.id).toBe(b.id);
-  expect(a.url).toBe(b.url);
-  expect((await pending(app, app.token, id)).id).toBe(a.id);
-  expect(await requests(app)).toHaveLength(1);
-  expect(
-    (await auditRows(app)).filter((r) => r.outcome === 'approval_requested'),
-  ).toHaveLength(1);
-});
 it('E20: the same once attempt can retry a lost delivery until two minutes after the decision', async () => {
   await setMark(app);
   const id = randomUUID();

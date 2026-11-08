@@ -179,9 +179,13 @@ it.each(['remembered approval', 'removed mark'] as const)(
     }
   },
 );
-it.each(['remembered', 'unmarked'] as const)(
-  'E10/E26: withdrawal after the %s decision read blocks atomic delivery and expires the retry',
-  async (route) => {
+it.each(
+  (['remembered', 'unmarked'] as const).flatMap((route) =>
+    (['withdrawn', 'denied'] as const).map((state) => ({ route, state })),
+  ),
+)(
+  'E8/E10/E26: $state after the $route decision read blocks atomic delivery and stays terminal on retry',
+  async ({ route, state }) => {
     let active = false;
     let batches = 0;
     const reached = deferred();
@@ -208,24 +212,32 @@ it.each(['remembered', 'unmarked'] as const)(
       active = true;
       inFlight = ask(app, app.token, id);
       await reached.promise;
-      expect((await withdraw(app, app.token, first.id)).status).toBe(204);
+      if (state === 'denied')
+        expect((await decide(app, first.id, 'deny')).status).toBe(200);
+      else expect((await withdraw(app, app.token, first.id)).status).toBe(204);
       const before = await requests(app);
       const audit = await auditRows(app);
       resume.resolve();
       const response = await inFlight;
       expect(response.status).toBe(503);
-      expect(await response.json()).toMatchObject({
+      const body = await response.json();
+      expect(body).not.toHaveProperty('values');
+      expect(body).toMatchObject({
         _tag: 'ServiceUnavailable',
       });
       expect(await requests(app)).toEqual(before);
       expect(await auditRows(app)).toEqual(audit);
-      expect(await view(app, first.id)).toMatchObject({ state: 'withdrawn' });
+      expect(
+        (await auditRows(app)).filter((row) => row.outcome === 'delivered'),
+      ).toEqual([]);
+      expect(await view(app, first.id)).toMatchObject({ state });
       const retry = await ask(app, app.token, id);
-      expect(retry.status).toBe(410);
-      expect(await retry.json()).toEqual({
-        _tag: 'ApprovalExpired',
-        reason: 'withdrawn',
-      });
+      expect(retry.status).toBe(state === 'denied' ? 403 : 410);
+      expect(await retry.json()).toEqual(
+        state === 'denied'
+          ? { _tag: 'ApprovalDenied', paths: [stripe] }
+          : { _tag: 'ApprovalExpired', reason: 'withdrawn' },
+      );
     } finally {
       resume.resolve();
       await inFlight;
@@ -233,6 +245,54 @@ it.each(['remembered', 'unmarked'] as const)(
     }
   },
 );
+it('E19: duplicate attempts read before either creates a row and converge through the insert conflict', async () => {
+  let active = false;
+  let batches = 0;
+  const firstRead = deferred();
+  const bothRead = deferred();
+  const resume = deferred();
+  const app = await approvalFixture(async (label) => {
+    if (!active || label !== '/before-batch') return true;
+    // Start B only after A has read and reached its create batch. A remains
+    // paused while B reads, so both creation paths see no existing attempt.
+    const batch = ++batches;
+    if (batch === 2 || batch === 4) {
+      if (batch === 2) firstRead.resolve();
+      else {
+        active = false;
+        bothRead.resolve();
+      }
+      await resume.promise;
+    }
+    return true;
+  });
+  const inFlight: Promise<Awaited<ReturnType<typeof pending>>>[] = [];
+  try {
+    await setMark(app);
+    const id = randomUUID();
+    active = true;
+    inFlight.push(pending(app, app.token, id));
+    await firstRead.promise;
+    inFlight.push(pending(app, app.token, id));
+    await bothRead.promise;
+    expect(await requests(app)).toEqual([]);
+    resume.resolve();
+    const [a, b] = await Promise.all(inFlight);
+    expect(a.id).toBe(b.id);
+    expect(a.url).toBe(b.url);
+    expect((await pending(app, app.token, id)).id).toBe(a.id);
+    expect(await requests(app)).toHaveLength(1);
+    expect(
+      (await auditRows(app)).filter(
+        (row) => row.outcome === 'approval_requested',
+      ),
+    ).toHaveLength(1);
+  } finally {
+    resume.resolve();
+    await Promise.allSettled(inFlight);
+    await app.close();
+  }
+});
 it('E26: a mark committed after the covered decision read defeats the guarded delivery', async () => {
   let active = false;
   let batches = 0;
