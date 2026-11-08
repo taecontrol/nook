@@ -46,18 +46,10 @@ import {
   timeLeft,
 } from './approval-screen';
 import { AskFirstLabel } from './ask-first-label';
+import { Cmd, Mark } from './authorize-parts';
 import { LoadFailure } from './failure';
 import { SlashPath } from './path-text';
 
-function Mark({ icon: Icon }: { icon: typeof KeyRound }) {
-  return (
-    <Avatar className="size-10 rounded-lg">
-      <AvatarFallback className="rounded-lg">
-        <Icon className="size-5" />
-      </AvatarFallback>
-    </Avatar>
-  );
-}
 function Fact({ name, children }: { name: string; children: ReactNode }) {
   return (
     <div className="flex justify-between gap-4 text-sm">
@@ -255,11 +247,8 @@ function PendingCard({
           <span className="text-foreground wrap-anywhere">
             {view.verified.machine.name}
           </span>{' '}
-          is waiting in{' '}
-          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">
-            nook run
-          </code>
-          . Approve only if you expect this run.
+          is waiting in <Cmd>nook run</Cmd>. Approve only if you expect this
+          run.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4 px-5 pb-5 sm:px-6 sm:pb-6">
