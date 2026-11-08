@@ -1008,6 +1008,13 @@ and real SIGINT/SIGTERM withdraw before exiting 130/143. Fake HTTP failures
 prove that retries begin only after a pending response and keep the same
 attempt. `approval-wait.test.ts` uses Effect TestClock for the ten-minute
 local deadline, retry pacing and the three-second withdrawal bound.
+The real CLI also receives SIGINT and SIGTERM while its first values request
+is held. A late pending answer is withdrawn; a late values answer is
+discarded. Both exit 130/143 without starting a command. TestClock proves
+that a stalled first answer gets at most three more seconds and that no
+withdrawal is sent without a known request id. With no id, the CLI prints
+`The run was cancelled. Nothing was delivered.` An undecided request left
+on the server expires after the usual ten minutes.
 The changed-coverage fake-server cases check the first answer and the wait
 loop: both exit 75, start no command, and print exactly
 `The secrets that need approval changed while you waited. Run again to ask again.`
