@@ -142,13 +142,23 @@ const shortPending = {
     interval: 2,
   },
 };
-it('E9/E11: pending until the relative local deadline exits 75 with run-again guidance', async () => {
-  const fake = await fakeValues(() => ({ status: 200, body: shortPending }));
+it('E9/E11: a server unreachable after the pending answer still ends at the relative local deadline with run-again guidance', async () => {
+  // Later pending answers would shorten the deadline again, so only the first
+  // answer's expiresIn can end this wait.
+  const fake = await fakeValues((call) =>
+    call === 1
+      ? {
+          status: 200,
+          body: { approval: { ...shortPending.approval, expiresIn: 3 } },
+        }
+      : null,
+  );
   try {
     const result = await keyring.start(args()).done;
     expect(result.status).toBe(75);
     expect(result.stdout).not.toContain('started');
     expect(result.stderr).toContain('Run again to ask again');
+    expect(fake.bodies.length).toBeGreaterThan(1);
   } finally {
     await fake.close();
   }
