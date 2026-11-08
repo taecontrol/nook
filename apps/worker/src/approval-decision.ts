@@ -20,8 +20,12 @@ type AttemptPayload = Pick<
   RunSecrets,
   'secrets' | 'purpose' | 'workingDirectory' | 'executable' | 'agentSession'
 >;
-export type ValuesDecision =
-  | { kind: 'deliver'; approval: ApprovalReference; settle: string | null }
+type ValuesDecision =
+  | {
+      kind: 'deliver';
+      approval: ApprovalReference | null;
+      settle: string | null;
+    }
   | { kind: 'pending'; request: Extract<StoredRequest, { status: 'pending' }> }
   | { kind: 'create' }
   | { kind: 'refuse'; error: InvalidRun | ApprovalDenied | ApprovalExpired };
@@ -52,23 +56,7 @@ function samePayload(row: StoredRequest, input: AttemptPayload) {
 function covers(approved: readonly string[], covered: readonly string[]) {
   return covered.every((path) => approved.includes(path));
 }
-function matchRemembered(
-  rows: readonly StoredApproved[],
-  covered: readonly string[],
-  now: number,
-) {
-  return rows.find(
-    (row) =>
-      row.status === 'approved' &&
-      row.remember !== 'once' &&
-      row.valid_until > now &&
-      covers(row.covered_json, covered),
-  );
-}
-export function ownTerminal(
-  own: StoredRequest | undefined,
-  payload: AttemptPayload,
-) {
+function ownTerminal(own: StoredRequest | undefined, payload: AttemptPayload) {
   if (!own) return;
   if (!samePayload(own, payload))
     return new InvalidRun({
@@ -83,7 +71,7 @@ function ownWaiting(
   own: StoredRequest,
   covered: readonly string[],
   now: number,
-): ValuesDecision {
+): ValuesResult {
   if (own.status === 'pending' && own.expires_at > now)
     return { kind: 'pending', request: own };
   if (
@@ -101,19 +89,30 @@ function ownWaiting(
     error: new ApprovalExpired({ reason: 'expired' }),
   };
 }
-export function decideValues(input: {
+type ValuesInput = {
   now: number;
   covered: readonly string[];
   payload: AttemptPayload;
   own: StoredRequest | undefined;
+  // The store supplies live, non-once approvals for this machine.
   remembered: readonly StoredApproved[];
-}): ValuesDecision {
+};
+export type ValuesResult = Exclude<ValuesDecision, { kind: 'create' }>;
+export function decideValues(
+  input: ValuesInput & { own: StoredRequest },
+): ValuesResult;
+export function decideValues(input: ValuesInput): ValuesDecision;
+export function decideValues(input: ValuesInput): ValuesDecision {
   const error = ownTerminal(input.own, input.payload);
   if (error) return { kind: 'refuse', error };
-  const remembered = matchRemembered(
-    input.remembered,
-    input.covered,
-    input.now,
+  if (!input.covered.length)
+    return {
+      kind: 'deliver',
+      approval: null,
+      settle: input.own?.status === 'pending' ? input.own.id : null,
+    };
+  const remembered = input.remembered.find((row) =>
+    covers(row.covered_json, input.covered),
   );
   if (remembered)
     return {
