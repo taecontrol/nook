@@ -178,7 +178,9 @@ it.each([
       // must not abandon a server-created request whose id is not known yet.
       const exitedEarly = await Promise.race([
         running.done.then(() => true),
-        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 100)),
+        new Promise<boolean>((resolve) =>
+          setTimeout(() => resolve(false), 100),
+        ),
       ]);
       expect.soft(exitedEarly).toBe(false);
       release.resolve();
@@ -187,11 +189,13 @@ it.each([
       expect.soft(result.stdout).toBe('');
       expectNoValue(result.stderr, ['synthetic-only']);
       expect.soft(fake.bodies).toHaveLength(1);
-      expect.soft(fake.withdrawals).toEqual(
-        answer === 'pending'
-          ? [`/api/machine/approvals/${shortPending.approval.id}`]
-          : [],
-      );
+      expect
+        .soft(fake.withdrawals)
+        .toEqual(
+          answer === 'pending'
+            ? [`/api/machine/approvals/${shortPending.approval.id}`]
+            : [],
+        );
     } finally {
       release.resolve();
       await running.done;

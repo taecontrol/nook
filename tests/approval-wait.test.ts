@@ -4,6 +4,7 @@ import { expect, it } from 'vitest';
 import {
   ApprovalStopped,
   awaitApproval,
+  requestValues,
 } from '../apps/cli/src/approval-wait.ts';
 import { RequestFailure, ServerFailure } from '../apps/cli/src/errors.ts';
 
@@ -163,6 +164,8 @@ it.each([
   { first: 600, later: [1], end: 3 },
   // A transient failure is retried, and a longer answer cannot extend the wait.
   { first: 6, later: [null, 600], end: 6 },
+  // A shortened deadline must also cap an in-flight poll, not just sleeps.
+  { first: 600, later: [3, 'stall' as const], end: 5 },
 ])(
   'E9/E11: pending answers $later after $first s end the wait at $end s',
   async ({ first: expiresIn, later, end }) => {
@@ -176,6 +179,7 @@ it.each([
             {
               ask: Effect.suspend(() => {
                 const next = later[Math.min(calls++, later.length - 1)];
+                if (next === 'stall') return Effect.never;
                 return next === null
                   ? Effect.fail(failure(true))
                   : Effect.succeed({
@@ -202,5 +206,38 @@ it.each([
       }).pipe(Effect.provide(TestClock.layer())),
     );
     expect(code).toBe(75);
+  },
+);
+it.each([
+  ['SIGINT', 130],
+  ['SIGTERM', 143],
+] as const)(
+  '%s bounds a stalled first values request to three more seconds and exits %i',
+  async (signal, expectedCode) => {
+    let code = 0;
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.scoped(
+          requestValues({
+            ask: Effect.never,
+            withdraw: () => Effect.die('No request id is known'),
+            status: () => {},
+            signal: Effect.sleep('1 second').pipe(Effect.as(signal)),
+          }),
+        ).pipe(
+          Effect.catch((error) =>
+            Effect.sync(() => {
+              code = error instanceof ApprovalStopped ? error.code : 1;
+            }),
+          ),
+          Effect.forkChild,
+        );
+        yield* TestClock.adjust('3999 millis');
+        expect(code).toBe(0);
+        yield* TestClock.adjust('1 millis');
+        yield* Fiber.join(fiber);
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+    expect(code).toBe(expectedCode);
   },
 );

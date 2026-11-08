@@ -5,8 +5,8 @@ import { resolveAgentSession } from './agent-session.ts';
 import {
   ApprovalStopped,
   approvalFailure,
-  awaitApproval,
   processSignal,
+  requestValues,
 } from './approval-wait.ts';
 import {
   CliFailure,
@@ -70,25 +70,24 @@ export function run(
           },
         }),
       );
-      const response = yield* ask.pipe(Effect.mapError(runFailure));
-      const delivered =
-        'values' in response
-          ? response
-          : yield* Effect.scoped(
-              awaitApproval(response.approval, {
-                ask,
-                withdraw: (id) =>
-                  request((api, headers) =>
-                    api.machine.withdraw({ headers, params: { id } }),
-                  ).pipe(Effect.catchCause(() => Effect.void)),
-                status,
-                signal: processSignal,
-              }),
-            ).pipe(
-              Effect.mapError((error) =>
-                error instanceof ApprovalStopped ? error : runFailure(error),
+      const delivered = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const signal = yield* processSignal;
+          return yield* requestValues({
+            ask,
+            withdraw: (id) =>
+              request((api, headers) =>
+                api.machine.withdraw({ headers, params: { id } }),
               ),
-            );
+            status,
+            signal,
+          });
+        }),
+      ).pipe(
+        Effect.mapError((error) =>
+          error instanceof ApprovalStopped ? error : runFailure(error),
+        ),
+      );
       const values = new Map(
         delivered.values.map(({ path, value }) => [path, value]),
       );
