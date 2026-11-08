@@ -19,7 +19,11 @@ import {
   listSecrets,
   secretInput,
 } from './support/vault.ts';
-import { createDraft, secretRow } from './support/vault-browser.ts';
+import {
+  createDraft,
+  openSecretMenu,
+  secretRow,
+} from './support/vault-browser.ts';
 
 import {
   createImport,
@@ -520,42 +524,67 @@ it.each(['create', 'delete'] as const)(
   },
 );
 
-// Secret create and delete settle through the same Vault write.
-it('E38: a secret create updates orphan marks before the cached list becomes stale', async () => {
-  await setMark(app, stripe, 'secret');
-  const secret = (await listSecrets(app)).find(
-    (secret) => secret.path === stripe,
-  );
-  if (!secret) throw new Error('The marked synthetic secret must exist.');
-  expect((await deleteSecret(app, stripe, secret.version)).status).toBe(204);
-  await openVault();
-  const alert = page
-    .getByRole('alert')
-    .filter({ hasText: 'Ask first is on a deleted secret' });
-  await expect.poll(() => page.getByRole('switch').count()).toBeGreaterThan(0);
-  expect(await alert.count()).toBe(1);
-  const sheet = await createDraft(page, { name: 'STRIPE_KEY' });
-  const saved = page.waitForResponse(
-    (r) =>
-      r.request().method() === 'POST' &&
-      new URL(r.url()).pathname === '/api/secrets',
-  );
-  await sheet.getByRole('button', { name: 'Save secret', exact: true }).click();
-  expect((await saved).status()).toBe(201);
-  expect((await marks()).marks).toContainEqual({
-    kind: 'secret',
-    path: stripe,
-    exists: true,
-  });
-  expect(await page.evaluate(() => Date.now())).toBe(approvalNow.getTime());
-  await expect
-    .poll(() => alert.count(), {
-      message:
-        'Orphan alerts follow the completed secret write within the 30-second cache window',
-    })
-    .toBe(0);
-  expect(await secretSwitch().getAttribute('aria-checked')).toBe('true');
-});
+it.each(['create', 'delete'] as const)(
+  'E38: a secret %s updates orphan marks before the cached list becomes stale',
+  async (operation) => {
+    await setMark(app, stripe, 'secret');
+    if (operation === 'create') {
+      const secret = (await listSecrets(app)).find(
+        (secret) => secret.path === stripe,
+      );
+      if (!secret) throw new Error('The marked synthetic secret must exist.');
+      expect((await deleteSecret(app, stripe, secret.version)).status).toBe(
+        204,
+      );
+    }
+    await openVault();
+    const alert = page
+      .getByRole('alert')
+      .filter({ hasText: 'Ask first is on a deleted secret' });
+    await expect
+      .poll(() => page.getByRole('switch').count())
+      .toBeGreaterThan(0);
+    expect(await alert.count()).toBe(operation === 'create' ? 1 : 0);
+    if (operation === 'create') {
+      const sheet = await createDraft(page, { name: 'STRIPE_KEY' });
+      const saved = page.waitForResponse(
+        (r) =>
+          r.request().method() === 'POST' &&
+          new URL(r.url()).pathname === '/api/secrets',
+      );
+      await sheet
+        .getByRole('button', { name: 'Save secret', exact: true })
+        .click();
+      expect((await saved).status()).toBe(201);
+    } else {
+      await openSecretMenu(page, stripe, 'Delete secret…');
+      const removed = page.waitForResponse(
+        (r) =>
+          r.request().method() === 'DELETE' &&
+          new URL(r.url()).pathname ===
+            `/api/secrets/${encodeURIComponent(stripe)}`,
+      );
+      await page
+        .getByRole('button', { name: 'Delete secret', exact: true })
+        .click();
+      expect((await removed).status()).toBe(204);
+    }
+    expect((await marks()).marks).toContainEqual({
+      kind: 'secret',
+      path: stripe,
+      exists: operation === 'create',
+    });
+    expect(await page.evaluate(() => Date.now())).toBe(approvalNow.getTime());
+    await expect
+      .poll(() => alert.count(), {
+        message:
+          'Orphan alerts follow the completed secret write within the 30-second cache window',
+      })
+      .toBe(operation === 'delete' ? 1 : 0);
+    if (operation === 'create')
+      expect(await secretSwitch().getAttribute('aria-checked')).toBe('true');
+  },
+);
 
 it('E38: a deleted bucket mark appears above Vault with Remove mark and disappears optimistically', async () => {
   await seedGrantTree(app, ['work/old-client']);
