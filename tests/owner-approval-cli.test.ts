@@ -129,13 +129,15 @@ async function fakeValues(
       ),
   };
 }
-// expiresAt stays far ahead so only the relative expiresIn can end the wait.
+// expiresAt lies an hour ahead, so only the relative expiresIn can end the
+// wait within the test. A far-future date would overflow a timer and fire at
+// once, hiding a deadline taken from expiresAt.
 const shortPending = {
   approval: {
     id: '00000000-0000-4000-8000-000000000001',
     url: 'https://nook.test/approvals/request',
     paths: [acmePath],
-    expiresAt: '2099-01-01T00:00:00.000Z',
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
     expiresIn: 1,
     interval: 2,
   },
@@ -182,13 +184,15 @@ it.each([
     tag: 'ApprovalExpired',
     code: 75,
     message: 'Run again to ask again',
+    // The local deadline lies beyond the test, so only the 410 ends the wait.
     answer: (call: number) =>
       call === 1
         ? {
             status: 200,
-            body: { approval: { ...shortPending.approval, expiresIn: 10 } },
+            body: { approval: { ...shortPending.approval, expiresIn: 600 } },
           }
         : { status: 410, body: { _tag: 'ApprovalExpired', reason: 'expired' } },
+    asks: 2,
   },
   {
     tag: 'ApprovalLimit',
@@ -198,16 +202,18 @@ it.each([
       status: 429,
       body: { _tag: 'ApprovalLimit', message: 'Too many pending requests.' },
     }),
+    asks: 1,
   },
 ] as const)(
   'E9/E28: $tag maps to exit $code and its public reason',
-  async ({ code, message, answer }) => {
+  async ({ code, message, answer, asks }) => {
     const fake = await fakeValues(answer);
     try {
       const result = await keyring.start(args()).done;
       expect(result.status).toBe(code);
       expect(result.stderr).toContain(message);
       expect(result.stdout).not.toContain('started');
+      expect(fake.bodies, 'The refusal is not retried').toHaveLength(asks);
     } finally {
       await fake.close();
     }
