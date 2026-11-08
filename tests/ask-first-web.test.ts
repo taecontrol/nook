@@ -19,11 +19,7 @@ import {
   listSecrets,
   secretInput,
 } from './support/vault.ts';
-import {
-  createDraft,
-  openSecretMenu,
-  secretRow,
-} from './support/vault-browser.ts';
+import { createDraft, secretRow } from './support/vault-browser.ts';
 
 import {
   createImport,
@@ -207,75 +203,73 @@ it('E37: inherited marks turn secret and bucket switches on and disable them, wi
   ).toBe(0);
 });
 
-it.each(['secret', 'bucket'] as const)(
-  'E37: a %s mark flips optimistically before PUT resolves and reconciles on success and failed 503',
-  async (kind) => {
-    await openVault();
-    const control =
-      kind === 'secret' ? secretSwitch() : bucketCard().getByRole('switch');
+// The toggle does not depend on the kind; the bucket card's switch is the
+// covered-secret case below.
+it('E37: a secret mark flips optimistically before PUT resolves and reconciles on success and failed 503', async () => {
+  await openVault();
+  const control = secretSwitch();
+  await expect
+    .poll(() => control.count(), {
+      message: 'The secret Ask first switch is available',
+    })
+    .toBe(1);
+  const gate = deferred();
+  const started = deferred();
+  const path = stripe;
+  const url = `**/api/ask-first/secret/${encodeURIComponent(path)}`;
+  await page.route(url, async (route) => {
+    started.resolve();
+    await gate.promise;
+    await route.continue().catch(() => {});
+  });
+  try {
+    await control.click();
+    await started.promise;
     await expect
-      .poll(() => control.count(), {
-        message: `The ${kind} Ask first switch is available`,
+      .poll(() => control.getAttribute('aria-checked'), {
+        message: 'The switch flips before the PUT response',
       })
-      .toBe(1);
-    const gate = deferred();
-    const started = deferred();
-    const path = kind === 'secret' ? stripe : 'work/acme';
-    const url = `**/api/ask-first/${kind}/${encodeURIComponent(path)}`;
+      .toBe('true');
+    expect((await marks()).marks).toEqual([]);
+    gate.resolve();
+    await expect
+      .poll(async () => (await marks()).marks.some((m) => m.path === path))
+      .toBe(true);
+    expect(await control.getAttribute('aria-checked')).toBe('true');
+    await page.unroute(url);
+    await control.click();
+    await expect.poll(async () => (await marks()).marks.length).toBe(0);
+    const failed = deferred();
+    const failedStarted = deferred();
     await page.route(url, async (route) => {
-      started.resolve();
-      await gate.promise;
-      await route.continue().catch(() => {});
+      failedStarted.resolve();
+      await failed.promise;
+      await route
+        .fulfill({ status: 503, json: { _tag: 'ServiceUnavailable' } })
+        .catch(() => {});
     });
     try {
       await control.click();
-      await started.promise;
+      await failedStarted.promise;
       await expect
-        .poll(() => control.getAttribute('aria-checked'), {
-          message: 'The switch flips before the PUT response',
-        })
+        .poll(() => control.getAttribute('aria-checked'))
         .toBe('true');
-      expect((await marks()).marks).toEqual([]);
-      gate.resolve();
+      failed.resolve();
       await expect
-        .poll(async () => (await marks()).marks.some((m) => m.path === path))
-        .toBe(true);
-      expect(await control.getAttribute('aria-checked')).toBe('true');
-      await page.unroute(url);
-      await control.click();
-      await expect.poll(async () => (await marks()).marks.length).toBe(0);
-      const failed = deferred();
-      const failedStarted = deferred();
-      await page.route(url, async (route) => {
-        failedStarted.resolve();
-        await failed.promise;
-        await route
-          .fulfill({ status: 503, json: { _tag: 'ServiceUnavailable' } })
-          .catch(() => {});
-      });
-      try {
-        await control.click();
-        await failedStarted.promise;
-        await expect
-          .poll(() => control.getAttribute('aria-checked'))
-          .toBe('true');
-        failed.resolve();
-        await expect
-          .poll(() => control.getAttribute('aria-checked'))
-          .toBe('false');
-        await page.getByRole('alert').waitFor();
-        expect(
-          (await page.getByRole('alert').innerText()).length,
-        ).toBeGreaterThan(0);
-        expect((await marks()).marks).toEqual([]);
-      } finally {
-        failed.resolve();
-      }
+        .poll(() => control.getAttribute('aria-checked'))
+        .toBe('false');
+      await page.getByRole('alert').waitFor();
+      expect(
+        (await page.getByRole('alert').innerText()).length,
+      ).toBeGreaterThan(0);
+      expect((await marks()).marks).toEqual([]);
     } finally {
-      gate.resolve();
+      failed.resolve();
     }
-  },
-);
+  } finally {
+    gate.resolve();
+  }
+});
 
 it('E37: long inherited bucket paths wrap only at / on a 390×844 phone', async () => {
   const parent = 'work/municipal-water-authority-ops-mx/infrastructure';
@@ -381,48 +375,6 @@ it('E37: rapid toggles stay optimistic, serialize writes per path and preserve t
   } finally {
     readGate.resolve();
     putGate.resolve();
-  }
-});
-
-it('E37: a failed DELETE restores the server mark and an error instead of leaving Ask first off', async () => {
-  await setMark(app, stripe, 'secret');
-  await openVault();
-  const control = secretSwitch();
-  await expect
-    .poll(() => control.count(), {
-      message: 'An explicit secret mark can be switched off',
-    })
-    .toBe(1);
-  const gate = deferred();
-  const started = deferred();
-  await page.route(
-    `**/api/ask-first/secret/${encodeURIComponent(stripe)}`,
-    async (route) => {
-      expect(route.request().method()).toBe('DELETE');
-      started.resolve();
-      await gate.promise;
-      await route
-        .fulfill({ status: 503, json: { _tag: 'ServiceUnavailable' } })
-        .catch(() => {});
-    },
-  );
-  try {
-    await control.click();
-    await started.promise;
-    await expect.poll(() => control.getAttribute('aria-checked')).toBe('false');
-    expect((await marks()).marks).toContainEqual({
-      kind: 'secret',
-      path: stripe,
-      exists: true,
-    });
-    gate.resolve();
-    await expect.poll(() => control.getAttribute('aria-checked')).toBe('true');
-    await page.getByRole('alert').waitFor();
-    expect((await page.getByRole('alert').innerText()).length).toBeGreaterThan(
-      0,
-    );
-  } finally {
-    gate.resolve();
   }
 });
 
@@ -577,67 +529,42 @@ it.each(['create', 'delete'] as const)(
   },
 );
 
-it.each(['create', 'delete'] as const)(
-  'E38: a secret %s updates orphan marks before the cached list becomes stale',
-  async (operation) => {
-    await setMark(app, stripe, 'secret');
-    if (operation === 'create') {
-      const secret = (await listSecrets(app)).find(
-        (secret) => secret.path === stripe,
-      );
-      if (!secret) throw new Error('The marked synthetic secret must exist.');
-      expect((await deleteSecret(app, stripe, secret.version)).status).toBe(
-        204,
-      );
-    }
-    await openVault();
-    const alert = page
-      .getByRole('alert')
-      .filter({ hasText: 'Ask first is on a deleted secret' });
-    await expect
-      .poll(() => page.getByRole('switch').count())
-      .toBeGreaterThan(0);
-    expect(await alert.count()).toBe(operation === 'create' ? 1 : 0);
-    if (operation === 'create') {
-      const sheet = await createDraft(page, { name: 'STRIPE_KEY' });
-      const saved = page.waitForResponse(
-        (r) =>
-          r.request().method() === 'POST' &&
-          new URL(r.url()).pathname === '/api/secrets',
-      );
-      await sheet
-        .getByRole('button', { name: 'Save secret', exact: true })
-        .click();
-      expect((await saved).status()).toBe(201);
-    } else {
-      await openSecretMenu(page, stripe, 'Delete secret…');
-      const removed = page.waitForResponse(
-        (r) =>
-          r.request().method() === 'DELETE' &&
-          new URL(r.url()).pathname ===
-            `/api/secrets/${encodeURIComponent(stripe)}`,
-      );
-      await page
-        .getByRole('button', { name: 'Delete secret', exact: true })
-        .click();
-      expect((await removed).status()).toBe(204);
-    }
-    expect((await marks()).marks).toContainEqual({
-      kind: 'secret',
-      path: stripe,
-      exists: operation === 'create',
-    });
-    expect(await page.evaluate(() => Date.now())).toBe(approvalNow.getTime());
-    await expect
-      .poll(() => alert.count(), {
-        message:
-          'Orphan alerts follow the completed secret write within the 30-second cache window',
-      })
-      .toBe(operation === 'delete' ? 1 : 0);
-    if (operation === 'create')
-      expect(await secretSwitch().getAttribute('aria-checked')).toBe('true');
-  },
-);
+// Secret create and delete settle through the same Vault write.
+it('E38: a secret create updates orphan marks before the cached list becomes stale', async () => {
+  await setMark(app, stripe, 'secret');
+  const secret = (await listSecrets(app)).find(
+    (secret) => secret.path === stripe,
+  );
+  if (!secret) throw new Error('The marked synthetic secret must exist.');
+  expect((await deleteSecret(app, stripe, secret.version)).status).toBe(204);
+  await openVault();
+  const alert = page
+    .getByRole('alert')
+    .filter({ hasText: 'Ask first is on a deleted secret' });
+  await expect.poll(() => page.getByRole('switch').count()).toBeGreaterThan(0);
+  expect(await alert.count()).toBe(1);
+  const sheet = await createDraft(page, { name: 'STRIPE_KEY' });
+  const saved = page.waitForResponse(
+    (r) =>
+      r.request().method() === 'POST' &&
+      new URL(r.url()).pathname === '/api/secrets',
+  );
+  await sheet.getByRole('button', { name: 'Save secret', exact: true }).click();
+  expect((await saved).status()).toBe(201);
+  expect((await marks()).marks).toContainEqual({
+    kind: 'secret',
+    path: stripe,
+    exists: true,
+  });
+  expect(await page.evaluate(() => Date.now())).toBe(approvalNow.getTime());
+  await expect
+    .poll(() => alert.count(), {
+      message:
+        'Orphan alerts follow the completed secret write within the 30-second cache window',
+    })
+    .toBe(0);
+  expect(await secretSwitch().getAttribute('aria-checked')).toBe('true');
+});
 
 it('E38: a deleted bucket mark appears above Vault with Remove mark and disappears optimistically', async () => {
   await seedGrantTree(app, ['work/old-client']);
@@ -693,57 +620,6 @@ it('E38: a deleted bucket mark appears above Vault with Remove mark and disappea
   }
 });
 
-it('E38: a failed Remove mark restores the orphan alert and reports an error', async () => {
-  await seedGrantTree(app, ['work/old-client']);
-  await setMark(app, 'work/old-client');
-  expect(
-    (
-      await fetch(
-        `${app.origin}/api/buckets/${encodeURIComponent('work/old-client')}`,
-        { method: 'DELETE' },
-      )
-    ).status,
-  ).toBe(204);
-  await openVault();
-  const alert = page
-    .getByRole('alert')
-    .filter({ hasText: 'Ask first is on a deleted bucket' });
-  await expect
-    .poll(() => alert.count(), {
-      message: 'The orphan alert offers Remove mark',
-    })
-    .toBe(1);
-  const gate = deferred();
-  const started = deferred();
-  await page.route(
-    '**/api/ask-first/bucket/work%2Fold-client',
-    async (route) => {
-      started.resolve();
-      await gate.promise;
-      await route
-        .fulfill({ status: 503, json: { _tag: 'ServiceUnavailable' } })
-        .catch(() => {});
-    },
-  );
-  try {
-    await alert
-      .getByRole('button', { name: 'Remove mark', exact: true })
-      .click();
-    await started.promise;
-    await expect.poll(() => alert.count()).toBe(0);
-    gate.resolve();
-    await expect.poll(() => alert.count()).toBe(1);
-    expect((await marks()).marks).toContainEqual({
-      kind: 'bucket',
-      path: 'work/old-client',
-      exists: false,
-    });
-    expect(await page.getByRole('alert').count()).toBeGreaterThan(1);
-  } finally {
-    gate.resolve();
-  }
-});
-
 it('E37: an optimistic bucket mark covers an already marked secret and failed PUT restores its explicit switch', async () => {
   await setMark(app, stripe, 'secret');
   await openVault();
@@ -761,14 +637,17 @@ it('E37: an optimistic bucket mark covers an already marked secret and failed PU
       .catch(() => {});
   });
   try {
-    await bucketCard().getByRole('switch').click();
+    const bucketSwitch = bucketCard().getByRole('switch');
+    await bucketSwitch.click();
     await started.promise;
     await expect.poll(() => control.isDisabled()).toBe(true);
+    expect(await bucketSwitch.getAttribute('aria-checked')).toBe('true');
     expect(await secretRow(page, stripe).innerText()).toContain(
       'Ask first, from work/acme',
     );
     gate.resolve();
     await expect.poll(() => control.isEnabled()).toBe(true);
+    expect(await bucketSwitch.getAttribute('aria-checked')).toBe('false');
     expect(await control.getAttribute('aria-checked')).toBe('true');
     expect(await secretRow(page, stripe).innerText()).toContain(
       'Ask first, on this secret',

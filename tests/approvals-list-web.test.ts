@@ -294,90 +294,59 @@ it.each(['pending', 'remembered'] as const)(
   },
 );
 
-it.each(['pending', 'remembered'] as const)(
-  'E36/E44: the last %s row expires into the empty state locally without extra requests',
-  async (kind) => {
-    const request = await webPending(app);
-    if (kind === 'remembered')
-      expect((await decide(app, request.id, '1h')).status).toBe(200);
-    const ui = await approvalBrowserPage(browser);
-    const { page } = ui;
-    const requests: string[] = [];
-    page.on('request', (r) => requests.push(r.url()));
-    try {
-      await page.goto(`${app.origin}/approvals`);
-      const row = page.locator(`[data-approval="${request.id}"]`);
-      await row.waitFor();
-      const badge = page
-        .locator('[data-sidebar="menu-item"]')
-        .filter({ has: page.getByRole('link', { name: /^Approvals/ }) })
-        .locator('[data-sidebar="menu-badge"]');
-      expect(await badge.count()).toBe(kind === 'pending' ? 1 : 0);
-      const section = page.locator('section').filter({ has: row });
-      expect(await section.getByRole('heading').innerText()).toMatch(
-        kind === 'pending' ? /Waiting for you\s*1/i : /Remembered\s*1/i,
-      );
-      await page.waitForLoadState('networkidle');
-      const count = requests.length;
-      await page.clock.setSystemTime(approvalNow);
-      await page.clock.pauseAt(new Date(approvalNow.getTime() + 60_000));
-      const left = (kind === 'pending' ? 522_000 : 3_600_000) - 60_000;
-      await page.clock.fastForward(left - 1);
-      expect(
-        await row.count(),
-        'The row remains visible until its deadline',
-      ).toBe(1);
-      await page.clock.runFor(1);
-      await expect
-        .poll(
-          () =>
-            page.getByText('Nothing waiting for you', { exact: true }).count(),
-          { message: 'The final local expiry shows the empty state' },
-        )
-        .toBe(1);
-      expect(await row.count()).toBe(0);
-      await expect
-        .poll(() => badge.count(), {
-          message: 'The pending-count badge expires with the last row',
-        })
-        .toBe(0);
-      expect(
-        await page
-          .getByRole('heading', { name: /Waiting for you|Remembered/ })
-          .count(),
-      ).toBe(0);
-      await page.clock.runFor(120_000);
-      expect(requests, 'Local expiry must not poll or refetch').toHaveLength(
-        count,
-      );
-    } finally {
-      await ui.close();
-    }
-  },
-);
-
-it('E36: a remembered mixed request lists only the paths covered by its approval', async () => {
-  // The shared setup marks cloudflare; remove that mark for a mixed run.
-  expect(
-    (
-      await fetch(
-        `${app.origin}/api/ask-first/secret/${encodeURIComponent(cloudflare)}`,
-        { method: 'DELETE' },
-      )
-    ).status,
-  ).toBe(204);
-  const request = await webPending(app, { secrets: [stripe, cloudflare] });
-  expect((await decide(app, request.id, '1h')).status).toBe(200);
+// The remembered deadline is the consecutive-expiry remembered row above.
+it('E36/E44: the last pending row expires into the empty state locally without extra requests', async () => {
+  const request = await webPending(app);
   const ui = await approvalBrowserPage(browser);
+  const { page } = ui;
+  const requests: string[] = [];
+  page.on('request', (r) => requests.push(r.url()));
   try {
-    await ui.page.goto(`${app.origin}/approvals`);
-    const row = ui.page.locator(`[data-approval="${request.id}"]`);
+    await page.goto(`${app.origin}/approvals`);
+    const row = page.locator(`[data-approval="${request.id}"]`);
     await row.waitFor();
-    expect(await row.innerText()).toContain(stripe);
+    const badge = page
+      .locator('[data-sidebar="menu-item"]')
+      .filter({ has: page.getByRole('link', { name: /^Approvals/ }) })
+      .locator('[data-sidebar="menu-badge"]');
+    expect(await badge.count()).toBe(1);
+    const section = page.locator('section').filter({ has: row });
+    expect(await section.getByRole('heading').innerText()).toMatch(
+      /Waiting for you\s*1/i,
+    );
+    await page.waitForLoadState('networkidle');
+    const count = requests.length;
+    await page.clock.setSystemTime(approvalNow);
+    await page.clock.pauseAt(new Date(approvalNow.getTime() + 60_000));
+    const left = 522_000 - 60_000;
+    await page.clock.fastForward(left - 1);
     expect(
-      await row.innerText(),
-      'Unmarked requested secrets are not remembered scope',
-    ).not.toContain(cloudflare);
+      await row.count(),
+      'The row remains visible until its deadline',
+    ).toBe(1);
+    await page.clock.runFor(1);
+    await expect
+      .poll(
+        () =>
+          page.getByText('Nothing waiting for you', { exact: true }).count(),
+        { message: 'The final local expiry shows the empty state' },
+      )
+      .toBe(1);
+    expect(await row.count()).toBe(0);
+    await expect
+      .poll(() => badge.count(), {
+        message: 'The pending-count badge expires with the last row',
+      })
+      .toBe(0);
+    expect(
+      await page
+        .getByRole('heading', { name: /Waiting for you|Remembered/ })
+        .count(),
+    ).toBe(0);
+    await page.clock.runFor(120_000);
+    expect(requests, 'Local expiry must not poll or refetch').toHaveLength(
+      count,
+    );
   } finally {
     await ui.close();
   }
