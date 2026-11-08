@@ -27,19 +27,24 @@ function existenceSource(key: readonly unknown[]) {
   return key[0] === 'buckets' || (key[0] === 'vault' && key[1] === 'secrets');
 }
 export function observeAskFirstExistence(queries: QueryClient) {
-  const previous = new WeakMap<object, unknown>();
+  const lastFetched = new WeakMap<object, unknown>();
   return queries.getQueryCache().subscribe((event) => {
-    if (event.type !== 'updated' || !existenceSource(event.query.queryKey))
-      return;
-    const { query, action } = event;
-    const before = previous.get(query);
-    previous.set(query, query.state.data);
-    // Initial parallel loads need no second marks read on navigation. Observe
-    // any later data change, including cancellation restoring a prior snapshot.
     if (
-      action.type !== 'invalidate' &&
-      (before === undefined ||
-        replaceEqualDeep(before, query.state.data) === before)
+      event.type !== 'updated' ||
+      event.action.type !== 'success' ||
+      event.action.manual ||
+      !existenceSource(event.query.queryKey)
+    )
+      return;
+    const { query } = event;
+    const before = lastFetched.get(query);
+    lastFetched.set(query, query.state.data);
+    // Only changed server responses refresh existence. Optimistic writes and
+    // invalidations say nothing about what exists yet. Initial parallel loads
+    // and equal navigation/focus refetches need no second marks read.
+    if (
+      before === undefined ||
+      replaceEqualDeep(before, query.state.data) === before
     )
       return;
     const filters = { queryKey: askFirstOptions.queryKey };

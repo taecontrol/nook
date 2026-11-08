@@ -70,6 +70,26 @@ async function marks() {
   };
 }
 
+async function holdWriteAndCountMarks(url: string, method: string) {
+  const started = deferred();
+  const release = deferred();
+  const reads: boolean[] = [];
+  let committed = false;
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/ask-first')
+      reads.push(committed);
+  });
+  await page.route(url, async (route) => {
+    if (route.request().method() !== method) return route.continue();
+    started.resolve();
+    await release.promise;
+    const response = await route.fetch();
+    committed = response.ok();
+    await route.fulfill({ response }).catch(() => {});
+  });
+  return { started: started.promise, release: release.resolve, reads };
+}
+
 it.each(['PUT', 'DELETE'] as const)(
   'E37: a queued toggle reconciles with the server and retains an error when %s fails',
   async (failedMethod) => {
@@ -363,8 +383,12 @@ it('E37: rapid toggles stay optimistic, serialize writes per path and preserve t
     await control.click();
     await expect.poll(() => control.getAttribute('aria-checked')).toBe('false');
     expect(writes, 'DELETE waits for this path’s PUT').toEqual(['PUT']);
+    const reconciled = page.waitForResponse(
+      (r) => new URL(r.url()).pathname === '/api/ask-first',
+    );
     putGate.resolve();
     await expect.poll(() => writes).toEqual(['PUT', 'DELETE']);
+    await (await reconciled).finished();
     await expect.poll(async () => (await marks()).marks.length).toBe(0);
     expect(await control.getAttribute('aria-checked')).toBe('false');
   } finally {
@@ -519,36 +543,54 @@ it.each(['create', 'delete'] as const)(
       .locator('[data-sidebar="menu-button"]')
       .filter({ hasText: /^Buckets$/ })
       .click();
-    if (operation === 'create') {
-      const field = page.getByRole('textbox', { name: 'New bucket path' });
-      await field.fill(path);
+    await page.getByRole('textbox', { name: 'New bucket path' }).waitFor();
+    await page.waitForLoadState('networkidle');
+    const method = operation === 'create' ? 'POST' : 'DELETE';
+    const endpoint =
+      operation === 'create'
+        ? '/api/buckets'
+        : `/api/buckets/${encodeURIComponent(path)}`;
+    const write = await holdWriteAndCountMarks(`**${endpoint}`, method);
+    try {
+      if (operation === 'create') {
+        const field = page.getByRole('textbox', { name: 'New bucket path' });
+        await field.fill(path);
+        await field.press('Enter');
+      } else {
+        await page
+          .getByRole('button', { name: `Actions for ${path}`, exact: true })
+          .click();
+        await page
+          .getByRole('menuitem', { name: 'Delete bucket…', exact: true })
+          .click();
+        await page
+          .getByRole('button', { name: 'Delete bucket', exact: true })
+          .click();
+      }
+      await write.started;
+      // Remount Vault while the optimistic bucket list is still uncommitted.
+      await page.getByRole('link', { name: 'Vault', exact: true }).click();
+      await page.locator('[data-path="work/acme"] a').click();
+      await secretSwitch().waitFor();
+      expect
+        .soft(write.reads, 'No marks read before the bucket commits')
+        .toEqual([]);
       const saved = page.waitForResponse(
         (r) =>
-          r.request().method() === 'POST' &&
-          new URL(r.url()).pathname === '/api/buckets',
+          r.request().method() === method &&
+          new URL(r.url()).pathname === endpoint,
       );
-      await field.press('Enter');
-      expect((await saved).ok()).toBe(true);
-    } else {
-      await page
-        .getByRole('button', { name: `Actions for ${path}`, exact: true })
-        .click();
-      await page
-        .getByRole('menuitem', { name: 'Delete bucket…', exact: true })
-        .click();
-      const removed = page.waitForResponse(
-        (r) =>
-          r.request().method() === 'DELETE' &&
-          new URL(r.url()).pathname ===
-            `/api/buckets/${encodeURIComponent(path)}`,
-      );
-      await page
-        .getByRole('button', { name: 'Delete bucket', exact: true })
-        .click();
-      expect((await removed).status()).toBe(204);
+      write.release();
+      expect((await saved).status()).toBe(operation === 'create' ? 200 : 204);
+      await expect.poll(() => write.reads.some(Boolean)).toBe(true);
+      await page.waitForLoadState('networkidle');
+      expect(
+        write.reads,
+        'Exactly one marks read, after the bucket commits',
+      ).toEqual([true]);
+    } finally {
+      write.release();
     }
-    await page.waitForLoadState('networkidle');
-    await page.getByRole('link', { name: 'Vault', exact: true }).click();
     expect((await marks()).marks).toContainEqual({
       kind: 'bucket',
       path,
@@ -590,29 +632,44 @@ it.each(['create', 'delete'] as const)(
       .poll(() => page.getByRole('switch').count())
       .toBeGreaterThan(0);
     expect(await alert.count()).toBe(operation === 'create' ? 1 : 0);
-    if (operation === 'create') {
-      const sheet = await createDraft(page, { name: 'STRIPE_KEY' });
+    await page.waitForLoadState('networkidle');
+    const method = operation === 'create' ? 'POST' : 'DELETE';
+    const endpoint =
+      operation === 'create'
+        ? '/api/secrets'
+        : `/api/secrets/${encodeURIComponent(stripe)}`;
+    const write = await holdWriteAndCountMarks(`**${endpoint}*`, method);
+    try {
+      if (operation === 'create') {
+        const sheet = await createDraft(page, { name: 'STRIPE_KEY' });
+        await sheet
+          .getByRole('button', { name: 'Save secret', exact: true })
+          .click();
+      } else {
+        await openSecretMenu(page, stripe, 'Delete secret…');
+        await page
+          .getByRole('button', { name: 'Delete secret', exact: true })
+          .click();
+      }
+      await write.started;
+      expect(write.reads, 'No marks read before the secret commits').toEqual(
+        [],
+      );
       const saved = page.waitForResponse(
         (r) =>
-          r.request().method() === 'POST' &&
-          new URL(r.url()).pathname === '/api/secrets',
+          r.request().method() === method &&
+          new URL(r.url()).pathname === endpoint,
       );
-      await sheet
-        .getByRole('button', { name: 'Save secret', exact: true })
-        .click();
-      expect((await saved).status()).toBe(201);
-    } else {
-      await openSecretMenu(page, stripe, 'Delete secret…');
-      const removed = page.waitForResponse(
-        (r) =>
-          r.request().method() === 'DELETE' &&
-          new URL(r.url()).pathname ===
-            `/api/secrets/${encodeURIComponent(stripe)}`,
-      );
-      await page
-        .getByRole('button', { name: 'Delete secret', exact: true })
-        .click();
-      expect((await removed).status()).toBe(204);
+      write.release();
+      expect((await saved).status()).toBe(operation === 'create' ? 201 : 204);
+      await expect.poll(() => write.reads.some(Boolean)).toBe(true);
+      await page.waitForLoadState('networkidle');
+      expect(
+        write.reads,
+        'Exactly one marks read, after the secret commits',
+      ).toEqual([true]);
+    } finally {
+      write.release();
     }
     expect((await marks()).marks).toContainEqual({
       kind: 'secret',
