@@ -445,6 +445,41 @@ it('E25: removing the last mark delivers and settles the waiting request as no l
   expect(await (await ask(app, app.token, id)).json()).toHaveProperty('values');
   expect(await view(app, first.id)).toMatchObject({ state: 'settled' });
 });
+it.each([
+  ['once', false],
+  ['1h', false],
+  ['once', true],
+  ['1h', true],
+] as const)(
+  'a new mark covering another requested path refuses a %s approval with the correct reason (window passed: %s)',
+  async (remember, expired) => {
+    await setMark(app, stripe, 'secret');
+    const id = randomUUID();
+    const input = { secrets: [stripe, database] };
+    const first = await pending(app, app.token, id, input);
+    expect(first.paths).toEqual([stripe]);
+    expect((await decide(app, first.id, remember)).status).toBe(200);
+    const approved = await view(app, first.id);
+    expect(Date.parse(String(approved.validUntil))).toBeGreaterThan(Date.now());
+    await setMark(app, database, 'secret');
+    if (expired) await age(app, first.id, 'valid_until', 43_200_001);
+    const before = await requests(app);
+    const audit = await auditRows(app);
+    const response = await ask(app, app.token, id, input);
+    expect(response.status).toBe(410);
+    const body = await response.json();
+    expect(body).not.toHaveProperty('values');
+    expect(body).toEqual({
+      _tag: 'ApprovalExpired',
+      reason: expired ? 'expired' : 'changed',
+    });
+    expect(await requests(app)).toEqual(before);
+    expect(await auditRows(app)).toEqual(audit);
+    expect(
+      (await auditRows(app)).filter((r) => r.outcome === 'delivered'),
+    ).toEqual([]);
+  },
+);
 it.each(['mark', 'grant'])(
   'E26: a %s committed between the read and delivery prevents every value and audit insert',
   async (change) => {

@@ -250,6 +250,32 @@ it('E11/E19: transient wait failures retry the identical attempt, then delivery 
     await fake.close();
   }
 });
+it.each([false, true])(
+  'changed coverage exits 75 with run-again guidance and no child (after pending: %s)',
+  async (afterPending) => {
+    const fake = await fakeValues((call) =>
+      afterPending && call === 1
+        ? {
+            status: 200,
+            body: { approval: { ...shortPending.approval, expiresIn: 3 } },
+          }
+        : { status: 410, body: { _tag: 'ApprovalExpired', reason: 'changed' } },
+    );
+    try {
+      const result = await keyring.start(args()).done;
+      expect.soft(result.status).toBe(75);
+      expect.soft(result.stdout).toBe('');
+      expect
+        .soft(result.stderr)
+        .toMatch(
+          /The secrets that need approval changed while you waited\. Run again to ask again\.\n$/,
+        );
+      expect(fake.bodies).toHaveLength(afterPending ? 2 : 1);
+    } finally {
+      await fake.close();
+    }
+  },
+);
 it.each([
   {
     tag: 'ApprovalExpired',
