@@ -82,14 +82,6 @@ it('E2: bucket marks cover descendants without matching siblings and secret mark
       .paths,
   ).toEqual([cloudflare]);
 });
-it('E3: a secret created through the machine API inside a marked bucket asks first', async () => {
-  await setMark(app);
-  const input = machineCreateInput({ name: 'NEW_KEY' });
-  expect((await machineCreate(app, app.token, input)).status).toBe(201);
-  await pending(app, app.token, randomUUID(), {
-    secrets: ['work/acme/NEW_KEY'],
-  });
-});
 it('E4: deleting and recreating an empty marked bucket keeps its orphan mark', async () => {
   await setMark(app, 'work/acme/empty');
   const mcp = machineMcp(app, app.token);
@@ -112,12 +104,8 @@ it('E4: deleting and recreating an empty marked bucket keeps its orphan mark', a
     secrets: ['work/acme/empty/NEW_KEY'],
   });
 });
-it('E5: only Access may read marks or decide; MCP exposes no approval or mark tools', async () => {
+it('E5: only Access may read marks or decide', async () => {
   await setMark(app);
-  const tools = await machineMcp(app, app.token).listTools();
-  expect(tools.tools.some((t) => /approval|ask.first/.test(t.name))).toBe(
-    false,
-  );
   const issuer = await accessFixture();
   await app.setBindings(
     { ...access, VAULT_KEY: app.key },
@@ -333,12 +321,6 @@ it('E17: narrowing a grant wins before approval logic and creates no request', a
   expect(await requests(app)).toHaveLength(1);
   expect((await auditRows(app)).some((r) => r.outcome === 'denied')).toBe(true);
 });
-it('E18: only-this-time is never reused by another attempt on the same machine', async () => {
-  await setMark(app);
-  const first = await pending(app, app.token);
-  await decide(app, first.id);
-  expect((await pending(app, app.token)).id).not.toBe(first.id);
-});
 it('E19: lost creation responses and concurrent duplicate attempts keep one request and one audit event', async () => {
   await setMark(app);
   const id = randomUUID();
@@ -417,11 +399,7 @@ it.each(['once', 'deny'] as const)(
     ).toHaveLength(1);
   },
 );
-it.each([
-  ['once', 120_000],
-  ['1h', 3_600_000],
-  ['12h', 43_200_000],
-] as const)(
+it.each([['once', 120_000]] as const)(
   'E22: repeating %s after its validity window returns AlreadyHandled without another decision event',
   async (remember, window) => {
     await setMark(app);

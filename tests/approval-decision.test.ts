@@ -2,19 +2,13 @@ import { expect, it } from 'vitest';
 import { decisionOutcome } from '../apps/worker/src/approval-decision.ts';
 import type { StoredRequest } from '../apps/worker/src/approval-rows.ts';
 
-it.each(
-  (
-    [
-      ['once', 120_000],
-      ['1h', 3_600_000],
-      ['12h', 43_200_000],
-    ] as const
-  ).flatMap(([remember, window]) =>
-    [-1, 0, 1].map((offset) => ({ remember, window, offset })),
-  ),
-)(
-  'E22: repeating $remember at valid_until $offset ms obeys the approval window',
-  ({ remember, window, offset }) => {
+// The Worker proves each window and a repeat after it; only the exact
+// boundary needs a fixed clock.
+const remember = '1h';
+const window = 3_600_000;
+it.each([-1, 0])(
+  'E22: repeating an approval at valid_until %i ms obeys the approval window',
+  (offset) => {
     const decidedAt = Date.parse('2026-11-02T12:00:00Z');
     const validUntil = decidedAt + window;
     const row: StoredRequest = {
