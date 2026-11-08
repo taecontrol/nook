@@ -277,6 +277,16 @@ it.each(viewports)(
       );
       await page.getByRole('button', { name: 'Approve', exact: true }).click();
       await page.getByText("Couldn't reach Nook", { exact: true }).waitFor();
+      // A lost answer may hide a committed approval, so it never says nothing
+      // was approved.
+      expect(
+        await page
+          .getByText(
+            "We couldn't confirm the result. Check your terminal or try again.",
+            { exact: true },
+          )
+          .count(),
+      ).toBe(1);
       await expectNoOverflow(page);
       expect(await bucketCheck(page, 'work/acme').isChecked()).toBe(true);
       await page.unroute('**/api/authorizations/*/approve');
