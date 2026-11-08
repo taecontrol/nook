@@ -15,6 +15,16 @@ export function useApproval(id: string) {
     load.data?.state === 'pending' ? load.data.expiresAt : undefined,
   );
   async function recover(error: unknown, choice: Choice) {
+    if (
+      error instanceof ApiError &&
+      ['Expired', 'NotFound', 'AlreadyHandled'].includes(error.tag)
+    )
+      void queries.invalidateQueries({
+        queryKey: approvalsOptions.queryKey,
+        // The detail page has no sidebar observer. Refresh a previously loaded
+        // list too, so its pending count is already correct before returning.
+        refetchType: 'all',
+      });
     if (error instanceof ApiError && error.tag === 'Expired') {
       setLocal({ unsaved: true, choice });
       return;
