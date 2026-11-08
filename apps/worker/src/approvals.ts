@@ -3,8 +3,7 @@ import {
   ApprovalLimit,
   type ApprovalReference,
   type ApprovalView,
-  AskFirstMark,
-  ApprovalRemember as Remember,
+  type AskFirstMark,
   type RunSecrets,
   rememberDuration,
 } from '@nook/contract';
@@ -16,6 +15,7 @@ import {
   type OwnerChoice,
   viewState,
 } from './approval-decision.ts';
+import { StoredApproved, StoredRequest } from './approval-rows.ts';
 import {
   type AuditMachine,
   approvalEventInsert,
@@ -26,71 +26,6 @@ import {
 import { unavailable } from './http-errors.ts';
 import type { OwnerFacts } from './owner-request.ts';
 
-const rowFacts = {
-  id: Schema.String,
-  machine_id: Schema.String,
-  machine_name: Schema.String,
-  attempt_id: Schema.String,
-  agent: Schema.NullOr(Schema.String),
-  agent_session: Schema.NullOr(Schema.String),
-  agent_thread: Schema.NullOr(Schema.String),
-  secrets_json: Schema.fromJsonString(
-    Schema.Array(
-      Schema.Struct({
-        path: Schema.String,
-        coveredBy: Schema.NullOr(AskFirstMark),
-      }),
-    ),
-  ),
-  covered_json: Schema.fromJsonString(Schema.Array(Schema.String)),
-  purpose: Schema.String,
-  working_directory: Schema.String,
-  executable: Schema.String,
-  client: Schema.NullOr(Schema.String),
-  requested_at: Schema.Number,
-  expires_at: Schema.Number,
-};
-const StoredRequest = Schema.Union([
-  Schema.Struct({
-    ...rowFacts,
-    status: Schema.Literal('pending'),
-    remember: Schema.Null,
-    decided_at: Schema.Null,
-    valid_until: Schema.Null,
-  }),
-  Schema.Struct({
-    ...rowFacts,
-    status: Schema.Literal('approved'),
-    remember: Remember,
-    decided_at: Schema.Number,
-    valid_until: Schema.Number,
-  }),
-  Schema.Struct({
-    ...rowFacts,
-    status: Schema.Literal('denied'),
-    remember: Schema.Null,
-    decided_at: Schema.Number,
-    valid_until: Schema.Null,
-  }),
-  Schema.Struct({
-    ...rowFacts,
-    status: Schema.Literals(['withdrawn', 'settled']),
-    remember: Schema.Null,
-    decided_at: Schema.Null,
-    valid_until: Schema.Null,
-  }),
-]);
-export type StoredRequest = typeof StoredRequest.Type;
-const StoredApproved = Schema.Struct({
-  id: Schema.String,
-  machine_id: Schema.String,
-  status: Schema.Literal('approved'),
-  remember: Remember,
-  decided_at: Schema.Number,
-  valid_until: Schema.Number,
-  covered_json: rowFacts.covered_json,
-});
-export type StoredApproved = typeof StoredApproved.Type;
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(StoredRequest));
 function decodeRead(rows: readonly unknown[]) {
   return decodeRows(rows).pipe(unavailable);
@@ -168,7 +103,7 @@ export function pendingAnswer(
     },
   };
 }
-export type Delivery = {
+type Delivery = {
   machine: AuditMachine & { grantJson: string };
   input: RunSecrets;
   paths: readonly string[];
@@ -202,7 +137,7 @@ export const machineApprovals = Effect.gen(function* () {
       input: RunSecrets;
       secrets: readonly {
         path: string;
-        coveredBy: typeof AskFirstMark.Type | null;
+        coveredBy: AskFirstMark | null;
       }[];
       covered: readonly string[];
       attemptId: string;

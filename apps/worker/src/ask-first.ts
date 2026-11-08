@@ -6,17 +6,11 @@ import {
   validateBucketPath,
   validateSecretPath,
 } from '@nook/contract';
-import { Effect, Schema } from 'effect';
+import { Effect } from 'effect';
 import { unavailable } from './http-errors.ts';
 
-const Mark = Schema.Struct({
-  kind: Schema.Literals(['bucket', 'secret']),
-  path: Schema.String,
-});
 export function marksRead(sql: D1Client.D1Client) {
-  return sql<
-    typeof Mark.Type
-  >`SELECT kind,path FROM ask_first_marks ORDER BY kind,path`;
+  return sql<AskFirstMark>`SELECT kind,path FROM ask_first_marks ORDER BY kind,path`;
 }
 export function marksUnchanged(
   sql: D1Client.D1Client,

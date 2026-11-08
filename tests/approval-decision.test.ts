@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { decisionOutcome } from '../apps/worker/src/approval-decision.ts';
-import type { StoredRequest } from '../apps/worker/src/approvals.ts';
+import type { StoredRequest } from '../apps/worker/src/approval-rows.ts';
 
 it.each(
   (

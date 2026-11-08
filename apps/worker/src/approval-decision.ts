@@ -6,17 +6,17 @@ import {
   type ApprovalView,
   Expired,
   InvalidRun,
-  normalizeAgentSession,
   type ApprovalRemember as Remember,
   type RunSecrets,
 } from '@nook/contract';
 import { HttpApiError } from 'effect/http-api';
-import type { StoredApproved, StoredRequest } from './approvals.ts';
+import type { StoredApproved, StoredRequest } from './approval-rows.ts';
+import { claimColumns } from './audit.ts';
 
 export type OwnerChoice =
   | { kind: 'approve'; remember: Remember }
   | { kind: 'deny' };
-export type AttemptPayload = Pick<
+type AttemptPayload = Pick<
   RunSecrets,
   'secrets' | 'purpose' | 'workingDirectory' | 'executable' | 'agentSession'
 >;
@@ -25,16 +25,16 @@ export type ValuesDecision =
   | { kind: 'pending'; request: Extract<StoredRequest, { status: 'pending' }> }
   | { kind: 'create' }
   | { kind: 'refuse'; error: InvalidRun | ApprovalDenied | ApprovalExpired };
-export function samePayload(row: StoredRequest, input: AttemptPayload) {
+function samePayload(row: StoredRequest, input: AttemptPayload) {
   const paths = [...new Set(input.secrets)].sort();
-  const claim = normalizeAgentSession(input.agentSession);
+  const claim = claimColumns(input.agentSession);
   const facts = [
     input.purpose,
     input.workingDirectory,
     input.executable,
-    claim?.agent ?? null,
-    claim?.session ?? null,
-    claim?.thread ?? null,
+    claim.agent,
+    claim.agent_session,
+    claim.agent_thread,
   ];
   return (
     JSON.stringify(row.secrets_json.map((s) => s.path).sort()) ===
@@ -52,7 +52,7 @@ export function samePayload(row: StoredRequest, input: AttemptPayload) {
 function covers(approved: readonly string[], covered: readonly string[]) {
   return covered.every((path) => approved.includes(path));
 }
-export function matchRemembered(
+function matchRemembered(
   rows: readonly StoredApproved[],
   covered: readonly string[],
   now: number,

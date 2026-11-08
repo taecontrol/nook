@@ -1,6 +1,6 @@
 import { D1Client } from '@effect/sql-d1';
 import {
-  type AskFirstMark,
+  AskFirstMark,
   canRead,
   coveringMark,
   InvalidRun,
@@ -19,12 +19,12 @@ import {
   ownTerminal,
   type ValuesDecision,
 } from './approval-decision.ts';
+import type { StoredRequest } from './approval-rows.ts';
 import {
   attemptRead,
   machineApprovals,
   pendingAnswer,
   readAttempt,
-  type StoredRequest,
 } from './approvals.ts';
 import { marksRead, marksUnchanged } from './ask-first.ts';
 import { type AuditMachine, approvalEventInsert, auditStore } from './audit.ts';
@@ -103,7 +103,9 @@ function readForRun(machine: RunMachine, input: RunSecrets, paths: string[]) {
           message: missing.map((p) => `${p} was not found.`).join(' '),
         }),
       );
-    const marks = read[paths.length] as readonly AskFirstMark[];
+    const marks = yield* Schema.decodeUnknownEffect(Schema.Array(AskFirstMark))(
+      read[paths.length],
+    ).pipe(unavailable);
     const secrets = paths.map((path) => ({
       path,
       coveredBy: coveringMark(marks, path),
