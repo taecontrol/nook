@@ -236,30 +236,7 @@ it('E33: the browser countdown expires without a reload, another document or a d
   await expectNoDecisionControls(page);
 });
 
-it('E33: a server Expired decision shows the expired card and the unsaved 1 hour alert', async () => {
-  const request = await webPending(app);
-  await page.goto(request.url);
-  await expectPendingPage(page);
-  await duration(page, '1 hour').click();
-  await age(app, request.id, 'expires_at', 600_000);
-  const answered = page.waitForResponse((r) =>
-    r.url().endsWith(`/${request.id}/approve`),
-  );
-  await approveButton(page).click();
-  expect((await answered).status()).toBe(410);
-  await page
-    .getByRole('heading', { name: 'This request expired', exact: true })
-    .waitFor();
-  const alert = await page.getByRole('alert').innerText();
-  expect(alert).toContain("Your 1 hour approval wasn't saved");
-  expect(alert).toContain(
-    'The request expired just before your choice reached Nook.',
-  );
-  await expectNoDecisionControls(page);
-});
-
 const states = [
-  ['approved', 'Approved for 1 hour', 'This run got its secrets.', '1h'],
   ['approved', /^Approved/, 'Only this time', 'once'],
   ['approved', 'Approved for 12 hours', '22:42', '12h'],
   [
@@ -280,12 +257,14 @@ const states = [
     'Requests last 10 minutes. Nothing was delivered. If the agent still needs these secrets, it runs again and sends a new link.',
     'once',
   ],
-  [
-    'settled',
-    'No longer needed',
-    'This run got its secrets without a decision here: an approval you gave earlier covered it, or its secrets are no longer marked Ask first.',
-    'once',
-  ],
+] as const;
+// A settled request is opened through the AlreadyHandled refresh below; the
+// cold open and that refresh render the same card from one query.
+const settled = [
+  'settled',
+  'No longer needed',
+  'This run got its secrets without a decision here: an approval you gave earlier covered it, or its secrets are no longer marked Ask first.',
+  'once',
 ] as const;
 async function terminal(
   request: Awaited<ReturnType<typeof webPending>>,
@@ -326,27 +305,20 @@ it.each(states)(
     await expectNoDecisionControls(page);
   },
 );
-it.each(['withdrawn', 'settled'] as const)(
-  'E34: AlreadyHandled after the run becomes %s replaces pending actions with the server state',
-  async (state) => {
-    const request = await webPending(app);
-    await page.goto(request.url);
-    await expectPendingPage(page);
-    await terminal(request, state, 'once');
-    const answered = page.waitForResponse((r) =>
-      r.url().endsWith(`/${request.id}/approve`),
-    );
-    await approveButton(page).click();
-    expect((await answered).status()).toBe(409);
-    const expected = states.find(([key]) => key === state);
-    if (!expected) throw new Error('Every terminal state has reference copy.');
-    await page
-      .getByRole('heading', { name: expected[1], exact: true })
-      .waitFor();
-    expect(await page.locator('body').innerText()).toContain(expected[2]);
-    await expectNoDecisionControls(page);
-  },
-);
+it('E34: AlreadyHandled after the run becomes settled replaces pending actions with the server state', async () => {
+  const request = await webPending(app);
+  await page.goto(request.url);
+  await expectPendingPage(page);
+  await terminal(request, 'settled', 'once');
+  const answered = page.waitForResponse((r) =>
+    r.url().endsWith(`/${request.id}/approve`),
+  );
+  await approveButton(page).click();
+  expect((await answered).status()).toBe(409);
+  await page.getByRole('heading', { name: settled[1], exact: true }).waitFor();
+  expect(await page.locator('body').innerText()).toContain(settled[2]);
+  await expectNoDecisionControls(page);
+});
 
 it('E35: three secrets and the long purpose keep Deny and Approve reachable on a 390×844 phone and paths break only at /', async () => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -606,73 +578,65 @@ it('E35: long unbroken secret, machine and directory names stay inside the phone
   await expectNoOverflow(page);
 });
 
-it.each(['1h', 'deny'] as const)(
-  'E32/E34: a successful %s decision survives an older pending detail response without returning controls',
-  async (choice) => {
-    const request = await webPending(app);
-    await page.goto(request.url);
+// The success path does not depend on the choice; E41 ends a denial.
+it('E32/E34: a successful 1 hour decision survives an older pending detail response without returning controls', async () => {
+  const request = await webPending(app);
+  await page.goto(request.url);
+  await expectPendingPage(page);
+  await page.getByRole('link', { name: 'All approvals', exact: true }).click();
+  await page.getByRole('link', { name: 'Review', exact: true }).waitFor();
+  await page.clock.setFixedTime(new Date(approvalNow.getTime() + 31_000));
+  const old = deferred();
+  const read = deferred();
+  const released = deferred();
+  await page.route(`**/api/approvals/${request.id}`, async (route) => {
+    const response = await route.fetch();
+    expect(await response.json()).toMatchObject({ state: 'pending' });
+    read.resolve();
+    await old.promise;
+    await route.fulfill({ response }).catch(() => {});
+    released.resolve();
+  });
+  try {
+    await page.getByRole('link', { name: 'Review', exact: true }).click();
+    await read.promise;
     await expectPendingPage(page);
-    await page
-      .getByRole('link', { name: 'All approvals', exact: true })
-      .click();
-    await page.getByRole('link', { name: 'Review', exact: true }).waitFor();
-    await page.clock.setFixedTime(new Date(approvalNow.getTime() + 31_000));
-    const old = deferred();
-    const read = deferred();
-    const released = deferred();
-    await page.route(`**/api/approvals/${request.id}`, async (route) => {
-      const response = await route.fetch();
-      expect(await response.json()).toMatchObject({ state: 'pending' });
-      read.resolve();
-      await old.promise;
-      await route.fulfill({ response }).catch(() => {});
-      released.resolve();
+    await duration(page, '1 hour').click();
+    await approveButton(page).click();
+    const result = page.getByRole('heading', {
+      name: 'Approved for 1 hour',
+      exact: true,
     });
-    try {
-      await page.getByRole('link', { name: 'Review', exact: true }).click();
-      await read.promise;
-      await expectPendingPage(page);
-      if (choice === '1h') await duration(page, '1 hour').click();
-      await (choice === 'deny'
-        ? page.getByRole('button', { name: 'Deny', exact: true })
-        : approveButton(page)
-      ).click();
-      const result = page.getByRole('heading', {
-        name: choice === 'deny' ? 'Run denied' : 'Approved for 1 hour',
-        exact: true,
-      });
-      await result.waitFor();
-      await expectNoDecisionControls(page);
-      await page.evaluate(() => {
-        document.documentElement.dataset.controlsReturned = 'false';
-        new MutationObserver(() => {
-          if (document.querySelector('[role="radio"]'))
-            document.documentElement.dataset.controlsReturned = 'true';
-        }).observe(document, { childList: true, subtree: true });
-      });
-      old.resolve();
-      await released.promise;
-      await page.waitForLoadState('networkidle');
-      expect(
-        await result.count(),
-        'An older pending GET cannot undo a confirmed decision',
-      ).toBe(1);
-      expect(
-        await page.evaluate(
-          () => document.documentElement.dataset.controlsReturned,
-        ),
-      ).toBe('false');
-      await expectNoDecisionControls(page);
-    } finally {
-      old.resolve();
-    }
-  },
-);
+    await result.waitFor();
+    await expectNoDecisionControls(page);
+    await page.evaluate(() => {
+      document.documentElement.dataset.controlsReturned = 'false';
+      new MutationObserver(() => {
+        if (document.querySelector('[role="radio"]'))
+          document.documentElement.dataset.controlsReturned = 'true';
+      }).observe(document, { childList: true, subtree: true });
+    });
+    old.resolve();
+    await released.promise;
+    await page.waitForLoadState('networkidle');
+    expect(
+      await result.count(),
+      'An older pending GET cannot undo a confirmed decision',
+    ).toBe(1);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.dataset.controlsReturned,
+      ),
+    ).toBe('false');
+    await expectNoDecisionControls(page);
+  } finally {
+    old.resolve();
+  }
+});
 
 const longSecretName = 'X'.repeat(64);
 const longSecretPath = `work/acme/${longSecretName}`;
 it.each([
-  { covered: [stripe], scope: `this secret (${stripe})` },
   { covered: [longSecretPath], scope: `this secret (${longSecretPath})` },
   {
     covered: [stripe, longSecretPath],

@@ -69,8 +69,10 @@ it.each(['expired', 'network'] as const)(
       await page
         .getByRole('heading', { name: 'This request expired', exact: true })
         .waitFor();
-      expect(await page.getByRole('alert').innerText()).toContain(
-        "Your 1 hour approval wasn't saved",
+      const alert = await page.getByRole('alert').innerText();
+      expect(alert).toContain("Your 1 hour approval wasn't saved");
+      expect(alert).toContain(
+        'The request expired just before your choice reached Nook.',
       );
       await expectNoDecisionControls(page);
       expect(await view(app, a.id)).toMatchObject({ state: 'expired' });
