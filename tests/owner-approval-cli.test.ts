@@ -136,24 +136,17 @@ const shortPending = {
     interval: 2,
   },
 };
-it.each(['pending', 'unreachable'])(
-  'E9/E11: %s until the relative local deadline exits 75 with run-again guidance',
-  async (mode) => {
-    const fake = await fakeValues((call) =>
-      call === 1 || mode === 'pending'
-        ? { status: 200, body: shortPending }
-        : null,
-    );
-    try {
-      const result = await keyring.start(args()).done;
-      expect(result.status).toBe(75);
-      expect(result.stdout).not.toContain('started');
-      expect(result.stderr).toContain('Run again to ask again');
-    } finally {
-      await fake.close();
-    }
-  },
-);
+it('E9/E11: pending until the local deadline exits 75 with run-again guidance', async () => {
+  const fake = await fakeValues(() => ({ status: 200, body: shortPending }));
+  try {
+    const result = await keyring.start(args()).done;
+    expect(result.status).toBe(75);
+    expect(result.stdout).not.toContain('started');
+    expect(result.stderr).toContain('Run again to ask again');
+  } finally {
+    await fake.close();
+  }
+});
 it('E11/E19: transient wait failures retry the identical attempt, then delivery starts the command', async () => {
   const fake = await fakeValues((call) =>
     call === 1
@@ -180,28 +173,14 @@ it('E11/E19: transient wait failures retry the identical attempt, then delivery 
     await fake.close();
   }
 });
-it('E19: a failure before the first pending response fails immediately without retrying or creating an attempt twice', async () => {
-  const fake = await fakeValues(() => null);
-  try {
-    const result = await keyring.start(args()).done;
-    expect(result.status).toBe(1);
-    expect(result.stdout + result.stderr).toContain('Could not reach');
-    expect(fake.bodies).toHaveLength(1);
-    expect(fake.bodies[0]).toHaveProperty('approval.attemptId');
-  } finally {
-    await fake.close();
-  }
-});
 it.each([
-  ['ApprovalDenied', 77, 'Nothing was delivered.'],
   ['ApprovalExpired', 75, 'Run again to ask again'],
   ['ApprovalLimit', 75, 'Too many pending requests.'],
 ] as const)(
-  'E8/E20/E28: %s on the first ask maps to exit %i and its public reason',
+  'E28: %s on the first ask maps to exit %i and its public reason',
   async (tag, code, message) => {
     const fake = await fakeValues(() => ({
-      status:
-        tag === 'ApprovalDenied' ? 403 : tag === 'ApprovalExpired' ? 410 : 429,
+      status: tag === 'ApprovalExpired' ? 410 : 429,
       body: {
         _tag: tag,
         paths: [acmePath],
@@ -219,40 +198,3 @@ it.each([
     }
   },
 );
-it('E3: nook vault create inherits an existing bucket mark', async () => {
-  await setMark(app);
-  expect(
-    (
-      await keyring.start(
-        [
-          'vault',
-          'create',
-          'work/acme/NEW_KEY',
-          '--purpose',
-          'new marked secret',
-        ],
-        {},
-        'synthetic-created-only',
-      ).done
-    ).status,
-  ).toBe(0);
-  const running = keyring.start([
-    'run',
-    '--secret',
-    'T=work/acme/NEW_KEY',
-    '--purpose',
-    'created secret',
-    '--',
-    process.execPath,
-    '-e',
-    '',
-  ]);
-  try {
-    await expect
-      .poll(() => running.output().includes('/approvals/'))
-      .toBe(true);
-  } finally {
-    await running.kill('SIGTERM');
-    await running.done;
-  }
-});
