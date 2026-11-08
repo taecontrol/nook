@@ -171,22 +171,30 @@ it.each([
       };
     });
     const running = keyring.start(args());
+    let finished = false;
+    void running.done.then(() => {
+      finished = true;
+    });
     try {
       await reached.promise;
       expect(await running.kill(signal)).toBe(true);
-      // Keep the response in flight while Node handles the signal. Cancellation
-      // must not abandon a server-created request whose id is not known yet.
-      const exitedEarly = await Promise.race([
-        running.done.then(() => true),
-        new Promise<boolean>((resolve) =>
-          setTimeout(() => resolve(false), 100),
-        ),
-      ]);
-      expect.soft(exitedEarly).toBe(false);
+      // Acknowledge the signal before releasing the answer, so cancellation
+      // deterministically wins over values even on a loaded runner.
+      await expect
+        .poll(() => running.output())
+        .toContain('Cancelling the run…');
+      expect(finished, 'Cancellation still waits for the first answer').toBe(
+        false,
+      );
       release.resolve();
       const result = await running.done;
       expect.soft(result.status).toBe(code);
       expect.soft(result.stdout).toBe('');
+      expect(result.stderr).toContain(
+        answer === 'pending'
+          ? 'The approval request was withdrawn. Nothing was delivered.'
+          : 'The run was cancelled. Nothing was delivered.',
+      );
       expectNoValue(result.stderr, ['synthetic-only']);
       expect.soft(fake.bodies).toHaveLength(1);
       expect

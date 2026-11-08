@@ -1009,7 +1009,9 @@ prove that retries begin only after a pending response and keep the same
 attempt. `approval-wait.test.ts` uses Effect TestClock for the ten-minute
 local deadline, retry pacing and the three-second withdrawal bound.
 The real CLI also receives SIGINT and SIGTERM while its first values request
-is held. A late pending answer is withdrawn; a late values answer is
+is held. The fake server releases its answer only after the CLI prints
+`Cancelling the run…` on stderr, proving it has handled the signal without
+a timed sleep. A late pending answer is withdrawn; a late values answer is
 discarded. Both exit 130/143 without starting a command. TestClock proves
 that a stalled first answer gets at most three more seconds and that no
 withdrawal is sent without a known request id. With no id, the CLI prints

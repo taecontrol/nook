@@ -130,6 +130,7 @@ export function requestValues(io: WaitIo) {
     const asking = yield* io.ask.pipe(Effect.forkScoped);
     const result = yield* Effect.raceFirst(Fiber.join(asking), io.signal);
     if (typeof result === 'string') {
+      io.status('Cancelling the run…');
       // The server may already have created a request. Give its first answer a
       // short chance to reveal the id before withdrawing, without starting a child.
       const response = yield* Fiber.join(asking).pipe(
