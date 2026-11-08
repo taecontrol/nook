@@ -26,6 +26,7 @@ import {
   endTime,
   timeLeft,
 } from './approval-screen';
+import { approvalTimeLeft } from './approval-time';
 import { useApprovals } from './approvals-api';
 import { LoadFailure } from './failure';
 import { useDesktop } from './hooks/use-desktop';
@@ -99,7 +100,7 @@ function ApprovalRow({ view, now }: { view: ApprovalView; now: number }) {
       </ItemMedia>
       <ApprovalSummary
         view={view}
-        msLeft={Math.max(0, Date.parse(view.expiresAt) - now)}
+        msLeft={Math.max(0, approvalTimeLeft(view, now))}
       />
       <ReviewApproval view={view} />
     </Item>

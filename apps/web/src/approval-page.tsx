@@ -1,5 +1,5 @@
-import type {
-  ApprovalView,
+import {
+  type ApprovalView,
   ApprovalRemember as Remember,
 } from '@nook/contract';
 import { Link, useParams } from '@tanstack/react-router';
@@ -33,8 +33,10 @@ import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { ApiError, describeFailure } from './api-client';
+import { useApproval } from './approval-api';
 import {
   approvalScope,
+  type Choice,
   durationLabel,
   endsAt,
   endTime,
@@ -43,7 +45,7 @@ import {
   submittingLabel,
   timeLeft,
 } from './approval-screen';
-import { useApproval } from './approvals-api';
+import { AskFirstLabel } from './ask-first-label';
 import { LoadFailure } from './failure';
 import { SlashPath } from './path-text';
 
@@ -85,13 +87,7 @@ function Verified({ view }: { view: ApprovalView }) {
               <SlashPath>{path}</SlashPath>
               <p className="mt-1 text-xs text-muted-foreground">
                 {coveredBy ? (
-                  coveredBy.kind === 'bucket' ? (
-                    <>
-                      Ask first, from <SlashPath>{coveredBy.path}</SlashPath>
-                    </>
-                  ) : (
-                    'Ask first, on this secret'
-                  )
+                  <AskFirstLabel mark={coveredBy} />
                 ) : (
                   'Not marked Ask first'
                 )}
@@ -172,7 +168,7 @@ function DurationChoice({
         onValueChange={(value) => setChoice(value as Remember)}
         disabled={disabled}
       >
-        {(['once', '1h', '12h'] as const).map((value) => {
+        {Remember.literals.map((value) => {
           const until = endsAt(value, Date.now());
           return (
             <Item key={value} variant="outline" size="sm" asChild>
@@ -204,7 +200,7 @@ function Decisions({
 }: {
   choice: Remember;
   submitting?: Submitting;
-  decide: (choice: Remember | 'deny') => void;
+  decide: (choice: Choice) => void;
 }) {
   const denying = submitting?.choice === 'deny';
   const approving = !!submitting && !denying;
@@ -241,7 +237,7 @@ function PendingCard({
 }: {
   screen: Screen & { kind: 'pending' | 'submitting' };
   failure?: 'network';
-  decide: (choice: Remember | 'deny') => void;
+  decide: (choice: Choice) => void;
 }) {
   const [choice, setChoice] = useState<Remember>('once');
   const { view } = screen;
@@ -426,7 +422,7 @@ function ApprovalCard({
 }: {
   screen: Screen;
   failure?: 'network';
-  decide: (choice: Remember | 'deny') => void;
+  decide: (choice: Choice) => void;
 }) {
   return screen.kind === 'pending' || screen.kind === 'submitting' ? (
     <PendingCard screen={screen} failure={failure} decide={decide} />

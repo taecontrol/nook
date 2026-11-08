@@ -1,7 +1,9 @@
-import type {
-  ApprovalView,
-  ApprovalRemember as Remember,
+import {
+  type ApprovalView,
+  type ApprovalRemember as Remember,
+  rememberDuration,
 } from '@nook/contract';
+import { approvalTimeLeft } from './approval-time';
 import { formatTime } from './time';
 
 export type Choice = Remember | 'deny';
@@ -26,7 +28,7 @@ export type Screen =
       unsaved: boolean;
       choice?: Choice;
     };
-type Local = { submitting?: Choice; unsaved?: boolean; choice?: Choice };
+export type Local = { submitting?: Choice; unsaved?: boolean; choice?: Choice };
 
 function pendingScreen(
   view: View<'pending'>,
@@ -37,7 +39,7 @@ function pendingScreen(
     return { kind: 'submitting', choice: local.submitting, view };
   if (local.unsaved)
     return { kind: 'expired', unsaved: true, choice: local.choice, view };
-  if (Date.parse(view.expiresAt) <= now)
+  if (approvalTimeLeft(view, now) <= 0)
     return { kind: 'expired', unsaved: false, view };
   return { kind: 'pending', view };
 }
@@ -69,7 +71,7 @@ export function approvalScreen(
 }
 export function endsAt(remember: Remember, now: number): number | null {
   if (remember === 'once') return null;
-  return now + (remember === '1h' ? 1 : 12) * 3_600_000;
+  return now + rememberDuration[remember];
 }
 export const durationLabel = {
   once: 'Only this time',

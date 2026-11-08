@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { describeFailure } from './api-client';
 import type { useAskFirst } from './ask-first-api';
+import { AskFirstLabel } from './ask-first-label';
 import { DismissibleAlert, LoadFailure } from './failure';
 import { SlashPath } from './path-text';
 
@@ -38,13 +39,7 @@ export function SecretMark({ marks, path }: { marks: Marks; path: string }) {
     <span className="flex items-start gap-1 text-xs text-muted-foreground">
       <Hand className="mt-0.5 size-3 shrink-0" />
       <span>
-        {coverage.inherited ? (
-          <>
-            Ask first, from <SlashPath>{coverage.mark.path}</SlashPath>
-          </>
-        ) : (
-          'Ask first, on this secret'
-        )}
+        <AskFirstLabel mark={coverage.mark} />
       </span>
     </span>
   );
