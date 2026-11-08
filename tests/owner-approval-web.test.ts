@@ -21,6 +21,7 @@ import {
   approvalScope,
   approvalWebApp,
   approveButton,
+  cachedPendingCount,
   duration,
   expectNoDecisionControls,
   expectPendingPage,
@@ -325,6 +326,42 @@ it('E34: AlreadyHandled after the run becomes settled replaces pending actions w
   expect(await page.locator('body').innerText()).toContain(settled[2]);
   await expectNoDecisionControls(page);
 });
+
+it.each([
+  ['AlreadyHandled', 409],
+  ['Expired', 410],
+  ['NotFound', 404],
+] as const)(
+  '%s during a decision removes the stale pending count without navigation',
+  async (tag, status) => {
+    const request = await webPending(app);
+    await page.goto(`${app.origin}/approvals`);
+    const badge = page.locator('[data-sidebar="menu-badge"]');
+    await expect.poll(() => badge.textContent()).toBe('1');
+    await page.locator(`a[href="/approvals/${request.id}"]`).click();
+    await expectPendingPage(page);
+    expect(await cachedPendingCount(page)).toBe(1);
+    if (tag === 'AlreadyHandled') await terminal(request, 'denied', 'deny');
+    else if (tag === 'Expired') await terminal(request, 'expired', 'once');
+    else
+      await (await app.mf.getD1Database('DB'))
+        .prepare('DELETE FROM approval_requests WHERE id=?')
+        .bind(request.id)
+        .run();
+    const navigations: string[] = [];
+    page.on('request', (r) => {
+      if (r.isNavigationRequest()) navigations.push(r.url());
+    });
+    const answered = page.waitForResponse((r) =>
+      r.url().endsWith(`/${request.id}/approve`),
+    );
+    await approveButton(page).click();
+    expect((await answered).status()).toBe(status);
+    await expect.poll(() => cachedPendingCount(page)).toBe(0);
+    expect(page.url()).toBe(request.url);
+    expect(navigations).toEqual([]);
+  },
+);
 
 it('E35: three secrets and the long purpose keep Deny and Approve reachable on a 390×844 phone and paths break only at /', async () => {
   await page.setViewportSize({ width: 390, height: 844 });

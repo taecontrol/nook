@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import type { ApprovalList } from '@nook/contract';
+import type { QueryClient } from '@tanstack/react-query';
 import type { Browser, Locator, Page } from 'playwright';
 import { expect } from 'vitest';
 import { closeBrowserPage } from './buckets-browser.ts';
@@ -118,6 +120,36 @@ export const approveButton = (page: Page) =>
     name: /^Approve (?:this time|for 1 hour|for 12 hours)$/,
     exact: true,
   });
+// The detail route deliberately omits the sidebar. Inspect its shared list
+// response in the existing provider to prove recovery before any navigation
+// or focus event can refresh the badge for us. No production test API is needed.
+export function cachedPendingCount(page: Page) {
+  return page.evaluate(() => {
+    type Fiber = {
+      child?: Fiber;
+      sibling?: Fiber;
+      stateNode?: { current?: Fiber };
+      memoizedProps?: { client?: QueryClient };
+    };
+    const element = document.querySelector('#root');
+    const key = Object.keys(element ?? {}).find((key) =>
+      key.startsWith('__reactContainer$'),
+    );
+    if (!element || !key) throw new Error('Missing React root');
+    const root = (element as unknown as Record<string, Fiber>)[key];
+    const fibers = [root.stateNode?.current ?? root];
+    while (fibers.length) {
+      const fiber = fibers.pop();
+      const client = fiber?.memoizedProps?.client;
+      if (client?.getQueryCache)
+        return client.getQueryData<typeof ApprovalList.Type>(['approvals'])
+          ?.pending.length;
+      if (fiber?.child) fibers.push(fiber.child);
+      if (fiber?.sibling) fibers.push(fiber.sibling);
+    }
+    throw new Error('Missing query provider');
+  });
+}
 export async function expectNoDecisionControls(page: Page) {
   expect(await page.getByRole('radio').count()).toBe(0);
   expect(await approveButton(page).count()).toBe(0);
