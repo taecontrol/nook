@@ -24,38 +24,67 @@ const args = (script = 'process.stdout.write("started")') => [
   '-e',
   script,
 ];
-async function startWaiting() {
+const session = { CLAUDE_CODE_SESSION_ID: 's1' };
+const resumed = (attempt: string, script?: string) => [
+  'run',
+  '--approval',
+  attempt,
+  ...args(script).slice(1),
+];
+// The first run creates the request and returns; only its --approval run waits.
+async function askOwner(script?: string) {
+  const asked = await keyring.start(args(script), session).done;
+  const id = /\/approvals\/([0-9a-f-]+)/.exec(asked.stderr)?.[1] ?? '';
+  const attempt = /--approval ([0-9a-f-]+)/.exec(asked.stderr)?.[1] ?? '';
+  return { asked, id, attempt };
+}
+async function startWaiting(scriptFor?: (value: string) => string) {
   const input = secretInput({ name: 'GH_TOKEN' });
   expect((await createSecret(app, input)).status).toBe(201);
   await setMark(app);
-  const running = keyring.start(args(), { CLAUDE_CODE_SESSION_ID: 's1' });
-  await expect
-    .poll(() => /\/approvals\/[0-9a-f-]+/.test(running.output()))
-    .toBe(true);
-  const id = /\/approvals\/([0-9a-f-]+)/.exec(running.output())?.[1] ?? '';
-  return { input, running, id };
+  const script = scriptFor?.(input.value);
+  const { id, attempt } = await askOwner(script);
+  const running = keyring.start(resumed(attempt, script), session);
+  await expect.poll(() => running.output()).toContain('Waiting (');
+  return { input, script, running, id };
 }
-it('E6/E7/E13/E30: the real CLI waits privately, delivers the exact value, propagates child exit and silently reuses across agents', async () => {
-  const input = secretInput({ name: 'GH_TOKEN' });
-  await createSecret(app, input);
+it('E6: the run that needs approval returns at once with the link and the way to resume, and leaves its request pending', async () => {
+  expect(
+    (await createSecret(app, secretInput({ name: 'GH_TOKEN' }))).status,
+  ).toBe(201);
   await setMark(app);
-  const digest = createHash('sha256').update(input.value).digest('hex');
-  const script = `const {createHash}=require('node:crypto');process.stdout.write(String(createHash('sha256').update(process.env.T).digest('hex')===${JSON.stringify(digest)}));process.exitCode=42`;
-  const running = keyring.start(args(script), { CLAUDE_CODE_SESSION_ID: 's1' });
+  const { asked, id, attempt } = await askOwner();
+  expect(asked.status).toBe(75);
+  expect(asked.stdout, 'No command starts before delivery').toBe('');
+  expect(asked.stderr).toContain(`${acmePath} needs the owner's approval.`);
+  expect(asked.stderr).toMatch(
+    new RegExp(`Tell the owner now to open \\S+/approvals/${id}\\n`),
+  );
+  expect(asked.stderr).toMatch(/\d+:\d{2} left/);
+  expect(attempt).toMatch(/^[0-9a-f-]{36}$/);
+  expect(await view(app, id)).toMatchObject({ state: 'pending' });
+  expect((await decide(app, id, 'once')).status).toBe(200);
+  const result = await keyring.start(resumed(attempt), session).done;
+  expect(result.status).toBe(0);
+  expect(result.stdout).toBe('started');
+  expect(result.stderr, 'An approved resume has nothing to announce').toBe('');
+});
+it('E6/E7/E13/E30: the resumed CLI waits privately under the same request, delivers the exact value, propagates child exit and silently reuses across agents', async () => {
+  const { input, script, running, id } = await startWaiting((value) => {
+    const digest = createHash('sha256').update(value).digest('hex');
+    return `const {createHash}=require('node:crypto');process.stdout.write(String(createHash('sha256').update(process.env.T).digest('hex')===${JSON.stringify(digest)}));process.exitCode=42`;
+  });
   let finished = false;
   void running.done.then(() => {
     finished = true;
   });
-  await expect
-    .poll(() => /\/approvals\/[0-9a-f-]+/.test(running.output()))
-    .toBe(true);
   expect(running.output()).toContain(acmePath);
-  expect(running.output()).toMatch(/\d+:\d{2} left/);
-  expect(finished, 'The CLI waits for the owner').toBe(false);
-  const id = /\/approvals\/([0-9a-f-]+)/.exec(running.output())?.[1] ?? '';
-  expect((await auditRows(app)).map((r) => r.outcome)).toEqual([
-    'approval_requested',
-  ]);
+  expect(running.output()).toContain(`/approvals/${id}`);
+  expect(finished, 'The resumed CLI waits for the owner').toBe(false);
+  expect(
+    (await auditRows(app)).map((r) => r.outcome),
+    'Resuming asks under the same request',
+  ).toEqual(['approval_requested']);
   expect((await decide(app, id, '1h')).status).toBe(200);
   const result = await running.done;
   expect(result.status).toBe(42);
@@ -211,6 +240,51 @@ it.each([
     }
   },
 );
+const attempt = '00000000-0000-4000-8000-0000000000a7';
+it('a pending first answer ends the run at once: one ask, no withdrawal, and the id to resume with', async () => {
+  const fake = await fakeValues(() => ({ status: 200, body: shortPending }));
+  try {
+    const result = await keyring.start(args()).done;
+    expect(result.status).toBe(75);
+    expect(result.stdout).toBe('');
+    expect(fake.bodies).toHaveLength(1);
+    expect(fake.withdrawals).toEqual([]);
+    const sent = (fake.bodies[0].approval as { attemptId: string }).attemptId;
+    expect(result.stderr).toBe(
+      `${acmePath} needs the owner's approval. Nothing ran yet.\nTell the owner now to open ${shortPending.approval.url}\nThen run the same command again with --approval ${sent} after "nook run". That run waits for the owner's decision (0:01 left).\n`,
+    );
+  } finally {
+    await fake.close();
+  }
+});
+it('an --approval that is not an attempt id is refused before any request', async () => {
+  const fake = await fakeValues(() => ({ status: 200, body: shortPending }));
+  try {
+    const result = await keyring.start(resumed('request')).done;
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe(
+      'Use --approval with the id a previous nook run printed.\n',
+    );
+    expect(fake.bodies).toHaveLength(0);
+  } finally {
+    await fake.close();
+  }
+});
+it('a resumed run that differs from the run that asked prints the refusal, not a network error', async () => {
+  const message = 'This attempt id was already used for a different run.';
+  const fake = await fakeValues(() => ({
+    status: 400,
+    body: { _tag: 'InvalidRun', message },
+  }));
+  try {
+    const result = await keyring.start(resumed(attempt)).done;
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe(`${message}\n`);
+    expect(fake.bodies).toHaveLength(1);
+  } finally {
+    await fake.close();
+  }
+});
 it('E9/E11: a server unreachable after the pending answer still ends at the relative local deadline with run-again guidance', async () => {
   // Later pending answers would shorten the deadline again, so only the first
   // answer's expiresIn can end this wait.
@@ -223,10 +297,12 @@ it('E9/E11: a server unreachable after the pending answer still ends at the rela
       : null,
   );
   try {
-    const result = await keyring.start(args()).done;
+    const result = await keyring.start(resumed(attempt)).done;
     expect(result.status).toBe(75);
     expect(result.stdout).not.toContain('started');
-    expect(result.stderr).toContain('Run again to ask again');
+    expect(result.stderr).toContain(
+      'Run again without --approval to ask again',
+    );
     expect(fake.bodies.length).toBeGreaterThan(1);
   } finally {
     await fake.close();
@@ -247,11 +323,11 @@ it('E11/E19: transient wait failures retry the identical attempt, then delivery 
           },
   );
   try {
-    const result = await keyring.start(args()).done;
+    const result = await keyring.start(resumed(attempt)).done;
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('started');
     expect(fake.bodies).toHaveLength(3);
-    expect(fake.bodies[0]).toHaveProperty('approval.attemptId');
+    expect(fake.bodies[0]).toHaveProperty('approval.attemptId', attempt);
     expect(fake.bodies[1]).toEqual(fake.bodies[0]);
     expect(fake.bodies[2]).toEqual(fake.bodies[0]);
   } finally {
@@ -270,13 +346,13 @@ it.each([false, true])(
         : { status: 410, body: { _tag: 'ApprovalExpired', reason: 'changed' } },
     );
     try {
-      const result = await keyring.start(args()).done;
+      const result = await keyring.start(resumed(attempt)).done;
       expect.soft(result.status).toBe(75);
       expect.soft(result.stdout).toBe('');
       expect
         .soft(result.stderr)
         .toMatch(
-          /The secrets that need approval changed while you waited\. Run again to ask again\.\n$/,
+          /The secrets that need approval changed while you waited\. Run again without --approval to ask again\.\n$/,
         );
       expect(fake.bodies).toHaveLength(afterPending ? 2 : 1);
     } finally {
@@ -288,7 +364,8 @@ it.each([
   ...(['expired', 'withdrawn'] as const).map((reason) => ({
     tag: `ApprovalExpired (${reason})`,
     code: 75,
-    message: 'The approval request expired. Run again to ask again.',
+    message:
+      'The approval request expired. Run again without --approval to ask again.',
     // The local deadline lies beyond the test, so only the 410 ends the wait.
     answer: (call: number) =>
       call === 1
@@ -314,7 +391,7 @@ it.each([
   async ({ code, message, answer, asks }) => {
     const fake = await fakeValues(answer);
     try {
-      const result = await keyring.start(args()).done;
+      const result = await keyring.start(resumed(attempt)).done;
       expect(result.status).toBe(code);
       expect(result.stderr).toContain(message);
       expect(result.stdout).not.toContain('started');

@@ -20,7 +20,7 @@ export let values: Record<string, string>;
 export const childFile = resolve('tests/support/run-child.ts');
 export const mappings = { GH_TOKEN: acmePath, DB_URL: 'work/acme/DB_URL' };
 export const usage =
-  'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] -- <command>';
+  'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] [--approval <id>] -- <command>';
 class PrivateLog extends Log {
   messages: string[] = [];
   constructor() {

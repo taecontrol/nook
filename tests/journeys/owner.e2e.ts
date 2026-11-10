@@ -38,27 +38,29 @@ test('E42: the owner marks work in Vault, approves a waiting nook run for 1 hour
         );
       })
       .toBe(true);
-    const running = keyring.start(args, {
-      CLAUDE_CODE_SESSION_ID: 'approval-journey-session-one',
-    });
+    const session = { CLAUDE_CODE_SESSION_ID: 'approval-journey-session-one' };
+    const asked = await keyring.start(args, session).done;
+    expect(asked.status).toBe(75);
+    expect(asked.stdout).toBe('');
+    const url = /https?:\/\/[^\s]+\/approvals\/[0-9a-f-]+/.exec(
+      asked.stderr,
+    )?.[0];
+    if (!url || new URL(url).origin !== origin)
+      throw new Error(
+        'The asking CLI must print this installation’s approval link.',
+      );
+    const attempt = /--approval ([0-9a-f-]+)/.exec(asked.stderr)?.[1] ?? '';
+    const running = keyring.start(
+      ['run', '--approval', attempt, ...args.slice(1)],
+      session,
+    );
     let finished = false;
     void running.done.then(() => {
       finished = true;
     });
-    await expect
-      .poll(() =>
-        /https?:\/\/[^\s]+\/approvals\/[0-9a-f-]+/.test(running.output()),
-      )
-      .toBe(true);
+    await expect.poll(() => running.output()).toContain('Waiting (');
     expect(finished).toBe(false);
     expect(running.output().includes('delivered')).toBe(false);
-    const url = /https?:\/\/[^\s]+\/approvals\/[0-9a-f-]+/.exec(
-      running.output(),
-    )?.[0];
-    if (!url || new URL(url).origin !== origin)
-      throw new Error(
-        'The waiting CLI must print this installation’s approval link.',
-      );
     const id = new URL(url).pathname.split('/').at(-1);
     await app.open(new URL(url).pathname);
     await expect(

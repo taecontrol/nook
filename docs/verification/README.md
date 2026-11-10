@@ -1001,10 +1001,13 @@ Unmarked runs retain one authentication statement, one read batch and one
 audit batch. A capable CLI's retry payload is checked in that read batch,
 even after the last mark is removed.
 
-`owner-approval-cli.test.ts` proves that pending output stays on stderr,
-no command starts before delivery, the exact injected bytes and child's
-exit status survive, remembered approval is silent across agent sessions,
-and real SIGINT/SIGTERM withdraw before exiting 130/143. Fake HTTP failures
+`owner-approval-cli.test.ts` proves that a run needing approval returns at
+once with exit 75, the link and the attempt id on stderr, starts no command
+and leaves its request pending (ADR-0022). The run given `--approval` waits
+under the same request, the exact injected bytes and child's exit status
+survive, remembered approval is silent across agent sessions, and real
+SIGINT/SIGTERM withdraw before exiting 130/143. A fake server proves the
+first pending answer is asked once and never withdrawn. Fake HTTP failures
 prove that retries begin only after a pending response and keep the same
 attempt. `approval-wait.test.ts` uses Effect TestClock for the ten-minute
 local deadline, retry pacing and the three-second withdrawal bound.
@@ -1019,7 +1022,7 @@ withdrawal is sent without a known request id. With no id, the CLI prints
 on the server expires after the usual ten minutes.
 The changed-coverage fake-server cases check the first answer and the wait
 loop: both exit 75, start no command, and print exactly
-`The secrets that need approval changed while you waited. Run again to ask again.`
+`The secrets that need approval changed while you waited. Run again without --approval to ask again.`
 The server's `expired` and `withdrawn` answers retain their existing message.
 
 `owner-approval-migration.test.ts` runs the previous Worker's actual source
