@@ -592,7 +592,7 @@ it('E6: incomplete run prints its required usage', async () => {
   expect(result.status).toBe(1);
   expectOutput(
     result.stdout + result.stderr,
-    'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] -- <command>',
+    'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] [--approval <id>] -- <command>',
     true,
   );
 });
@@ -764,12 +764,12 @@ it.each([
   {
     args: ['--secret', '--', 'node'],
     message:
-      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] -- <command>',
+      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] [--approval <id>] -- <command>',
   },
   {
     args: ['--purpose', '--', 'node'],
     message:
-      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] -- <command>',
+      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] [--approval <id>] -- <command>',
   },
   {
     args: [
@@ -783,12 +783,12 @@ it.each([
       'node',
     ],
     message:
-      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] -- <command>',
+      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] [--approval <id>] -- <command>',
   },
   {
     args: ['--secret', `GH_TOKEN=${acmePath}`, '--purpose', 'test', '--'],
     message:
-      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] -- <command>',
+      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] [--approval <id>] -- <command>',
   },
   {
     args: [
@@ -1236,7 +1236,7 @@ it.each(
     expect(result.status).toBe(1);
     expectOutput(
       result.stdout + result.stderr,
-      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] -- <command>',
+      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] [--approval <id>] -- <command>',
       true,
     );
     expect((await keyringTranscript()) === before).toBe(true);

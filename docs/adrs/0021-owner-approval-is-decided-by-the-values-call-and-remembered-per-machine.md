@@ -1,7 +1,7 @@
 # ADR-0021: Owner approval is decided by the values call and remembered per machine
 
 Date: 2026-11-02
-Status: Accepted
+Status: Accepted (waiting in the invocation that asks superseded by [ADR-0022](0022-nook-run-returns-the-approval-link-at-once-and-waits-only-when-resumed.md))
 
 ## Context
 

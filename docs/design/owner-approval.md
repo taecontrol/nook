@@ -1,6 +1,6 @@
 # Owner approval before `nook run` uses chosen secrets
 
-Status: Accepted (owner, 2026-11-02)
+Status: Accepted (owner, 2026-11-02). Amended on 2026-11-10 by [ADR-0022](../adrs/0022-nook-run-returns-the-approval-link-at-once-and-waits-only-when-resumed.md): the run that creates a request returns at once, and the run given `--approval` waits. Sections 2 and 4 reflect it.
 Date: 2026-11-02
 Issue: [#82](https://github.com/taecontrol/nook/issues/82), part of [#76](https://github.com/taecontrol/nook/issues/76)
 Grounded at: `main` 1927803 (designed at 466b0e6)
@@ -28,7 +28,7 @@ Protected behavior:
 
 Spikes run locally on 2026-11-02 (the experiments were deleted afterwards):
 
-- **Claude Code.** A blocking command's stderr reaches the agent while it runs. At the tool timeout, Claude Code moves the command to the background and notifies the agent when it exits, instead of killing it. When the agent cancels, the command receives SIGTERM.
+- **Claude Code.** A blocking command's output reaches the agent only when the command ends or the tool timeout passes (corrected on 2026-11-10; the original spike reported that stderr arrives while the command runs). At the tool timeout, Claude Code moves the command to the background and notifies the agent when it exits, instead of killing it. When the agent cancels, the command receives SIGTERM.
 - **Codex 0.166.** It waited 150 s on a blocking command, saw interim output, and did not kill the command.
 - **Session markers.** Claude Code sets `CLAUDE_CODE_SESSION_ID`, which stays stable across turns. Codex sets `CODEX_SESSION_ID`. Nested agents inherit both. The values are claimed by the client and an agent can forge them. Since #117, the CLI resolves one claim per run (`apps/cli/src/agent-session.ts`, ADR-0019) and sends it as `RunSecrets.agentSession`.
 - **Web Push.** It works end to end from workerd: VAPID signing and aes128gcm encryption through WebCrypto. It was not chosen.
@@ -57,20 +57,30 @@ The server verifies two facts: the machine, through its Nook token, and the secr
 
 ## 4. Caller usage
 
-**Agent.** The agent runs `nook run -- pnpm deploy`, and `work/acme` is marked:
+**Agent.** The agent runs `nook run -- pnpm deploy`, and `work/acme` is marked. The run starts nothing and exits 75:
 
 ```
-nook: work/acme/STRIPE_KEY needs the owner's approval.
-      Ask the owner to open https://nook.example.com/approvals/3f2c…
-      Waiting (10:00 left)…
+work/acme/STRIPE_KEY needs the owner's approval. Nothing ran yet.
+Tell the owner now to open https://nook.example.com/approvals/3f2c…
+Then run the same command again with --approval 6a1e… after "nook run". That run waits for the owner's decision (10:00 left).
 ```
 
-- **Approved.** The command runs.
+The agent gives the owner the link and runs `nook run --approval 6a1e… -- pnpm deploy`. That run sends the same attempt id, creates no second request, and waits:
+
+```
+work/acme/STRIPE_KEY needs the owner's approval.
+Ask the owner to open https://nook.example.com/approvals/3f2c…
+Waiting (9:40 left)…
+```
+
+The outcomes below are those of the run given `--approval`.
+
+- **Approved.** The command runs. If the owner decided before the resumed run started, it prints nothing extra.
 - **Denied.** `The owner denied work/acme/STRIPE_KEY. Nothing was delivered.` Exit code 77.
-- **Expired or withdrawn on the server,** or the server is unreachable until the deadline: `The approval request expired. Run again to ask again.` Exit code 75.
-- **Covered paths changed.** If this attempt's approval is still valid but a new mark covers another requested path, the server returns `ApprovalExpired` with reason `changed`. The CLI prints `The secrets that need approval changed while you waited. Run again to ask again.` and exits 75. Nothing is delivered.
+- **Expired or withdrawn on the server,** or the server is unreachable until the deadline: `The approval request expired. Run again without --approval to ask again.` Exit code 75.
+- **Covered paths changed.** If this attempt's approval is still valid but a new mark covers another requested path, the server returns `ApprovalExpired` with reason `changed`. The CLI prints `The secrets that need approval changed while you waited. Run again without --approval to ask again.` and exits 75. Nothing is delivered.
 - **Cancelled.** SIGINT exits with 130; SIGTERM exits with 143. If the request id is known, `nook run` withdraws it best effort and prints `The approval request was withdrawn. Nothing was delivered.` If the signal arrives during the first values request, the CLI prints `Cancelling the run…` on stderr and waits up to 3 seconds for its answer. A pending answer reveals the id, so the CLI withdraws that request. A values answer is discarded without starting the command. If no answer arrives in time, the CLI leaves the unknown request alone; an undecided request expires after 10 minutes, as usual. When no id is known, including after a values answer, the CLI prints `The run was cancelled. Nothing was delivered.`
-- **Remembered.** A later run on the same machine, needing some of the approved secrets, is delivered on its first call and prints nothing extra, whichever agent runs it.
+- **Remembered.** A later run on the same machine, needing some of the approved secrets, is delivered on its first call without `--approval` and prints nothing extra, whichever agent runs it.
 - **Window passed.** If the *only this time* window passes before this attempt receives its values, the next ask fails with `ApprovalExpired` with reason `expired` and exits 75 with the existing expiry message, even if another mark was added meanwhile.
 - **Released CLI.** An old CLI asking for a covered secret prints `work/acme/STRIPE_KEY needs the owner's approval, and this nook version cannot ask. Update nook.` and exits 1.
 

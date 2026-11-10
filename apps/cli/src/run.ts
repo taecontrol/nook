@@ -32,9 +32,13 @@ function runFailure(error: RequestFailure) {
         .join(' '),
     );
   if (
-    ['SecretNotFound', 'SecretKeyUnavailable', 'VaultNotConfigured'].includes(
-      error.server.tag,
-    ) &&
+    [
+      'SecretNotFound',
+      'SecretKeyUnavailable',
+      'VaultNotConfigured',
+      // A resumed run that differs from the one that asked is refused by name.
+      'InvalidRun',
+    ].includes(error.server.tag) &&
     error.publicMessage
   )
     return new CliFailure(error.publicMessage);
@@ -59,7 +63,7 @@ export function run(
       const relay =
         plan.kind === 'masked' ? yield* startRelay(plan) : undefined;
       const { url, request } = yield* session(host);
-      const attemptId = randomUUID();
+      const attemptId = parsed.approval ?? randomUUID();
       const ask = request((api, headers) =>
         api.machine.values({
           headers,
@@ -79,6 +83,7 @@ export function run(
               request((api, headers) =>
                 api.machine.withdraw({ headers, params: { id } }),
               ),
+            attempt: { id: attemptId, resumed: parsed.approval !== undefined },
             status,
             signal,
           });

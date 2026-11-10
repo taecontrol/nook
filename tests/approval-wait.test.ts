@@ -16,6 +16,7 @@ const first = {
   expiresIn: 600,
   interval: 2,
 };
+const attempt = { id: 'synthetic-attempt', resumed: true };
 function failure(retryable: boolean, tag = 'Unavailable') {
   return new RequestFailure(
     'Could not reach synthetic.',
@@ -35,6 +36,7 @@ it('E9/E11: a server unreachable throughout the wait ends at the ten-minute dead
             return Effect.fail(failure(true));
           }),
           withdraw: () => Effect.void,
+          attempt,
           status: (line) => lines.push(line),
           signal: Effect.never,
         }),
@@ -90,6 +92,7 @@ it.each([
                   yield* Deferred.succeed(withdrawing, undefined);
                   yield* Effect.never;
                 }),
+              attempt,
               status: () => {},
               signal: Deferred.await(signal),
             },
@@ -141,6 +144,7 @@ it('E11: terminal errors during the wait are not retried', async () => {
             return Effect.fail(failure(false, 'SecretsForbidden'));
           }),
           withdraw: () => Effect.void,
+          attempt,
           status: () => {},
           signal: Effect.never,
         }),
@@ -187,6 +191,7 @@ it.each([
                     });
               }),
               withdraw: () => Effect.void,
+              attempt,
               status: () => {},
               signal: Effect.never,
             },
@@ -225,6 +230,7 @@ it.each([
               Effect.sync(() => {
                 withdrawals++;
               }),
+            attempt,
             status: () => {},
             signal: Effect.sleep('1 second').pipe(Effect.as(signal)),
           }),

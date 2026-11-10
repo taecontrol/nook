@@ -1,5 +1,10 @@
 import { basename } from 'node:path';
-import { validateRunSecrets, validateSecretPath } from '@nook/contract';
+import {
+  validateRunSecrets,
+  validateSecretPath,
+  WriteId,
+} from '@nook/contract';
+import { Schema } from 'effect';
 import { isClaimVariable } from './agent-session.ts';
 import { type Grammar, parseArguments } from './arguments.ts';
 import { CliFailure } from './errors.ts';
@@ -12,11 +17,17 @@ import {
 
 export const runGrammar: Grammar = {
   usage:
-    'nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] -- <command>',
+    'nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] [--approval <id>] -- <command>',
   positional: [],
-  flags: { secret: 'repeated', purpose: 'required', 'no-masking': 'boolean' },
+  flags: {
+    secret: 'repeated',
+    purpose: 'required',
+    'no-masking': 'boolean',
+    approval: 'optional',
+  },
   rest: 'command',
 };
+const isAttemptId = Schema.is(WriteId);
 function mapping(value: string): SecretMapping {
   const separator = value.indexOf('=');
   const name = value.slice(0, separator);
@@ -51,7 +62,18 @@ export function parseRun(
   };
   const invalid = validateRunSecrets(input);
   if (invalid) throw new CliFailure(invalid);
-  return { command, mappings, input, masking: !flags.has('no-masking') };
+  const [approval] = flags.get('approval') ?? [];
+  if (approval !== undefined && !isAttemptId(approval))
+    throw new CliFailure(
+      'Use --approval with the id a previous nook run printed.',
+    );
+  return {
+    command,
+    mappings,
+    input,
+    masking: !flags.has('no-masking'),
+    approval,
+  };
 }
 function mergeMappings(
   project: ProjectSecrets | undefined,
