@@ -5,12 +5,12 @@ import { agentSessionContext } from './agent-session.ts';
 import {
   ApprovalStopped,
   approvalFailure,
-  processSignal,
   requestValues,
 } from './approval-wait.ts';
 import { CliFailure, networkError, type RequestFailure } from './errors.ts';
 import type { Host } from './host.ts';
 import { planOutput } from './output-plan.ts';
+import { processSignal } from './process-signal.ts';
 import { currentDirectory, projectSecrets } from './project-secrets.ts';
 import { startRelay } from './relay-client.ts';
 import { parseRun } from './run-arguments.ts';

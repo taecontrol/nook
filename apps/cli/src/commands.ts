@@ -6,6 +6,7 @@ import { declaration } from './arguments.ts';
 import { CliFailure } from './errors.ts';
 import { hostFor } from './host.ts';
 import { memoryAttach, memoryDownload } from './memory-files.ts';
+import { processSignal, signalExitCode } from './process-signal.ts';
 import { run } from './run.ts';
 import { runGrammar } from './run-arguments.ts';
 import { login, logout, mcpHeader, whoami } from './session.ts';
@@ -79,28 +80,18 @@ function grammarCommand(args: readonly string[]) {
   );
 }
 
-async function runInterruptible(effect: Effect.Effect<number>) {
-  const controller = new AbortController();
-  let interrupted = 0;
-  const interrupt = () => {
-    interrupted = 130;
-    controller.abort();
-  };
-  const terminate = () => {
-    interrupted = 143;
-    controller.abort();
-  };
-  process.on('SIGINT', interrupt);
-  process.on('SIGTERM', terminate);
-  try {
-    return await Effect.runPromise(effect, { signal: controller.signal });
-  } catch (error) {
-    if (interrupted) return interrupted;
-    throw error;
-  } finally {
-    process.off('SIGINT', interrupt);
-    process.off('SIGTERM', terminate);
-  }
+function runInterruptible(effect: Effect.Effect<number>) {
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const signal = yield* processSignal;
+        return yield* Effect.raceFirst(
+          effect,
+          signal.pipe(Effect.map(signalExitCode)),
+        );
+      }),
+    ),
+  );
 }
 
 export async function execute(

@@ -1,6 +1,7 @@
 import type { ApprovalPending, DeliveredSecrets } from '@nook/contract';
-import { Clock, Deferred, Effect, Fiber, type Scope } from 'effect';
+import { Clock, Effect, Fiber, type Scope } from 'effect';
 import { CliFailure, type RequestFailure } from './errors.ts';
+import { type ProcessSignal, signalExitCode } from './process-signal.ts';
 
 export class ApprovalStopped extends CliFailure {
   constructor(
@@ -49,7 +50,7 @@ export type WaitIo = {
   attempt: { id: string; resumed: boolean };
   withdraw: (id: string) => Effect.Effect<void, unknown>;
   status: (line: string) => void;
-  signal: Effect.Effect<'SIGINT' | 'SIGTERM', never, Scope.Scope>;
+  signal: Effect.Effect<ProcessSignal, never, Scope.Scope>;
 };
 function timeLeft(seconds: number) {
   const rounded = Math.max(0, Math.ceil(seconds));
@@ -115,11 +116,7 @@ export function awaitApproval(first: ApprovalPending['approval'], io: WaitIo) {
     return yield* stop(result, first.id, io);
   });
 }
-function stop(
-  signal: 'SIGINT' | 'SIGTERM',
-  id: string | undefined,
-  io: WaitIo,
-) {
+function stop(signal: ProcessSignal, id: string | undefined, io: WaitIo) {
   return Effect.gen(function* () {
     if (id)
       yield* io.withdraw(id).pipe(
@@ -131,7 +128,7 @@ function stop(
         id
           ? 'The approval request was withdrawn. Nothing was delivered.'
           : 'The run was cancelled. Nothing was delivered.',
-        signal === 'SIGINT' ? 130 : 143,
+        signalExitCode(signal),
       ),
     );
   });
@@ -160,23 +157,3 @@ export function requestValues(io: WaitIo) {
       : yield* Effect.fail(askOwner(result.approval, io.attempt.id));
   });
 }
-// Registration is a scoped resource, separate from waiting for the signal.
-// Keep both listeners until the values phase ends, including during withdrawal.
-export const processSignal = Effect.gen(function* () {
-  const signal = yield* Deferred.make<'SIGINT' | 'SIGTERM'>();
-  const interrupt = () => Deferred.doneUnsafe(signal, Effect.succeed('SIGINT'));
-  const terminate = () =>
-    Deferred.doneUnsafe(signal, Effect.succeed('SIGTERM'));
-  yield* Effect.acquireRelease(
-    Effect.sync(() => {
-      process.on('SIGINT', interrupt);
-      process.on('SIGTERM', terminate);
-    }),
-    () =>
-      Effect.sync(() => {
-        process.off('SIGINT', interrupt);
-        process.off('SIGTERM', terminate);
-      }),
-  );
-  return Deferred.await(signal);
-});

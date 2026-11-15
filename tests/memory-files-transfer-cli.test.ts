@@ -106,9 +106,12 @@ it('E16: substituting the temporary entry during a held real download cannot pub
   }
 });
 
-it.each(['SIGINT', 'SIGTERM'] as const)(
+it.each([
+  ['SIGINT', 130],
+  ['SIGTERM', 143],
+] as const)(
   'a %s interrupts a partial download and awaits temporary-file cleanup',
-  async (signal) => {
+  async (signal, expectedCode) => {
     await attachFile(app, machine.token, { bytes: Buffer.alloc(4096, 129) });
     const held = deferred();
     await proxy({
@@ -123,7 +126,7 @@ it.each(['SIGINT', 'SIGTERM'] as const)(
     const temporary = await temporaryPath();
     await expect.poll(async () => (await lstat(temporary)).size).toBe(32);
     expect(await child.kill(signal)).toBe(true);
-    expect((await child.done).status).not.toBe(0);
+    expect((await child.done).status).toBe(expectedCode);
     expect(await readdir(directory)).toEqual([]);
   },
 );
