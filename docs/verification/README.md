@@ -68,7 +68,9 @@ On Ubuntu 24.04 with restricted unprivileged user namespaces, load the versioned
 sudo apparmor_parser -r .github/apparmor/nook-bwrap
 ```
 
-The profile grants `userns` to `/usr/bin/bwrap`; it leaves the runner's global restriction and Chromium's AppArmor policy intact. CI loads it in each test shard before `pnpm test:coverage`. Missing bubblewrap or a denied UID map fails setup with installation/profile instructions and removes the fixture HOME; tests never skip or retry outside the sandbox.
+The profile grants `userns` to `/usr/bin/bwrap`. Ubuntu 25.04 and later ship a stricter `bwrap` AppArmor profile that already allows user namespaces. `nook-bwrap` conflicts with it and must not be loaded there. If already loaded, unload it with `sudo apparmor_parser -R .github/apparmor/nook-bwrap`.
+
+CI runs on `ubuntu-latest` (Ubuntu 26.04) and relies on the distribution profile. Both setups leave the global restriction and Chromium's AppArmor policy intact. Missing bubblewrap or a denied UID map fails setup with installation/profile instructions and removes the fixture HOME; tests never skip or retry outside the sandbox.
 
 The network namespace is shared so the CLI reaches workerd at its actual `127.0.0.1:<port>` origin and retains its abstract-socket session-lock semantics. Consequently, host abstract Unix sockets remain reachable. Neither the observed Omarchy owner bus nor CI uses an abstract D-Bus address; filesystem session-bus sockets remain absent. This is a deliberate limit of the isolation boundary.
 

@@ -94,7 +94,7 @@ export function launchSandbox(
     diagnostic = (diagnostic + String(chunk)).slice(-512);
     if (diagnostic.includes('setting up uid map: Permission denied'))
       message =
-        "Bubblewrap user namespace denied. Load the repository's nook-bwrap AppArmor profile with sudo apparmor_parser -r .github/apparmor/nook-bwrap.";
+        'Bubblewrap user namespace denied. Ubuntu 25.04 and later ship a bwrap AppArmor profile that already allows user namespaces; loading nook-bwrap conflicts with it. Unload nook-bwrap there with sudo apparmor_parser -R .github/apparmor/nook-bwrap. On Ubuntu 24.04, load it with sudo apparmor_parser -r .github/apparmor/nook-bwrap.';
     else if (diagnostic.includes('No such file or directory'))
       message ??= 'Sandbox command unavailable (ENOENT).';
   });
