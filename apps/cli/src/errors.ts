@@ -42,14 +42,34 @@ export function tryCli<A>(check: () => A) {
   return Effect.try({ try: check, catch: (error) => error as CliFailure });
 }
 export class ServerFailure {
-  constructor(
-    readonly tag: string,
-    readonly message?: string,
-    readonly paths: readonly string[] = [],
-    readonly retryable: boolean = false,
-    readonly expiredAt?: string,
-    readonly approvalReason?: ApprovalExpired['reason'],
-  ) {}
+  readonly tag: string;
+  readonly message?: string;
+  readonly paths: readonly string[];
+  readonly retryable: boolean;
+  readonly expiredAt?: string;
+  readonly approvalReason?: ApprovalExpired['reason'];
+  constructor({
+    tag,
+    message,
+    paths = [],
+    retryable = false,
+    expiredAt,
+    approvalReason,
+  }: {
+    readonly tag: string;
+    readonly message?: string;
+    readonly paths?: readonly string[];
+    readonly retryable?: boolean;
+    readonly expiredAt?: string;
+    readonly approvalReason?: ApprovalExpired['reason'];
+  }) {
+    this.tag = tag;
+    this.message = message;
+    this.paths = paths;
+    this.retryable = retryable;
+    this.expiredAt = expiredAt;
+    this.approvalReason = approvalReason;
+  }
 }
 export class RequestFailure extends CliFailure {
   constructor(
