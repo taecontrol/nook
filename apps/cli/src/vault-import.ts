@@ -14,7 +14,7 @@ import {
 } from '@nook/contract';
 import { Effect } from 'effect';
 import { isClaimVariable, resolveAgentSession } from './agent-session.ts';
-import { CliFailure, type RequestFailure, tryCli } from './errors.ts';
+import { CliFailure, tryCli } from './errors.ts';
 import type { Host } from './host.ts';
 import { currentDirectory } from './project-secrets.ts';
 import {
@@ -22,6 +22,7 @@ import {
   createSecretOnce,
   createSession,
 } from './secret-write.ts';
+import { listSecrets } from './vault.ts';
 import { parseImport } from './vault-import-arguments.ts';
 
 type KeyResult =
@@ -56,13 +57,6 @@ function readEnv(file: string) {
       );
     return parsed;
   });
-}
-function listingFailure(error: RequestFailure, bucket: string) {
-  if (error.server.tag === 'Forbidden')
-    return new CliFailure(`Access to ${bucket} is forbidden.`);
-  if (error.server.tag === 'BucketNotFound')
-    return new CliFailure('Bucket not found.');
-  return error;
 }
 function fixReason(entry: EnvEntry, status: EnvKeyStatus) {
   if (status === 'invalid-name') return validateSecretName(entry.name);
@@ -212,9 +206,15 @@ export function vaultImport(
     const parsed = yield* readEnv(file);
     const agentSession = resolveAgentSession((name) => process.env[name]);
     const { request } = yield* createSession(host);
-    const { secrets } = yield* request((api, headers) =>
-      api.machine.secrets({ headers, query: { bucket } }),
-    ).pipe(Effect.mapError((error) => listingFailure(error, bucket)));
+    const secrets = yield* listSecrets(request, bucket);
+    if (typeof secrets === 'string')
+      return yield* Effect.fail(
+        new CliFailure(
+          secrets === 'Forbidden'
+            ? `Access to ${bucket} is forbidden.`
+            : 'Bucket not found.',
+        ),
+      );
     const existing = new Set(
       secrets
         .filter((secret) => secret.bucket === bucket)

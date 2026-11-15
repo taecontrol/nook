@@ -13,12 +13,23 @@ import {
 } from './project-secrets.ts';
 import { session } from './session.ts';
 
-function listFailure(error: RequestFailure) {
-  if (error.server.tag === 'Forbidden')
-    return new CliFailure('Access to this bucket is forbidden.');
-  if (error.server.tag === 'BucketNotFound')
-    return new CliFailure('Bucket not found.');
-  return error;
+type BucketListing = readonly Secret[] | 'Forbidden' | 'BucketNotFound';
+export function listSecrets(
+  request: Effect.Success<ReturnType<typeof session>>['request'],
+  bucket: string,
+): Effect.Effect<BucketListing, RequestFailure> {
+  return request((api, headers) =>
+    api.machine.secrets({ headers, query: { bucket } }),
+  ).pipe(
+    Effect.map(({ secrets }) => secrets),
+    Effect.catch((error) => {
+      if (error.server.tag === 'Forbidden')
+        return Effect.succeed('Forbidden' as const);
+      if (error.server.tag === 'BucketNotFound')
+        return Effect.succeed('BucketNotFound' as const);
+      return Effect.fail(error);
+    }),
+  );
 }
 export function vaultList(
   host: Host,
@@ -29,12 +40,15 @@ export function vaultList(
     const message = validateBucketPath(bucket);
     if (message) return yield* Effect.fail(new CliFailure(message));
     const { request } = yield* session(host);
-    const { secrets } = yield* request((api, headers) =>
-      api.machine.secrets({
-        headers,
-        query: { bucket },
-      }),
-    ).pipe(Effect.mapError(listFailure));
+    const secrets = yield* listSecrets(request, bucket);
+    if (typeof secrets === 'string')
+      return yield* Effect.fail(
+        new CliFailure(
+          secrets === 'Forbidden'
+            ? 'Access to this bucket is forbidden.'
+            : 'Bucket not found.',
+        ),
+      );
     if (secrets.length === 0) {
       write(`No secrets visible from ${bucket}.`);
       return;
@@ -46,21 +60,6 @@ export function vaultList(
           : secret.path,
       );
   });
-}
-type Availability = Set<string> | 'not found' | "outside this machine's grant";
-function availability(
-  operation: Effect.Effect<{ secrets: readonly Secret[] }, RequestFailure>,
-): Effect.Effect<Availability, CliFailure> {
-  return operation.pipe(
-    Effect.map(({ secrets }) => new Set(secrets.map(({ path }) => path))),
-    Effect.catch((error) => {
-      if (error.server.tag === 'Forbidden')
-        return Effect.succeed("outside this machine's grant" as const);
-      if (error.server.tag === 'BucketNotFound')
-        return Effect.succeed('not found' as const);
-      return Effect.fail(error);
-    }),
-  );
 }
 export function vaultCheck(host: Host, write: (message: string) => void) {
   return Effect.gen(function* () {
@@ -85,24 +84,27 @@ export function vaultCheck(host: Host, write: (message: string) => void) {
     const { request } = yield* session(host);
     const listed = new Map(
       yield* Effect.forEach(buckets, (bucket) =>
-        availability(
-          request((api, headers) =>
-            api.machine.secrets({
-              headers,
-              query: { bucket },
-            }),
+        listSecrets(request, bucket).pipe(
+          Effect.map(
+            (found) =>
+              [
+                bucket,
+                typeof found === 'string'
+                  ? found
+                  : new Set(found.map(({ path }) => path)),
+              ] as const,
           ),
-        ).pipe(Effect.map((found) => [bucket, found] as const)),
+        ),
       ),
     );
     const problems = project.mappings.flatMap(({ name, path }) => {
       const found = listed.get(splitSecretPath(path).bucket);
       const problem =
-        typeof found === 'string'
-          ? found
-          : found?.has(path)
-            ? undefined
-            : 'not found';
+        found === 'Forbidden'
+          ? "outside this machine's grant"
+          : found === 'BucketNotFound' || !found?.has(path)
+            ? 'not found'
+            : undefined;
       return problem ? [`${name}  ${path}  ${problem}`] : [];
     });
     if (problems.length)
