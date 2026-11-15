@@ -13,6 +13,7 @@ import {
   NotLoggedIn,
   networkError,
   RequestFailure,
+  tryCli,
   untilText,
 } from './errors.ts';
 import type { Host } from './host.ts';
@@ -165,13 +166,7 @@ function refuseExisting(
 export function login(host: Host, input: string, write: Write) {
   return Effect.scoped(
     Effect.gen(function* () {
-      const url = yield* Effect.try({
-        try: () => installationOrigin(input),
-        catch: () =>
-          new CliFailure(
-            'Use the HTTPS origin of your Nook installation, without a path, query, or credentials.',
-          ),
-      });
+      const url = yield* tryCli(() => installationOrigin(input));
       yield* host.lockSession;
       yield* host.keyring.checkKeyring;
       const configured = yield* readConfig;

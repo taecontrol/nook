@@ -5,20 +5,24 @@ import { Effect } from 'effect';
 import { CliFailure } from './errors.ts';
 
 export function installationOrigin(input: string) {
-  const url = new URL(input);
-  const local = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
-  if (
-    !supportedProtocol(url, local) ||
-    url.username ||
-    url.password ||
-    url.pathname !== '/' ||
-    url.search ||
-    url.hash
-  )
+  try {
+    const url = new URL(input);
+    const local = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+    if (
+      !supportedProtocol(url, local) ||
+      url.username ||
+      url.password ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash
+    )
+      throw new Error();
+    return url.origin;
+  } catch {
     throw new CliFailure(
       'Use the HTTPS origin of your Nook installation, without a path, query, or credentials.',
     );
-  return url.origin;
+  }
 }
 function supportedProtocol(url: URL, local: boolean) {
   return url.protocol === 'https:' || (local && url.protocol === 'http:');
