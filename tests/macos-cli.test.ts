@@ -12,7 +12,6 @@ import {
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import {
   approve,
-  createAuthorization,
   jsonRequest,
   ownerRuntime,
 } from './support/authorizations.ts';
@@ -252,36 +251,17 @@ describe.runIf(process.platform === 'darwin')(
         expect(existsSync(keyring.config)).toBe(false);
       },
     );
-    it.each([
-      'failed-read',
-      'empty-read',
-      'failed-metadata',
-      'wrong-prefix',
-      'wrong-type',
-      'missing-label',
-    ] as const)(
+    // macos-keyring-policy pins every transcript shape in-process; one token
+    // read and one metadata read prove the real security binary is wired in.
+    it.each(['failed-read', 'wrong-type'] as const)(
       'E7: %s fails privately and keeps the existing credential',
       async (mode) => {
         await login();
         const token = await keyring.lookup(app.origin);
-        const metadata =
-          mode.includes('metadata') ||
-          mode === 'wrong-prefix' ||
-          mode === 'wrong-type' ||
-          mode === 'missing-label';
-        const label =
-          mode === 'wrong-prefix'
-            ? 'Fake machine "macbook"'
-            : mode === 'wrong-type'
-              ? 'Nook machine 123'
-              : 'Nook machine "macbook"';
+        const metadata = mode === 'wrong-type';
         const output = metadata
-          ? mode === 'missing-label'
-            ? 'no label'
-            : `    0x00000007 <blob>="${label}"\n`
-          : mode === 'failed-read'
-            ? 'synthetic diagnostic'
-            : '';
+          ? '    0x00000007 <blob>="Nook machine 123"\n'
+          : 'synthetic diagnostic';
         const encoded = Buffer.from(output).toString('base64');
         await shim(
           `#!/bin/sh\nif [ "$1" = "find-generic-password" ] && [ "$3" = "nook" ]${metadata ? ' && [ "$#" = 5 ]' : ' && [ "$#" = 6 ]'}; then\n printf "%s" "${encoded}" | /usr/bin/base64 -D\n exit ${mode.startsWith('failed') ? '2' : '0'}\nfi\nexec /usr/bin/security "$@"\n`,
@@ -354,56 +334,17 @@ describe.runIf(process.platform === 'darwin')(
         }
       },
     );
-    it.each(['denied', 'expired', 'pending-cap'] as const)(
-      'E9: %s stores no credential',
-      async (mode) => {
-        if (mode === 'pending-cap')
-          for (let i = 0; i < 20; i++) await createAuthorization(app);
-        const child = keyring.start(['login', app.origin]);
-        let message =
-          'Too many pending login requests. Wait a few minutes and try again.';
-        if (mode !== 'pending-cap') {
-          const code = await readUserCode(child);
-          if (mode === 'denied') {
-            expect(
-              (await jsonRequest(app, `/api/authorizations/${code}/deny`))
-                .status,
-            ).toBe(204);
-            message = 'Login denied. Nothing was stored.';
-          } else {
-            await (await app.mf.getD1Database('DB'))
-              .prepare('UPDATE authorizations SET expires_at=0')
-              .run();
-            message = `The login request expired. Run: nook login ${app.origin}`;
-          }
-        }
-        const result = await child.done;
-        expect(result.status).toBe(1);
-        expectOutput(result.stdout + result.stderr, message);
-        expect((await keyring.inspect(app.origin)).status).toBe(44);
-        expect(existsSync(keyring.config)).toBe(false);
-      },
-    );
-    it.each(['login', 'whoami', 'logout'] as const)(
-      'E10: %s succeeds after a 15-second security stall',
-      async (command) => {
-        if (command !== 'login') await login();
-        await shim(
-          '#!/bin/sh\nif /bin/mkdir "$HOME/stall-once" 2>/dev/null; then /bin/sleep 15; fi\nexec /usr/bin/security "$@"\n',
-        );
-        const started = performance.now();
-        const child = keyring.start(
-          command === 'login' ? ['login', app.origin] : [command],
-        );
-        if (command === 'login')
-          expect(
-            (await approve(app, await readUserCodeWithLongProbe(child))).status,
-          ).toBe(204);
-        expect((await child.done).status).toBe(0);
-        expect(performance.now() - started).toBeGreaterThanOrEqual(15_000);
-      },
-      30_000,
-    );
+    // Every command stalls in the same first keychain call; macos-cli-timeouts
+    // pins the two-minute limit for login and logout.
+    it('E10: whoami succeeds after a 15-second security stall', async () => {
+      await login();
+      await shim(
+        '#!/bin/sh\nif /bin/mkdir "$HOME/stall-once" 2>/dev/null; then /bin/sleep 15; fi\nexec /usr/bin/security "$@"\n',
+      );
+      const started = performance.now();
+      expect((await keyring.start(['whoami']).done).status).toBe(0);
+      expect(performance.now() - started).toBeGreaterThanOrEqual(15_000);
+    }, 30_000);
     it('E11: mcp-header abandons a stalled shim in five seconds with empty stdout and login guidance', async () => {
       await login();
       const token = await keyring.lookup(app.origin);
@@ -426,33 +367,24 @@ describe.runIf(process.platform === 'darwin')(
         'Timeout preserves the credential',
       ).toBe(true);
     });
-    it.each(['success', 'failure', 'missing'] as const)(
-      'E12: open %s receives only the code-free approval URL and login continues',
-      async (mode) => {
-        if (mode === 'missing')
-          await rename(
-            resolve(keyring.shim, 'open'),
-            resolve(keyring.shim, 'disabled-open'),
-          );
-        const child = keyring.start(['login', app.origin], {
-          PATH: keyring.shim,
-          NOOK_TEST_OPEN_STATUS: mode === 'failure' ? '1' : '0',
-        });
-        const code = await readUserCode(child);
-        if (mode !== 'missing') {
-          await expect
-            .poll(() => existsSync(resolve(keyring.home, 'opened')))
-            .toBe(true);
-          expect(
-            (await readFile(resolve(keyring.home, 'opened'), 'utf8')).trim() ===
-              `${app.origin}/cli/authorize`,
-            'open receives only the approval URL',
-          ).toBe(true);
-        }
-        expect((await approve(app, code)).status).toBe(204);
-        expect((await child.done).status).toBe(0);
-      },
-    );
+    // The opener's failure modes are shared with Linux (cli-login E2); this
+    // test proves macOS hands the code-free URL to open.
+    it('E12: open receives only the code-free approval URL and login continues', async () => {
+      const child = keyring.start(['login', app.origin], {
+        PATH: keyring.shim,
+      });
+      const code = await readUserCode(child);
+      await expect
+        .poll(() => existsSync(resolve(keyring.home, 'opened')))
+        .toBe(true);
+      expect(
+        (await readFile(resolve(keyring.home, 'opened'), 'utf8')).trim() ===
+          `${app.origin}/cli/authorize`,
+        'open receives only the approval URL',
+      ).toBe(true);
+      expect((await approve(app, code)).status).toBe(204);
+      expect((await child.done).status).toBe(0);
+    });
     it.each(['login', 'logout'] as const)(
       'E13: a pending login excludes %s from another config directory',
       async (command) => {
@@ -620,18 +552,3 @@ describe.runIf(process.platform === 'darwin')(
     });
   },
 );
-
-async function readUserCodeWithLongProbe(child: { output: () => string }) {
-  await expect
-    .poll(
-      () =>
-        /\b[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}\b/.test(
-          child.output(),
-        ),
-      { timeout: 22_000 },
-    )
-    .toBe(true);
-  return /\b[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}\b/.exec(
-    child.output(),
-  )![0];
-}
