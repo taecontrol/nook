@@ -68,7 +68,7 @@ On Ubuntu 24.04 with restricted unprivileged user namespaces, load the versioned
 sudo apparmor_parser -r .github/apparmor/nook-bwrap
 ```
 
-The profile grants `userns` to `/usr/bin/bwrap`. Ubuntu 25.04 and later ship a stricter `bwrap` AppArmor profile that already allows user namespaces. `nook-bwrap` conflicts with it and must not be loaded there. If already loaded, unload it with `sudo apparmor_parser -R .github/apparmor/nook-bwrap`.
+The profile grants `userns` to `/usr/bin/bwrap`. Ubuntu 26.04 ships and loads its own, stricter `bwrap` profile (`/etc/apparmor.d/bwrap-userns-restrict`), which `sudo aa-status` lists as `bwrap`. It already allows the user namespace and removes all capabilities from the programs bwrap starts. Two profiles attached to `/usr/bin/bwrap` conflict, the kernel attaches neither, and bubblewrap fails with `setting up uid map: Permission denied`. Where `bwrap` is listed, do not load `nook-bwrap`; unload it with `sudo apparmor_parser -R .github/apparmor/nook-bwrap`.
 
 CI runs on `ubuntu-latest` (Ubuntu 26.04) and relies on the distribution profile. Both setups leave the global restriction and Chromium's AppArmor policy intact. Missing bubblewrap or a denied UID map fails setup with installation/profile instructions and removes the fixture HOME; tests never skip or retry outside the sandbox.
 
