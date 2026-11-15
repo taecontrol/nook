@@ -31,7 +31,8 @@ jobs:
       - run: pnpm verify:complexity
       - run: pnpm verify:migrations
   tests:
-    runs-on: ubuntu-latest
+    # ubuntu-26.04 denies bubblewrap's user namespace even with nook-bwrap loaded.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
