@@ -31,7 +31,8 @@ jobs:
       - run: pnpm verify:complexity
       - run: pnpm verify:migrations
   tests:
-    runs-on: ubuntu-latest
+    # The sandbox relies on the bwrap AppArmor profile that Ubuntu 26.04 ships.
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     strategy:
       fail-fast: false

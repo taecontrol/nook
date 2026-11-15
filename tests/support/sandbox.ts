@@ -94,7 +94,7 @@ export function launchSandbox(
     diagnostic = (diagnostic + String(chunk)).slice(-512);
     if (diagnostic.includes('setting up uid map: Permission denied'))
       message =
-        'Bubblewrap user namespace denied. If sudo aa-status lists a bwrap profile, as on Ubuntu 26.04, nook-bwrap conflicts with it: unload it with sudo apparmor_parser -R .github/apparmor/nook-bwrap. Otherwise, as on Ubuntu 24.04, load it with sudo apparmor_parser -r .github/apparmor/nook-bwrap.';
+        'Bubblewrap user namespace denied. If sudo aa-status lists a profile named exactly bwrap, as on Ubuntu 26.04, nook-bwrap conflicts with it: unload it with sudo apparmor_parser -R .github/apparmor/nook-bwrap. Otherwise, as on Ubuntu 24.04, load it with sudo apparmor_parser -r .github/apparmor/nook-bwrap.';
     else if (diagnostic.includes('No such file or directory'))
       message ??= 'Sandbox command unavailable (ENOENT).';
   });

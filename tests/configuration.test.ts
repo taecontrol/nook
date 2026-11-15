@@ -377,9 +377,9 @@ it('E26: CLI enters complexity and coverage scope, and CI installs a real Secret
     expect(commands).toContain(dependency);
 });
 
-it('E12: every CI test shard uses ubuntu-latest and installs bubblewrap before coverage without changing AppArmor policy', async () => {
+it('E12: every CI test shard runs on Ubuntu 26.04 and installs bubblewrap before coverage, with no other privileged command', async () => {
   const ci = await workflow('verify');
-  expect(ci.jobs.tests['runs-on']).toBe('ubuntu-latest');
+  expect(ci.jobs.tests['runs-on']).toBe('ubuntu-26.04');
   const commands: string[] = ci.jobs.tests.steps.map(
     (step: { run?: string }) => step.run ?? '',
   );
@@ -394,9 +394,10 @@ it('E12: every CI test shard uses ubuntu-latest and installs bubblewrap before c
   expect(ci.jobs.tests.strategy.matrix.shard).toEqual([
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
   ]);
-  expect(commands.join('\n')).not.toMatch(
-    /apparmor_parser|apparmor_restrict_unprivileged_userns/,
-  );
+  // Ubuntu's own bwrap profile must stay as the image ships it.
+  expect(commands.filter((command) => command.includes('sudo'))).toEqual([
+    'sudo apt-get update && sudo apt-get install -y bubblewrap gnome-keyring libsecret-tools dbus',
+  ]);
   const policy = await readFile('.github/apparmor/nook-bwrap', 'utf8');
   expect(policy.replace(/\s+/g, ' ').trim()).toBe(
     'abi <abi/4.0>, include <tunables/global> profile nook-bwrap /usr/bin/bwrap flags=(unconfined) { userns, }',
