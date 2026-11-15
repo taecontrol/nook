@@ -15,14 +15,29 @@ import { createGrammar } from './vault-create-arguments.ts';
 import { vaultImport } from './vault-import.ts';
 import { importGrammar } from './vault-import-arguments.ts';
 
+const grammarCommands = [
+  {
+    path: ['vault', 'create'],
+    grammar: createGrammar,
+    handler: vaultCreate,
+    description: 'Store a new secret from stdin without overwriting.',
+  },
+  {
+    path: ['vault', 'import'],
+    grammar: importGrammar,
+    handler: vaultImport,
+    description: 'Import a .env file without overwriting existing secrets.',
+  },
+] as const;
 type Usage = string | { readonly [command: string]: Usage };
 const usage: Usage = {
   run: runGrammar.usage,
   vault: {
     check: 'nook vault check',
     list: 'nook vault list <bucket>',
-    create: createGrammar.usage,
-    import: importGrammar.usage,
+    ...Object.fromEntries(
+      grammarCommands.map(({ path, grammar }) => [path[1], grammar.usage]),
+    ),
   },
   memory: {
     attach: 'nook memory attach <id> <path>',
@@ -56,10 +71,12 @@ function failedPath(error: unknown) {
 function missingVaultBucket(args: readonly string[]) {
   return args[0] === 'vault' && args[1] === 'list' && args.length === 2;
 }
-function writingVault(args: readonly string[]) {
-  if (args[0] !== 'vault' || args[2] === '--help') return;
-  if (args[1] === 'create') return vaultCreate;
-  if (args[1] === 'import') return vaultImport;
+function grammarCommand(args: readonly string[]) {
+  return grammarCommands.find(
+    ({ path }) =>
+      path.every((name, index) => args[index] === name) &&
+      args[path.length] !== '--help',
+  );
 }
 
 async function runInterruptible(effect: Effect.Effect<number>) {
@@ -128,16 +145,14 @@ export async function execute(
             { bucket: Argument.String('bucket') },
             ({ bucket }) => vaultList(host, bucket, write),
           ),
-          Command.make('import', declaration(importGrammar)).pipe(
-            Command.withDescription(
-              'Import a .env file without overwriting existing secrets.',
+          // Help has always listed import before create; usage lists create first.
+          ...grammarCommands
+            .toReversed()
+            .map(({ path, grammar, description }) =>
+              Command.make(path[1], declaration(grammar)).pipe(
+                Command.withDescription(description),
+              ),
             ),
-          ),
-          Command.make('create', declaration(createGrammar)).pipe(
-            Command.withDescription(
-              'Store a new secret from stdin without overwriting.',
-            ),
-          ),
         ]),
       ),
       Command.make('memory').pipe(
@@ -178,10 +193,14 @@ export async function execute(
       ),
     ]),
   );
-  const vaultWrite = writingVault(args);
+  const parsedCommand = grammarCommand(args);
   return runInterruptible(
-    (vaultWrite
-      ? vaultWrite(host, args.slice(2), write)
+    (parsedCommand
+      ? parsedCommand.handler(
+          host,
+          args.slice(parsedCommand.path.length),
+          write,
+        )
       : Command.runWith(command, {
           version: cliPackage.version,
           renderErrors: false,
