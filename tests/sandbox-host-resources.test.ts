@@ -341,22 +341,24 @@ it.each(['missing', 'uid-map-denied'])(
         service: 'present',
         options: { tempRoot: string; sandboxExecutable: string },
       ) => Promise<PrivateKeyring>;
-      await expect(
-        setup('present', {
-          tempRoot: fixtures,
-          sandboxExecutable: resolve(
-            bin,
-            failure === 'missing' ? 'missing-bwrap' : 'bwrap',
-          ),
-        }).then(async (fixture) => {
-          await fixture.close();
-          return fixture;
-        }),
-      ).rejects.toThrow(
-        failure === 'missing'
-          ? /bubblewrap.*required/i
-          : /nook-bwrap.*sudo apparmor_parser -r/,
-      );
+      const result = setup('present', {
+        tempRoot: fixtures,
+        sandboxExecutable: resolve(
+          bin,
+          failure === 'missing' ? 'missing-bwrap' : 'bwrap',
+        ),
+      }).then(async (fixture) => {
+        await fixture.close();
+        return fixture;
+      });
+      if (failure === 'missing')
+        await expect(result).rejects.toThrow(/bubblewrap.*required/i);
+      else
+        for (const command of [
+          'sudo apparmor_parser -R .github/apparmor/nook-bwrap',
+          'sudo apparmor_parser -r .github/apparmor/nook-bwrap',
+        ])
+          await expect(result).rejects.toThrow(command);
       expect(await readdir(fixtures)).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });

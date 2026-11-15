@@ -377,28 +377,25 @@ it('E26: CLI enters complexity and coverage scope, and CI installs a real Secret
     expect(commands).toContain(dependency);
 });
 
-it('E12: every CI test shard installs bubblewrap and loads only the versioned executable profile before coverage', async () => {
+it('E12: every CI test shard uses ubuntu-latest and installs bubblewrap before coverage without changing AppArmor policy', async () => {
   const ci = await workflow('verify');
+  expect(ci.jobs.tests['runs-on']).toBe('ubuntu-latest');
   const commands: string[] = ci.jobs.tests.steps.map(
     (step: { run?: string }) => step.run ?? '',
   );
   const install = commands.findIndex((command) =>
     /apt-get install.*\bbubblewrap\b/.test(command),
   );
-  const profile = commands.indexOf(
-    'sudo apparmor_parser -r .github/apparmor/nook-bwrap',
-  );
   const coverage = commands.findIndex((command) =>
     command.startsWith('pnpm test:coverage'),
   );
   expect(install).toBeGreaterThanOrEqual(0);
-  expect(profile).toBeGreaterThan(install);
-  expect(coverage).toBeGreaterThan(profile);
+  expect(coverage).toBeGreaterThan(install);
   expect(ci.jobs.tests.strategy.matrix.shard).toEqual([
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
   ]);
   expect(commands.join('\n')).not.toMatch(
-    /sysctl.*apparmor_restrict_unprivileged_userns/,
+    /apparmor_parser|apparmor_restrict_unprivileged_userns/,
   );
   const policy = await readFile('.github/apparmor/nook-bwrap', 'utf8');
   expect(policy.replace(/\s+/g, ' ').trim()).toBe(
