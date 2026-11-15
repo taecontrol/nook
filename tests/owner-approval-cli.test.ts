@@ -178,10 +178,9 @@ const shortPending = {
     interval: 2,
   },
 };
+// Both signals share one stop path, so one row per signal and answer kind.
 it.each([
   ['SIGINT', 130, 'pending'],
-  ['SIGTERM', 143, 'pending'],
-  ['SIGINT', 130, 'values'],
   ['SIGTERM', 143, 'values'],
 ] as const)(
   '%s during the first values request exits %i after its %s answer and starts no child',

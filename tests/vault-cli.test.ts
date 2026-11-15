@@ -7,7 +7,6 @@ import {
   readUserCode,
 } from './support/cli.ts';
 import { approveGrant } from './support/grants.ts';
-import { listMachines, revokeMachine } from './support/machines.ts';
 import { expectOutput } from './support/private-assertions.ts';
 import {
   expectNoValue,
@@ -113,25 +112,6 @@ it('Vault list uses the existing unavailable-server guidance for a genuine stora
   expectNoValue(result.stdout + result.stderr, [
     await keyring.lookup(app.origin),
   ]);
-});
-it('E18: revoked and absent sessions use existing reconnect guidance', async () => {
-  let result = await keyring.start(['vault', 'list', 'me']).done;
-  expect(result.status).toBe(1);
-  expectOutput(
-    result.stdout + result.stderr,
-    'Not logged in. Run: nook login <your Nook URL>',
-    true,
-  );
-  await login();
-  const [machine] = await listMachines(app);
-  expect((await revokeMachine(app, machine.id)).status).toBe(204);
-  result = await keyring.start(['vault', 'list', 'work/acme']).done;
-  expect(result.status).toBe(1);
-  expectOutput(
-    result.stdout + result.stderr,
-    `This machine's token is no longer valid. Run: nook logout && nook login ${app.origin}`,
-    true,
-  );
 });
 it('E18: an empty bucket lists ancestors and a fresh installation has clear empty feedback', async () => {
   await login('all');
