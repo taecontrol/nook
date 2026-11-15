@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { validateWorkingDirectory } from '@nook/contract';
 import { Effect } from 'effect';
-import { resolveAgentSession } from './agent-session.ts';
+import { agentSessionContext } from './agent-session.ts';
 import { CliFailure, tryCli } from './errors.ts';
 import type { Host } from './host.ts';
-import { currentDirectory } from './project-secrets.ts';
+import { writeDirectory } from './project-secrets.ts';
 import { readSecretInput } from './secret-input.ts';
 import { createSecretOnce, createSession } from './secret-write.ts';
 import { parseCreate } from './vault-create-arguments.ts';
@@ -16,11 +15,9 @@ export function vaultCreate(
 ) {
   return Effect.gen(function* () {
     const parsed = yield* tryCli(() => parseCreate(args));
-    const workingDirectory = yield* currentDirectory;
-    const message = validateWorkingDirectory(workingDirectory);
-    if (message) return yield* Effect.fail(new CliFailure(message));
+    const workingDirectory = yield* writeDirectory;
     const value = yield* readSecretInput(parsed.path);
-    const agentSession = resolveAgentSession((name) => process.env[name]);
+    const agentContext = agentSessionContext();
     const { request } = yield* createSession(host);
     const outcome = yield* createSecretOnce(
       request,
@@ -29,7 +26,7 @@ export function vaultCreate(
         value,
         writeId: randomUUID(),
         workingDirectory,
-        ...(agentSession ? { agentSession } : {}),
+        ...agentContext,
       },
       parsed.path,
     );

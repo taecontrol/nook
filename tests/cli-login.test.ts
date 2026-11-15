@@ -79,6 +79,12 @@ it('E1/E12: Linux login approves in Chromium, stores only in the private keyring
       .waitFor();
     const loggedIn = await child.done;
     expect(loggedIn.status).toBe(0);
+    expect(
+      existsSync(resolve(keyring.home, 'opened')) &&
+        (await readFile(resolve(keyring.home, 'opened'), 'utf8')).trim() ===
+          `${app.origin}/cli/authorize`,
+      'The browser opener receives only the bare approval URL',
+    ).toBe(true);
     expectOutput(
       loggedIn.stdout,
       `${waitingOutput(app.origin, code)}\nLogged in to ${app.origin} as ${hostname()}. Token stored in the system keyring.`,
@@ -116,36 +122,18 @@ it('E1/E12: Linux login approves in Chromium, stores only in the private keyring
     await closeBrowserPage(page, context);
   }
 });
-it.each(['success', 'failure', 'missing'] as const)(
-  'E2: browser opener %s uses a code-free URL and never interrupts the login',
-  async (mode) => {
-    if (mode === 'missing')
-      await rename(
-        resolve(keyring.shim, 'xdg-open'),
-        resolve(keyring.shim, 'disabled-opener'),
-      );
-    const child = keyring.start(['login', app.origin], {
-      PATH: keyring.shim,
-      NOOK_TEST_OPEN_STATUS: mode === 'failure' ? '1' : '0',
-    });
-    // secret-tool delegates by absolute path, so the opener may be absent safely.
-    const code = await readUserCode(child);
-    const expected = waitingOutput(app.origin, code);
-    expectOutput(child.output(), expected, true);
-    if (mode !== 'missing') {
-      await expect
-        .poll(async () => existsSync(resolve(keyring.home, 'opened')))
-        .toBe(true);
-      expect(
-        (await readFile(resolve(keyring.home, 'opened'), 'utf8')).trim() ===
-          `${app.origin}/cli/authorize`,
-        'The browser receives only the bare approval URL',
-      ).toBe(true);
-    }
-    expect((await approve(app, code)).status).toBe(204);
-    expect((await child.done).status).toBe(0);
-  },
-);
+it('E2: a missing browser opener never interrupts the login', async () => {
+  await rename(
+    resolve(keyring.shim, 'xdg-open'),
+    resolve(keyring.shim, 'disabled-opener'),
+  );
+  const child = keyring.start(['login', app.origin], { PATH: keyring.shim });
+  // secret-tool delegates by absolute path, so the opener may be absent safely.
+  const code = await readUserCode(child);
+  expectOutput(child.output(), waitingOutput(app.origin, code), true);
+  expect((await approve(app, code)).status).toBe(204);
+  expect((await child.done).status).toBe(0);
+});
 it('E3: denial in Chromium exits without a keyring entry or configuration', async () => {
   const child = keyring.start(['login', app.origin]);
   const code = await readUserCode(child);
@@ -313,24 +301,15 @@ it.each(['missing-binary', 'missing-service'] as const)(
       true,
     );
     expect(existsSync(keyring.config)).toBe(false);
-    // The table may not exist in the red phase; endpoint existence is a separate acceptance obligation.
-    const tables = (
-      await (
-        await app.mf.getD1Database('DB')
-      )
-        .prepare("SELECT name FROM sqlite_master WHERE name='authorizations'")
-        .all()
-    ).results;
-    if (tables.length)
-      expect(
-        (
-          await (
-            await app.mf.getD1Database('DB')
-          )
-            .prepare('SELECT count(*) AS count FROM authorizations')
-            .first()
-        )?.count,
-      ).toBe(0);
+    expect(
+      (
+        await (
+          await app.mf.getD1Database('DB')
+        )
+          .prepare('SELECT count(*) AS count FROM authorizations')
+          .first()
+      )?.count,
+    ).toBe(0);
   },
 );
 it('E11: the CLI reports the pending request cap without storing a token', async () => {

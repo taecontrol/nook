@@ -107,6 +107,12 @@ it('the CLI, private bus, host, daemon, and shims never inherit owner environmen
         await readFile(resolve(fixture.home, 'shim-environment'), 'utf8')
       ).trim(),
     ).toBe('isolated');
+    // A child cannot be pointed back at another session bus either.
+    expect(() =>
+      fixture.start(['--help'], {
+        DBUS_SESSION_BUS_ADDRESS: 'unix:path=/tmp/nook-nonexistent-test-bus',
+      }),
+    ).toThrow('Private bus overrides are forbidden.');
   } finally {
     await fixture.close();
     vi.unstubAllEnvs();

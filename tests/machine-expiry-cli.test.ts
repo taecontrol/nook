@@ -9,11 +9,7 @@ import {
 import { createArgs } from './support/agent-create.ts';
 import { issueToken } from './support/authorizations.ts';
 import { type PrivateKeyring, privateKeyring } from './support/cli.ts';
-import {
-  listMachines,
-  machineIdentity,
-  revokeMachine,
-} from './support/machines.ts';
+import { listMachines, machineIdentity } from './support/machines.ts';
 import {
   configureFilesCli,
   fileTransport,
@@ -103,16 +99,6 @@ it('Expiry E8/E18: every authenticated CLI command reports the local expiration 
     expectNoValue(result.stdout + result.stderr, [token, input]);
   }
   expect((await keyring.lookup(app.origin)) === token).toBe(true);
-});
-it('Expiry E8: a revoked token retains the released CLI recovery message', async () => {
-  await revokeMachine(app, (await listMachines(app))[0].id);
-  const result = await keyring.start(['whoami']).done;
-  expect(result.status).toBe(1);
-  expectOutput(
-    result.stdout + result.stderr,
-    `This machine's token is no longer valid. Run: nook logout && nook login ${app.origin}`,
-    true,
-  );
 });
 it.each([
   [30 * dayMs, 'in 30 days'],

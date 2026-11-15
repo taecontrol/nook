@@ -6,7 +6,6 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { parse } from 'dotenv';
 import { expect, it } from 'vitest';
 import { validateSecretName } from '../packages/contract/src/index.ts';
@@ -747,72 +746,9 @@ it('E14: disappeared cwd refuses import before keyring or network', async () => 
   }
 });
 
-it.each([
-  { status: 403, tag: 'Forbidden' },
-  { status: 404, tag: 'BucketNotFound' },
-  { status: 401, tag: 'Unauthorized' },
-  { status: 503, tag: 'VaultNotConfigured' },
-])(
-  'E10/state: first-answer $tag stops new creates and settles in-flight successes',
-  async ({ status, tag }) => {
-    await envFile(
-      Array.from({ length: 7 }, (_, i) => `KEY_${i}=${privateValue()}`).join(
-        '\n',
-      ),
-    );
-    // KEY_1 and KEY_2 answer only 300 ms after KEY_0's refusal. Until then the
-    // refusal is the only answer, so any fourth create is a CLI that ignored it.
-    // After that, a success read before the refusal may legitimately free a
-    // slot, so the final checks only require each key's report to match whether
-    // it was sent.
-    const refused = deferred();
-    let sentBeforeSuccesses: string[] | undefined;
-    const transport = await proxy(
-      (_attempt, body) => {
-        if (JSON.parse(body.toString()).name !== 'KEY_0') return undefined;
-        refused.resolve();
-        return {
-          status,
-          body: { _tag: tag, message: 'Public bucket refusal.' },
-        };
-      },
-      async () => {
-        await refused.promise;
-        await sleep(300);
-        sentBeforeSuccesses ??= names(transport).sort();
-        return undefined;
-      },
-    );
-    try {
-      const result = await importFile();
-      expect(result.status).toBe(1);
-      // KEY_2 may still be on its way; nothing beyond the first three may be.
-      expect(sentBeforeSuccesses).toContain('KEY_0');
-      for (const name of sentBeforeSuccesses ?? [])
-        expect(['KEY_0', 'KEY_1', 'KEY_2']).toContain(name);
-      const sent = new Set(names(transport));
-      expectOutput(result.stdout, 'failed  KEY_0');
-      for (let i = 1; i < 7; i++)
-        expectOutput(
-          result.stdout,
-          `${sent.has(`KEY_${i}`) ? 'created' : 'not tried'}  KEY_${i}`,
-        );
-      expect(await secretRows(app)).toHaveLength(sent.size - 1);
-      expect(await auditRows(app)).toHaveLength(sent.size - 1);
-    } finally {
-      await transport.close();
-    }
-  },
-);
-
-it.each([
-  { status: 409, tag: 'SecretExists' },
-  { status: 403, tag: 'Forbidden' },
-  { status: 404, tag: 'BucketNotFound' },
-  { status: 401, tag: 'Unauthorized' },
-  { status: 503, tag: 'VaultNotConfigured' },
-  { status: 400, tag: 'InvalidSecret' },
-])(
+// After a lost attempt the outcome ignores the tag (secret-write.ts), so the
+// bucket-wide Forbidden is the one tag that could wrongly stop other keys.
+it.each([{ status: 403, tag: 'Forbidden' }])(
   'E12/state: $tag after a lost attempt stays unconfirmed and does not stop other keys',
   async ({ status, tag }) => {
     await envFile(

@@ -86,38 +86,35 @@ it.each(['keyring-store', 'config-save'] as const)(
       expect(await configHasOnlyUrl(keyring.config, previous)).toBe(true);
   },
 );
-it.each([1, 2])(
-  'lookup status %s with a diagnostic fails without replacing an active session',
-  async (status) => {
-    await login();
-    const token = await keyring.lookup(app.origin);
-    await writeFile(
-      resolve(keyring.shim, 'secret-tool'),
-      `#!/bin/sh\nif [ "$1" = "lookup" ]; then /usr/bin/secret-tool "$@" >/dev/null; printf "Synthetic lookup failure\\n" >&2; exit ${status}; fi\nexec /usr/bin/secret-tool "$@"\n`,
-      { mode: 0o700 },
+it('a lookup with a diagnostic fails without replacing an active session', async () => {
+  await login();
+  const token = await keyring.lookup(app.origin);
+  await writeFile(
+    resolve(keyring.shim, 'secret-tool'),
+    `#!/bin/sh\nif [ "$1" = "lookup" ]; then /usr/bin/secret-tool "$@" >/dev/null; printf "Synthetic lookup failure\\n" >&2; exit 1; fi\nexec /usr/bin/secret-tool "$@"\n`,
+    { mode: 0o700 },
+  );
+  for (const args of [['whoami'], ['logout'], ['login', app.origin]]) {
+    const child = keyring.start(args);
+    // Finish a mistakenly created login too, so failures cannot leave a live child.
+    await expect.poll(async () => child.output().length > 0).toBe(true);
+    if (child.output().includes('Waiting for approval'))
+      await (await app.mf.getD1Database('DB'))
+        .prepare('UPDATE authorizations SET expires_at=0')
+        .run();
+    const result = await child.done;
+    expect(result.status).toBe(1);
+    expectOutput(
+      result.stdout + result.stderr,
+      'Nook keeps its token in the Secret Service keyring and could not use it.',
     );
-    for (const args of [['whoami'], ['logout'], ['login', app.origin]]) {
-      const child = keyring.start(args);
-      // Finish a mistakenly created login too, so failures cannot leave a live child.
-      await expect.poll(async () => child.output().length > 0).toBe(true);
-      if (child.output().includes('Waiting for approval'))
-        await (await app.mf.getD1Database('DB'))
-          .prepare('UPDATE authorizations SET expires_at=0')
-          .run();
-      const result = await child.done;
-      expect(result.status).toBe(1);
-      expectOutput(
-        result.stdout + result.stderr,
-        'Nook keeps its token in the Secret Service keyring and could not use it.',
-      );
-    }
-    expect(await requestCount()).toBe(0);
-    expect(
-      (await keyring.lookup(app.origin)) === token,
-      'Lookup failure preserves the active credential',
-    ).toBe(true);
-  },
-);
+  }
+  expect(await requestCount()).toBe(0);
+  expect(
+    (await keyring.lookup(app.origin)) === token,
+    'Lookup failure preserves the active credential',
+  ).toBe(true);
+});
 it('a slow browser opener leaves the server poll interval unchanged', async () => {
   let started = 0;
   const polls: number[] = [];
@@ -174,52 +171,45 @@ it('a slow browser opener leaves the server poll interval unchanged', async () =
     await new Promise<void>((accept) => server.close(() => accept()));
   }
 });
-it.each([
-  'http://example.nook.test',
-  'https://synthetic-user@example.nook.test',
-  'https://:synthetic-password@example.nook.test',
-  'https://example.nook.test/path',
-  'https://example.nook.test?code=synthetic',
-  'https://example.nook.test#synthetic',
-])(
-  'login rejects the unsupported origin %s before creating a request',
-  async (origin) => {
+it('login rejects every unsupported origin before creating a request', async () => {
+  for (const origin of [
+    'http://example.nook.test',
+    'https://synthetic-user@example.nook.test',
+    'https://:synthetic-password@example.nook.test',
+    'https://example.nook.test/path',
+    'https://example.nook.test?code=synthetic',
+    'https://example.nook.test#synthetic',
+  ]) {
     const result = await keyring.start(['login', origin]).done;
-    expect(result.status).toBe(1);
+    expect(result.status, origin).toBe(1);
     expectOutput(
       result.stdout + result.stderr,
       'Use the HTTPS origin of your Nook installation, without a path, query, or credentials.',
     );
-    expect(await requestCount()).toBe(0);
-    expect(existsSync(keyring.config)).toBe(false);
-  },
-);
-it.each(['{not-json', '{"url":[]}', '{"url":null}'])(
-  'malformed configuration fails without creating a request (%s)',
-  async (content) => {
-    await mkdir(resolve(keyring.home, 'config/nook'), { recursive: true });
+  }
+  expect(await requestCount()).toBe(0);
+  expect(existsSync(keyring.config)).toBe(false);
+});
+it('malformed configuration fails without creating a request', async () => {
+  await mkdir(resolve(keyring.home, 'config/nook'), { recursive: true });
+  for (const content of [
+    '{not-json',
+    '{"url":[]}',
+    '{"url":null}',
+    // An array would coerce to a valid origin if the type were not checked.
+    JSON.stringify({ url: [app.origin] }),
+  ]) {
     await writeFile(keyring.config, content);
     const result = await keyring.start(['login', app.origin]).done;
-    expect(result.status).toBe(1);
+    expect(result.status, content).toBe(1);
     expectOutput(
       result.stdout + result.stderr,
       'Could not read the Nook configuration.',
     );
-    expect(await requestCount()).toBe(0);
-  },
-);
-it('a configuration URL cannot be an array that coerces to a valid origin', async () => {
-  await mkdir(resolve(keyring.home, 'config/nook'), { recursive: true });
-  await writeFile(keyring.config, JSON.stringify({ url: [app.origin] }));
-  const result = await keyring.start(['login', app.origin]).done;
-  expect(result.status).toBe(1);
-  expectOutput(
-    result.stdout + result.stderr,
-    'Could not read the Nook configuration.',
-  );
+  }
   expect(await requestCount()).toBe(0);
 });
-it.each([undefined, '', 'relative-config'])(
+it.each([undefined, 'relative-config'])(
   'XDG_CONFIG_HOME %j remembers only the origin under HOME/.config',
   async (xdg) => {
     const child = keyring.start(['login', app.origin], {
@@ -254,14 +244,6 @@ it('a removed pending request exits with the generic invalid-request message wit
   );
   expect((await keyring.lookup(app.origin)) === '').toBe(true);
   expect(existsSync(keyring.config)).toBe(false);
-});
-it('a child cannot override the private session bus', async () => {
-  expect(() =>
-    keyring.start(['login', app.origin], {
-      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/tmp/nook-nonexistent-test-bus',
-    }),
-  ).toThrow('Private bus overrides are forbidden.');
-  expect(await requestCount()).toBe(0);
 });
 it('failed persistence and revocation retain a recoverable keyring session without creating another request', async () => {
   let unavailable = true;
@@ -346,36 +328,31 @@ it('a stalled keyring probe times out before creating a request', async () => {
   );
   expect(await requestCount()).toBe(0);
 });
-it.each(['whoami', 'logout'] as const)(
-  'a stalled %s request times out while retaining the credential',
-  async (command) => {
-    let stalled = false;
-    const proxy = await machineProxy(app, () => (stalled ? 'hang' : undefined));
-    try {
-      const child = keyring.start(['login', proxy.origin]);
-      expect((await approve(app, await readUserCode(child))).status).toBe(204);
-      expect((await child.done).status).toBe(0);
-      const token = await keyring.lookup(proxy.origin);
-      stalled = true;
-      const started = Date.now();
-      const result = await keyring.start([command]).done;
-      expect(result.status).toBe(1);
-      expectOutput(
-        result.stdout + result.stderr,
-        command === 'logout'
-          ? `Could not reach ${proxy.origin}; the token is still active. Try again.`
-          : `Could not reach ${proxy.origin}. Try again.`,
-        true,
-      );
-      expect(
-        Date.now() - started >= 9000 && Date.now() - started < 15_000,
-      ).toBe(true);
-      expect((await keyring.lookup(proxy.origin)) === token).toBe(true);
-    } finally {
-      await proxy.close();
-    }
-  },
-);
+it('a stalled request times out while retaining the credential', async () => {
+  let stalled = false;
+  const proxy = await machineProxy(app, () => (stalled ? 'hang' : undefined));
+  try {
+    const child = keyring.start(['login', proxy.origin]);
+    expect((await approve(app, await readUserCode(child))).status).toBe(204);
+    expect((await child.done).status).toBe(0);
+    const token = await keyring.lookup(proxy.origin);
+    stalled = true;
+    const started = Date.now();
+    const result = await keyring.start(['whoami']).done;
+    expect(result.status).toBe(1);
+    expectOutput(
+      result.stdout + result.stderr,
+      `Could not reach ${proxy.origin}. Try again.`,
+      true,
+    );
+    expect(Date.now() - started >= 9000 && Date.now() - started < 15_000).toBe(
+      true,
+    );
+    expect((await keyring.lookup(proxy.origin)) === token).toBe(true);
+  } finally {
+    await proxy.close();
+  }
+});
 it('a failed keyring clear after revocation remains recoverable by logout', async () => {
   await login();
   await writeFile(

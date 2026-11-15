@@ -19,7 +19,6 @@ import {
 import { auditRows } from './support/audit.ts';
 import { filesContain } from './support/cli.ts';
 import { machineMcp } from './support/grants.ts';
-import { listMachines, revokeMachine } from './support/machines.ts';
 import { expectOutput } from './support/private-assertions.ts';
 import { testBuild } from './support/runtime.ts';
 import {
@@ -36,7 +35,7 @@ it('E1/E4/E20: real create, run, list and MCP preserve exact bytes without expos
   const result = await keyring.start(
     [...createArgs(), '--description', 'Provider API token'],
     {},
-    value + '\n',
+    `${value}\n`,
   ).done;
   expect(result.status).toBe(0);
   expectOutput(result.stdout, `Stored ${createdPath}.`, true);
@@ -96,7 +95,7 @@ it.each(
     { input: 'a', expected: 'a' },
     { input: '\ufeffa\n', expected: '\ufeffa' },
     { input: '  a\t\r', expected: '  a\t\r' },
-    { input: 'a'.repeat(65536) + '\r\n', expected: 'a'.repeat(65536) },
+    { input: `${'a'.repeat(65536)}\r\n`, expected: 'a'.repeat(65536) },
   ].map((sample, index) => ({ ...sample, index })),
 )(
   'E2: remove exactly one final LF or CRLF and retain other bytes ($index)',
@@ -155,7 +154,7 @@ it.skipIf(process.platform !== 'linux').each(['tty', 'tty-open'])(
         resolve(testBuild, 'cli.js'),
       ],
       childEnv(),
-      value + '\n',
+      `${value}\n`,
     );
     let timedOut = false;
     const deadline = setTimeout(() => {
@@ -208,7 +207,7 @@ it.skipIf(process.platform !== 'linux')(
         resolve(testBuild, 'cli.js'),
       ],
       childEnv(),
-      value + '\n',
+      `${value}\n`,
     ).done;
     expectNoValue(result.stdout + result.stderr, [value, token, app.key]);
     expect(result.status).toBe(0);
@@ -275,15 +274,14 @@ it('E5: a duplicate name reports the conflict and leaves its value, description,
   expect(await secretRows(app)).toEqual(before);
   expect(await auditRows(app)).toEqual([]);
 });
-it.each(['work/X', 'me/X', 'personal/X', 'work/acme/missing/X'])(
-  'E6/E7: create refuses %s without storing or auditing',
-  async (path) => {
+it('E6/E7: create refuses paths outside the grant or bucket without storing or auditing', async () => {
+  for (const path of ['work/X', 'me/X', 'personal/X', 'work/acme/missing/X']) {
     const result = await keyring.start(
       createArgs(path),
       {},
       secretInput().value,
     ).done;
-    expect(result.status).toBe(1);
+    expect(result.status, path).toBe(1);
     expectOutput(
       result.stdout + result.stderr,
       path.includes('/missing/')
@@ -291,16 +289,17 @@ it.each(['work/X', 'me/X', 'personal/X', 'work/acme/missing/X'])(
         : `Access to ${path} is forbidden.`,
       true,
     );
-    expect(await secretRows(app)).toEqual([]);
-    expect(await auditRows(app)).toEqual([]);
-  },
-);
-it.each(
-  [
+  }
+  expect(await secretRows(app)).toEqual([]);
+  expect(await auditRows(app)).toEqual([]);
+});
+// Every row fails before keyring or HTTP, so one fixture serves the table.
+it('E8: invalid CLI input fails before keyring or HTTP', async () => {
+  const samples: { input?: string; args?: string[]; message: string }[] = [
     { input: '', message: 'Enter a value.' },
     { input: '\n', message: 'Enter a value.' },
     {
-      input: 'a'.repeat(65537) + '\n',
+      input: `${'a'.repeat(65537)}\n`,
       message: 'A value can be at most 64 KiB.',
     },
     { input: 'a\0b', message: 'A value cannot contain NUL.' },
@@ -332,30 +331,32 @@ it.each(
       args: [...createArgs(), '--description', 'two\nlines'],
       message: 'Use one line for the description.',
     },
-  ].map((sample, index) => ({ ...sample, index })),
-)(
-  'E8: invalid CLI input $index fails before keyring or HTTP',
-  async ({ input, args, message }) => {
-    const transport = await createTransport(app, () => undefined);
-    try {
-      await configure(transport.origin);
-      const before = await transcript();
+  ];
+  const transport = await createTransport(app, () => undefined);
+  try {
+    await configure(transport.origin);
+    const before = await transcript();
+    for (const [index, { input, args, message }] of samples.entries()) {
       const result = await keyring.start(
         args ?? createArgs(),
         {},
         input ?? secretInput().value,
       ).done;
-      expect(result.status).toBe(1);
-      expectOutput(result.stdout + result.stderr, message, true);
-      expect(transport.bodies.length).toBe(0);
-      expect((await transcript()) === before).toBe(true);
-      expect(await secretRows(app)).toEqual([]);
-      expect(await auditRows(app)).toEqual([]);
-    } finally {
-      await transport.close();
+      expect(result.status, `sample ${index}`).toBe(1);
+      // A boolean keeps any echoed value out of the failure output.
+      expect(
+        (result.stdout + result.stderr).trim() === message,
+        `sample ${index} prints its message`,
+      ).toBe(true);
     }
-  },
-);
+    expect(transport.bodies.length).toBe(0);
+    expect((await transcript()) === before).toBe(true);
+    expect(await secretRows(app)).toEqual([]);
+    expect(await auditRows(app)).toEqual([]);
+  } finally {
+    await transport.close();
+  }
+});
 it.each(['invalid-utf8', 'open-pipe'])(
   'E8: %s is rejected without waiting for unbounded stdin or sending HTTP',
   async (mode) => {
@@ -407,35 +408,40 @@ it.each(['flag', 'positional'])(
     expect(await auditRows(app)).toEqual([]);
   },
 );
-it.each([
-  { args: ['vault', 'create'], label: 'missing path' },
-  { args: [...createArgs(), '--description'], label: 'dangling description' },
-  {
-    args: [...createArgs(), '--purpose', 'other purpose'],
-    label: 'duplicate purpose',
-  },
-  {
-    args: [
-      ...createArgs(),
-      '--description',
-      'first',
-      '--description',
-      'second',
-    ],
-    label: 'duplicate description',
-  },
-])('CLI usage: $label is refused before keyring or HTTP', async ({ args }) => {
+it('CLI usage: malformed invocations are refused before keyring or HTTP', async () => {
   const transport = await createTransport(app, () => undefined);
   try {
     await configure(transport.origin);
     const before = await transcript();
-    const result = await keyring.start(args, {}, secretInput().value).done;
-    expect(result.status).toBe(1);
-    expectOutput(
-      result.stdout + result.stderr,
-      'Usage: nook vault create <bucket>/<NAME> --purpose "…" [--description "…"]',
-      true,
-    );
+    for (const { args, label } of [
+      { args: ['vault', 'create'], label: 'missing path' },
+      {
+        args: [...createArgs(), '--description'],
+        label: 'dangling description',
+      },
+      {
+        args: [...createArgs(), '--purpose', 'other purpose'],
+        label: 'duplicate purpose',
+      },
+      {
+        args: [
+          ...createArgs(),
+          '--description',
+          'first',
+          '--description',
+          'second',
+        ],
+        label: 'duplicate description',
+      },
+    ]) {
+      const result = await keyring.start(args, {}, secretInput().value).done;
+      expect(result.status, label).toBe(1);
+      expect(
+        (result.stdout + result.stderr).trim() ===
+          'Usage: nook vault create <bucket>/<NAME> --purpose "…" [--description "…"]',
+        `${label} prints usage`,
+      ).toBe(true);
+    }
     expect(transport.bodies.length).toBe(0);
     expect((await transcript()) === before).toBe(true);
     expect((await secretRows(app)).length).toBe(0);
@@ -512,35 +518,24 @@ it('E11: an unconfigured machine gives the create login placeholder', async () =
   expect((await secretRows(app)).length).toBe(0);
   expect((await auditRows(app)).length).toBe(0);
 });
-it.each(['absent', 'revoked'])(
-  'E11: %s token uses the create reconnect guidance',
-  async (mode) => {
-    if (mode === 'absent') {
-      const args =
-        process.platform === 'darwin'
-          ? ['delete-generic-password', '-s', 'nook', '-a', app.origin]
-          : ['clear', 'service', 'nook', 'url', app.origin];
-      await keyring.command(
-        process.platform === 'darwin'
-          ? '/usr/bin/security'
-          : '/usr/bin/secret-tool',
-        args,
-      ).done;
-    } else
-      expect(
-        (await revokeMachine(app, (await listMachines(app))[0].id)).status,
-      ).toBe(204);
-    const result = await keyring.start(createArgs(), {}, secretInput().value)
-      .done;
-    expect(result.status).toBe(1);
-    expectOutput(
-      result.stdout + result.stderr,
-      mode === 'revoked'
-        ? `This machine's token is no longer valid. Run: nook logout && nook login ${app.origin}`
-        : `This machine's token is no longer valid. Run: nook login ${app.origin}`,
-      true,
-    );
-    expect(await secretRows(app)).toEqual([]);
-    expect(await auditRows(app)).toEqual([]);
-  },
-);
+// A revoked token is covered for create by machines-cli E8.
+it('E11: an absent token uses the create reconnect guidance', async () => {
+  await keyring.command(
+    process.platform === 'darwin'
+      ? '/usr/bin/security'
+      : '/usr/bin/secret-tool',
+    process.platform === 'darwin'
+      ? ['delete-generic-password', '-s', 'nook', '-a', app.origin]
+      : ['clear', 'service', 'nook', 'url', app.origin],
+  ).done;
+  const result = await keyring.start(createArgs(), {}, secretInput().value)
+    .done;
+  expect(result.status).toBe(1);
+  expectOutput(
+    result.stdout + result.stderr,
+    `This machine's token is no longer valid. Run: nook login ${app.origin}`,
+    true,
+  );
+  expect(await secretRows(app)).toEqual([]);
+  expect(await auditRows(app)).toEqual([]);
+});

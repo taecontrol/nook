@@ -18,7 +18,7 @@ it('E29: the actual v0.3.2 failure mapping prints the approval update message', 
     const outfile = resolve(directory, 'mapping.mjs');
     await build({
       stdin: {
-        contents: `import { runFailure } from 'released-run'; import { publicFailure } from 'released-api'; import { RequestFailure } from ${JSON.stringify(resolve('apps/cli/src/errors.ts'))}; export function mapped(message) { const server=publicFailure(JSON.stringify({_tag:'VaultNotConfigured',message}),503); const error=runFailure(new RequestFailure('Could not reach synthetic',server,server.message)); return error.message; }`,
+        contents: `import { runFailure } from 'released-run'; import { publicFailure } from 'released-api'; import { RequestFailure } from 'released-errors'; export function mapped(message) { const server=publicFailure(JSON.stringify({_tag:'VaultNotConfigured',message}),503); const error=runFailure(new RequestFailure('Could not reach synthetic',server,server.message)); return error.message; }`,
         resolveDir: process.cwd(),
       },
       outfile,
@@ -29,12 +29,20 @@ it('E29: the actual v0.3.2 failure mapping prints the approval update message', 
         {
           name: 'released-source',
           setup(builder) {
-            builder.onResolve({ filter: /^released-(run|api)$/ }, (args) => ({
-              path: args.path.slice(9),
-              namespace: 'released',
-            }));
+            builder.onResolve(
+              { filter: /^released-(run|api|errors)$/ },
+              (args) => ({
+                path: args.path.slice(9),
+                namespace: 'released',
+              }),
+            );
+            // Historical modules must use their own positional error classes.
+            builder.onResolve(
+              { filter: /^\.\/errors\.ts$/, namespace: 'released' },
+              () => ({ path: 'errors', namespace: 'released' }),
+            );
             builder.onLoad({ filter: /.*/, namespace: 'released' }, (args) => ({
-              contents: `${source(args.path)}\nexport { ${args.path === 'run' ? 'runFailure' : 'publicFailure'} };`,
+              contents: `${source(args.path)}\n${args.path === 'errors' ? '' : `export { ${args.path === 'run' ? 'runFailure' : 'publicFailure'} };`}`,
               loader: 'ts',
               resolveDir: resolve('apps/cli/src'),
             }));

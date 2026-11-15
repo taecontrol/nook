@@ -230,49 +230,52 @@ it('E11/E12: one auth statement, one read batch, one audit batch; commit precede
     await measured.close();
   }
 });
-it.each([
-  { purpose: '' },
-  { purpose: '  ' },
-  { purpose: 'bad\nline' },
-  { purpose: 'bad\rline' },
-  { purpose: 'bad\u2028line' },
-  { purpose: 'bad\u2029line' },
-  { purpose: '🔐'.repeat(201) },
-  { workingDirectory: '' },
-  { workingDirectory: 'relative' },
-  { workingDirectory: '/' + '界'.repeat(1366) },
-  { workingDirectory: '/bad\0dir' },
-  { executable: '' },
-  { executable: 'node/path' },
-  { executable: 'x'.repeat(256) },
-  { executable: '界'.repeat(86) },
-  { executable: 'bad\0name' },
-  { secrets: [] },
-  { secrets: Array.from({ length: 21 }, (_, i) => `work/acme/KEY_${i}`) },
-  { secrets: ['Work/Acme/GH_TOKEN'] },
-  { secrets: ['work/acme'] },
-  { purpose: { private: 'synthetic-invalid-request' } },
-])(
-  'E14: invalid bounds neither read secrets nor audit (%#)',
-  async (overrides) => {
-    const labels: string[] = [];
-    const measured = await vaultCheckpoints(async (label) => {
-      labels.push(label);
-      return true;
-    });
-    try {
-      const { token } = await issueGrant(measured);
+it('E14: invalid bounds neither read secrets nor audit', async () => {
+  const labels: string[] = [];
+  const measured = await vaultCheckpoints(async (label) => {
+    labels.push(label);
+    return true;
+  });
+  try {
+    // A stored value makes the privacy check meaningful: a request that
+    // slipped past validation could read and return it.
+    const stored = secretInput({ name: 'GH_TOKEN' });
+    expect((await createSecret(measured, stored)).status).toBe(201);
+    const { token } = await issueGrant(measured);
+    for (const overrides of [
+      { purpose: '' },
+      { purpose: '  ' },
+      { purpose: 'bad\nline' },
+      { purpose: 'bad\rline' },
+      { purpose: 'bad\u2028line' },
+      { purpose: 'bad\u2029line' },
+      { purpose: '🔐'.repeat(201) },
+      { workingDirectory: '' },
+      { workingDirectory: 'relative' },
+      { workingDirectory: '/' + '界'.repeat(1366) },
+      { workingDirectory: '/bad\0dir' },
+      { executable: '' },
+      { executable: 'node/path' },
+      { executable: 'x'.repeat(256) },
+      { executable: '界'.repeat(86) },
+      { executable: 'bad\0name' },
+      { secrets: [] },
+      { secrets: Array.from({ length: 21 }, (_, i) => `work/acme/KEY_${i}`) },
+      { secrets: ['Work/Acme/GH_TOKEN'] },
+      { secrets: ['work/acme'] },
+      { purpose: { private: 'synthetic-invalid-request' } },
+    ]) {
       labels.length = 0;
       const response = await fetchValues(measured, token, overrides);
-      expect(response.status).toBe(400);
+      expect(response.status, JSON.stringify(overrides)).toBe(400);
       expect(labels.filter((label) => label !== '/statement')).toEqual([]);
-      expect(await auditRows(measured)).toEqual([]);
-      expectNoValue(await response.text(), [app.input.value]);
-    } finally {
-      await measured.close();
+      expectNoValue(await response.text(), [stored.value]);
     }
-  },
-);
+    expect(await auditRows(measured)).toEqual([]);
+  } finally {
+    await measured.close();
+  }
+});
 it('E14: code-point purpose, byte bounds and twenty distinct paths accept their boundaries', async () => {
   for (let i = 0; i < 20; i++)
     expect(
@@ -375,19 +378,22 @@ it('E13/E15: stable newest-first keyset pages and historical filters survive del
     (await auditPageData(app, '?secret=work%2Facme%2FMISSING')).entries,
   ).toEqual([]);
 });
-it.each([
-  '?bucket=Work',
-  '?secret=work/acme',
-  '?cursor=garbage',
-  '?cursor=e30',
-  '?cursor=%21',
-  `?cursor=${'a'.repeat(257)}`,
-  `?cursor=${Buffer.from(JSON.stringify({ at: 'invalid-time', id: '12345678-1234-4123-8123-123456789abc' })).toString('base64url')}`,
-  `?cursor=${Buffer.from(JSON.stringify({ at: '2026-10-08T12:00:00.000Z', id: 'invalid-id' })).toString('base64url')}`,
-  '?bucket=/work',
-  '?secret=work/acme/GH_TOKEN/extra',
-])('E13: malformed audit filters/cursors return 400 (%s)', async (query) => {
-  expect((await fetch(`${app.origin}/api/audit${query}`)).status).toBe(400);
+it('E13: malformed audit filters/cursors return 400', async () => {
+  for (const query of [
+    '?bucket=Work',
+    '?secret=work/acme',
+    '?cursor=garbage',
+    '?cursor=e30',
+    '?cursor=%21',
+    `?cursor=${'a'.repeat(257)}`,
+    `?cursor=${Buffer.from(JSON.stringify({ at: 'invalid-time', id: '12345678-1234-4123-8123-123456789abc' })).toString('base64url')}`,
+    `?cursor=${Buffer.from(JSON.stringify({ at: '2026-10-08T12:00:00.000Z', id: 'invalid-id' })).toString('base64url')}`,
+    '?bucket=/work',
+    '?secret=work/acme/GH_TOKEN/extra',
+  ])
+    expect((await fetch(`${app.origin}/api/audit${query}`)).status, query).toBe(
+      400,
+    );
 });
 it('E13: a restricted principal cannot list owner audit entries', async () => {
   const labels: string[] = [];
@@ -516,13 +522,12 @@ it('E14: the first directory byte beyond the limit is rejected before reads and 
     await measured.close();
   }
 });
-it.each([
-  { extra: true },
-  { at: '2026-10-08T12:00:00Z' },
-  { at: 1791460800000 },
-])(
-  'E13: a cursor must use the exact opaque encoding issued by the API (%#)',
-  async (invalid) => {
+it('E13: a cursor must use the exact opaque encoding issued by the API', async () => {
+  for (const invalid of [
+    { extra: true },
+    { at: '2026-10-08T12:00:00Z' },
+    { at: 1791460800000 },
+  ]) {
     const cursor = Buffer.from(
       JSON.stringify({
         at: '2026-10-08T12:00:00.000Z',
@@ -532,9 +537,10 @@ it.each([
     ).toString('base64url');
     expect(
       (await fetch(`${app.origin}/api/audit?cursor=${cursor}`)).status,
+      JSON.stringify(invalid),
     ).toBe(400);
-  },
-);
+  }
+});
 it('E28: a genuine secret read failure exposes only a fixed unavailable response', async () => {
   const log = new PrivateRunLog();
   await app.setBindings(app.bindings, {

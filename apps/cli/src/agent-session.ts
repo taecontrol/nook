@@ -39,3 +39,7 @@ export function resolveAgentSession(
   const cursor = valid('CURSOR_CONVERSATION_ID');
   return cursor ? { agent: 'cursor', session: cursor } : null;
 }
+export function agentSessionContext() {
+  const agentSession = resolveAgentSession((name) => process.env[name]);
+  return agentSession ? { agentSession } : {};
+}

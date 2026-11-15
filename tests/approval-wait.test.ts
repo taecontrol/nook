@@ -20,7 +20,7 @@ const attempt = { id: 'synthetic-attempt', resumed: true };
 function failure(retryable: boolean, tag = 'Unavailable') {
   return new RequestFailure(
     'Could not reach synthetic.',
-    new ServerFailure(tag, undefined, [], retryable),
+    new ServerFailure({ tag, retryable }),
   );
 }
 it('E9/E11: a server unreachable throughout the wait ends at the ten-minute deadline and paces stderr', async () => {

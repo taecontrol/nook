@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, rm, symlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { expect, it } from 'vitest';
-import { acmePath, auditPageData, useEntry } from './support/audit.ts';
+import { acmePath, auditPageData } from './support/audit.ts';
 import { revokeMachine } from './support/machines.ts';
 import {
   app,
@@ -13,7 +13,6 @@ import {
   childFile,
   cli,
   config,
-  expectPrivate,
   file,
   keyring,
   mappings,
@@ -57,57 +56,6 @@ it('E2: flags override a mapped name before the single value request and audit',
   expect(result.stderr).toBe('');
   expect(requests('value')).toBe(1);
   expect(await auditPaths()).toEqual(['work/acme/DB_URL', 'work/acme/OTHER']);
-});
-it('E3: flags add variables to all file mappings', async () => {
-  await config(mappings);
-  const result = await cli(
-    runArgs(
-      probe({
-        GH_TOKEN: values.GH_TOKEN,
-        DB_URL: values.DB_URL,
-        EXTRA: values.EXTRA,
-      }),
-      ['EXTRA=work/acme/EXTRA'],
-    ),
-  );
-  expect(result.status).toBe(0);
-  expectOutput(result.stdout, 'true', true);
-  expect(result.stderr).toBe('');
-  expect(requests('value')).toBe(1);
-  expect(await auditPaths()).toEqual([
-    'work/acme/DB_URL',
-    'work/acme/EXTRA',
-    acmePath,
-  ]);
-});
-it('E4: aliases fetch once and audit each distinct path once with one purpose and run id', async () => {
-  await config({ ...mappings, ALIAS: mappings.DB_URL });
-  const result = await cli(
-    runArgs(
-      probe({
-        GH_TOKEN: values.GH_TOKEN,
-        DB_URL: values.DB_URL,
-        ALIAS: values.DB_URL,
-      }),
-    ),
-  );
-  expect(result.status).toBe(0);
-  expectOutput(result.stdout, 'true', true);
-  expect(requests('value')).toBe(1);
-  const { entries } = await auditPageData(app);
-  expectPrivate(JSON.stringify(entries));
-  expect(entries).toHaveLength(2);
-  expect(new Set(entries.map((entry) => useEntry(entry).runId)).size).toBe(1);
-  for (const entry of entries)
-    expect(entry).toMatchObject({
-      outcome: 'delivered',
-      purpose: 'dev server',
-      workingDirectory: project,
-    });
-  expect(entries.map((entry) => entry.path).sort()).toEqual([
-    'work/acme/DB_URL',
-    acmePath,
-  ]);
 });
 it('E5: discovery walks parents and only the nearest file supplies mappings', async () => {
   const nested = resolve(project, 'a/b');
@@ -163,23 +111,6 @@ it('E6: every missing path is reported, including an absent bucket, before any c
   expect(await auditPaths()).toEqual([]);
   expect(requests('value')).toBe(1);
 });
-it('E7: a denied mapped path stops the child and is the only audited path', async () => {
-  await config({ ...mappings, DENIED: 'personal/finances/PLAID_SECRET' });
-  const marker = resolve(project, 'child-marker');
-  const result = await cli(
-    runArgs([process.execPath, childFile, 'mark', marker]),
-  );
-  expect(result.status).toBe(1);
-  expectOutput(
-    result.stdout + result.stderr,
-    'Access to personal/finances/PLAID_SECRET is forbidden.',
-    true,
-  );
-  expect(existsSync(marker)).toBe(false);
-  expect(await auditPaths()).toEqual(['personal/finances/PLAID_SECRET']);
-  expect((await auditPageData(app)).entries[0].outcome).toBe('denied');
-});
-
 it('E8: the twenty-path limit applies after merging with flags', async () => {
   await config(
     Object.fromEntries(

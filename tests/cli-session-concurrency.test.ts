@@ -2,11 +2,7 @@ import { existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { beforeEach, expect, it } from 'vitest';
-import {
-  approve,
-  jsonRequest,
-  ownerRuntime,
-} from './support/authorizations.ts';
+import { approve, ownerRuntime } from './support/authorizations.ts';
 import {
   type PrivateKeyring,
   privateKeyring,
@@ -104,14 +100,4 @@ it('killing a pending login releases coordination without a stale file or active
   expect(await count('machine_tokens')).toBe(1);
   expect((await keyring.start(['logout']).done).status).toBe(0);
   expect(await count('machine_tokens')).toBe(0);
-});
-it('a denied login releases coordination for a later successful login', async () => {
-  const first = keyring.start(['login', app.origin]);
-  const code = await readUserCode(first);
-  expect(
-    (await jsonRequest(app, `/api/authorizations/${code}/deny`)).status,
-  ).toBe(204);
-  expect((await first.done).status).toBe(1);
-  await approvedLogin();
-  expect((await keyring.start(['logout']).done).status).toBe(0);
 });

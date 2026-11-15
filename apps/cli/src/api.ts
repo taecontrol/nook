@@ -46,7 +46,7 @@ export function machineApi(
       Effect.mapError((error) =>
         error instanceof ServerFailure
           ? error
-          : new ServerFailure('TimeoutError', undefined, [], true),
+          : new ServerFailure({ tag: 'TimeoutError', retryable: true }),
       ),
     );
   };
@@ -60,38 +60,38 @@ function publicFailure(text: string, status: number) {
   const fallback = status === 404 ? 'NotFound' : 'Unavailable';
   try {
     const body = Schema.decodeUnknownSync(PublicError)(JSON.parse(text));
-    return new ServerFailure(
-      body._tag ?? fallback,
-      body.message,
-      [],
-      status >= 500 && body._tag !== 'VaultNotConfigured',
-    );
+    return new ServerFailure({
+      tag: body._tag ?? fallback,
+      message: body.message,
+      retryable: status >= 500 && body._tag !== 'VaultNotConfigured',
+    });
   } catch {
-    return new ServerFailure(fallback, undefined, [], status >= 500);
+    return new ServerFailure({ tag: fallback, retryable: status >= 500 });
   }
 }
 function responseFailure(error: HttpClientError.HttpClientError) {
   const response = error.response;
   if (!response)
     return Effect.succeed(
-      new ServerFailure('Unavailable', undefined, [], true),
+      new ServerFailure({ tag: 'Unavailable', retryable: true }),
     );
   return response.text.pipe(
     Effect.match({
       onSuccess: (text) => publicFailure(text, response.status),
-      onFailure: () => new ServerFailure('Unavailable', undefined, [], true),
+      onFailure: () =>
+        new ServerFailure({ tag: 'Unavailable', retryable: true }),
     }),
   );
 }
 function serverFailure(error: unknown) {
   if (transferTimedOut(error))
     return Effect.succeed(
-      new ServerFailure('TimeoutError', undefined, [], true),
+      new ServerFailure({ tag: 'TimeoutError', retryable: true }),
     );
   if (HttpClientError.isHttpClientError(error)) return responseFailure(error);
   if (Schema.isSchemaError(error))
     return Effect.succeed(
-      new ServerFailure('Unavailable', undefined, [], true),
+      new ServerFailure({ tag: 'Unavailable', retryable: true }),
     );
   return Effect.succeed(declaredFailure(error));
 }
@@ -109,12 +109,14 @@ function declaredFailure(error: unknown) {
     'TimeoutError',
     'Unavailable',
   ].includes(tag);
-  return new ServerFailure(
+  return new ServerFailure({
     tag,
-    transient ? undefined : typed.message,
-    ['SecretsForbidden', 'ApprovalDenied'].includes(tag) ? typed.paths : [],
-    transient,
-    tag === 'Unauthorized' ? typed.expiredAt : undefined,
-    tag === 'ApprovalExpired' ? typed.reason : undefined,
-  );
+    message: transient ? undefined : typed.message,
+    paths: ['SecretsForbidden', 'ApprovalDenied'].includes(tag)
+      ? typed.paths
+      : [],
+    retryable: transient,
+    expiredAt: tag === 'Unauthorized' ? typed.expiredAt : undefined,
+    approvalReason: tag === 'ApprovalExpired' ? typed.reason : undefined,
+  });
 }

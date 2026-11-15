@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { NodeServices } from '@effect/platform-node';
 import { Effect, Redacted } from 'effect';
-import { resolveAgentSession } from './agent-session.ts';
+import { agentSessionContext } from './agent-session.ts';
 import {
   ApprovalStopped,
   approvalFailure,
@@ -58,7 +58,7 @@ export function run(
         parseRun(args, workingDirectory, project),
       );
       const file = yield* resolveCommand(parsed.command[0]);
-      const agentSession = resolveAgentSession((name) => process.env[name]);
+      const agentContext = agentSessionContext();
       const plan = yield* planOutput(parsed.masking);
       const relay =
         plan.kind === 'masked' ? yield* startRelay(plan) : undefined;
@@ -70,7 +70,7 @@ export function run(
           payload: {
             ...parsed.input,
             approval: { attemptId },
-            ...(agentSession ? { agentSession } : {}),
+            ...agentContext,
           },
         }),
       );

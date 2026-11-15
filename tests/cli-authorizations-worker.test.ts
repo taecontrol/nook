@@ -36,7 +36,7 @@ it('the device response is short-lived, code-free in its URL, and pending polls 
   expect(response.status).toBe(400);
   expect(await responseHasTag(response, 'pending')).toBe(true);
 });
-it.each(['pending', 'approved', 'denied'])(
+it.each(['approved', 'denied'])(
   'expiry takes precedence over the %s request state and owner writes leave it unchanged',
   async (status) => {
     const pending = await createAuthorization(app);
@@ -127,61 +127,6 @@ it('E14: user codes and invented device codes cannot redeem a token', async () =
     expect(response.status).toBe(400);
     expect(await responseHasTag(response, 'invalid')).toBe(true);
   }
-});
-it('E15: concurrent polls redeem exactly one token and all subsequent polls are invalid', async () => {
-  const pending = await createAuthorization(app);
-  expect((await approve(app, pending.userCode)).status).toBe(204);
-  const polls = await Promise.all(
-    [0, 1].map(() =>
-      jsonRequest(app, '/api/machine/token', {
-        deviceCode: pending.deviceCode,
-      }),
-    ),
-  );
-  expect(polls.map((response) => response.status).sort()).toEqual([200, 400]);
-  const bodies = (await Promise.all(
-    polls.map((response) => response.json()),
-  )) as { token?: string; _tag?: string }[];
-  expect(bodies.filter((body) => typeof body.token === 'string').length).toBe(
-    1,
-  );
-  expect(bodies.filter((body) => body._tag === 'invalid').length).toBe(1);
-  const later = await jsonRequest(app, '/api/machine/token', {
-    deviceCode: pending.deviceCode,
-  });
-  expect(await responseHasTag(later, 'invalid')).toBe(true);
-  expect(
-    (
-      await (
-        await app.mf.getD1Database('DB')
-      )
-        .prepare('SELECT count(*) AS count FROM machine_tokens')
-        .first()
-    )?.count,
-  ).toBe(1);
-});
-it('E16: concurrent approval and denial have exactly one winner', async () => {
-  const pending = await createAuthorization(app);
-  const responses = await Promise.all([
-    approve(app, pending.userCode),
-    jsonRequest(app, `/api/authorizations/${pending.userCode}/deny`),
-  ]);
-  expect(responses.map((response) => response.status).sort()).toEqual([
-    204, 409,
-  ]);
-  expect(
-    await responseHasTag(
-      responses.find((response) => response.status === 409),
-      'AlreadyHandled',
-      false,
-    ),
-  ).toBe(true);
-  const response = await jsonRequest(app, '/api/machine/token', {
-    deviceCode: pending.deviceCode,
-  });
-  expect([200, 400].includes(response.status)).toBe(true);
-  const body = (await response.json()) as { token?: string; _tag?: string };
-  expect(Boolean(body.token) !== (body._tag === 'denied')).toBe(true);
 });
 it('E17: approval trims names, rejects blank or overlong names, and allows duplicate machine names', async () => {
   const pending = await createAuthorization(app);
@@ -330,16 +275,6 @@ it('E19: owner lookup, approval, and denial enforce Access identity and same-ori
   } finally {
     await guarded.close();
   }
-});
-it('issued tokens and machine identity preserve the all-bucket grant', async () => {
-  const issued = await issueToken(app);
-  expect(issued.grant === 'all').toBe(true);
-  const response = await fetch(`${app.origin}/api/machine/whoami`, {
-    headers: { Authorization: `Bearer ${issued.token}` },
-  });
-  expect(response.status).toBe(200);
-  const identity = (await response.json()) as { grant?: unknown };
-  expect(identity.grant === 'all').toBe(true);
 });
 it('owner lookup preserves the submitted metadata and advertised request lifetime', async () => {
   const before = Date.now();

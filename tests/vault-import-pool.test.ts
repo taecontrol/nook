@@ -24,7 +24,7 @@ async function importWithFirstRefusal(tag: string) {
   const release = deferred();
   const refusal = new RequestFailure(
     'Refused.',
-    new ServerFailure(tag),
+    new ServerFailure({ tag }),
     'Refused.',
   );
   const api = {

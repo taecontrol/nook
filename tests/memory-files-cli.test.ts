@@ -261,15 +261,15 @@ it('E11: CLI reports readable-but-unwritable, unreadable and revoked credentials
   expect(await fileObjects(app)).toEqual([]);
   expect(await auditRows(app)).toEqual([]);
 });
-it.each(['.', '..', 'a\\b.pdf'])(
+it.each([
+  ['.', 'Use a file name.'],
+  ['..', 'Use a file name.'],
+  ['a\\b.pdf', 'A file name cannot contain slashes or control characters.'],
+])(
   'E6: CLI refuses an invalid basename %j before any network request',
-  async (name) => {
+  async (name, message) => {
     const transport = await proxy();
-    const result = await attach(name);
-    expect(result.status).toBe(1);
-    expect(result.stdout + result.stderr).toMatch(
-      /file name|filename|Unicode|InvalidFile/i,
-    );
+    publicFailure(await attach(name), message);
     expect(transport.requests).toEqual([]);
     expect(await fileObjects(app)).toEqual([]);
     expect(await auditRows(app)).toEqual([]);
@@ -384,7 +384,10 @@ it('E15: --output writes to the requested path, refuses stdout and never emits f
   });
   expect(digest(await readFile(output))).toBe(digest(bytes));
   const count = transport.requests.length;
-  expect((await download(pdfName, ['--output', '-'])).status).toBe(1);
+  publicFailure(
+    await download(pdfName, ['--output', '-']),
+    'Use --output <path> to save the file.',
+  );
   expect(transport.requests).toHaveLength(count);
 });
 it.each(['truncated', 'wrong-digest'] as const)(

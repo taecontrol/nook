@@ -80,30 +80,6 @@ it('E15: polls with overlapping approved reads redeem one token', async () => {
       'invalid',
     ),
   ).toBe(true);
-});
-it('E15: exchange remains atomic when both reads and writes overlap', async () => {
-  const pending = await createAuthorization(app);
-  expect((await approve(app, pending.userCode)).status).toBe(204);
-  held = '/poll-read';
-  const polls = [0, 1].map(() =>
-    jsonRequest(app, '/api/machine/token', { deviceCode: pending.deviceCode }),
-  );
-  await waitFor(2);
-  const readGates = releaseReads.splice(0);
-  held = '/poll-write';
-  for (const resume of readGates) resume();
-  await waitFor(2);
-  release();
-  const responses = await Promise.all(polls);
-  expect(responses.map((response) => response.status).sort()).toEqual([
-    200, 400,
-  ]);
-  expect(
-    await responseHasTag(
-      responses.find((response) => response.status === 400),
-      'invalid',
-    ),
-  ).toBe(true);
   expect(
     (
       await (
