@@ -67,6 +67,8 @@ export function run(
           },
         }),
       );
+      // Keep the signal listeners until the values phase ends, including
+      // during withdrawal.
       const delivered = yield* Effect.scoped(
         Effect.gen(function* () {
           const signal = yield* processSignal;

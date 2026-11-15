@@ -7,7 +7,9 @@ export function signalExitCode(signal: ProcessSignal): 130 | 143 {
 }
 
 // Registration is a scoped resource, separate from waiting for the signal.
-// Keep both listeners until the values phase ends, including during withdrawal.
+// The listeners stay until the caller's scope closes, so a signal during the
+// caller's cleanup is absorbed instead of killing the process. The first
+// signal decides the exit code.
 export const processSignal = Effect.gen(function* () {
   const signal = yield* Deferred.make<ProcessSignal>();
   const interrupt = () => Deferred.doneUnsafe(signal, Effect.succeed('SIGINT'));
