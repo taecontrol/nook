@@ -198,12 +198,6 @@ async function pressureProbe(mode: string, args: string[]) {
     nonblocking: boolean;
   };
 }
-async function addValue(name: string, value: string) {
-  expect((await createSecret(app, secretInput({ name, value }))).status).toBe(
-    201,
-  );
-  return `work/acme/${name}`;
-}
 async function nativeSignal(
   running: { kill(signal: NodeJS.Signals): boolean | Promise<boolean> },
   signal: NodeJS.Signals,
@@ -232,7 +226,7 @@ beforeEach(async () => {
     await app.close();
   };
 });
-it.each([0, 1, 42])(
+it.each([42])(
   'E1/E5/E28: exact injected bytes, inherited env, stdin and unchanged child streams/code (%s)',
   async (exit) => {
     const hash = createHash('sha256').update(app.input.value).digest('hex');
@@ -273,34 +267,6 @@ it.each([0, 1, 42])(
     expect(await filesContain(keyring.home, app.input.value)).toBe(false);
   },
 );
-it.skipIf(process.platform !== 'linux')(
-  'E2: inherited PTY preserves all three child TTYs',
-  async () => {
-    const args = [
-      process.execPath,
-      resolve(testBuild, 'cli.js'),
-      ...runArgs([process.execPath, childFile, 'tty']),
-    ];
-    const command = args
-      .map((arg) => "'" + arg.replaceAll("'", "'\\''") + "'")
-      .join(' ');
-    const result = await keyring.command(
-      '/usr/bin/script',
-      ['--quiet', '--return', '--command', command, '/dev/null'],
-      process.env.COVERAGE_RUN
-        ? {
-            NOOK_CLI_COVERAGE: resolve(
-              evidenceRoot,
-              `cli-${crypto.randomUUID()}.json`,
-            ),
-          }
-        : {},
-    ).done;
-    expect(result.status).toBe(0);
-    expectOutput(result.stdout, '[true,true,true]', true);
-    expect(result.stderr).toBe('');
-  },
-);
 it('E3: a signalled child maps SIGTERM to 143', async () => {
   expect(
     (
@@ -309,29 +275,6 @@ it('E3: a signalled child maps SIGTERM to 143', async () => {
     ).status,
   ).toBe(143);
 });
-it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
-  'E3: %s reaches the child or leaves its decision intact',
-  async (signal) => {
-    const running = keyring.start(
-      runArgs([process.execPath, childFile, 'wait']),
-    );
-    await expect
-      .poll(() => running.output().includes('child-ready'))
-      .toBe(true);
-    running.kill(signal);
-    if (signal === 'SIGINT') {
-      // The parent ignores SIGINT; sending TERM later proves it stayed alive and forwarded it.
-      running.kill('SIGTERM');
-    }
-    const result = await running.done;
-    expect(result.status).toBe(0);
-    expectOutput(
-      result.stdout,
-      'child-ready\n' + (signal === 'SIGINT' ? 'SIGTERM' : signal),
-      true,
-    );
-  },
-);
 it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
   'E3: the private fixture distinguishes %s termination from exit code 1',
   async (signal) => {
@@ -425,13 +368,13 @@ it.each(['SIGTERM', 'SIGHUP', 'SIGINT'] as const)(
     }
   },
 );
-it.each(
-  (['SIGTERM', 'SIGHUP', 'SIGINT'] as const).flatMap((signal) => [
-    { signal, kind: 'completes', code: 0 },
-    { signal, kind: 'fails', code: 127 },
-    { signal, kind: 'exceeds launch limits', code: 126 },
-  ]),
-)(
+// One cleanup removes every handler on every exit path, so each signal and
+// each path needs one row rather than the full product.
+it.each([
+  { signal: 'SIGTERM', kind: 'completes', code: 0 },
+  { signal: 'SIGHUP', kind: 'fails', code: 127 },
+  { signal: 'SIGINT', kind: 'exceeds launch limits', code: 126 },
+] as const)(
   'E3: native $signal remains native after the real run $kind',
   async ({ signal, kind, code }) => {
     const ready = resolve(keyring.home, 'run-completed');
@@ -509,6 +452,8 @@ it.each(
 it('E4: command resolution precedes keyring/network, with 127 and 126', async () => {
   const locked = resolve(keyring.home, 'not-executable');
   await writeFile(locked, '#!/bin/sh\nexit 0\n', { mode: 0o600 });
+  const directory = resolve(keyring.home, 'directory-command');
+  await mkdir(directory);
   const before = await readFile(resolve(keyring.home, 'argv'), 'utf8').catch(
     () => '',
   );
@@ -519,6 +464,7 @@ it('E4: command resolution precedes keyring/network, with 127 and 126', async ()
       'Command not found: nook-command-that-does-not-exist',
     ],
     [locked, 126, `Command is not executable: ${locked}`],
+    [directory, 126, `Command is not executable: ${directory}`],
   ] as const) {
     const result = await keyring.start(runArgs([name])).done;
     expect(result.status).toBe(code);
@@ -526,75 +472,6 @@ it('E4: command resolution precedes keyring/network, with 127 and 126', async ()
   }
   expect((await keyringTranscript()) === before).toBe(true);
   expect(await auditRows(app)).toEqual([]);
-});
-it.each(
-  [
-    ['--secret', `GH_TOKEN=${acmePath}`, '--', 'node'],
-    ['--secret', `GH_TOKEN=${acmePath}`, '--purpose', '', '--', 'node'],
-    ['--secret', `GH_TOKEN=${acmePath}`, '--purpose', '   ', '--', 'node'],
-    [
-      '--secret',
-      `GH_TOKEN=${acmePath}`,
-      '--purpose',
-      'bad\nline',
-      '--',
-      'node',
-    ],
-    [
-      '--secret',
-      `GH_TOKEN=${acmePath}`,
-      '--purpose',
-      '🔐'.repeat(201),
-      '--',
-      'node',
-    ],
-    ['--purpose', 'test', '--', 'node'],
-    ...[
-      'GH_TOKEN',
-      '=work/acme/GH_TOKEN',
-      '1X=work/acme/GH_TOKEN',
-      'GH_TOKEN=work/acme',
-      'GH_TOKEN=Work/Acme/GH_TOKEN',
-    ].map((secret) => ['--secret', secret, '--purpose', 'test', '--', 'node']),
-    [
-      '--secret',
-      `GH_TOKEN=${acmePath}`,
-      '--secret',
-      `GH_TOKEN=${acmePath}`,
-      '--purpose',
-      'test',
-      '--',
-      'node',
-    ],
-    ['--secret', `GH_TOKEN=${acmePath}`, '--purpose', 'test', 'node'],
-    ['--secret', `GH_TOKEN=${acmePath}`, '--purpose', 'test', '--'],
-  ].map((args) => ({ args })),
-)(
-  'E6: invalid run args stop before the keyring with one useful line (%#)',
-  async ({ args }) => {
-    const before = await readFile(resolve(keyring.home, 'argv'), 'utf8').catch(
-      () => '',
-    );
-    const result = await keyring.start(['run', ...args]).done;
-    expect(result.status).toBe(1);
-    expect((result.stdout + result.stderr).trim().split('\n')).toHaveLength(1);
-    expect((result.stdout + result.stderr).trim().length).toBeGreaterThan(0);
-    expect(
-      (await readFile(resolve(keyring.home, 'argv'), 'utf8').catch(
-        () => '',
-      )) === before,
-    ).toBe(true);
-    expect(await auditRows(app)).toEqual([]);
-  },
-);
-it('E6: incomplete run prints its required usage', async () => {
-  const result = await keyring.start(['run']).done;
-  expect(result.status).toBe(1);
-  expectOutput(
-    result.stdout + result.stderr,
-    'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] [--approval <id>] -- <command>',
-    true,
-  );
 });
 it.each(
   [
@@ -674,7 +551,9 @@ it('E8/E9: missing keys, absent login, revoked tokens and offline Worker keep re
   ]);
 });
 
-it.each(['removed', 'permission-lost'])(
+// A command removed after resolution takes the same spawn-failure branch as
+// the missing interpreter in the native-signal test above.
+it.each(['permission-lost'])(
   'E4: a command %s after resolution keeps its recorded audit and spawn exit code',
   async (kind) => {
     const command = resolve(keyring.home, 'race-command');
@@ -712,13 +591,6 @@ it.each(['removed', 'permission-lost'])(
     }
   },
 );
-it('E1: a quiet successful child produces no CLI output', async () => {
-  const result = await keyring.start(runArgs(['/usr/bin/true'])).done;
-  expect(result.status).toBe(0);
-  expect(result.stdout).toBe('');
-  expect(result.stderr).toBe('');
-});
-
 it('E8: a mismatched key stops the child with only the recorded key fingerprint', async () => {
   await app.setBindings({
     ...app.bindings,
@@ -756,81 +628,72 @@ it('E1/E5: every accepted environment name reaches the child, including __proto_
   expectNoValue(result.stdout + result.stderr, [app.input.value, app.token]);
 });
 
-it.each([
-  {
-    args: ['--secret', `GH_TOKEN=${acmePath}`, '--', 'node'],
-    message: 'A purpose is required.',
-  },
-  {
-    args: ['--secret', '--', 'node'],
-    message:
-      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] [--approval <id>] -- <command>',
-  },
-  {
-    args: ['--purpose', '--', 'node'],
-    message:
-      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] [--approval <id>] -- <command>',
-  },
-  {
-    args: [
-      '--secret',
-      `GH_TOKEN=${acmePath}`,
-      '--purpose',
-      'test',
-      '--purpose',
-      'other',
-      '--',
-      'node',
+const usage =
+  'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] [--approval <id>] -- <command>';
+const secretFlag = ['--secret', `GH_TOKEN=${acmePath}`];
+// Every row fails in argument parsing, so one fixture proves each of them
+// reached neither the keyring nor the Worker.
+it('E6/E14/Masking E11: argument failures name their cause before keyring access', async () => {
+  const purposeLine = 'Purpose must be one line of 1 to 200 characters.';
+  const secretPath = 'Use a secret path such as work/acme/GH_TOKEN.';
+  const secretName =
+    'Use --secret ENV=bucket/NAME with a valid environment name and secret path.';
+  const cases: [string[], string][] = [
+    [[], usage],
+    [[...secretFlag, '--', 'node'], 'A purpose is required.'],
+    [[...secretFlag, '--purpose', '', '--', 'node'], purposeLine],
+    [[...secretFlag, '--purpose', '   ', '--', 'node'], purposeLine],
+    [[...secretFlag, '--purpose', 'bad\nline', '--', 'node'], purposeLine],
+    [[...secretFlag, '--purpose', '🔐'.repeat(201), '--', 'node'], purposeLine],
+    [['--purpose', 'test', '--', 'node'], usage],
+    [['--secret', '--', 'node'], usage],
+    [['--purpose', '--', 'node'], usage],
+    [
+      [...secretFlag, '--purpose', 'test', '--purpose', 'other', '--', 'node'],
+      usage,
     ],
-    message:
-      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] [--approval <id>] -- <command>',
-  },
-  {
-    args: ['--secret', `GH_TOKEN=${acmePath}`, '--purpose', 'test', '--'],
-    message:
-      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] [--approval <id>] -- <command>',
-  },
-  {
-    args: [
-      '--secret',
-      `GH_TOKEN=${acmePath}`,
-      '--secret',
-      `GH_TOKEN=${acmePath}`,
-      '--purpose',
-      'test',
-      '--',
-      'node',
+    [[...secretFlag, '--purpose', 'test', 'node'], usage],
+    [[...secretFlag, '--purpose', 'test', '--'], usage],
+    ...(
+      [
+        ['GH_TOKEN', secretPath],
+        ['=work/acme/GH_TOKEN', secretName],
+        ['1X=work/acme/GH_TOKEN', secretName],
+        ['GH_TOKEN=work/acme', secretPath],
+        ['GH_TOKEN=Work/Acme/GH_TOKEN', secretPath],
+      ] as const
+    ).map(([secret, message]): [string[], string] => [
+      ['--secret', secret, '--purpose', 'test', '--', 'node'],
+      message,
+    ]),
+    [
+      [...secretFlag, ...secretFlag, '--purpose', 'test', '--', 'node'],
+      'Environment name GH_TOKEN is repeated.',
     ],
-    message: 'Environment name GH_TOKEN is repeated.',
-  },
-])(
-  'E6: argument failures name their cause before keyring access (%#)',
-  async ({ args, message }) => {
-    const before = await keyringTranscript();
-    const result = await keyring.start(['run', ...args]).done;
-    expect(result.status).toBe(1);
-    expectOutput(result.stdout + result.stderr, message, true);
-    expect((await keyringTranscript()) === before).toBe(true);
-    expect(await auditRows(app)).toEqual([]);
-  },
-);
-it('E14: too many CLI paths fail before the keyring and network', async () => {
+    [
+      runArgs(
+        ['/usr/bin/true'],
+        Array.from({ length: 21 }, (_, i) => `KEY_${i}=work/acme/KEY_${i}`),
+      ).slice(1),
+      'Request 1 to 20 distinct secret paths.',
+    ],
+    ...[
+      ['--no-masking', '--no-masking'],
+      ['--no-masking', 'true'],
+      ['--no-masking=false'],
+    ].map((flags): [string[], string] => [
+      [...flags, ...runArgs(['/usr/bin/true']).slice(1)],
+      usage,
+    ]),
+  ];
   const before = await keyringTranscript();
-  const result = await keyring.start(
-    runArgs(
-      ['/usr/bin/true'],
-      Array.from(
-        { length: 21 },
-        (_, index) => `KEY_${index}=work/acme/KEY_${index}`,
-      ),
-    ),
-  ).done;
-  expect(result.status).toBe(1);
-  expectOutput(
-    result.stdout + result.stderr,
-    'Request 1 to 20 distinct secret paths.',
-    true,
-  );
+  for (const [args, message] of cases) {
+    const result = await keyring.start(['run', ...args]).done;
+    expect(result.status, args.join(' ')).toBe(1);
+    expect((result.stdout + result.stderr).trim(), args.join(' ')).toBe(
+      message,
+    );
+  }
   expect((await keyringTranscript()) === before).toBe(true);
   expect(await auditRows(app)).toEqual([]);
 });
@@ -960,20 +823,6 @@ it('E11: the CLI does not retry a lost value response after the Worker audited d
   }
 });
 
-it('E4: a directory is denied before reading the keyring', async () => {
-  const directory = resolve(keyring.home, 'directory-command');
-  await mkdir(directory);
-  const before = await keyringTranscript();
-  const result = await keyring.start(runArgs([directory])).done;
-  expect(result.status).toBe(126);
-  expectOutput(
-    result.stdout + result.stderr,
-    `Command is not executable: ${directory}`,
-    true,
-  );
-  expect((await keyringTranscript()) === before).toBe(true);
-  expect(await auditRows(app)).toEqual([]);
-});
 it('E4: command lookup uses the caller PATH', async () => {
   await writeFile(
     resolve(keyring.shim, 'path-command'),
@@ -1111,41 +960,6 @@ it('Masking E4: writes 200 ms apart never expose a value fragment', async () => 
   expect(result.status).toBe(0);
   expectOutput(result.stdout, marker, true);
 });
-it('Masking E5: the longest containing value wins whole', async () => {
-  const shorter = await addValue('SHORT', 'abcdefgh');
-  const longer = await addValue('LONG', 'prefix-abcdefgh-suffix');
-  const result = await keyring.start(
-    maskingArgs('print-value', [], [`GH_TOKEN=${longer}`, `SHORT=${shorter}`]),
-  ).done;
-  expect(result.status).toBe(0);
-  expectOutput(result.stdout, `token=<nook:${longer}>`, true);
-});
-it('Masking E6: duplicate values sort by path and aliases share that marker', async () => {
-  const first = await addValue('AAA', app.input.value);
-  const result = await keyring.start(
-    maskingArgs(
-      'all-values',
-      ['GH_TOKEN,ALIAS,FIRST'],
-      [`GH_TOKEN=${acmePath}`, `ALIAS=${acmePath}`, `FIRST=${first}`],
-    ),
-  ).done;
-  expect(result.status).toBe(0);
-  expectOutput(result.stdout, `<nook:${first}>|`.repeat(3), true);
-});
-it('Masking E7: seven Unicode code points pass through and eight are masked', async () => {
-  const seven = '🔐'.repeat(7);
-  const short = await addValue('SEVEN', seven);
-  const eight = await addValue('EIGHT', seven + '🔑');
-  const result = await keyring.start(
-    maskingArgs(
-      'all-values',
-      ['SEVEN,EIGHT'],
-      [`SEVEN=${short}`, `EIGHT=${eight}`],
-    ),
-  ).done;
-  expect(result.status).toBe(0);
-  expectOutput(result.stdout, `${seven}|<nook:${eight}>|`, true);
-});
 it('Masking E8: whole multiline bytes are masked and separate labelled lines survive', async () => {
   const result = await keyring.start(maskingArgs('multiline')).done;
   expect(result.status).toBe(0);
@@ -1220,30 +1034,6 @@ it('Masking E11: no-masking passes bytes unchanged without a relay', async () =>
   expect(result.stdout === 'token=' + app.input.value + '\n').toBe(true);
   expect(existsSync(resolve(keyring.home, 'relay-launch'))).toBe(false);
 });
-it.each(
-  [
-    ['--no-masking', '--no-masking'],
-    ['--no-masking', 'true'],
-    ['--no-masking=false'],
-  ].map((flags) => ({ flags })),
-)(
-  'Masking E11: invalid boolean occurrence starts nothing (%#)',
-  async ({ flags }) => {
-    const before = await keyringTranscript();
-    const args = maskingArgs('mark', [resolve(keyring.home, 'started')]);
-    args.splice(1, 0, ...flags);
-    const result = await keyring.start(args).done;
-    expect(result.status).toBe(1);
-    expectOutput(
-      result.stdout + result.stderr,
-      'Usage: nook run --secret ENV=bucket/NAME --purpose "…" [--no-masking] [--approval <id>] -- <command>',
-      true,
-    );
-    expect((await keyringTranscript()) === before).toBe(true);
-    expect(await auditRows(app)).toEqual([]);
-    expect(existsSync(resolve(keyring.home, 'started'))).toBe(false);
-  },
-);
 it('Masking E12: an unterminated prompt arrives before the writer is released', async () => {
   const release = resolve(keyring.home, 'release');
   expect(

@@ -94,23 +94,24 @@ function invalidFile(kind: (typeof invalidCases)[number]) {
   };
   return cases[kind];
 }
-it.each(
-  invalidCases.flatMap((kind) =>
-    ['run', 'flags', 'check'].map((command) => ({ kind, command })),
-  ),
-)(
-  'E8/E13/E14: $command rejects $kind before keyring or network',
-  async ({ kind, command }) => {
+// The file is parsed once, before flags, the keyring or the network, so each
+// kind runs through `run`; `check` shares the parser and keeps one parse kind
+// plus its own mapping limit. One fixture serves every case because each one
+// proves it reached no keyring, Worker or audit.
+it('E8/E13/E14: run and check reject every invalid file before keyring or network', async () => {
+  const cases = [
+    ...invalidCases.map((kind) => ({ kind, command: 'run' })),
+    { kind: 'array root', command: 'check' },
+    { kind: 'too many paths', command: 'check' },
+  ] as const;
+  for (const { kind, command } of cases) {
     const invalid = invalidFile(kind);
     await writeFile(file, invalid.content);
-    const message = `Invalid ${file}: ${invalid.message}`;
-    const args =
-      command === 'check'
-        ? ['vault', 'check']
-        : runArgs(
-            ['/usr/bin/true'],
-            command === 'flags' ? [`GH_TOKEN=${acmePath}`] : [],
-          );
-    await beforeAccess(args, message);
-  },
-);
+    await beforeAccess(
+      command === 'check' ? ['vault', 'check'] : runArgs(['/usr/bin/true']),
+      `Invalid ${file}: ${invalid.message}`,
+    ).catch((error: Error) => {
+      throw new Error(`${command} with ${kind}: ${error.message}`);
+    });
+  }
+});
