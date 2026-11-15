@@ -513,7 +513,7 @@ another: recorded reveals may exceed displayed values, never the reverse.
 
 `migrations/NNNN_name.sql` files are applied in order using Wrangler's SQL splitter and one atomic D1 batch per file, including its `d1_migrations` record. `migrations/schema.sql` is a snapshot, not a migration. The D1 binding's `migrations_pattern` selects only numbered files; a local Wrangler acceptance test proves that it excludes the snapshot and preserves replay. Verification uses fresh Miniflare databases, checks an idempotent replay, and applies the latest file to the previous schema containing a sentinel bucket. Both final normalized schemas must match the snapshot, and the sentinel must remain unchanged. A second migration enforces the reserved `me` invariant at the database boundary.
 
-Fetch `origin/main` before verification: a migration present there cannot change or disappear. SQL errors, schema drift, and `BEGIN TRANSACTION` fail the gate. Deployment relies on the commit's successful Verify run instead of repeating it, builds, creates the named database if missing, applies remote migrations, then deploys the Worker. Local migration evidence does not claim production execution.
+Fetch `origin/main` before verification: a migration present there cannot change or disappear. SQL errors, schema drift, and `BEGIN TRANSACTION` fail the gate. `pnpm run deploy` ships only the commit `origin`'s `main` points to. Changes reach `main` only through a pull request whose Verify run passed; the command does not repeat Verify, so two pull requests merged close together can deploy without having passed Verify together. It builds, creates the named database if missing, applies remote migrations, then deploys the Worker; `deploy.test.ts` E24 proves that order. Local migration evidence does not claim production execution.
 
 `tests/cli-release.test.ts` proves that `nook version` prints `{"version":"X.Y.Z"}` from `apps/cli/package.json`, the only version source, and that the CLI bundle runs as a Node single executable with no Node on `PATH`. It runs in the Linux shards and the macOS CLI job. Verify's `linux-binary` job (Linux x64) and the `macos-cli` job (macOS arm64) also run `node scripts/release/binary.ts`, the release packaging step, which checks `nook version` under `env -i PATH=/usr/bin:/bin`. `tests/release-archive.test.ts` extracts a release archive with the system `tar` and requires exactly the executable, byte for byte, beside a `sha256sum` checksum. `tests/release-rollback.test.ts` runs the release workflow's own publish and unpublish scripts against a local bare repository with stub `gh` and `ssh`: a failed release deletes the tag it pushed and the release it created, and neither script passes the deploy key in an argument list. The release workflow's own checks are described in [releasing](../releasing.md).
 
@@ -592,7 +592,7 @@ Issue #11 uses the production Worker bundle, migrated D1, and its genuine schedu
 | E20 | The idle browser case observes the real HTTP boundary and requires zero search, embedding and vector requests. `load-time.test.ts` and `verify:load-time` retain the 1000 ms cold-open and 100 ms intent-navigation budgets; `memory-load-time.test.ts` proves the production measurement conditions. |
 | E21 | `tests/captures/memory-search-reference.capture.ts`: eleven states × two sizes × two themes, 44 genuine-product PNGs. |
 | E22 | `tests/journeys/owner.e2e.ts`: deterministic strict-cache search and opening of the Spanish ancestor memory. |
-| E23 | `memory-search-deploy.test.ts`: the workflow's actual shell against a temporary command fixture, missing index/metadata combinations, idempotent reruns, delayed metadata readiness and timeout without deployment. |
+| E23 | `deploy.test.ts`: the deploy command against a fake Wrangler account, missing index/metadata combinations, idempotent reruns, delayed metadata readiness and timeout without deployment. |
 | E24 | Hosted search integration is outside local synthetic-index evidence. |
 
 `tests/fixtures/bge-m3.json.gz` records exact-text embeddings from the authorized bge-m3 experiment. `scripts/record-search-fixtures.ts` is an explicit, separate recording tool and never runs in verification. The strict embedder rejects unrecorded input; `memory-search-stand-ins.test.ts` also proves the observed Vectorize metadata-index timing, upsert replacement, delayed visibility and request limits, including the 20-id get and 100-id delete payloads that Vectorize rejects with code 40007. D1 round trips and AI/index calls are counted without recording SQL or bindings. Dense 16 KiB content, large bilingual content and six-level paths with valid 32-character segments are included.
@@ -889,7 +889,7 @@ embedding call while Cron independently lists R2 and deletes old garbage.
 `file-operation-statements.test.ts` also rejects a saved position without
 "cursor" in its error, requires the next invocation to collect old garbage,
 and keeps the saved position when the `FILES` binding is missing.
-`memory-files-deploy.test.ts` drives the actual provisioning shell with
+`deploy.test.ts` drives the deploy command's bucket provisioning with
 synthetic command responses. Audit uses its existing rows and disclosures
 for all five file outcomes; its file suite covers Vault pagination and
 descendant filtering plus file-only and mixed activity column/region labels.
@@ -971,13 +971,13 @@ still forbids installation identifiers. Automatic invocation logs are disabled
 to avoid full request URLs; custom rejection logs remain enabled.
 A separate E6 configuration check requires invocation logs to stay disabled,
 including when removing that setting would restore the platform default.
-`installation-deploy.test.ts` E9 runs the actual deployment shell with fake
-Wrangler responses, proving name-only missing-secret summaries, advisory
-list failures, and no secret check after a failed deployment. Wrangler
+`deploy.test.ts` E9 runs the deploy command with fake Wrangler responses,
+proving name-only missing-secret notices, advisory list failures whose
+errors stay hidden, and no secret check after a failed deployment. Wrangler
 4.147.0's locked implementation and its [command documentation](https://developers.cloudflare.com/workers/wrangler/commands/workers/#secret-list)
 confirm `--format json` lists name/type records without values.
 
-The installation guide is reviewed against E10's fourteen steps; the operations
+The installation guide is reviewed against E10; the operations
 reference and README fulfill E11. Existing MCP inventory and access-guidance
 tests now read `docs/install.md`; their assertions are unchanged. E1–E4
 require a real Cloudflare installation and are not claimed by local verification.

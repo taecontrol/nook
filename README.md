@@ -9,7 +9,7 @@ Nook is in early development. The owner manages hierarchical buckets and connect
 
 When approving CLI login on Linux or macOS, the owner chooses specific bucket subtrees or all buckets. Agents on that machine connect over MCP using `nook mcp-header`, which reads its credential from the system keyring. The CLI shows the grant with `whoami` and revokes it with `logout`; the owner can also revoke it from Machines.
 
-Follow [Install Nook in your Cloudflare account](docs/install.md) to set up your own installation and keep it updated through a GitHub fork.
+Follow [Install Nook in your Cloudflare account](docs/install.md) to set up your own installation and keep it updated. You deploy it from a local checkout with `pnpm run deploy <hostname>`.
 
 ## Install the CLI
 
@@ -18,7 +18,7 @@ mise use -g github:taecontrol/nook@latest   # Linux or macOS
 brew install taecontrol/tap/nook            # macOS
 ```
 
-`nook login https://<hostname>` connects a machine to an installation. See [client connections](docs/install.md#11-sign-in-and-connect-your-clients) for the agent configuration and [releasing](docs/releasing.md) for how versions ship.
+`nook login https://<hostname>` connects a machine to an installation. See [client connections](docs/install.md#9-sign-in-and-connect-your-clients) for the agent configuration and [releasing](docs/releasing.md) for how versions ship.
 
 Machine approval offers 1, 7, 30 or 90 days of access (30 days by default),
 or No expiration. Existing machines keep no expiration. `nook whoami` shows

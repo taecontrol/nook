@@ -1,13 +1,14 @@
 # Install Nook in your Cloudflare account
 
-This guide installs one owner's Nook through a GitHub fork and GitHub Actions.
-Replace `<hostname>` with a dedicated hostname in your domain and
-`<team-name>` with your Zero Trust team name. Installation settings stay in
-GitHub and Cloudflare; you do not need to edit source or commit identifiers.
+This guide installs one owner's Nook from a local checkout of this
+repository. One command deploys it from your machine with your own Wrangler
+login; Nook needs no CI and no Cloudflare API token. Replace `<hostname>`
+with a dedicated hostname in your domain and `<team-name>` with your Zero
+Trust team name. Installation settings stay in Cloudflare and on the command
+line; you do not need to edit source or commit identifiers.
 
 ## 1. Prerequisites
 
-- A GitHub account that can fork this public repository and run Actions.
 - A Cloudflare account on **Workers Paid**. Workers Free is unsupported.
   See [Workers plans and limits](https://developers.cloudflare.com/workers/platform/limits/).
 - A payment method for Zero Trust onboarding, including its Free plan,
@@ -18,11 +19,14 @@ GitHub and Cloudflare; you do not need to edit source or commit identifiers.
 - A domain with an **Active** DNS zone in that Cloudflare account. Choose
   an unused hostname; the deployment attaches it as the Worker's custom domain.
 - No unrelated Worker or D1 database named `nook`, R2 bucket named
-  `nook-files`, or Vectorize index named `nook-memories`. The workflow deploys
-  to this Worker name and reuses these resources; it must not overwrite or
+  `nook-files`, or Vectorize index named `nook-memories`. The deploy command
+  deploys to this Worker name and reuses these resources; it must not overwrite or
   adopt another application's resources. Use a separate account
   if those names are already taken. This guide supports one installation
   per account.
+- Linux or macOS with git, Node.js 26.10.0, and pnpm 12.8.1, the versions
+  `package.json` requires. With mise, `mise install` in the checkout installs
+  Node.js and pnpm.
 - An email inbox for the owner's Access one-time PIN, a browser, `curl`,
   and OpenSSL for privately generating the Vault key.
 - For the CLI: Linux or macOS on x64 or arm64. The mise release is one
@@ -33,45 +37,28 @@ GitHub and Cloudflare; you do not need to edit source or commit identifiers.
   `security`, and `open`. The keyring must be available to the terminal and
   MCP client that run Nook.
 
-## 2. Fork and enable Actions
+## 2. Get the code and sign in to Cloudflare
 
-Fork this repository into your GitHub account. In the fork, open **Actions**
-and enable workflows when GitHub asks. Keep `main` as the deployment branch.
+```sh
+git clone https://github.com/taecontrol/nook.git
+cd nook
+pnpm install
+pnpm exec wrangler login
+```
 
-Do not dispatch **Release** in your fork: it publishes the upstream CLI and
-targets the upstream Homebrew tap. Installing Nook does not require a CLI
-release or release credentials.
+`wrangler login` opens a browser to authorize Wrangler for your Cloudflare
+user, and keeps the credential on this machine. The deploy command uses it.
+If `pnpm exec wrangler whoami` lists more than one account, set Nook's
+account in the shell before each deployment:
 
-## 3. Create the deployment API token
+```sh
+export CLOUDFLARE_ACCOUNT_ID=<account-id>
+```
 
-Select your account in Cloudflare, then open **Manage account → Account
-API tokens → Create Token**. Name it Nook deployment. Scope account resources
-to your installation's account and zone resources to the hostname's zone.
-Grant these permissions; the dashboard may label write permissions **Edit**,
-while the API calls them **Write**:
+`wrangler whoami` shows each account's ID, as does **Workers & Pages →
+Account Details** in the dashboard. See [Wrangler login](https://developers.cloudflare.com/workers/wrangler/commands/general/#login).
 
-| Scope | Permission |
-| --- | --- |
-| Workers product (all Workers in this account) | Admin |
-| Account | Account Settings: Read |
-| Account | Workers R2 Storage: Edit / Write |
-| Account | D1: Edit / Write |
-| Account | Vectorize: Edit / Write |
-| Account | Workers AI: Read and Edit / Write |
-| Zone | Workers Routes: Edit / Write |
-
-Continue to the summary, review the account and zone, and create the token.
-The first deployment creates the Worker, which requires Workers product Admin;
-Editor only deploys an existing Worker. Per-Worker roles cannot target a
-Worker that does not exist yet. Custom domains also require the zone's
-Workers Routes permission. See [account API tokens](https://developers.cloudflare.com/fundamentals/api/get-started/account-owned-tokens/),
-[API permissions](https://developers.cloudflare.com/fundamentals/api/reference/permissions/),
-and [Workers roles](https://developers.cloudflare.com/workers/authorization/workers/).
-
-Keep the token private for step 7. Never paste it into an agent conversation,
-command argument, log, or committed file.
-
-## 4. Create the Zero Trust organization
+## 3. Create the Zero Trust organization
 
 Open **Zero Trust** in the Cloudflare dashboard and complete onboarding.
 Choose a team name, select a plan (Zero Trust Free is sufficient for this
@@ -86,9 +73,9 @@ the owner's email. See [one-time PIN setup](https://developers.cloudflare.com/cl
 Other [identity providers](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/)
 can be configured separately; they must supply the same owner email claim.
 
-## 5. Protect the whole hostname with Access
+## 4. Protect the whole hostname with Access
 
-Before setting `NOOK_HOSTNAME` in GitHub, go to **Zero Trust → Access controls
+Before the first deployment, go to **Zero Trust → Access controls
 → Applications → Create new application → Self-hosted and private**.
 
 1. Name it Nook. Select **Add public hostname** for `<hostname>` and leave **Path
@@ -101,14 +88,14 @@ Before setting `NOOK_HOSTNAME` in GitHub, go to **Zero Trust → Access controls
    OAuth**, and save again. This lets owner MCP clients use the same Access
    policy. Nook verifies Access's forwarded assertion itself.
 4. Open the application's **Configure → Additional settings** and retain
-   its **Application Audience (AUD) Tag** privately for step 9. Use this
+   its **Application Audience (AUD) Tag** privately for step 7. Use this
    whole-hostname application's audience, not the Bypass application's.
 
 No Tunnel is needed: the deployment serves the hostname directly from Workers.
 See [self-hosted applications](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)
 and [Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/).
 
-## 6. Add the machine API Bypass application
+## 5. Add the machine API Bypass application
 
 Select **Create new application → Self-hosted and private → Add public
 hostname** for a second Access application on the same hostname, with
@@ -121,41 +108,40 @@ The more specific application wins. Keep the slash before `*`: neither
 Only `/api/machine/*` uses Nook machine tokens; the Worker authorizes those
 requests itself. See [Access path precedence](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/).
 
-## 7. Set the GitHub variables and secret
+## 6. Run the first deployment
 
-In your fork's **Settings → Secrets and variables → Actions**, add:
+Run the deployment only after both Access applications exist. It attaches
+`<hostname>` to the Worker, and without Access the app shell would be public.
+From the checkout:
 
-| Tab | Name | Value source |
-| --- | --- | --- |
-| Variables | `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account ID, from **Workers & Pages → Account Details**, or dashboard search **Copy account ID**. |
-| Secrets | `CLOUDFLARE_API_TOKEN` | The deployment token from step 3. |
-| Variables | `NOOK_HOSTNAME` | `<hostname>` alone, without `https://`, a slash, or a path. Set this last, after both Access applications exist. |
+```sh
+git switch main && git pull
+pnpm run deploy <hostname>
+```
 
-Do not add the Worker secrets to GitHub. Without `NOOK_HOSTNAME`, automatic
-Deploy runs skip installation. Setting it after Access exists prevents the
-asset layer from serving an unprotected shell during the first deployment.
-See [finding the account ID](https://developers.cloudflare.com/fundamentals/account/find-account-and-zone-ids/).
+Pass the hostname alone, without `https://`, a slash, or a path. The command
+deploys only the commit that `main` on `origin` points to: it stops before
+building when the checkout has uncommitted or untracked files, or sits at
+another commit.
+It does not run Verify again; changes reach this repository's `main` only
+after Verify passes on their pull request.
 
-## 8. Run the first deployment
+The command installs the locked dependencies, builds, creates missing R2,
+D1, and Vectorize resources, applies
+D1 migrations, waits for the Vectorize `bucket` metadata index, and deploys
+the `nook` Worker with `<hostname>` as its custom domain. Wrangler runs
+without prompts, so it never writes resource IDs into `wrangler.jsonc`. Keep
+resources private; no public R2 URL is required.
 
-In your fork's **Actions**, run **Verify → Run workflow → main**. Wait for
-all jobs to succeed. Then run **Deploy → Run workflow → main**. A manual
-Verify run alone does not trigger Deploy; a successful Verify on a subsequent
-push to `main` does.
+The first deployment ends with a notice that names the four missing Worker
+secrets and points to step 7. This is expected: the Worker must exist before
+you can enter its secrets. The check reads secret names only, and a failed
+check does not change the deployment result. If a step fails, the command
+names it and stops; fix the permission or configuration that Wrangler
+reports, then run the command again. A rerun reuses what the failed run
+created.
 
-Verify normally takes about 15 minutes and Deploy about a minute. Deploy
-requires a successful Verify on the exact current `main` commit. It builds,
-creates missing R2/D1/Vectorize resources, applies D1 migrations, waits for
-the Vectorize `bucket` metadata index, and deploys the `nook` Worker and
-custom domain. Keep resources private; no public R2 URL is required.
-
-The first successful Deploy summary names the four missing Worker secrets
-and links to step 9. This warning is expected: the Worker must exist before
-you can enter its secrets. A failed secret-name check is advisory and does
-not change the deployment result. If deployment itself fails, fix the named
-permission or configuration and rerun it; do not remove the Verify gate.
-
-## 9. Set the Worker secrets
+## 7. Set the Worker secrets
 
 Open **Workers & Pages → nook → Settings → Variables and Secrets**.
 Add these four entries with type **Secret**, then deploy/apply the changes:
@@ -163,7 +149,7 @@ Add these four entries with type **Secret**, then deploy/apply the changes:
 | Name | Value |
 | --- | --- |
 | `ACCESS_ISSUER` | `https://<team-name>.cloudflareaccess.com`, exactly, with no trailing slash. |
-| `ACCESS_AUDIENCE` | The whole-hostname Access application's AUD Tag from step 5. |
+| `ACCESS_AUDIENCE` | The whole-hostname Access application's AUD Tag from step 4. |
 | `OWNER_EMAIL` | The exact email used in the owner Allow policy and one-time PIN login. |
 | `VAULT_KEY` | Standard base64 encoding of 32 random bytes. |
 
@@ -181,12 +167,12 @@ and secret metadata do not require that key. See [ADR-0006](adrs/0006-vault-valu
 
 Owner API requests return 401 until the three Access settings exist. A missing
 or invalid Vault key prevents storing, replacing, revealing, and delivering
-values. Later workflow deployments preserve the secrets. See [Worker secrets](https://developers.cloudflare.com/workers/configuration/secrets/).
+values. Later deployments preserve the secrets. See [Worker secrets](https://developers.cloudflare.com/workers/configuration/secrets/).
 
-## 10. Check the Access boundary while signed out
+## 8. Check the Access boundary while signed out
 
-In the Deploy job's `pnpm build` output, find a real current hashed JavaScript
-asset under `dist/assets/assets/`. Replace the asset placeholder below with
+In the checkout, run `ls dist/assets/assets/*.js` to find a real current
+hashed JavaScript asset from the deployment's build. Replace the asset placeholder below with
 its `/assets/<filename>.js` path; a made-up path would test only a 404.
 Use a signed-out shell without cookies or Access assertions. Do not follow
 redirects:
@@ -223,10 +209,10 @@ fi
 unset reply
 ```
 
-If any check fails, correct steps 5–6 before continuing. In particular,
+If any check fails, correct steps 4–5 before continuing. In particular,
 `/api/machines` must stay protected; it is not the Bypass prefix.
 
-## 11. Sign in and connect your clients
+## 9. Sign in and connect your clients
 
 Open `https://<hostname>/`, sign in with one-time PIN, and confirm that the
 shell shows your email and Buckets includes `me`.
@@ -314,7 +300,7 @@ and confirm that only its permitted tree, ancestors, and `me` appear.
 See [Claude Code dynamic headers](https://code.claude.com/docs/en/mcp#use-dynamic-headers-for-custom-authentication)
 and [Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
-## 12. Store your first memory and secret
+## 10. Store your first memory and secret
 
 Ask the connected MCP client to call `remember` with this input:
 
@@ -342,32 +328,37 @@ type or inspect the value. Agents discover names with `list_secrets` and
 receive values only in a command's environment through `nook run`.
 You may delete this disposable secret from Vault when finished.
 
-## 13. Take upstream updates
+## 11. Take upstream updates
 
-In GitHub, open your fork and choose **Sync fork → Update branch** for
-`main`. If your own changes conflict, resolve them before updating. Verify
-runs on the new commit, and a successful run triggers Deploy for that same
-commit while it remains the head of `main`.
+From the checkout:
 
-Keep the Verify gate. Public forks can use GitHub-hosted Actions without
-paid minutes for standard public-repository runs; expect about 15 minutes
-per update. See [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
-For a failed job, open its run and use **Re-run failed jobs**
-after checking the failure. Do not bypass a failed check. A manual redeploy
-uses **Deploy → Run workflow → main** after Verify is green on that commit.
+```sh
+git switch main && git pull
+pnpm install
+pnpm run deploy <hostname>
+```
 
-Updates reuse D1, R2, and Vectorize, apply outstanding migrations, and
-preserve Worker secrets. Confirm your memory, `SMOKE` if retained, and
+To deploy your own changes, merge them into `main` in the repository the
+checkout calls `origin`, after `pnpm verify` passes. The deploy command does
+not run Verify.
+
+If you installed through a GitHub fork and its Deploy workflow, syncing the
+fork removes the workflow. Delete the fork's `CLOUDFLARE_API_TOKEN` secret and
+its `CLOUDFLARE_ACCOUNT_ID` and `NOOK_HOSTNAME` variables, revoke the token in
+Cloudflare, and deploy with the command above from then on.
+
+Updates reuse D1, R2, and Vectorize, apply outstanding migrations before
+the new Worker deploys, and preserve Worker secrets. Confirm your memory, `SMOKE` if retained, and
 approved machine still exist. Keep the Vault key backup and follow the
 [operational backup reference](deployment.md#back-up-a-database-with-full-text-search)
 before changes that warrant a backup.
 
-Update the fork **before** the CLI: Nook does not check CLI/Worker version
+Update the Worker **before** the CLI: Nook does not check CLI/Worker version
 compatibility. To stay on a particular release with mise, replace `latest`
 with that release's `X.Y.Z` in the install command. `nook version` shows the
 installed version. Review release notes before upgrading a pinned CLI.
 
-## 14. Troubleshooting
+## 12. Troubleshooting
 
 For a Worker 401, 403, or expired-session screen after Access login, open
 **Workers & Pages → nook → Observability → Logs** and select the request's
@@ -413,16 +404,19 @@ failing service's message.
 
 Other installation problems:
 
-- **Deploy skipped:** confirm `NOOK_HOSTNAME` exists, the branch is `main`,
-  and Verify succeeded on its current commit. A later `main` commit supersedes
-  an older run; deploy the current green commit.
-- **Provisioning/deploy permission denied:** recheck step 3, especially
-  Workers product Admin for creation, D1, R2, Vectorize, Workers AI, and the
-  selected zone's Workers Routes permission. Confirm R2 checkout is complete.
-- **Missing Worker secrets in the Deploy summary:** follow its link to
-  step 9 and set only the names listed. The check uses
+- **Deploy refused:** the command deploys only `origin`'s `main`. Commit or
+  remove local changes, then run `git fetch origin && git switch --detach
+  origin/main`, or `git switch main && git pull`, and run it again.
+- **More than one account available:** set `CLOUDFLARE_ACCOUNT_ID` as in
+  step 2.
+- **Provisioning or deploy permission denied:** confirm that your Cloudflare
+  user can manage Workers, D1, R2, Vectorize, and Workers AI in the account,
+  and Workers Routes in the hostname's zone. Confirm R2 checkout is complete.
+  Run `pnpm exec wrangler login` again if the login expired.
+- **Missing Worker secrets after deployment:** follow the notice to step 7
+  and set only the names listed. The check uses
   `wrangler secret list --format json`, which lists names and types, not
-  values. Once all four names exist, no warning is written. It cannot
+  values. Once all four names exist, the notice disappears. It cannot
   validate their contents. See [Wrangler secret list](https://developers.cloudflare.com/workers/wrangler/commands/workers/#secret-list).
 - **The secret check could not run:** deployment succeeded but the name-only
   check failed. Confirm the four names privately in the Worker's dashboard;
