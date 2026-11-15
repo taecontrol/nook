@@ -1,14 +1,11 @@
-import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { delimiter, resolve } from 'node:path';
+import { readdir, readFile } from 'node:fs/promises';
 import { expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 import {
   macosCliGroups,
   macosCliSuites,
 } from '../scripts/lib/macos-cli-suites.ts';
-import { testEnvironment } from '../scripts/lib/test-environment.ts';
 
 const expression = (value: string) => ['$', '{{ ', value, ' }}'].join('');
 
@@ -39,8 +36,8 @@ it('E5: committed Worker and deploy settings contain no installation identifiers
     }
   };
   visit(config);
-  const deploy = await workflow('deploy');
-  expect(JSON.stringify(deploy)).not.toMatch(
+  const deploy = await readFile('scripts/lib/deploy.ts', 'utf8');
+  expect(deploy).not.toMatch(
     /LOCAL_OWNER|LOCAL_ORIGIN|synthetic-owner|owner@nook\.test/,
   );
   expect(config.workers_dev).toBe(false);
@@ -183,159 +180,23 @@ it('E13: both journey entry points require strict cache replay', async () => {
   );
 });
 
-it('E20 setup: deployment follows a green Verify push on main or a main dispatch, builds without repeating verification and reads the installation settings from GitHub', async () => {
-  const deploy = await workflow('deploy');
-  expect(deploy.on).toEqual({
-    workflow_run: {
-      workflows: ['Verify'],
-      types: ['completed'],
-      branches: ['main'],
-    },
-    workflow_dispatch: null,
-  });
-  expect(deploy.env.DEPLOY_SHA).toBe(
-    expression('github.event.workflow_run.head_sha || github.sha'),
-  );
-  const gate = deploy.jobs.latest.if.replace(/\s+/g, ' ');
-  expect(gate).toBe(
-    "(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || " +
-      "(github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && " +
-      "github.event.workflow_run.conclusion == 'success' && vars.NOOK_HOSTNAME != '')",
-  );
-  expect(deploy.jobs.deploy.needs).toBe('latest');
-  expect(deploy.jobs.deploy.if).toBe("needs.latest.outputs.current == 'true'");
-  expect(
-    deploy.jobs.deploy.steps.find((step: { uses?: string }) =>
-      step.uses?.startsWith('actions/checkout@'),
-    ).with.ref,
-  ).toBe(expression('env.DEPLOY_SHA'));
-  const steps = deploy.jobs.deploy.steps;
-  const commands = steps
-    .filter((step: { run?: string }) => step.run)
-    .map((step: { run: string }) => step.run);
-  expect(
-    commands.filter((command: string) => command.startsWith('pnpm verify')),
-  ).toEqual([]);
-  const publish = commands.findIndex((command: string) =>
-    command.includes('wrangler deploy'),
-  );
-  expect(commands.indexOf('pnpm build')).toBeGreaterThan(-1);
-  expect(publish).toBeGreaterThan(commands.indexOf('pnpm build'));
-  expect(commands[publish]).toContain('--domain "$NOOK_HOSTNAME"');
-  const env = steps.find((step: { run?: string }) =>
-    step.run?.includes('wrangler deploy'),
-  ).env;
-  expect(env).toMatchObject({
-    CLOUDFLARE_ACCOUNT_ID: expression('vars.CLOUDFLARE_ACCOUNT_ID'),
-    NOOK_HOSTNAME: expression('vars.NOOK_HOSTNAME'),
-    CLOUDFLARE_API_TOKEN: expression('secrets.CLOUDFLARE_API_TOKEN'),
-  });
-});
-
-it('E20 setup: the real preflight blocks unless Verify succeeded on the exact main commit', async () => {
-  const deploy = await workflow('deploy');
-  const preflight = deploy.jobs.deploy.steps.find(
-    (step: { name?: string }) => step.name === 'Require green main',
-  );
-  expect(preflight).toBeDefined();
-  const directory = await mkdtemp(resolve('.local', 'green-main-'));
-  const argsPath = resolve(directory, 'args.json');
-  try {
-    const fixture = resolve(directory, 'gh');
-    await writeFile(
-      fixture,
-      '#!/usr/bin/env node\nimport {writeFileSync} from "node:fs"; writeFileSync(process.env.PREFLIGHT_ARGS, JSON.stringify(process.argv.slice(2))); console.log(process.env.PREFLIGHT_COUNT);\n',
+it('CI holds no Cloudflare credential and never deploys', async () => {
+  const directory = '.github/workflows';
+  for (const name of await readdir(directory)) {
+    const text = await readFile(`${directory}/${name}`, 'utf8');
+    expect(text, name).not.toMatch(
+      /CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|NOOK_HOSTNAME|wrangler (deploy|d1|r2|vectorize|secret)/,
     );
-    await chmod(fixture, 0o755);
-    const environment = testEnvironment(resolve(directory, 'home'), {
-      PATH: `${directory}${delimiter}${process.env.PATH}`,
-      GITHUB_REPOSITORY: 'synthetic/nook',
-      DEPLOY_SHA: 'fixture-main-sha',
-      PREFLIGHT_ARGS: argsPath,
-    });
-    for (const [count, status] of [
-      ['0', 1],
-      ['1', 0],
-    ] as const) {
-      const result = spawnSync('bash', ['-c', preflight.run], {
-        env: testEnvironment(resolve(directory, 'home'), {
-          PATH: environment.PATH,
-          GITHUB_REPOSITORY: 'synthetic/nook',
-          DEPLOY_SHA: 'fixture-main-sha',
-          PREFLIGHT_ARGS: argsPath,
-          PREFLIGHT_COUNT: count,
-        }),
-        encoding: 'utf8',
-        timeout: 5_000,
-      });
-      expect(result.status).toBe(status);
-      expect(JSON.parse(await readFile(argsPath, 'utf8'))).toEqual([
-        'run',
-        'list',
-        '--repo',
-        'synthetic/nook',
-        '--workflow',
-        'verify.yml',
-        '--branch',
-        'main',
-        '--commit',
-        'fixture-main-sha',
-        '--json',
-        'status,conclusion',
-        '--jq',
-        'map(select(.status == "completed" and .conclusion == "success")) | length',
-      ]);
-    }
-  } finally {
-    await rm(directory, { recursive: true, force: true });
   }
 });
 
-it('E20 setup: only the commit main points to deploys, so a slower older Verify never overwrites a newer deployment', async () => {
-  const deploy = await workflow('deploy');
-  const check = deploy.jobs.latest.steps.find(
-    (step: { id?: string }) => step.id === 'main',
-  );
-  expect(check).toBeDefined();
-  const directory = await mkdtemp(resolve('.local', 'latest-main-'));
-  const argsPath = resolve(directory, 'args.json');
-  const outputPath = resolve(directory, 'output');
-  try {
-    const fixture = resolve(directory, 'gh');
-    await writeFile(
-      fixture,
-      '#!/usr/bin/env node\nimport {writeFileSync} from "node:fs"; writeFileSync(process.env.LATEST_ARGS, JSON.stringify(process.argv.slice(2))); console.log(process.env.MAIN_HEAD);\n',
-    );
-    await chmod(fixture, 0o755);
-    for (const [head, current] of [
-      ['fixture-deploy-sha', 'true'],
-      ['fixture-newer-sha', 'false'],
-    ] as const) {
-      await writeFile(outputPath, '');
-      const result = spawnSync('bash', ['-c', check.run], {
-        env: testEnvironment(resolve(directory, 'home'), {
-          PATH: `${directory}${delimiter}${process.env.PATH}`,
-          GITHUB_REPOSITORY: 'synthetic/nook',
-          GITHUB_OUTPUT: outputPath,
-          DEPLOY_SHA: 'fixture-deploy-sha',
-          MAIN_HEAD: head,
-          LATEST_ARGS: argsPath,
-        }),
-        encoding: 'utf8',
-        timeout: 5_000,
-      });
-      expect(result.status).toBe(0);
-      expect(await readFile(outputPath, 'utf8')).toBe(`current=${current}\n`);
-      expect(JSON.parse(await readFile(argsPath, 'utf8'))).toEqual([
-        'api',
-        'repos/synthetic/nook/commits/main',
-        '--jq',
-        '.sha',
-      ]);
-    }
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+it('E23: the Worker binds Workers AI, the memory index and the five-minute Cron', async () => {
+  const config = JSON.parse(await readFile('wrangler.jsonc', 'utf8'));
+  expect(config.ai).toEqual({ binding: 'AI' });
+  expect(config.vectorize).toEqual([
+    { binding: 'MEMORY_INDEX', index_name: 'nook-memories' },
+  ]);
+  expect(config.triggers.crons).toEqual(['*/5 * * * *']);
 });
 
 it('E23: D1 is bound by name with migrations and no installation ID', async () => {
@@ -348,22 +209,6 @@ it('E23: D1 is bound by name with migrations and no installation ID', async () =
       migrations_pattern: 'migrations/[0-9][0-9][0-9][0-9]_+([a-z0-9_]).sql',
     },
   ]);
-});
-
-it('E24: deployment builds, creates the missing database, migrates, then deploys', async () => {
-  const deploy = await workflow('deploy');
-  const commands = deploy.jobs.deploy.steps
-    .filter((step: { run?: string }) => step.run)
-    .map((step: { run: string }) => step.run)
-    .join('\n');
-  const build = commands.indexOf('pnpm build');
-  const create = commands.indexOf('wrangler d1 create nook');
-  const migrate = commands.indexOf('wrangler d1 migrations apply DB --remote');
-  const publish = commands.indexOf('wrangler deploy');
-  expect(build).toBeGreaterThanOrEqual(0);
-  expect(create).toBeGreaterThan(build);
-  expect(migrate).toBeGreaterThan(create);
-  expect(publish).toBeGreaterThan(migrate);
 });
 
 it('E26: CLI enters complexity and coverage scope, and CI installs a real Secret Service', async () => {

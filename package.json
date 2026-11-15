@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "node scripts/dev.ts",
     "build": "node scripts/build.ts",
+    "deploy": "node scripts/deploy.ts",
     "verify": "node scripts/verify.ts",
     "verify:style": "biome check .",
     "verify:ui": "oxlint -c .oxlintrc.json apps/web/src",
