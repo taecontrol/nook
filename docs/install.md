@@ -342,6 +342,11 @@ To deploy your own changes, merge them into `main` in the repository the
 checkout calls `origin`, after `pnpm verify` passes. The deploy command does
 not run Verify.
 
+If you installed through a GitHub fork and its Deploy workflow, syncing the
+fork removes the workflow. Delete the fork's `CLOUDFLARE_API_TOKEN` secret and
+its `CLOUDFLARE_ACCOUNT_ID` and `NOOK_HOSTNAME` variables, revoke the token in
+Cloudflare, and deploy with the command above from then on.
+
 Updates reuse D1, R2, and Vectorize, apply outstanding migrations before
 the new Worker deploys, and preserve Worker secrets. Confirm your memory, `SMOKE` if retained, and
 approved machine still exist. Keep the Vault key backup and follow the
