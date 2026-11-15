@@ -15,14 +15,14 @@ The workflow also made installation harder. A new owner had to fork the reposito
 
 The owner deploys from a local checkout with `pnpm run deploy <hostname>`, using their own `wrangler login`. No workflow deploys, and GitHub stores no Cloudflare credential, account ID, or hostname.
 
-The command deploys only the commit that `main` on `origin` points to, and refuses a checkout with uncommitted changes. It does not repeat Verify. Instead, a ruleset on `main` requires a pull request and a green `verify` check before merge, with no bypass for admins.
+The command deploys only the commit that `main` on `origin` points to, and refuses a checkout with uncommitted or untracked changes. It installs the locked dependencies before building. It does not repeat Verify. Instead, a ruleset on `main` requires a pull request and a green `verify` check before merge, with no bypass for admins.
 
 ## Consequences
 
 - A leaked GitHub token or a compromised workflow can no longer reach the Cloudflare account. The credential lives only on the owner's machines, under Wrangler's login.
 - Installation needs a clone, `wrangler login`, and one command. It no longer needs a fork, Actions, or an API token.
 - Merging no longer deploys. The owner runs the command after each merge they want live.
-- The ruleset does not require a pull request to be up to date with `main`, so two pull requests merged close together can reach `main` without having passed Verify together. Verify still runs on the push to `main`, and the owner checks it before deploying. The command does not check it.
+- The ruleset does not require a pull request to be up to date with `main`, so two pull requests merged close together can reach `main` without having passed Verify together. Verify still runs on the push to `main` and shows its result on the commit, but the command does not check it. The owner accepted this risk.
 - Every deployment runs on a machine the owner controls. If that machine is compromised, so is the Cloudflare login, as with any local Wrangler use.
 
 ## Alternatives considered

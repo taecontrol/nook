@@ -121,11 +121,13 @@ pnpm run deploy <hostname>
 
 Pass the hostname alone, without `https://`, a slash, or a path. The command
 deploys only the commit that `main` on `origin` points to: it stops before
-building when the checkout has uncommitted changes or sits at another commit.
+building when the checkout has uncommitted or untracked files, or sits at
+another commit.
 It does not run Verify again; changes reach this repository's `main` only
 after Verify passes on their pull request.
 
-The command builds, creates missing R2, D1, and Vectorize resources, applies
+The command installs the locked dependencies, builds, creates missing R2,
+D1, and Vectorize resources, applies
 D1 migrations, waits for the Vectorize `bucket` metadata index, and deploys
 the `nook` Worker with `<hostname>` as its custom domain. Wrangler runs
 without prompts, so it never writes resource IDs into `wrangler.jsonc`. Keep
@@ -336,7 +338,7 @@ pnpm install
 pnpm run deploy <hostname>
 ```
 
-To deploy your own changes, push them to `main` in the repository the
+To deploy your own changes, merge them into `main` in the repository the
 checkout calls `origin`, after `pnpm verify` passes. The deploy command does
 not run Verify.
 

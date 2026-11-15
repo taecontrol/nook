@@ -44,6 +44,10 @@ interface Account {
   failing?: string;
   status: string;
   head: string;
+  /** git ls-remote output, when origin answers with more than main. */
+  remote?: string;
+  /** Wrangler colors its labelled listings, as under FORCE_COLOR. */
+  colored?: boolean;
 }
 
 const installed = (): Account => ({
@@ -67,7 +71,7 @@ const empty = (): Account => ({
 
 const wrangler = (...args: string[]) => ['pnpm', 'exec', 'wrangler', ...args];
 const checks = [
-  ['git', 'status', '--porcelain'],
+  ['git', 'status', '--porcelain', '--untracked-files=all'],
   ['git', 'ls-remote', '--exit-code', 'origin', 'refs/heads/main'],
   ['git', 'rev-parse', 'HEAD'],
 ];
@@ -78,6 +82,15 @@ const metadataList = wrangler(
   '--json',
 );
 
+/** Wraps each label and value the way Wrangler colors labelled listings. */
+const paint = (colored: boolean | undefined, text: string) =>
+  colored
+    ? text.replace(
+        /^(\w+):(\s+)(\S+)$/gm,
+        '\u001b[37m$1:\u001b[39m$2\u001b[90m$3\u001b[39m',
+      )
+    : text;
+
 /** A Cloudflare account and git checkout that answer like Wrangler and git. */
 function fake(account: Account) {
   const calls: { command: string[]; quiet?: boolean }[] = [];
@@ -87,16 +100,19 @@ function fake(account: Account) {
       exists ? [{ name: 'unrelated' }, { name }] : [{ name: 'unrelated' }],
     );
   const outputs: Record<string, () => string> = {
-    'git status --porcelain': () => account.status,
+    'git status --porcelain --untracked-files=all': () => account.status,
     'git ls-remote --exit-code origin refs/heads/main': () =>
-      `${main}\trefs/heads/main\n`,
+      account.remote ?? `${main}\trefs/heads/main\n`,
     'git rev-parse HEAD': () => `${account.head}\n`,
     'r2 bucket list': () =>
-      `Listing buckets...\nname:           unrelated-bucket\ncreation_date:  2026-10-01\n${
-        account.bucket
-          ? 'name:           nook-files\ncreation_date:  2026-10-01\n'
-          : ''
-      }`,
+      paint(
+        account.colored,
+        `Listing buckets...\nname:           unrelated-bucket\ncreation_date:  2026-10-01\n${
+          account.bucket
+            ? 'name:           nook-files\ncreation_date:  2026-10-01\n'
+            : ''
+        }`,
+      ),
     'd1 list --json': () => listing(account.database, 'nook'),
     'vectorize list --json': () => listing(account.index, 'nook-memories'),
     'vectorize list-metadata-index nook-memories --json': () => {
@@ -117,6 +133,7 @@ function fake(account: Account) {
   };
   const effects: Record<string, () => void> = {
     build: () => {},
+    'install --frozen-lockfile': () => {},
     'r2 bucket create nook-files': () => {
       account.bucket = true;
     },
@@ -173,6 +190,7 @@ it('E24: a first deployment builds, creates storage, migrates before deploying t
   const notice = await deploy(hostname, shell, bound);
   expect(commands()).toEqual([
     ...checks,
+    ['pnpm', 'install', '--frozen-lockfile'],
     ['pnpm', 'build'],
     wrangler('r2', 'bucket', 'list'),
     wrangler('r2', 'bucket', 'create', 'nook-files'),
@@ -301,6 +319,7 @@ it.each([
   ],
   ['r2 bucket list', 'pnpm exec wrangler r2 bucket list failed.'],
   ['build', 'pnpm build failed.'],
+  ['install --frozen-lockfile', 'pnpm install --frozen-lockfile failed.'],
   [
     'd1 migrations apply DB --remote',
     'pnpm exec wrangler d1 migrations apply DB --remote failed.',
@@ -360,6 +379,34 @@ it('deploy ships only main: an unreachable origin stops it', async () => {
   expect(commands).toEqual(checks.slice(0, 2));
 });
 
+it('deploy ships only main: a branch whose name ends in refs/heads/main does not stand in for main', async () => {
+  const other = 'c'.repeat(40);
+  const { shell, commands } = fake({
+    ...installed(),
+    remote: `${other}\trefs/heads/a/refs/heads/main\n${main}\trefs/heads/main\n`,
+  });
+  await deploy(hostname, shell, bound);
+  expect(commands().at(-2)).toEqual(wrangler('deploy', '--domain', hostname));
+
+  const { message } = await refusal(
+    {
+      ...installed(),
+      head: other,
+      remote: `${other}\trefs/heads/a/refs/heads/main\n`,
+    },
+    hostname,
+  );
+  expect(message).toBe('origin has no main branch.');
+});
+
+it('a colored bucket listing still finds the existing bucket', async () => {
+  const { shell, commands } = fake({ ...installed(), colored: true });
+  await deploy(hostname, shell, bound);
+  expect(commands().filter((command) => command.includes('create'))).toEqual(
+    [],
+  );
+});
+
 it.each([
   [undefined, 'Usage: pnpm run deploy <hostname>'],
   ['https://nook.example.com', 'without https:// or a path'],
@@ -382,7 +429,7 @@ it('resource names come from the Worker bindings in wrangler.jsonc', async () =>
   );
 });
 
-it('pnpm run deploy wires the real processes: it refuses a dirty checkout and deploys a clean main', async () => {
+it('pnpm run deploy wires the real processes: it refuses a dirty checkout, deploys a clean main with Wrangler unable to prompt, and hides secret-listing errors', async () => {
   const pkg = JSON.parse(await readFile('package.json', 'utf8'));
   expect(pkg.scripts.deploy).toBe('node scripts/deploy.ts');
   const directory = await mkdtemp(resolve('.local', 'deploy-entry-'));
@@ -393,7 +440,7 @@ it('pnpm run deploy wires the real processes: it refuses a dirty checkout and de
       resolve(directory, 'git'),
       `#!/usr/bin/env node
 const args = process.argv.slice(2).join(' ');
-if (args === 'status --porcelain') process.stdout.write(process.env.FIXTURE_STATUS);
+if (args === 'status --porcelain --untracked-files=all') process.stdout.write(process.env.FIXTURE_STATUS);
 else if (args.startsWith('ls-remote')) console.log('${main}\\trefs/heads/main');
 else if (args === 'rev-parse HEAD') console.log('${main}');
 else process.exit(99);
@@ -402,7 +449,10 @@ else process.exit(99);
     await writeFile(
       resolve(directory, 'pnpm'),
       `#!/usr/bin/env node
-import { readFileSync, writeFileSync } from 'node:fs';
+import { fstatSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+// Wrangler must never prompt: its standard input is /dev/null, not a pipe or TTY.
+const stdin = fstatSync(0);
+if (!stdin.isCharacterDevice() || stdin.rdev !== statSync('/dev/null').rdev) process.exit(98);
 const args = process.argv.slice(2);
 const calls = JSON.parse(readFileSync(${JSON.stringify(calls)}, 'utf8'));
 calls.push(args);
@@ -412,17 +462,24 @@ if (command === 'r2 bucket list') console.log('name: nook-files');
 else if (command.startsWith('d1 list')) console.log(JSON.stringify([{ name: 'nook' }]));
 else if (command.startsWith('vectorize list ')) console.log(JSON.stringify([{ name: 'nook-memories' }]));
 else if (command.startsWith('vectorize list-metadata-index')) console.log(JSON.stringify([{ propertyName: 'bucket', indexType: 'String' }]));
-else if (command.startsWith('secret list')) console.log(JSON.stringify([{ name: 'ACCESS_ISSUER' }]));
+else if (command.startsWith('secret list')) {
+  if (process.env.FIXTURE_SECRETS === 'fail') { console.error('private-command-error-canary'); process.exit(1); }
+  console.log(JSON.stringify([{ name: 'ACCESS_ISSUER' }]));
+}
 `,
     );
     await chmod(resolve(directory, 'git'), 0o755);
     await chmod(resolve(directory, 'pnpm'), 0o755);
-    const entry = (status: string) => {
+    const entry = (status: string, secrets = 'listed') => {
       const environment = testEnvironment(resolve(directory, 'home'), {
         PATH: `${directory}${delimiter}${process.env.PATH}`,
       });
       return spawnSync('node', ['scripts/deploy.ts', hostname], {
-        env: { ...environment, FIXTURE_STATUS: status },
+        env: {
+          ...environment,
+          FIXTURE_STATUS: status,
+          FIXTURE_SECRETS: secrets,
+        },
         encoding: 'utf8',
         timeout: 10_000,
       });
@@ -443,6 +500,11 @@ else if (command.startsWith('secret list')) console.log(JSON.stringify([{ name: 
     expect(observed.map((args) => args.join(' '))).toContain(
       `exec wrangler deploy --domain ${hostname}`,
     );
+
+    const unlisted = entry('', 'fail');
+    expect(unlisted.status, unlisted.stderr).toBe(0);
+    expect(unlisted.stderr).toContain('The Worker secret check could not run.');
+    expect(unlisted.stderr).not.toContain('private-command-error-canary');
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

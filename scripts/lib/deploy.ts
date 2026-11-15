@@ -1,3 +1,5 @@
+import { stripVTControlCharacters } from 'node:util';
+
 export type Command = readonly string[];
 
 /** The processes a deployment starts, so tests can replace Cloudflare and git. */
@@ -86,17 +88,24 @@ function checkHostname(hostname: string | undefined): string {
 
 /** Deploy ships only what main on origin holds, with nothing local mixed in. */
 function requireMain(shell: Shell) {
-  if (read(shell, ['git', 'status', '--porcelain']).trim())
+  const status = ['git', 'status', '--porcelain', '--untracked-files=all'];
+  if (read(shell, status).trim())
     throw new DeployError(
       'This checkout has changes that are not committed. Deploy ships only main: commit or remove them, then run it again.',
     );
+  // ls-remote matches ref name suffixes, so a branch such as
+  // a/refs/heads/main also matches; only the exact ref counts.
   const main = read(shell, [
     'git',
     'ls-remote',
     '--exit-code',
     'origin',
     'refs/heads/main',
-  ]).split(/\s/)[0];
+  ])
+    .split('\n')
+    .map((line) => line.split('\t'))
+    .find(([, ref]) => ref === 'refs/heads/main')?.[0];
+  if (!main) throw new DeployError('origin has no main branch.');
   const head = read(shell, ['git', 'rev-parse', 'HEAD']).trim();
   if (head !== main)
     throw new DeployError(
@@ -105,7 +114,10 @@ function requireMain(shell: Shell) {
 }
 
 function provisionBucket(shell: Shell, bucket: string) {
-  const listing = read(shell, wrangler('r2', 'bucket', 'list'));
+  // A FORCE_COLOR environment colors Wrangler's labelled listing.
+  const listing = stripVTControlCharacters(
+    read(shell, wrangler('r2', 'bucket', 'list')),
+  );
   const names = [...listing.matchAll(/^name:\s+(\S+)\s*$/gm)].map(
     (match) => match[1],
   );
@@ -190,7 +202,8 @@ function secretNotice(shell: Shell): string | undefined {
 }
 
 /**
- * Deploys main on origin to the hostname: builds, creates missing storage,
+ * Deploys main on origin to the hostname: installs its locked dependencies,
+ * builds, creates missing storage,
  * migrates D1 before the new Worker runs, waits for the Vectorize metadata
  * index, then deploys. Returns a notice about missing Worker secrets.
  */
@@ -201,6 +214,7 @@ export async function deploy(
 ): Promise<string | undefined> {
   const domain = checkHostname(hostname);
   requireMain(shell);
+  run(shell, ['pnpm', 'install', '--frozen-lockfile']);
   run(shell, ['pnpm', 'build']);
   provisionBucket(shell, bound.bucket);
   provisionDatabase(shell, bound.database);

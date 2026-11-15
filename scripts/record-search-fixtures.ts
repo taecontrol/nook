@@ -4,7 +4,7 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import { recordedTexts } from '../tests/fixtures/search-corpus.ts';
 
 // Run only against the explicitly authorized remote-AI development worker.
-// This script is deliberately outside verify, tests, and the deploy workflow.
+// This script is deliberately outside verify, tests, and the deploy command.
 const endpoint = process.argv[2];
 if (endpoint !== 'http://127.0.0.1:4387')
   throw new Error('Use the authorized loopback recording worker on port 4387.');
