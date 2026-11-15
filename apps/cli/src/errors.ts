@@ -1,8 +1,15 @@
 import type { ApprovalExpired } from '@nook/contract';
-import { Effect } from 'effect';
 
 export class CliFailure extends Error {}
 export class NotLoggedIn extends CliFailure {}
+/** The system error code of a caught value, such as ENOENT, if it has one. */
+export function errorCode(error: unknown) {
+  return error instanceof Error &&
+    'code' in error &&
+    typeof error.code === 'string'
+    ? error.code
+    : undefined;
+}
 export function networkError(url: string) {
   return new CliFailure(`Could not reach ${url}. Try again.`);
 }
@@ -36,10 +43,6 @@ export function expiredAccess(url: string, expiredAt: string) {
   return new CliFailure(
     `This machine's access expired on ${accessDateTime(expiredAt)}. Run: nook logout && nook login ${url}`,
   );
-}
-// Lifts a synchronous check whose only failure is a thrown CliFailure.
-export function tryCli<A>(check: () => A) {
-  return Effect.try({ try: check, catch: (error) => error as CliFailure });
 }
 export class ServerFailure {
   readonly tag: string;

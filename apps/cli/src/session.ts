@@ -13,7 +13,6 @@ import {
   NotLoggedIn,
   networkError,
   RequestFailure,
-  tryCli,
   untilText,
 } from './errors.ts';
 import type { Host } from './host.ts';
@@ -166,7 +165,7 @@ function refuseExisting(
 export function login(host: Host, input: string, write: Write) {
   return Effect.scoped(
     Effect.gen(function* () {
-      const url = yield* tryCli(() => installationOrigin(input));
+      const url = yield* installationOrigin(input);
       yield* host.lockSession;
       yield* host.keyring.checkKeyring;
       const configured = yield* readConfig;

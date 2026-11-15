@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Effect } from 'effect';
 import { agentSessionContext } from './agent-session.ts';
-import { CliFailure, tryCli } from './errors.ts';
+import { CliFailure } from './errors.ts';
 import type { Host } from './host.ts';
 import { writeDirectory } from './project-secrets.ts';
 import { readSecretInput } from './secret-input.ts';
@@ -14,7 +14,7 @@ export function vaultCreate(
   write: (message: string) => void,
 ) {
   return Effect.gen(function* () {
-    const parsed = yield* tryCli(() => parseCreate(args));
+    const parsed = yield* parseCreate(args);
     const workingDirectory = yield* writeDirectory;
     const value = yield* readSecretInput(parsed.path);
     const agentContext = agentSessionContext();

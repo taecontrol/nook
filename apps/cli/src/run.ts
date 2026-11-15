@@ -8,12 +8,7 @@ import {
   processSignal,
   requestValues,
 } from './approval-wait.ts';
-import {
-  CliFailure,
-  networkError,
-  type RequestFailure,
-  tryCli,
-} from './errors.ts';
+import { CliFailure, networkError, type RequestFailure } from './errors.ts';
 import type { Host } from './host.ts';
 import { planOutput } from './output-plan.ts';
 import { currentDirectory, projectSecrets } from './project-secrets.ts';
@@ -54,9 +49,7 @@ export function run(
     Effect.gen(function* () {
       const workingDirectory = yield* currentDirectory;
       const project = yield* projectSecrets(workingDirectory);
-      const parsed = yield* tryCli(() =>
-        parseRun(args, workingDirectory, project),
-      );
+      const parsed = yield* parseRun(args, workingDirectory, project);
       const file = yield* resolveCommand(parsed.command[0]);
       const agentContext = agentSessionContext();
       const plan = yield* planOutput(parsed.masking);

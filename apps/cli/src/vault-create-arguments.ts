@@ -4,6 +4,7 @@ import {
   validateSecretDescription,
   validateSecretPath,
 } from '@nook/contract';
+import { Effect } from 'effect';
 import { type Grammar, parseArguments } from './arguments.ts';
 import { CliFailure } from './errors.ts';
 
@@ -13,16 +14,18 @@ export const createGrammar: Grammar = {
   flags: { purpose: 'required', description: 'optional' },
 };
 export function parseCreate(args: readonly string[]) {
-  const {
-    positional: [path],
-    flags,
-  } = parseArguments(createGrammar, args);
-  const [purpose] = flags.get('purpose') ?? [];
-  const [description = ''] = flags.get('description') ?? [];
-  const message =
-    validateSecretPath(path) ??
-    validatePurpose(purpose) ??
-    validateSecretDescription(description);
-  if (message) throw new CliFailure(message);
-  return { ...splitSecretPath(path), path, purpose, description };
+  return Effect.gen(function* () {
+    const {
+      positional: [path],
+      flags,
+    } = yield* parseArguments(createGrammar, args);
+    const [purpose] = flags.get('purpose') ?? [];
+    const [description = ''] = flags.get('description') ?? [];
+    const message =
+      validateSecretPath(path) ??
+      validatePurpose(purpose) ??
+      validateSecretDescription(description);
+    if (message) return yield* Effect.fail(new CliFailure(message));
+    return { ...splitSecretPath(path), path, purpose, description };
+  });
 }

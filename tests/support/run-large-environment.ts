@@ -12,15 +12,17 @@ const mappings = Array.from(
   { length: 128 },
   (_, index) => `LARGE_${index}=work/acme/LARGE`,
 );
-const parsed = parseRun(
-  [
-    ...mappings.flatMap((mapping) => ['--secret', mapping]),
-    '--purpose',
-    'exercise the native environment limit',
-    '--',
-    '/usr/bin/true',
-  ],
-  home,
+const parsed = Effect.runSync(
+  parseRun(
+    [
+      ...mappings.flatMap((mapping) => ['--secret', mapping]),
+      '--purpose',
+      'exercise the native environment limit',
+      '--',
+      '/usr/bin/true',
+    ],
+    home,
+  ),
 );
 const value = randomBytes(48 * 1024).toString('base64');
 if (validateSecretValue(value))

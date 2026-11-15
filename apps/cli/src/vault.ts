@@ -4,7 +4,7 @@ import {
   validateBucketPath,
 } from '@nook/contract';
 import { Effect } from 'effect';
-import { CliFailure, type RequestFailure, tryCli } from './errors.ts';
+import { CliFailure, type RequestFailure } from './errors.ts';
 import type { Host } from './host.ts';
 import {
   currentDirectory,
@@ -69,7 +69,7 @@ export function vaultCheck(host: Host, write: (message: string) => void) {
       return yield* Effect.fail(
         new CliFailure(`No nook.json in ${directory} or its parents.`),
       );
-    yield* tryCli(() => requireMappingLimit(project.mappings, project.file));
+    yield* requireMappingLimit(project.mappings, project.file);
     const buckets = [
       ...new Set(
         project.mappings.map(({ path }) => splitSecretPath(path).bucket),
