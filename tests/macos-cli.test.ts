@@ -367,8 +367,9 @@ describe.runIf(process.platform === 'darwin')(
         'Timeout preserves the credential',
       ).toBe(true);
     });
-    // The opener's failure modes are shared with Linux (cli-login E2); this
-    // test proves macOS hands the code-free URL to open.
+    // The opener's exit status is ignored on every platform (session.ts
+    // openBrowser) and a missing opener is cli-login E2; this test proves
+    // macOS hands the code-free URL to open.
     it('E12: open receives only the code-free approval URL and login continues', async () => {
       const child = keyring.start(['login', app.origin], {
         PATH: keyring.shim,

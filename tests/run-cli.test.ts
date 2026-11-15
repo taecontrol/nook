@@ -207,6 +207,12 @@ async function nativeSignal(
     `Native signal ${signal} must be delivered`,
   ).toBe(true);
 }
+async function addValue(name: string, value: string) {
+  expect((await createSecret(app, secretInput({ name, value }))).status).toBe(
+    201,
+  );
+  return `work/acme/${name}`;
+}
 async function keyringTranscript() {
   try {
     return await readFile(resolve(keyring.home, 'argv'), 'utf8');
@@ -690,9 +696,11 @@ it('E6/E14/Masking E11: argument failures name their cause before keyring access
   for (const [args, message] of cases) {
     const result = await keyring.start(['run', ...args]).done;
     expect(result.status, args.join(' ')).toBe(1);
-    expect((result.stdout + result.stderr).trim(), args.join(' ')).toBe(
-      message,
-    );
+    // A boolean keeps any echoed value out of the failure output.
+    expect(
+      (result.stdout + result.stderr).trim() === message,
+      `${args.join(' ')} prints its message`,
+    ).toBe(true);
   }
   expect((await keyringTranscript()) === before).toBe(true);
   expect(await auditRows(app)).toEqual([]);
@@ -959,6 +967,22 @@ it('Masking E4: writes 200 ms apart never expose a value fragment', async () => 
   const result = await keyring.start(maskingArgs('split-value')).done;
   expect(result.status).toBe(0);
   expectOutput(result.stdout, marker, true);
+});
+// The only masked run with several distinct, non-ASCII values: it proves the
+// relay protocol delivers every value to the masker (run-masker pins the rules).
+it('Masking E7: seven Unicode code points pass through and eight are masked', async () => {
+  const seven = '🔐'.repeat(7);
+  const short = await addValue('SEVEN', seven);
+  const eight = await addValue('EIGHT', `${seven}🔑`);
+  const result = await keyring.start(
+    maskingArgs(
+      'all-values',
+      ['SEVEN,EIGHT'],
+      [`SEVEN=${short}`, `EIGHT=${eight}`],
+    ),
+  ).done;
+  expect(result.status).toBe(0);
+  expectOutput(result.stdout, `${seven}|<nook:${eight}>|`, true);
 });
 it('Masking E8: whole multiline bytes are masked and separate labelled lines survive', async () => {
   const result = await keyring.start(maskingArgs('multiline')).done;

@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import {
+  claimVariables,
   isClaimVariable,
   resolveAgentSession,
 } from '../apps/cli/src/agent-session.ts';
@@ -136,7 +137,10 @@ const precedence: {
 it.each(precedence)('CLI resolution $label', ({ env, claim }) => {
   expect(resolveAgentSession((name) => env[name])).toEqual(claim);
 });
+// The literal names are the user-facing contract, so a name added to or
+// dropped from the production list turns this red.
 it('the CLI reserves exactly the claim variables', () => {
+  expect([...claimVariables].sort()).toEqual([...claimNames].sort());
   for (const name of claimNames) expect(isClaimVariable(name), name).toBe(true);
   for (const name of ['GH_TOKEN', ...Object.keys(decoys)])
     expect(isClaimVariable(name), name).toBe(false);

@@ -19,7 +19,6 @@ import {
 import { auditRows } from './support/audit.ts';
 import { filesContain } from './support/cli.ts';
 import { machineMcp } from './support/grants.ts';
-import { listMachines, revokeMachine } from './support/machines.ts';
 import { expectOutput } from './support/private-assertions.ts';
 import { testBuild } from './support/runtime.ts';
 import {
@@ -344,9 +343,11 @@ it('E8: invalid CLI input fails before keyring or HTTP', async () => {
         input ?? secretInput().value,
       ).done;
       expect(result.status, `sample ${index}`).toBe(1);
-      expect((result.stdout + result.stderr).trim(), `sample ${index}`).toBe(
-        message,
-      );
+      // A boolean keeps any echoed value out of the failure output.
+      expect(
+        (result.stdout + result.stderr).trim() === message,
+        `sample ${index} prints its message`,
+      ).toBe(true);
     }
     expect(transport.bodies.length).toBe(0);
     expect((await transcript()) === before).toBe(true);
@@ -435,9 +436,11 @@ it('CLI usage: malformed invocations are refused before keyring or HTTP', async 
     ]) {
       const result = await keyring.start(args, {}, secretInput().value).done;
       expect(result.status, label).toBe(1);
-      expect((result.stdout + result.stderr).trim(), label).toBe(
-        'Usage: nook vault create <bucket>/<NAME> --purpose "…" [--description "…"]',
-      );
+      expect(
+        (result.stdout + result.stderr).trim() ===
+          'Usage: nook vault create <bucket>/<NAME> --purpose "…" [--description "…"]',
+        `${label} prints usage`,
+      ).toBe(true);
     }
     expect(transport.bodies.length).toBe(0);
     expect((await transcript()) === before).toBe(true);
@@ -516,35 +519,23 @@ it('E11: an unconfigured machine gives the create login placeholder', async () =
   expect((await auditRows(app)).length).toBe(0);
 });
 // A revoked token is covered for create by machines-cli E8.
-it.each(['absent'])(
-  'E11: %s token uses the create reconnect guidance',
-  async (mode) => {
-    if (mode === 'absent') {
-      const args =
-        process.platform === 'darwin'
-          ? ['delete-generic-password', '-s', 'nook', '-a', app.origin]
-          : ['clear', 'service', 'nook', 'url', app.origin];
-      await keyring.command(
-        process.platform === 'darwin'
-          ? '/usr/bin/security'
-          : '/usr/bin/secret-tool',
-        args,
-      ).done;
-    } else
-      expect(
-        (await revokeMachine(app, (await listMachines(app))[0].id)).status,
-      ).toBe(204);
-    const result = await keyring.start(createArgs(), {}, secretInput().value)
-      .done;
-    expect(result.status).toBe(1);
-    expectOutput(
-      result.stdout + result.stderr,
-      mode === 'revoked'
-        ? `This machine's token is no longer valid. Run: nook logout && nook login ${app.origin}`
-        : `This machine's token is no longer valid. Run: nook login ${app.origin}`,
-      true,
-    );
-    expect(await secretRows(app)).toEqual([]);
-    expect(await auditRows(app)).toEqual([]);
-  },
-);
+it('E11: an absent token uses the create reconnect guidance', async () => {
+  await keyring.command(
+    process.platform === 'darwin'
+      ? '/usr/bin/security'
+      : '/usr/bin/secret-tool',
+    process.platform === 'darwin'
+      ? ['delete-generic-password', '-s', 'nook', '-a', app.origin]
+      : ['clear', 'service', 'nook', 'url', app.origin],
+  ).done;
+  const result = await keyring.start(createArgs(), {}, secretInput().value)
+    .done;
+  expect(result.status).toBe(1);
+  expectOutput(
+    result.stdout + result.stderr,
+    `This machine's token is no longer valid. Run: nook login ${app.origin}`,
+    true,
+  );
+  expect(await secretRows(app)).toEqual([]);
+  expect(await auditRows(app)).toEqual([]);
+});
