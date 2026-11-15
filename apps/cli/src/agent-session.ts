@@ -16,7 +16,7 @@ type ClaimVariable = (typeof claimVariables)[number];
 export function isClaimVariable(name: string): boolean {
   return claimVariables.some((variable) => variable === name);
 }
-function resolveAgentSession(
+export function resolveAgentSession(
   read: (name: ClaimVariable) => string | undefined,
 ): AgentSessionClaim | null {
   const valid = (name: ClaimVariable) => {
