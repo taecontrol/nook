@@ -17,6 +17,7 @@ beforeEach(async () => {
 });
 it('E1: all is explicit, round-trips through whoami, and an omitted grant cannot approve', async () => {
   const issued = await issueGrant(app);
+  expect(issued.grant).toBe('all');
   expect(
     (
       (await (await machineIdentity(app, issued.token)).json()) as {

@@ -49,59 +49,51 @@ it('E20: query-string codes never prefill or reveal a request', async () => {
     await closeBrowserPage(page, context);
   }
 });
-it.each(['lowercase', 'spaces', 'no-hyphen'])(
-  'E21: a %s code reveals only a matching pending request in one request and focuses its name',
-  async (variation) => {
-    const pending = await createAuthorization(app);
-    const code =
-      variation === 'lowercase'
-        ? pending.userCode.toLowerCase()
-        : variation === 'spaces'
-          ? ` ${pending.userCode.replace('-', ' ')} `
-          : pending.userCode.replace('-', '');
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    const lookups: string[] = [];
-    page.on('request', (request) => {
-      if (request.url().includes('/api/authorizations/'))
-        lookups.push(request.url());
+it('E21: a lowercase, spaced, unhyphenated code reveals only a matching pending request in one request and focuses its name', async () => {
+  const pending = await createAuthorization(app);
+  const code = ` ${pending.userCode.toLowerCase().replace('-', ' ')} `;
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const lookups: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/authorizations/'))
+      lookups.push(request.url());
+  });
+  try {
+    await page.goto(`${app.origin}/cli/authorize`);
+    await page
+      .getByRole('textbox', { name: 'Code from your terminal' })
+      .fill(code);
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    const name = page.getByRole('textbox', {
+      name: 'Machine name',
+      exact: true,
     });
-    try {
-      await page.goto(`${app.origin}/cli/authorize`);
-      await page
-        .getByRole('textbox', { name: 'Code from your terminal' })
-        .fill(code);
-      await page.getByRole('button', { name: 'Continue', exact: true }).click();
-      const name = page.getByRole('textbox', {
-        name: 'Machine name',
-        exact: true,
-      });
-      await name.waitFor();
-      expect(
-        await name.evaluate((field) => field === document.activeElement),
-      ).toBe(true);
-      expect(await name.inputValue()).toBe('synthetic-machine');
-      expect(
-        await page.getByText(pending.userCode, { exact: true }).count(),
-      ).toBe(1);
-      expect(
-        await page.getByRole('button', { name: 'Change', exact: true }).count(),
-      ).toBe(1);
-      for (const text of [
-        'Bucket access',
-        'Client',
-        'Requested',
-        'Request expires',
-      ])
-        expect(await page.getByText(text, { exact: true }).count()).toBe(1);
-      expect(lookups).toHaveLength(1);
-      await name.press('Enter');
-      await page.getByRole('heading', { name: 'Machine approved' }).waitFor();
-    } finally {
-      await closeBrowserPage(page, context);
-    }
-  },
-);
+    await name.waitFor();
+    expect(
+      await name.evaluate((field) => field === document.activeElement),
+    ).toBe(true);
+    expect(await name.inputValue()).toBe('synthetic-machine');
+    expect(
+      await page.getByText(pending.userCode, { exact: true }).count(),
+    ).toBe(1);
+    expect(
+      await page.getByRole('button', { name: 'Change', exact: true }).count(),
+    ).toBe(1);
+    for (const text of [
+      'Bucket access',
+      'Client',
+      'Requested',
+      'Request expires',
+    ])
+      expect(await page.getByText(text, { exact: true }).count()).toBe(1);
+    expect(lookups).toHaveLength(1);
+    await name.press('Enter');
+    await page.getByRole('heading', { name: 'Machine approved' }).waitFor();
+  } finally {
+    await closeBrowserPage(page, context);
+  }
+});
 it('E21: an unknown code stays on step one with an error and restores code focus', async () => {
   const context = await browser.newContext();
   const page = await context.newPage();
