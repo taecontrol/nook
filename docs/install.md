@@ -24,7 +24,7 @@ line; you do not need to edit source or commit identifiers.
   adopt another application's resources. Use a separate account
   if those names are already taken. This guide supports one installation
   per account.
-- Linux or macOS with git, Node.js 26.10.0, and pnpm 12.8.1, the versions
+- Linux or macOS with git, Node.js 26.13.1, and pnpm 12.8.1, the versions
   `package.json` requires. With mise, `mise install` in the checkout installs
   Node.js and pnpm.
 - An email inbox for the owner's Access one-time PIN, a browser, `curl`,
