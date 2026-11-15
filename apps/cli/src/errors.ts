@@ -1,5 +1,4 @@
 import type { ApprovalExpired } from '@nook/contract';
-import { Effect } from 'effect';
 
 export class CliFailure extends Error {}
 export class NotLoggedIn extends CliFailure {}
@@ -36,10 +35,6 @@ export function expiredAccess(url: string, expiredAt: string) {
   return new CliFailure(
     `This machine's access expired on ${accessDateTime(expiredAt)}. Run: nook logout && nook login ${url}`,
   );
-}
-// Lifts a synchronous check whose only failure is a thrown CliFailure.
-export function tryCli<A>(check: () => A) {
-  return Effect.try({ try: check, catch: (error) => error as CliFailure });
 }
 export class ServerFailure {
   readonly tag: string;

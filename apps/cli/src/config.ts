@@ -4,25 +4,30 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { Effect } from 'effect';
 import { CliFailure } from './errors.ts';
 
-export function installationOrigin(input: string) {
-  try {
-    const url = new URL(input);
-    const local = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+export function installationOrigin(
+  input: string,
+): Effect.Effect<string, CliFailure> {
+  return Effect.gen(function* () {
+    const url = URL.parse(input);
     if (
-      !supportedProtocol(url, local) ||
+      !url ||
+      !supportedProtocol(
+        url,
+        ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname),
+      ) ||
       url.username ||
       url.password ||
       url.pathname !== '/' ||
       url.search ||
       url.hash
     )
-      throw new Error();
+      return yield* Effect.fail(
+        new CliFailure(
+          'Use the HTTPS origin of your Nook installation, without a path, query, or credentials.',
+        ),
+      );
     return url.origin;
-  } catch {
-    throw new CliFailure(
-      'Use the HTTPS origin of your Nook installation, without a path, query, or credentials.',
-    );
-  }
+  });
 }
 function supportedProtocol(url: URL, local: boolean) {
   return url.protocol === 'https:' || (local && url.protocol === 'http:');
@@ -36,20 +41,43 @@ function configPath() {
     'nook/config.json',
   );
 }
-export const readConfig = Effect.tryPromise({
-  try: async () => {
-    let text: string;
-    try {
-      text = await readFile(configPath(), 'utf8');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-      throw error;
-    }
-    const data = JSON.parse(text) as { url?: unknown };
-    if (typeof data.url !== 'string') throw new Error();
-    return installationOrigin(data.url);
-  },
-  catch: () => new CliFailure('Could not read the Nook configuration.'),
+export const readConfig = Effect.gen(function* () {
+  const path = configPath();
+  const text = yield* Effect.tryPromise({
+    try: async () => {
+      try {
+        return await readFile(path, 'utf8');
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          'code' in error &&
+          error.code === 'ENOENT'
+        )
+          return undefined;
+        throw error;
+      }
+    },
+    catch: () => new CliFailure('Could not read the Nook configuration.'),
+  });
+  if (text === undefined) return;
+  const data: unknown = yield* Effect.try({
+    try: () => JSON.parse(text),
+    catch: () => new CliFailure('Could not read the Nook configuration.'),
+  });
+  if (
+    data === null ||
+    typeof data !== 'object' ||
+    !('url' in data) ||
+    typeof data.url !== 'string'
+  )
+    return yield* Effect.fail(
+      new CliFailure('Could not read the Nook configuration.'),
+    );
+  return yield* installationOrigin(data.url).pipe(
+    Effect.mapError(
+      () => new CliFailure('Could not read the Nook configuration.'),
+    ),
+  );
 });
 export function writeConfig(url: string) {
   return Effect.tryPromise({

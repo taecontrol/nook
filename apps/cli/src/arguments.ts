@@ -1,3 +1,4 @@
+import { Effect } from 'effect';
 import { Argument, Flag, type Param } from 'effect/cli';
 import { CliFailure } from './errors.ts';
 
@@ -44,34 +45,40 @@ function occurrence(grammar: Grammar, flag: string) {
     : undefined;
 }
 function requireFlags(grammar: Grammar, flags: Map<string, string[]>) {
-  for (const [name, occurs] of Object.entries(grammar.flags))
-    if (occurs === 'required' && !flags.has(name))
-      throw new CliFailure(`A ${name} is required.`);
+  return Effect.gen(function* () {
+    for (const [name, occurs] of Object.entries(grammar.flags))
+      if (occurs === 'required' && !flags.has(name))
+        return yield* Effect.fail(new CliFailure(`A ${name} is required.`));
+  });
 }
 function readFlags(grammar: Grammar, pairs: readonly string[]) {
-  const flags = new Map<string, string[]>();
-  for (let index = 0; index < pairs.length; index++) {
-    const name = pairs[index].slice(2);
-    const occurs = occurrence(grammar, pairs[index]);
-    const values = flags.get(name) ?? [];
-    if (!occurs || (values.length && occurs !== 'repeated'))
-      throw usageFailure(grammar);
-    const value = occurs === 'boolean' ? '' : pairs[++index];
-    if (value === undefined) throw usageFailure(grammar);
-    flags.set(name, [...values, value]);
-  }
-  requireFlags(grammar, flags);
-  return flags;
+  return Effect.gen(function* () {
+    const flags = new Map<string, string[]>();
+    for (let index = 0; index < pairs.length; index++) {
+      const name = pairs[index].slice(2);
+      const occurs = occurrence(grammar, pairs[index]);
+      const values = flags.get(name) ?? [];
+      if (!occurs || (values.length && occurs !== 'repeated'))
+        return yield* Effect.fail(usageFailure(grammar));
+      const value = occurs === 'boolean' ? '' : pairs[++index];
+      if (value === undefined) return yield* Effect.fail(usageFailure(grammar));
+      flags.set(name, [...values, value]);
+    }
+    yield* requireFlags(grammar, flags);
+    return flags;
+  });
 }
 export function parseArguments(grammar: Grammar, args: readonly string[]) {
-  const end = grammar.rest ? args.indexOf('--') : args.length;
-  const count = grammar.positional.length;
-  const positional = args.slice(0, count);
-  if (end < count || end === args.length - 1 || positional.some((v) => !v))
-    throw usageFailure(grammar);
-  return {
-    positional,
-    flags: readFlags(grammar, args.slice(count, end)),
-    rest: args.slice(end + 1),
-  };
+  return Effect.gen(function* () {
+    const end = grammar.rest ? args.indexOf('--') : args.length;
+    const count = grammar.positional.length;
+    const positional = args.slice(0, count);
+    if (end < count || end === args.length - 1 || positional.some((v) => !v))
+      return yield* Effect.fail(usageFailure(grammar));
+    return {
+      positional,
+      flags: yield* readFlags(grammar, args.slice(count, end)),
+      rest: args.slice(end + 1),
+    };
+  });
 }

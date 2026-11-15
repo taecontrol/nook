@@ -13,7 +13,7 @@ import {
 } from '@nook/contract';
 import { Effect } from 'effect';
 import { agentSessionContext, isClaimVariable } from './agent-session.ts';
-import { CliFailure, tryCli } from './errors.ts';
+import { CliFailure } from './errors.ts';
 import type { Host } from './host.ts';
 import { writeDirectory } from './project-secrets.ts';
 import {
@@ -66,14 +66,18 @@ function requireFixes(
   statuses: readonly EnvKeyStatus[],
   file: string,
 ) {
-  const problems = entries.flatMap((entry, index) => {
-    const reason = fixReason(entry, statuses[index]);
-    return reason ? [`line ${entry.line}  ${entry.name}  ${reason}`] : [];
+  return Effect.gen(function* () {
+    const problems = entries.flatMap((entry, index) => {
+      const reason = fixReason(entry, statuses[index]);
+      return reason ? [`line ${entry.line}  ${entry.name}  ${reason}`] : [];
+    });
+    if (problems.length)
+      return yield* Effect.fail(
+        new CliFailure(
+          `Nothing was imported. Fix these keys in ${file} and run again:\n${problems.join('\n')}`,
+        ),
+      );
   });
-  if (problems.length)
-    throw new CliFailure(
-      `Nothing was imported. Fix these keys in ${file} and run again:\n${problems.join('\n')}`,
-    );
 }
 function initialResult(status: EnvKeyStatus): KeyResult {
   if (status === 'exists') return { status: 'exists' };
@@ -198,7 +202,7 @@ export function vaultImport(
   write: (message: string) => void,
 ) {
   return Effect.gen(function* () {
-    const { bucket, file, purpose } = yield* tryCli(() => parseImport(args));
+    const { bucket, file, purpose } = yield* parseImport(args);
     const workingDirectory = yield* writeDirectory;
     const parsed = yield* readEnv(file);
     const agentContext = agentSessionContext();
@@ -221,7 +225,7 @@ export function vaultImport(
       parsed.entries.map((entry) => ({ ...entry, counted: true })),
       existing,
     );
-    yield* tryCli(() => requireFixes(parsed.entries, statuses, file));
+    yield* requireFixes(parsed.entries, statuses, file);
     const keys = parsed.entries.map(
       ({ line, name }, index): ImportedKey => ({
         line,

@@ -17,36 +17,43 @@ export class CommandFailure extends CliFailure {
     );
   }
 }
-async function candidate(file: string) {
-  try {
-    if (!(await stat(file)).isFile()) return 'denied';
-    await access(file, constants.X_OK);
-    return 'ready';
-  } catch (error) {
-    return ['ENOENT', 'ENOTDIR'].includes(
-      (error as NodeJS.ErrnoException).code ?? '',
-    )
-      ? 'missing'
-      : 'denied';
-  }
+function candidateFailure(error: unknown) {
+  return ['ENOENT', 'ENOTDIR'].includes(
+    (error as NodeJS.ErrnoException).code ?? '',
+  )
+    ? ('missing' as const)
+    : ('denied' as const);
 }
-export function resolveCommand(name: string) {
-  return Effect.tryPromise({
-    try: async () => {
-      const paths = name.includes('/')
-        ? [resolve(name)]
-        : (process.env.PATH ?? '/usr/bin:/bin')
-            .split(':')
-            .map((directory) => resolve(directory, name));
-      let denied = false;
-      for (const path of paths) {
-        const state = await candidate(path);
-        if (state === 'ready') return path;
-        if (state === 'denied') denied = true;
-      }
-      throw new CommandFailure(denied ? 126 : 127, name);
-    },
-    catch: (error) => error as CommandFailure,
+function candidate(file: string) {
+  return Effect.gen(function* () {
+    const info = yield* Effect.tryPromise({
+      try: () => stat(file),
+      catch: candidateFailure,
+    });
+    if (!info.isFile()) return 'denied' as const;
+    yield* Effect.tryPromise({
+      try: () => access(file, constants.X_OK),
+      catch: candidateFailure,
+    });
+    return 'ready' as const;
+  }).pipe(Effect.catch((state) => Effect.succeed(state)));
+}
+export function resolveCommand(
+  name: string,
+): Effect.Effect<string, CommandFailure> {
+  return Effect.gen(function* () {
+    const paths = name.includes('/')
+      ? [resolve(name)]
+      : (process.env.PATH ?? '/usr/bin:/bin')
+          .split(':')
+          .map((directory) => resolve(directory, name));
+    let denied = false;
+    for (const path of paths) {
+      const state = yield* candidate(path);
+      if (state === 'ready') return path;
+      if (state === 'denied') denied = true;
+    }
+    return yield* Effect.fail(new CommandFailure(denied ? 126 : 127, name));
   });
 }
 function spawnFailure(error: unknown, name: string) {
