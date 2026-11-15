@@ -10,13 +10,12 @@ import {
   RUN_PATHS_MAX,
   type SecretValueIssue,
   validateSecretName,
-  validateWorkingDirectory,
 } from '@nook/contract';
 import { Effect } from 'effect';
-import { isClaimVariable, resolveAgentSession } from './agent-session.ts';
+import { agentSessionContext, isClaimVariable } from './agent-session.ts';
 import { CliFailure, tryCli } from './errors.ts';
 import type { Host } from './host.ts';
-import { currentDirectory } from './project-secrets.ts';
+import { writeDirectory } from './project-secrets.ts';
 import {
   type CreateOutcome,
   createSecretOnce,
@@ -200,11 +199,9 @@ export function vaultImport(
 ) {
   return Effect.gen(function* () {
     const { bucket, file, purpose } = yield* tryCli(() => parseImport(args));
-    const workingDirectory = yield* currentDirectory;
-    const message = validateWorkingDirectory(workingDirectory);
-    if (message) return yield* Effect.fail(new CliFailure(message));
+    const workingDirectory = yield* writeDirectory;
     const parsed = yield* readEnv(file);
-    const agentSession = resolveAgentSession((name) => process.env[name]);
+    const agentContext = agentSessionContext();
     const { request } = yield* createSession(host);
     const secrets = yield* listSecrets(request, bucket);
     if (typeof secrets === 'string')
@@ -236,7 +233,7 @@ export function vaultImport(
       bucket,
       purpose,
       workingDirectory,
-      ...(agentSession ? { agentSession } : {}),
+      ...agentContext,
     });
     const output = report(keys, parsed.unreadable, bucket, file);
     if (

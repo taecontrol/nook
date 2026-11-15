@@ -1,6 +1,10 @@
 import { readFile, realpath } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { validateSecretPath, validateSecretPaths } from '@nook/contract';
+import {
+  validateSecretPath,
+  validateSecretPaths,
+  validateWorkingDirectory,
+} from '@nook/contract';
 import { Effect } from 'effect';
 import { isClaimVariable } from './agent-session.ts';
 import { CliFailure } from './errors.ts';
@@ -11,6 +15,14 @@ export const currentDirectory = Effect.tryPromise({
   try: () => realpath(process.cwd()),
   catch: () => new CliFailure('Could not resolve the working directory.'),
 });
+export const writeDirectory = currentDirectory.pipe(
+  Effect.flatMap((directory) => {
+    const message = validateWorkingDirectory(directory);
+    return message
+      ? Effect.fail(new CliFailure(message))
+      : Effect.succeed(directory);
+  }),
+);
 export const isEnvironmentName = (name: string) =>
   /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
 function invalidFile(file: string, message: string) {

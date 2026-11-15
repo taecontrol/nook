@@ -16,7 +16,7 @@ type ClaimVariable = (typeof claimVariables)[number];
 export function isClaimVariable(name: string): boolean {
   return claimVariables.some((variable) => variable === name);
 }
-export function resolveAgentSession(
+function resolveAgentSession(
   read: (name: ClaimVariable) => string | undefined,
 ): AgentSessionClaim | null {
   const valid = (name: ClaimVariable) => {
@@ -38,4 +38,8 @@ export function resolveAgentSession(
   if (claude) return { agent: 'claude-code', session: claude };
   const cursor = valid('CURSOR_CONVERSATION_ID');
   return cursor ? { agent: 'cursor', session: cursor } : null;
+}
+export function agentSessionContext() {
+  const agentSession = resolveAgentSession((name) => process.env[name]);
+  return agentSession ? { agentSession } : {};
 }
