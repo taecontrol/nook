@@ -7,7 +7,7 @@ import {
 } from '@nook/contract';
 import { Effect } from 'effect';
 import { isClaimVariable } from './agent-session.ts';
-import { CliFailure } from './errors.ts';
+import { CliFailure, errorCode } from './errors.ts';
 
 export type SecretMapping = { name: string; path: string };
 export type ProjectSecrets = { file: string; mappings: SecretMapping[] };
@@ -93,19 +93,11 @@ export function projectSecrets(directory: string) {
     while (true) {
       const file = join(current, 'nook.json');
       const content = yield* Effect.tryPromise({
-        try: async () => {
-          try {
-            return await readFile(file, 'utf8');
-          } catch (error) {
-            if (
-              error instanceof Error &&
-              'code' in error &&
-              error.code === 'ENOENT'
-            )
-              return undefined;
+        try: () =>
+          readFile(file, 'utf8').catch((error: unknown) => {
+            if (errorCode(error) === 'ENOENT') return undefined;
             throw error;
-          }
-        },
+          }),
         catch: () => new CliFailure(`Could not read ${file}.`),
       });
       if (content !== undefined) return yield* parseFile(file, content);

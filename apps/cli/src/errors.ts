@@ -2,6 +2,14 @@ import type { ApprovalExpired } from '@nook/contract';
 
 export class CliFailure extends Error {}
 export class NotLoggedIn extends CliFailure {}
+/** The system error code of a caught value, such as ENOENT, if it has one. */
+export function errorCode(error: unknown) {
+  return error instanceof Error &&
+    'code' in error &&
+    typeof error.code === 'string'
+    ? error.code
+    : undefined;
+}
 export function networkError(url: string) {
   return new CliFailure(`Could not reach ${url}. Try again.`);
 }

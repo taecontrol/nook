@@ -4,7 +4,7 @@ import { access, stat } from 'node:fs/promises';
 import { constants as osConstants } from 'node:os';
 import { resolve } from 'node:path';
 import { Effect } from 'effect';
-import { CliFailure } from './errors.ts';
+import { CliFailure, errorCode } from './errors.ts';
 export class CommandFailure extends CliFailure {
   constructor(
     readonly code: number,
@@ -18,9 +18,7 @@ export class CommandFailure extends CliFailure {
   }
 }
 function candidateFailure(error: unknown) {
-  return ['ENOENT', 'ENOTDIR'].includes(
-    (error as NodeJS.ErrnoException).code ?? '',
-  )
+  return ['ENOENT', 'ENOTDIR'].includes(errorCode(error) ?? '')
     ? ('missing' as const)
     : ('denied' as const);
 }
@@ -57,10 +55,7 @@ export function resolveCommand(
   });
 }
 function spawnFailure(error: unknown, name: string) {
-  return new CommandFailure(
-    (error as NodeJS.ErrnoException).code === 'ENOENT' ? 127 : 126,
-    name,
-  );
+  return new CommandFailure(errorCode(error) === 'ENOENT' ? 127 : 126, name);
 }
 function childExit(code: number | null, signal: NodeJS.Signals | null) {
   if (code !== null) return code;

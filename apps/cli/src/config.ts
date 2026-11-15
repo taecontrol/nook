@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { Effect } from 'effect';
-import { CliFailure } from './errors.ts';
+import { CliFailure, errorCode } from './errors.ts';
 
 export function installationOrigin(
   input: string,
@@ -41,28 +41,21 @@ function configPath() {
     'nook/config.json',
   );
 }
+const unreadableConfig = () =>
+  new CliFailure('Could not read the Nook configuration.');
 export const readConfig = Effect.gen(function* () {
-  const path = configPath();
   const text = yield* Effect.tryPromise({
-    try: async () => {
-      try {
-        return await readFile(path, 'utf8');
-      } catch (error) {
-        if (
-          error instanceof Error &&
-          'code' in error &&
-          error.code === 'ENOENT'
-        )
-          return undefined;
+    try: () =>
+      readFile(configPath(), 'utf8').catch((error: unknown) => {
+        if (errorCode(error) === 'ENOENT') return undefined;
         throw error;
-      }
-    },
-    catch: () => new CliFailure('Could not read the Nook configuration.'),
+      }),
+    catch: unreadableConfig,
   });
   if (text === undefined) return;
   const data: unknown = yield* Effect.try({
     try: () => JSON.parse(text),
-    catch: () => new CliFailure('Could not read the Nook configuration.'),
+    catch: unreadableConfig,
   });
   if (
     data === null ||
@@ -70,13 +63,9 @@ export const readConfig = Effect.gen(function* () {
     !('url' in data) ||
     typeof data.url !== 'string'
   )
-    return yield* Effect.fail(
-      new CliFailure('Could not read the Nook configuration.'),
-    );
+    return yield* Effect.fail(unreadableConfig());
   return yield* installationOrigin(data.url).pipe(
-    Effect.mapError(
-      () => new CliFailure('Could not read the Nook configuration.'),
-    ),
+    Effect.mapError(unreadableConfig),
   );
 });
 export function writeConfig(url: string) {
