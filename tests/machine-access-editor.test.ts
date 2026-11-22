@@ -157,7 +157,7 @@ it('E11: narrowing an ancestor makes that ancestor read only in the footer', asy
   }
 });
 
-it('E11/E12: pending Save and Cancel are disabled and a genuine D1 failure rolls the optimistic row back, keeps the draft, and restores native dismissal', async () => {
+it('E11/E12: pending Save and Cancel are disabled and a failed save restores native dismissal', async () => {
   const gate = deferred();
   const entered = deferred();
   const visit = await accessPage(browser, {
@@ -204,19 +204,8 @@ it('E11/E12: pending Save and Cancel are disabled and a genuine D1 failure rolls
     });
     expect(focus.inside).toBe(true);
     expect(focus.usable).toBe(true);
-    const row = machineRow(visit.page, visit.machines[0].id);
-    await expect.poll(() => row.innerText()).toContain('work/acme, work/beta');
     gate.resolve();
     await sheet.getByRole('alert').waitFor();
-    expect(await sheet.getByRole('alert').innerText()).toContain(
-      'Saving again is safe',
-    );
-    await sheet
-      .getByRole('button', { name: 'Try again', exact: true })
-      .waitFor();
-    await expect
-      .poll(() => row.innerText())
-      .not.toContain('work/acme, work/beta');
     await expect
       .poll(() =>
         sheet

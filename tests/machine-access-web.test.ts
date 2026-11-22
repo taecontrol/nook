@@ -11,6 +11,7 @@ import {
 import {
   deferred,
   listMachines,
+  machinesNow,
   revokeMachine,
 } from './support/machines.ts';
 import { machineRow } from './support/machines-browser.ts';
@@ -281,6 +282,72 @@ it('E12: an unconfirmed lost response retains the selection, reconciles the row,
       { grant: ['work/acme', 'work/beta'], previous: ['work/acme'] },
     ]);
   } finally {
+    await visit.close();
+  }
+});
+
+it('E12: genuine D1 failure rolls the optimistic row back and keeps the sheet draft for retry', async () => {
+  const gate = deferred();
+  const entered = deferred();
+  const recovery = deferred();
+  const visit = await accessPage(browser, {
+    configure: async (page) => {
+      await page.route('**/api/machines/*/grant', async (route) => {
+        entered.resolve();
+        await gate.promise;
+        await route.continue().catch(() => {});
+      });
+    },
+  });
+  const db = await visit.app.mf.getD1Database('DB');
+  const row = machineRow(visit.page, visit.machines[0].id);
+  try {
+    await db
+      .prepare(
+        "CREATE TRIGGER access_failure BEFORE UPDATE ON machine_tokens BEGIN SELECT RAISE(ABORT, 'Synthetic private failure'); END",
+      )
+      .run();
+    const sheet = await editAccess(visit.page, visit.machines[0]);
+    await sheet
+      .getByRole('checkbox', { name: 'work/beta', exact: true })
+      .check();
+    await sheet
+      .getByRole('button', { name: 'Save access', exact: true })
+      .click();
+    await entered.promise;
+    await expect.poll(() => row.innerText()).toContain('work/acme, work/beta');
+    // Hold the recovery list so only the local rollback can restore the row.
+    await visit.page.route('**/api/machines', async (route) => {
+      await recovery.promise;
+      await route.continue().catch(() => {});
+    });
+    gate.resolve();
+    await sheet
+      .getByRole('button', { name: 'Try again', exact: true })
+      .waitFor();
+    expect(await sheet.getByRole('alert').innerText()).toContain(
+      'Saving again is safe',
+    );
+    expect(
+      await sheet
+        .getByRole('checkbox', { name: 'work/beta', exact: true })
+        .isChecked(),
+    ).toBe(true);
+    await expect
+      .poll(() => row.innerText())
+      .not.toContain('work/acme, work/beta');
+    recovery.resolve();
+    await db.prepare('DROP TRIGGER access_failure').run();
+    await sheet.getByRole('button', { name: 'Try again', exact: true }).click();
+    await sheet.waitFor({ state: 'hidden' });
+    expect(
+      (await listMachines(visit.app)).find(
+        (entry) => entry.id === visit.machines[0].id,
+      )?.grant,
+    ).toEqual(['work/acme', 'work/beta']);
+  } finally {
+    gate.resolve();
+    recovery.resolve();
     await visit.close();
   }
 });
@@ -995,6 +1062,53 @@ it('E17: an editor chunk transport failure uses the route error boundary and rec
       )?.grant,
     ).toEqual(['work/acme']);
   } finally {
+    await visit.close();
+  }
+});
+
+it('E12/E17: stale focus and visibility reads cannot overwrite an optimistic grant during a pending save', async () => {
+  const gate = deferred();
+  const entered = deferred();
+  const visit = await accessPage(browser, {
+    configure: async (page) => {
+      await page.route('**/api/machines/*/grant', async (route) => {
+        entered.resolve();
+        await gate.promise;
+        await route.continue().catch(() => {});
+      });
+    },
+  });
+  try {
+    const sheet = await editAccess(visit.page, visit.machines[0]);
+    await sheet
+      .getByRole('checkbox', { name: 'work/beta', exact: true })
+      .check();
+    await sheet
+      .getByRole('button', { name: 'Save access', exact: true })
+      .click();
+    await entered.promise;
+    const reads = () =>
+      visit.requests.filter(
+        (request) =>
+          request.path === '/api/machines' && request.method === 'GET',
+      ).length;
+    const before = reads();
+    await visit.page.clock.setFixedTime(
+      new Date(Date.parse(machinesNow) + 40_000),
+    );
+    await visit.page.evaluate(() => {
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new Event('visibilitychange'));
+    });
+    await visit.page.clock.runFor(500);
+    expect(reads()).toBe(before);
+    expect(
+      await machineRow(visit.page, visit.machines[0].id).innerText(),
+    ).toContain('work/acme, work/beta');
+    gate.resolve();
+    await sheet.waitFor({ state: 'hidden' });
+  } finally {
+    gate.resolve();
     await visit.close();
   }
 });
