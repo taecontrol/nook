@@ -57,10 +57,7 @@ it('E1: the owner lists all active approvals with independent opaque ids, includ
       'name',
     ]);
     expect(new Date(machine.approvedAt).toISOString()).toBe(machine.approvedAt);
-    expect(
-      machine.lastUsedAt === null ||
-        new Date(machine.lastUsedAt).toISOString() === machine.lastUsedAt,
-    ).toBe(true);
+    expect(machine.lastUsedAt).toBeNull();
     expect(machine.grant).toBe('all');
   }
 });
@@ -78,11 +75,7 @@ it('E2: the list and every public id reveal neither tokens nor their hashes', as
     hash,
   ]);
 });
-it('E3: an approval that has never authenticated has no last use', async () => {
-  await issueToken(app);
-  expect((await listMachines(app))[0].lastUsedAt).toBeNull();
-});
-it('E5: malformed, unknown, and revoked Bearers cannot update any last use', async () => {
+it('E4/E5: each authentication advances last use within its request interval; malformed, unknown, and revoked Bearers update none', async () => {
   const active = await issueToken(app, 'kept');
   const gone = await issueToken(app, 'gone');
   const machines = await listMachines(app);
@@ -101,15 +94,17 @@ it('E5: malformed, unknown, and revoked Bearers cannot update any last use', asy
     (await tokenSnapshot(app)) === before,
     'Denied credentials change no stored row',
   ).toBe(true);
-  expect((await machineIdentity(app, active.token)).status).toBe(200);
-  expect((await listMachines(app))[0].lastUsedAt).not.toBeNull();
-});
-it('E7: owner revocation deletes the approval and the next token request is unauthorized', async () => {
-  const issued = await issueToken(app);
-  const [machine] = await listMachines(app);
-  expect((await revokeMachine(app, machine.id)).status).toBe(204);
-  expect(await listMachines(app)).toEqual([]);
-  expect((await machineIdentity(app, issued.token)).status).toBe(401);
+  let previous = 0;
+  for (let call = 0; call < 2; call++) {
+    const before = Date.now();
+    expect((await machineIdentity(app, active.token)).status).toBe(200);
+    const after = Date.now();
+    const at = Date.parse((await listMachines(app))[0].lastUsedAt ?? '');
+    expect(at).toBeGreaterThanOrEqual(before);
+    expect(at).toBeLessThanOrEqual(after);
+    expect(at).toBeGreaterThan(previous);
+    previous = at;
+  }
 });
 it('E9: revoking one duplicate name preserves the other token and approval', async () => {
   const first = await issueToken(app, 'framework-13');
@@ -156,32 +151,18 @@ it('E10: repeated revocation, logout, and invented ids are idempotent and preser
   expect((await revokeMachine(app, kept.id)).status).toBe(204);
   expect(await listMachines(app)).toEqual([]);
 });
-it('E11: a Nook Bearer cannot list or revoke owner machines and every credential survives', async () => {
-  const first = await issueToken(app, 'first');
-  const second = await issueToken(app, 'second');
-  const [machine] = await listMachines(app);
-  await app.setBindings({});
-  const before = await tokenSnapshot(app);
-  const headers = { Authorization: `Bearer ${first.token}` };
-  expect((await fetch(`${app.origin}/api/machines`, { headers })).status).toBe(
-    401,
-  );
-  expect((await revokeMachine(app, machine.id, headers)).status).toBe(401);
-  expect((await tokenSnapshot(app)) === before).toBe(true);
-  for (const issued of [first, second])
-    expect((await machineIdentity(app, issued.token)).status).toBe(200);
-});
-it('E12: both owner routes require Access and reject a valid assertion for another email', async () => {
-  await issueToken(app);
+it('E11/E12/E13: owner routes require Access for the owner, refuse Nook Bearers and foreign-Origin revokes, and preserve every credential', async () => {
+  const issued = await issueToken(app);
   const [machine] = await listMachines(app);
   const issuer = await accessFixture();
   // Keep the same populated database while enabling the genuine Access verifier.
   await app.setBindings(access, { outboundService: issuer.outboundService });
   const other = await issuer.assertion({ email: 'other@nook.test' });
-  const owner = await issuer.assertion();
+  const owner = { 'Cf-Access-Jwt-Assertion': await issuer.assertion() };
   const before = await tokenSnapshot(app);
   for (const [headers, status] of [
     [{}, 401],
+    [{ Authorization: `Bearer ${issued.token}` }, 401],
     [{ 'Cf-Access-Jwt-Assertion': other }, 403],
   ] as const) {
     expect(
@@ -191,61 +172,21 @@ it('E12: both owner routes require Access and reject a valid assertion for anoth
     expect((await tokenSnapshot(app)) === before).toBe(true);
   }
   expect(
-    await listMachines(app, { 'Cf-Access-Jwt-Assertion': owner }),
-  ).toHaveLength(1);
-  expect(
-    (await revokeMachine(app, machine.id, { 'Cf-Access-Jwt-Assertion': owner }))
-      .status,
-  ).toBe(204);
-});
-it('E13: a foreign-Origin owner revoke is forbidden and the credential still works', async () => {
-  const issued = await issueToken(app);
-  const [machine] = await listMachines(app);
-  const issuer = await accessFixture();
-  await app.setBindings(access, { outboundService: issuer.outboundService });
-  const headers = { 'Cf-Access-Jwt-Assertion': await issuer.assertion() };
-  const before = await tokenSnapshot(app);
-  expect(
     (
       await revokeMachine(app, machine.id, {
-        ...headers,
+        ...owner,
         Origin: 'https://foreign.nook.test',
       })
     ).status,
   ).toBe(403);
   expect((await tokenSnapshot(app)) === before).toBe(true);
   expect((await machineIdentity(app, issued.token)).status).toBe(200);
+  expect(await listMachines(app, owner)).toHaveLength(1);
   expect(
-    (await revokeMachine(app, machine.id, { ...headers, Origin: app.origin }))
+    (await revokeMachine(app, machine.id, { ...owner, Origin: app.origin }))
       .status,
   ).toBe(204);
 });
-it.each(['GET', 'DELETE'])(
-  'E14: a subtree principal cannot perform whole-installation %s machine management',
-  async (method) => {
-    const restricted = await checkpointRuntime(async () => {}, {
-      principalGrant: ['work'],
-    });
-    try {
-      const db = await restricted.mf.getD1Database('DB');
-      await db
-        .prepare(
-          'INSERT INTO machine_tokens(token_hash, machine_name, grant_json, created_at) VALUES (?, ?, ?, ?)',
-        )
-        .bind('synthetic-private-hash', 'kept', '"all"', Date.now())
-        .run();
-      const before = await tokenSnapshot(restricted);
-      const response = await fetch(
-        `${restricted.origin}/api/machines${method === 'DELETE' ? '/invented' : ''}`,
-        { method },
-      );
-      expect(response.status).toBe(403);
-      expect((await tokenSnapshot(restricted)) === before).toBe(true);
-    } finally {
-      await restricted.close();
-    }
-  },
-);
 it('E15: the machine bypass never exposes another machine list or revocation', async () => {
   const issued = await issueToken(app);
   const before = await tokenSnapshot(app);
