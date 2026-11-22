@@ -7,6 +7,7 @@ import {
   Expired,
   formatUserCode,
   GrantBucketNotFound,
+  grantBucketNotFoundMessage,
   InvalidBucketGrant,
   InvalidMachineName,
   MachineAccessChanged,
@@ -85,6 +86,9 @@ function decodeGrant(value: unknown) {
     ),
   );
 }
+function selectedBucketsExist(sql: D1Client.D1Client, json: string) {
+  return sql`(${json}='"all"' OR NOT EXISTS (SELECT 1 FROM json_each(${json}) root WHERE NOT EXISTS (SELECT 1 FROM buckets WHERE path=root.value)))`;
+}
 function savedGrant(
   updated: readonly unknown[],
   remaining: readonly unknown[],
@@ -104,7 +108,7 @@ function savedGrant(
     if (!current.selected_exist)
       return yield* Effect.fail(
         new GrantBucketNotFound({
-          message: 'Some selected buckets no longer exist. Choose again.',
+          message: grantBucketNotFoundMessage,
         }),
       );
     return yield* Effect.fail(
@@ -243,7 +247,7 @@ export const machineOperations = Effect.gen(function* () {
       // Validate existence at the same atomic boundary that records the decision.
       const [updated, remaining] = yield* sql
         .batch([
-          sql`UPDATE authorizations SET status=${status}, machine_name=${name}, grant_json=${grantJson}, access_expires_at=CASE WHEN ${duration} IS NULL THEN NULL ELSE CAST(unixepoch('subsec')*1000 AS INTEGER)+${duration} END WHERE device_hash=${row.device_hash} AND status='pending' AND expires_at>unixepoch('subsec')*1000 AND (${chosenJson}='"all"' OR NOT EXISTS (SELECT 1 FROM json_each(${chosenJson}) root WHERE NOT EXISTS (SELECT 1 FROM buckets WHERE path=root.value))) RETURNING device_hash`,
+          sql`UPDATE authorizations SET status=${status}, machine_name=${name}, grant_json=${grantJson}, access_expires_at=CASE WHEN ${duration} IS NULL THEN NULL ELSE CAST(unixepoch('subsec')*1000 AS INTEGER)+${duration} END WHERE device_hash=${row.device_hash} AND status='pending' AND expires_at>unixepoch('subsec')*1000 AND ${selectedBucketsExist(sql, chosenJson)} RETURNING device_hash`,
           sql<RequestRow>`SELECT * FROM authorizations WHERE device_hash=${row.device_hash}`,
         ])
         .pipe(unavailable);
@@ -251,7 +255,7 @@ export const machineOperations = Effect.gen(function* () {
         yield* requirePending(remaining[0]);
         return yield* Effect.fail(
           new GrantBucketNotFound({
-            message: 'Some selected buckets no longer exist. Choose again.',
+            message: grantBucketNotFoundMessage,
           }),
         );
       }
@@ -357,8 +361,8 @@ export const machineOperations = Effect.gen(function* () {
         // share one atomic boundary, including retries after a committed save.
         const [updated, remaining] = yield* sql
           .batch([
-            sql`UPDATE machine_tokens SET grant_json=${nextJson} WHERE id=${id} AND (grant_json=${priorJson} OR grant_json=${nextJson}) AND (${selectedJson}='"all"' OR NOT EXISTS (SELECT 1 FROM json_each(${selectedJson}) root WHERE NOT EXISTS (SELECT 1 FROM buckets WHERE path=root.value))) RETURNING id, machine_name, grant_json, created_at, last_used_at, access_expires_at`,
-            sql`SELECT id, machine_name, grant_json, created_at, last_used_at, access_expires_at, (${selectedJson}='"all"' OR NOT EXISTS (SELECT 1 FROM json_each(${selectedJson}) root WHERE NOT EXISTS (SELECT 1 FROM buckets WHERE path=root.value))) AS selected_exist FROM machine_tokens WHERE id=${id}`,
+            sql`UPDATE machine_tokens SET grant_json=${nextJson} WHERE id=${id} AND (grant_json=${priorJson} OR grant_json=${nextJson}) AND ${selectedBucketsExist(sql, selectedJson)} RETURNING id, machine_name, grant_json, created_at, last_used_at, access_expires_at`,
+            sql`SELECT id, machine_name, grant_json, created_at, last_used_at, access_expires_at, ${selectedBucketsExist(sql, selectedJson)} AS selected_exist FROM machine_tokens WHERE id=${id}`,
           ])
           .pipe(unavailable);
         return yield* savedGrant(updated, remaining);

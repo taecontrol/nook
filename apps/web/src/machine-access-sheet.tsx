@@ -1,4 +1,8 @@
-import type { BucketGrant, Machine } from '@nook/contract';
+import {
+  type BucketGrant,
+  grantBucketNotFoundMessage,
+  type Machine,
+} from '@nook/contract';
 import { useQueryClient } from '@tanstack/react-query';
 import { Check, CircleAlert, Minus, Plus, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -138,7 +142,7 @@ function outcomeCopy(outcome: Outcome, machine: Machine) {
       };
     case 'missing':
       return {
-        title: 'Some selected buckets no longer exist. Choose again.',
+        title: grantBucketNotFoundMessage,
         body: (
           <p>
             The bucket outline is refreshed without the deleted buckets. Your
