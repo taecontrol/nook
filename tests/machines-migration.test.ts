@@ -58,6 +58,7 @@ it('E1/E2/E3: upgrading existing approvals preserves their credentials and dates
       expect(machine.id.length).toBeGreaterThanOrEqual(16);
       expect(machine.approvedAt).toBe('2026-07-28T16:05:00.000Z');
       expect(machine.lastUsedAt).toBeNull();
+      expect(machine.expiresAt).toBeNull();
     }
     for (const token of tokens)
       expect((await machineIdentity(app, token)).status).toBe(200);

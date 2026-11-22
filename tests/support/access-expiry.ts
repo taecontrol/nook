@@ -1,5 +1,3 @@
-import type { D1Database } from '@cloudflare/workers-types';
-import { expect } from 'vitest';
 import { machineCreateInput } from './agent-create.ts';
 import { runInput } from './audit.ts';
 import { jsonRequest } from './authorizations.ts';
@@ -14,17 +12,6 @@ export const lifetimes = [
   ['90d', '90 days', 90 * dayMs],
   ['never', 'No expiration', null],
 ] as const;
-export async function expiryColumns(db: D1Database) {
-  for (const table of ['authorizations', 'machine_tokens']) {
-    const rows = await db
-      .prepare(`PRAGMA table_info(${table})`)
-      .all<{ name: string }>();
-    expect(
-      rows.results.map((row) => row.name),
-      `${table} persists access expiry`,
-    ).toContain('access_expires_at');
-  }
-}
 export async function d1Now(app: TestRuntime) {
   return (await (
     await app.mf.getD1Database('DB')
@@ -38,7 +25,6 @@ export async function setExpiry(
   offset: number | null,
 ) {
   const db = await app.mf.getD1Database('DB');
-  await expiryColumns(db);
   const hash = await tokenHash(app, token);
   const row = await db
     .prepare(

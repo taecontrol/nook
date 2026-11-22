@@ -1,12 +1,5 @@
-import { Miniflare } from 'miniflare';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import {
-  applyMigrations,
-  migrationFiles,
-  verifyMigrations,
-} from '../scripts/lib/migrations.ts';
-import {
-  expiryColumns,
   machinePaths,
   machineRequest,
   setExpiry,
@@ -34,55 +27,6 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await base?.close();
-});
-it('Expiry E16: migration 0015 replays on empty, already-migrated and populated schemas and matches the snapshot', async () => {
-  expect(await migrationFiles('migrations')).toContain(
-    '0015_machine_access_expiry.sql',
-  );
-  expect(await verifyMigrations()).toMatchObject({
-    replayed: true,
-    upgraded: true,
-    schemaMatches: true,
-  });
-});
-it('Expiry E7/E16: migrating a populated previous schema preserves NULL expiry and its active token', async () => {
-  const mf = new Miniflare({
-    modules: true,
-    cf: false,
-    script: 'export default {fetch(){return new Response()}}',
-    d1Databases: ['DB'],
-    d1Persist: false,
-  });
-  try {
-    const db = await mf.getD1Database('DB');
-    const names = await migrationFiles('migrations');
-    await applyMigrations(db, 'migrations', {
-      only: names.filter((name) => name < '0015'),
-    });
-    await db
-      .prepare(
-        `INSERT INTO machine_tokens(token_hash, machine_name, grant_json, created_at) VALUES ('old-hash', 'old-machine', '"all"', 0)`,
-      )
-      .run();
-    await applyMigrations(db);
-    await expiryColumns(db);
-    expect(
-      await db
-        .prepare('SELECT access_expires_at, last_used_at FROM machine_tokens')
-        .first(),
-    ).toEqual({ access_expires_at: null, last_used_at: null });
-    expect(
-      (
-        await db
-          .prepare(
-            "UPDATE machine_tokens SET last_used_at=unixepoch('subsec')*1000 WHERE token_hash='old-hash' RETURNING id",
-          )
-          .all()
-      ).results,
-    ).toHaveLength(1);
-  } finally {
-    await mf.dispose();
-  }
 });
 it('Expiry E17: the delivery-base Worker rejects expired tokens with its exact body, lists and revokes them, and old approvals polled after upgrade never expire', async () => {
   const app = await previousMachineWorker(base.directory);

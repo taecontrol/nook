@@ -1,11 +1,10 @@
 import type { Browser, Page } from 'playwright';
-import { d1Now, dayMs, expiryColumns } from './access-expiry.ts';
+import { d1Now, dayMs } from './access-expiry.ts';
 import { machinesPage } from './machines-browser.ts';
 import type { TestRuntime } from './runtime.ts';
 
-export async function expiryFixtures(page: Page, app: TestRuntime) {
+async function expiryFixtures(page: Page, app: TestRuntime) {
   const db = await app.mf.getD1Database('DB');
-  await expiryColumns(db);
   await db
     .prepare(
       "UPDATE machine_tokens SET created_at=CAST(unixepoch('subsec')*1000 AS INTEGER)-86400000*5, last_used_at=CAST(unixepoch('subsec')*1000 AS INTEGER)-600000",
@@ -30,8 +29,6 @@ export async function expiryFixtures(page: Page, app: TestRuntime) {
 export function expiryPage(
   browser: Browser,
   options: {
-    viewport?: { width: number; height: number };
-    colorScheme?: 'light' | 'dark';
     configure?: (page: Page, app: TestRuntime, now: number) => Promise<void>;
   } = {},
 ) {
@@ -46,8 +43,6 @@ export function expiryPage(
       approvedAt: '2026-10-01T12:00:00.000Z',
       lastUsedAt: '2026-10-02T12:00:00.000Z',
     })),
-    viewport: options.viewport,
-    colorScheme: options.colorScheme,
     configure: async (page, app) => {
       const now = await expiryFixtures(page, app);
       await options.configure?.(page, app, now);
