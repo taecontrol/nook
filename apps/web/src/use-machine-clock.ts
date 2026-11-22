@@ -17,7 +17,7 @@ export function useMachineClock(machines: readonly Machine[] | undefined) {
         .filter((at) => at > now),
     );
     const timer = Number.isFinite(next)
-      ? setTimeout(advance, timeoutDelay(next - now, 1))
+      ? setTimeout(advance, timeoutDelay(next - now))
       : undefined;
     return () => {
       clearInterval(interval);
