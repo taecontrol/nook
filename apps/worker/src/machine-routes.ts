@@ -66,10 +66,10 @@ export function machineHandler(
   vaultKey = '',
   files: FileBindings = {},
 ) {
+  const database = D1Client.layer({ db });
   const handlers = HttpApiBuilder.group(MachineApi, 'machine', (handlers) =>
     Effect.gen(function* () {
       const store = yield* machineOperations;
-      const sql = yield* D1Client.D1Client;
       const fileAccess = (authorization: string, userAgent: string | null) =>
         Effect.gen(function* () {
           const machine = yield* store.authenticate(authorization);
@@ -79,7 +79,7 @@ export function machineHandler(
             clientFrom(undefined, userAgent),
           );
           return { attachments, actor };
-        }).pipe(Effect.provideService(D1Client.D1Client, sql));
+        });
       return handlers
         .handleRaw('attachFile', ({ params, headers, request }) =>
           Effect.gen(function* () {
@@ -118,14 +118,14 @@ export function machineHandler(
             const { grant } = yield* store.whoami(headers.authorization);
             const vault = yield* machineVault(grant);
             return yield* vault.list(query.bucket);
-          }).pipe(Effect.provideService(D1Client.D1Client, sql)),
+          }),
         )
         .handle('withdraw', ({ headers, params }) =>
           Effect.gen(function* () {
             const machine = yield* store.authenticate(headers.authorization);
             const approvals = yield* machineApprovals;
             yield* approvals.withdraw(machine.id, params.id);
-          }).pipe(Effect.provideService(D1Client.D1Client, sql)),
+          }),
         )
         .handle('values', ({ headers, payload, request }) =>
           store.authenticate(headers.authorization).pipe(
@@ -135,7 +135,6 @@ export function machineHandler(
                 client: request.headers['user-agent'] ?? null,
               }),
             ),
-            Effect.provideService(D1Client.D1Client, sql),
           ),
         )
         .handle('createSecret', ({ headers, payload }) =>
@@ -143,11 +142,11 @@ export function machineHandler(
             const machine = yield* store.authenticate(headers.authorization);
             const vault = yield* machineVault(machine.grant, vaultKey);
             return yield* vault.create(machine, payload);
-          }).pipe(Effect.provideService(D1Client.D1Client, sql)),
+          }),
         )
         .handle('logout', ({ headers }) => store.logout(headers.authorization));
     }),
-  ).pipe(Layer.provide(D1Client.layer({ db })));
+  ).pipe(Layer.provide(database), HttpRouter.provideRequest(database));
   const routes = HttpApiBuilder.layer(MachineApi).pipe(
     Layer.provide(handlers),
     Layer.provide(HttpServer.layerServices),
