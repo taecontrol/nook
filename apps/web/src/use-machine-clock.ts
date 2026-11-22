@@ -1,5 +1,6 @@
 import type { Machine } from '@nook/contract';
 import { useEffect, useState } from 'react';
+import { timeoutDelay } from './time';
 
 export function useMachineClock(machines: readonly Machine[] | undefined) {
   const [, tick] = useState(0);
@@ -15,10 +16,8 @@ export function useMachineClock(machines: readonly Machine[] | undefined) {
         )
         .filter((at) => at > now),
     );
-    // Node/browser timers overflow beyond signed 32-bit milliseconds. Revisit
-    // distant expiries before that limit, then schedule the remaining time.
     const timer = Number.isFinite(next)
-      ? setTimeout(advance, Math.min(next - now, 2 ** 31 - 2))
+      ? setTimeout(advance, timeoutDelay(next - now, 1))
       : undefined;
     return () => {
       clearInterval(interval);
