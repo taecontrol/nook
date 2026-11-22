@@ -136,6 +136,8 @@ it('E29: a background refresh of cached buckets blocks limited approval and Ente
       .toBe(true);
     expect(await bucketCheck(page, 'me').isChecked()).toBe(true);
     expect(await bucketCheck(page, 'All buckets').isChecked()).toBe(false);
+    // The request event is asynchronous, so check again after later round trips.
+    expect(approvals, 'Enter during the refresh sent nothing').toEqual([]);
   } finally {
     held.resolve();
     await close();
