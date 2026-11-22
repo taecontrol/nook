@@ -183,7 +183,7 @@ ancestor when normalization collapses the stored grant.
 | --- | --- |
 | E1 | `machine-access-worker.test.ts` preserves identity, credentials, dates, and duplicate-name approvals; `machine-grant-cli.test.ts` proves the next real `whoami`; `machine-grant-mcp.test.ts` proves newly granted writes in both protocols. |
 | E2 | The same CLI and MCP suites deny a removed root while retaining the other root. |
-| E3–E10 | `machine-access-worker.test.ts` covers normalization, validation at the batch boundary, lost-response retries, stale writers, revocation, owner/Origin/subtree boundaries, and credential-free failures and logs. |
+| E3–E10 | `machine-access-worker.test.ts` covers normalization, validation at the batch boundary, lost-response retries, stale writers, revocation, owner/Origin boundaries, and credential-free failures and logs; `owner-guards.test.ts` denies a subtree principal before D1. |
 | E11–E15 | `machine-access-web.test.ts` covers optimistic rows and stable positions, keyboard focus, every save failure and recovery, disabled/empty drafts, deleted roots, loading retry, and approval/deployment guidance. |
 | E11–E12 cache races | `machine-access-cache.test.ts` holds genuine reads and writes to prove machine-action exclusivity, cancellation of stale reads, and immediate application of the successful machine response before recovery can conceal a cache defect. |
 | E11–E13, E17 editor recovery | `machine-access-editor.test.ts` proves keyboard intent, stacked phone actions, native body scrolling, All-to-limited and ancestor effects, usable pending focus, early native reopening, and fresh choices after real bucket failures. |

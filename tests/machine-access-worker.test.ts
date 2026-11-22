@@ -99,43 +99,40 @@ it('E3: all and limited grants switch in both directions, normalizing new and pr
   expect(((await all.json()) as Machine).grant).toBe('all');
 });
 
-it.each(['never-existed', 'deleted-before-batch'])(
-  'E4: a %s bucket rejects the entire save at its atomic boundary',
-  async (state) => {
-    let armed = false;
-    const measured = await ownerRuntime(
-      await checkpointRuntime(async (label) => {
-        if (armed && label === '/machine-before-batch') {
-          armed = false;
-          await (await measured.mf.getD1Database('DB'))
-            .prepare("DELETE FROM buckets WHERE path='work/beta'")
-            .run();
-        }
-      }),
+it('E4: a bucket deleted before the batch rejects the entire save at its atomic boundary', async () => {
+  let armed = false;
+  const measured = await ownerRuntime(
+    await checkpointRuntime(async (label) => {
+      if (armed && label === '/machine-before-batch') {
+        armed = false;
+        await (await measured.mf.getD1Database('DB'))
+          .prepare("DELETE FROM buckets WHERE path='work/beta'")
+          .run();
+      }
+    }),
+  );
+  try {
+    await seedGrantTree(measured, ['me', 'work', 'work/acme', 'work/beta']);
+    await issueGrant(measured, ['work/acme']);
+    const [machine] = await listMachines(measured);
+    const before = await tokenSnapshot(measured);
+    armed = true;
+    const response = await saveAccess(
+      measured,
+      machine.id,
+      ['work/acme', 'work/beta'],
+      machine.grant,
     );
-    try {
-      await seedGrantTree(measured, ['me', 'work', 'work/acme', 'work/beta']);
-      await issueGrant(measured, ['work/acme']);
-      const [machine] = await listMachines(measured);
-      const before = await tokenSnapshot(measured);
-      armed = state === 'deleted-before-batch';
-      const response = await saveAccess(
-        measured,
-        machine.id,
-        ['work/acme', state === 'never-existed' ? 'work/missing' : 'work/beta'],
-        machine.grant,
-      );
-      expect(response.status).toBe(400);
-      expect(await response.json()).toEqual({
-        _tag: 'GrantBucketNotFound',
-        message: 'Some selected buckets no longer exist. Choose again.',
-      });
-      expect((await tokenSnapshot(measured)) === before).toBe(true);
-    } finally {
-      await measured.close();
-    }
-  },
-);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      _tag: 'GrantBucketNotFound',
+      message: 'Some selected buckets no longer exist. Choose again.',
+    });
+    expect((await tokenSnapshot(measured)) === before).toBe(true);
+  } finally {
+    await measured.close();
+  }
+});
 
 it('E4: a missing requested descendant is rejected even when its present ancestor covers it', async () => {
   const { machine } = await approved();
@@ -154,32 +151,23 @@ it('E4: a missing requested descendant is rejected even when its present ancesto
   await expectUnchanged(before);
 });
 
-it.each(
-  [[], null, {}, 'work/acme', ['Work'], ['work/acme', 1]].map((grant) => ({
-    grant,
-  })),
-)(
-  'E5: invalid new grant %j returns InvalidBucketGrant and changes nothing',
-  async ({ grant }) => {
-    const { machine } = await approved();
-    const before = await tokenSnapshot(app);
-    const response = await saveAccess(app, machine.id, grant, machine.grant);
-    expect(response.status).toBe(400);
+it('E5: an invalid new or previous grant returns InvalidBucketGrant and changes nothing', async () => {
+  const { machine } = await approved();
+  const before = await tokenSnapshot(app);
+  for (const [grant, previous] of [
+    ...[[], null, {}, 'work/acme', ['Work'], ['work/acme', 1]].map(
+      (grant) => [grant, machine.grant] as const,
+    ),
+    ...[[], null, {}, 'work/acme'].map(
+      (previous) => ['all', previous] as const,
+    ),
+  ]) {
+    const response = await saveAccess(app, machine.id, grant, previous);
+    expect(response.status, JSON.stringify({ grant, previous })).toBe(400);
     expect((await response.json())._tag).toBe('InvalidBucketGrant');
     await expectUnchanged(before);
-  },
-);
-it.each([[], null, {}, 'work/acme'].map((previous) => ({ previous })))(
-  'E5: invalid previous grant %j cannot become a writing contract',
-  async ({ previous }) => {
-    const { machine } = await approved();
-    const before = await tokenSnapshot(app);
-    const response = await saveAccess(app, machine.id, 'all', previous);
-    expect(response.status).toBe(400);
-    expect((await response.json())._tag).toBe('InvalidBucketGrant');
-    await expectUnchanged(before);
-  },
-);
+  }
+});
 
 it('E6: retry after a committed lost response and an unchanged save both succeed without further changes', async () => {
   const { machine } = await approved();
@@ -276,33 +264,6 @@ it('E9: only owner Access at the same Origin can edit; a machine Bearer can neve
       })
     ).status,
   ).toBe(200);
-});
-
-it('E9: a restricted principal is denied before D1 even when it names the target machine', async () => {
-  const labels: string[] = [];
-  const restricted = await checkpointRuntime(
-    async (label) => {
-      labels.push(label);
-    },
-    { principalGrant: ['work'] },
-  );
-  try {
-    const db = await restricted.mf.getD1Database('DB');
-    await db
-      .prepare(
-        'INSERT INTO machine_tokens(id, token_hash, machine_name, grant_json, created_at) VALUES (?, ?, ?, ?, ?)',
-      )
-      .bind('target', 'synthetic-private-hash', 'kept', '["work"]', 1)
-      .run();
-    const before = await tokenSnapshot(restricted);
-    expect(
-      (await saveAccess(restricted, 'target', 'all', ['work'])).status,
-    ).toBe(403);
-    expect(labels).toEqual([]);
-    expect((await tokenSnapshot(restricted)) === before).toBe(true);
-  } finally {
-    await restricted.close();
-  }
 });
 
 class PrivateLog extends Log {
