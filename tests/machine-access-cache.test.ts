@@ -12,6 +12,7 @@ import {
   deferred,
   listMachines,
   machineIdentity,
+  machinesNow,
   revokeMachine,
 } from './support/machines.ts';
 import { machineRow } from './support/machines-browser.ts';
@@ -123,60 +124,123 @@ it('E11/E12: an access save cancels an old machines read already in flight', asy
   }
 });
 
-it('E11: a successful save applies real machine activity facts before the recovery list', async () => {
-  let privateToken = '';
-  const visit = await accessPage(browser, {
-    configure: async (_page, app) => {
-      privateToken = (await issueGrant(app, ['work/acme'])).token;
-    },
-  });
-  const write = deferred();
-  const entered = deferred();
-  const read = deferred();
-  const recovery = deferred();
-  try {
-    const machine = (await listMachines(visit.app)).find(
-      (entry) => entry.name === 'work-laptop',
-    );
-    if (!machine) throw new Error('The synthetic machine was not approved');
-    expect(machine.lastUsedAt).toBe(null);
-    const row = machineRow(visit.page, machine.id);
-    expect(await row.innerText()).toContain('Never used');
-    const sheet = await editAccess(visit.page, machine);
-    await visit.page.route('**/api/machines/*/grant', async (route) => {
-      entered.resolve();
-      await write.promise;
-      await route.continue().catch(() => {});
+it.each([
+  {
+    name: 'Never used to Used in the last 30 days on first request',
+    initialLastUsedAt: null as string | null,
+    from: 'Never used',
+    to: 'Used in the last 30 days',
+    trigger: 'request' as const,
+  },
+  {
+    name: 'Not used in 30 days to Used in the last 30 days on a new request',
+    initialLastUsedAt: '2026-08-14T10:22:00.000Z',
+    from: 'Not used in 30 days',
+    to: 'Used in the last 30 days',
+    trigger: 'request' as const,
+  },
+  {
+    name: 'Used in the last 30 days to Not used in 30 days when the 30-day mark passes',
+    initialLastUsedAt: '2026-09-05T15:00:30.000Z',
+    from: 'Used in the last 30 days',
+    to: 'Not used in 30 days',
+    trigger: 'clock' as const,
+  },
+])(
+  'E11: a confirmed save applies activity facts and returns focus to Edit access when moving from $name',
+  async ({ initialLastUsedAt, from, to, trigger }) => {
+    let privateToken = '';
+    const visit = await accessPage(browser, {
+      configure: async (_page, app) => {
+        privateToken = (await issueGrant(app, ['work/acme'])).token;
+        if (initialLastUsedAt !== null) {
+          await (await app.mf.getD1Database('DB'))
+            .prepare(
+              "UPDATE machine_tokens SET last_used_at=? WHERE machine_name='work-laptop'",
+            )
+            .bind(Date.parse(initialLastUsedAt))
+            .run();
+        }
+      },
     });
-    await visit.page.route('**/api/machines', async (route) => {
-      recovery.resolve();
-      await read.promise;
-      await route.continue().catch(() => {});
-    });
-    await sheet
-      .getByRole('checkbox', { name: 'work/beta', exact: true })
-      .check();
-    const response = visit.page.waitForResponse((response) =>
-      response.url().endsWith('/grant'),
-    );
-    await sheet
-      .getByRole('button', { name: 'Save access', exact: true })
-      .click();
-    await entered.promise;
-    const activity = await machineIdentity(visit.app, privateToken);
-    expect(activity.status).toBe(200);
-    await activity.body?.cancel();
-    write.resolve();
-    expect((await response).status()).toBe(200);
-    await recovery.promise;
-    await expect.poll(() => row.innerText()).toContain('Last used');
-    expect(await row.innerText()).not.toContain('Never used');
-  } finally {
-    write.resolve();
-    read.resolve();
-    await visit.close();
-  }
-});
+    const write = deferred();
+    const entered = deferred();
+    const read = deferred();
+    const recovery = deferred();
+    try {
+      const machine = (await listMachines(visit.app)).find(
+        (entry) => entry.name === 'work-laptop',
+      );
+      if (!machine) throw new Error('The synthetic machine was not approved');
+      const startGroup = visit.page.getByRole('region', {
+        name: from,
+        exact: true,
+      });
+      const endGroup = visit.page.getByRole('region', {
+        name: to,
+        exact: true,
+      });
+      const startRow = startGroup.locator(`[data-machine="${machine.id}"]`);
+      await startRow.waitFor();
+      if (initialLastUsedAt === null) {
+        expect(machine.lastUsedAt).toBe(null);
+        expect(await startRow.innerText()).toContain('Never used');
+      }
+      const sheet = await editAccess(visit.page, machine);
+      await visit.page.route('**/api/machines/*/grant', async (route) => {
+        entered.resolve();
+        await write.promise;
+        await route.continue().catch(() => {});
+      });
+      await visit.page.route('**/api/machines', async (route) => {
+        recovery.resolve();
+        await read.promise;
+        await route.continue().catch(() => {});
+      });
+      await sheet
+        .getByRole('checkbox', { name: 'work/beta', exact: true })
+        .check();
+      const response = visit.page.waitForResponse((response) =>
+        response.url().endsWith('/grant'),
+      );
+      await sheet
+        .getByRole('button', { name: 'Save access', exact: true })
+        .click();
+      await entered.promise;
+      if (trigger === 'request') {
+        const activity = await machineIdentity(visit.app, privateToken);
+        expect(activity.status).toBe(200);
+        await activity.body?.cancel();
+      } else {
+        await visit.page.clock.setFixedTime(
+          new Date(Date.parse(machinesNow) + 60_000),
+        );
+        await visit.page.clock.runFor(60_000);
+      }
+      write.resolve();
+      expect((await response).status()).toBe(200);
+      await recovery.promise;
+      await sheet.waitFor({ state: 'hidden' });
+      const movedRow = endGroup.locator(`[data-machine="${machine.id}"]`);
+      await movedRow.waitFor();
+      await expect.poll(() => movedRow.innerText()).toContain('Last used');
+      expect(await movedRow.innerText()).not.toContain('Never used');
+      expect(
+        await startGroup.locator(`[data-machine="${machine.id}"]`).count(),
+      ).toBe(0);
+      const editButton = movedRow.getByRole('button', { name: /Edit access/ });
+      await expect
+        .poll(() =>
+          editButton.evaluate((button) => button === document.activeElement),
+        )
+        .toBe(true);
+    } finally {
+      write.resolve();
+      read.resolve();
+      await visit.close();
+    }
+  },
+);
 
 it.each([404, 409])(
   'E12: a genuine %s reconciles the row and presents its alert before the recovery list',

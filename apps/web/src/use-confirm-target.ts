@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react';
 
+export type FocusTarget = HTMLElement | (() => HTMLElement | null) | null;
+
 export function focusSoon(find: () => HTMLElement | null) {
   requestAnimationFrame(() =>
     requestAnimationFrame(() => find()?.focus({ preventScroll: true })),
@@ -13,11 +15,16 @@ export function useLastValue<T>(value: T | null) {
   return value ?? last.current;
 }
 
+function resolveFocusTarget(target: FocusTarget) {
+  const element = typeof target === 'function' ? target() : target;
+  return element?.isConnected ? element : null;
+}
+
 /** Returns focus to whatever opened a dialog, or to `fallback` once it is gone. */
 export function useReturnFocus(fallback: () => HTMLElement | null) {
-  const trigger = useRef<HTMLElement | null>(null);
+  const trigger = useRef<FocusTarget>(null);
   return {
-    capture: (element: HTMLElement | null) => {
+    capture: (element: FocusTarget) => {
       trigger.current = element;
     },
     restore: (event: Event, after?: () => HTMLElement | null) => {
@@ -26,9 +33,9 @@ export function useReturnFocus(fallback: () => HTMLElement | null) {
         focusSoon(after);
         return;
       }
-      if (trigger.current?.isConnected)
-        trigger.current.focus({ preventScroll: true });
-      else fallback()?.focus({ preventScroll: true });
+      (resolveFocusTarget(trigger.current) ?? fallback())?.focus({
+        preventScroll: true,
+      });
     },
   };
 }
@@ -42,7 +49,7 @@ export function useConfirmTarget<T>(fallback: () => HTMLElement | null) {
   return {
     target,
     shown,
-    open: (value: T, trigger: HTMLElement | null) => {
+    open: (value: T, trigger: FocusTarget) => {
       after.current = undefined;
       focus.capture(trigger);
       setTarget(value);
