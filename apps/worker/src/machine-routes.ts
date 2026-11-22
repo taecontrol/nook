@@ -146,7 +146,7 @@ export function machineHandler(
         )
         .handle('logout', ({ headers }) => store.logout(headers.authorization));
     }),
-  ).pipe(Layer.provide(database), HttpRouter.provideRequest(database));
+  ).pipe(HttpRouter.provideRequest(database), Layer.provide(database));
   const routes = HttpApiBuilder.layer(MachineApi).pipe(
     Layer.provide(handlers),
     Layer.provide(HttpServer.layerServices),
