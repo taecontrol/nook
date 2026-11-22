@@ -55,8 +55,21 @@ import {
   lastUsedParts,
 } from './machines-model';
 import { formatDate } from './time';
-import { useConfirmTarget } from './use-confirm-target';
+import { type FocusTarget, useConfirmTarget } from './use-confirm-target';
 import { useMachineClock } from './use-machine-clock';
+
+type MachineAction = 'edit' | 'revoke';
+function findMachineAction(
+  root: HTMLElement | null,
+  id: string,
+  action: MachineAction,
+) {
+  return (
+    root?.querySelector<HTMLButtonElement>(
+      `[data-machine="${CSS.escape(id)}"] [data-machine-action="${action}"]`,
+    ) ?? null
+  );
+}
 
 const icons = {
   expired: CalendarX,
@@ -161,8 +174,8 @@ function MachineActions({
   now: number;
   busy: boolean;
   preload: () => void;
-  onEdit: (machine: Machine, trigger: HTMLButtonElement) => void;
-  onRevoke: (machine: Machine, trigger: HTMLButtonElement) => void;
+  onEdit: (machine: Machine) => void;
+  onRevoke: (machine: Machine) => void;
 }) {
   const expired = isExpired(machine, now);
   const action = expired ? 'Remove' : 'Revoke';
@@ -173,10 +186,11 @@ function MachineActions({
           variant="outline"
           size="sm"
           disabled={busy}
+          data-machine-action="edit"
           aria-label={`Edit access of ${machine.name}`}
           onPointerEnter={preload}
           onFocus={preload}
-          onClick={(event) => onEdit(machine, event.currentTarget)}
+          onClick={() => onEdit(machine)}
         >
           Edit access
         </Button>
@@ -185,8 +199,9 @@ function MachineActions({
         variant="outline"
         size="sm"
         disabled={busy}
+        data-machine-action={expired ? undefined : 'revoke'}
         aria-label={`${action} ${machine.name}, ${approvedText(machine, now).toLowerCase()}`}
-        onClick={(event) => onRevoke(machine, event.currentTarget)}
+        onClick={() => onRevoke(machine)}
       >
         {action}
       </Button>
@@ -204,8 +219,8 @@ function MachineGroups({
   machines: readonly Machine[];
   now: number;
   busy: boolean;
-  onRevoke: (machine: Machine, trigger: HTMLButtonElement) => void;
-  onEdit: (machine: Machine, trigger: HTMLButtonElement) => void;
+  onRevoke: (machine: Machine) => void;
+  onEdit: (machine: Machine) => void;
   saved?: string;
 }) {
   const queries = useQueryClient();
@@ -423,8 +438,8 @@ function MachineList({
 }: {
   state: ReturnType<typeof useMachines>;
   now: number;
-  onRevoke: (machine: Machine, trigger: HTMLButtonElement) => void;
-  onEdit: (machine: Machine, trigger: HTMLButtonElement) => void;
+  onRevoke: (machine: Machine) => void;
+  onEdit: (machine: Machine) => void;
   saved?: string;
 }) {
   const { machines, busy } = state;
@@ -503,6 +518,7 @@ export function MachinesPage() {
   const state = useMachines();
   const { machines, write, busy, revoke } = state;
   const [dismissed, setDismissed] = useState<number>();
+  const page = useRef<HTMLDivElement | null>(null);
   const heading = useRef<HTMLHeadingElement | null>(null);
   const revocation = useConfirmTarget<Machine>(() => heading.current);
   const editing = useConfirmTarget<Machine>(() => heading.current);
@@ -513,15 +529,15 @@ export function MachinesPage() {
   const now = useMachineClock(machines.data);
   const list = machines.data;
   if (editing.target && isExpired(editing.target, now)) editing.close();
-  const confirm = (machine: Machine, button: HTMLButtonElement) => {
+  const confirm = (machine: Machine, trigger: FocusTarget) => {
     if (busy) return;
     if (isExpired(machine, Date.now())) {
       revoke(machine);
       heading.current?.focus({ preventScroll: true });
-    } else revocation.open(machine, button);
+    } else revocation.open(machine, trigger);
   };
   return (
-    <div className="w-full max-w-4xl px-4 pb-24 sm:px-6 md:px-12">
+    <div ref={page} className="w-full max-w-4xl px-4 pb-24 sm:px-6 md:px-12">
       <h1
         ref={heading}
         tabIndex={-1}
@@ -551,9 +567,13 @@ export function MachinesPage() {
       <MachineList
         state={state}
         now={now}
-        onRevoke={confirm}
+        onRevoke={(machine) =>
+          confirm(machine, () =>
+            findMachineAction(page.current, machine.id, 'revoke'),
+          )
+        }
         saved={saved?.machine.id}
-        onEdit={(machine, button) => {
+        onEdit={(machine) => {
           if (busy) return;
           // A resolved module mounts directly. Suspending a fresh lazy wrapper
           // would delay the checked tree even after its intent preload finished.
@@ -563,7 +583,9 @@ export function MachinesPage() {
               setSession((value) => value + 1);
               setSaved(null);
               setGone(null);
-              editing.open(machine, button);
+              editing.open(machine, () =>
+                findMachineAction(page.current, machine.id, 'edit'),
+              );
             },
             (error: unknown) => setEditor({ error }),
           );
