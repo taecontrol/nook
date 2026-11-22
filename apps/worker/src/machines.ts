@@ -177,6 +177,12 @@ function identity(row: typeof TokenRow.Type) {
 }
 export const machineOperations = Effect.gen(function* () {
   const sql = yield* D1Client.D1Client;
+  const tokenColumns = sql.csv(
+    Object.keys(TokenRow.fields).map((column) => sql`${sql(column)}`),
+  );
+  const machineColumns = sql.csv(
+    Object.keys(MachineRow.fields).map((column) => sql`${sql(column)}`),
+  );
   const findCode = SqlSchema.findAll({
     Request: Schema.String,
     Result: RequestRow,
@@ -193,7 +199,7 @@ export const machineOperations = Effect.gen(function* () {
     Request: Schema.String,
     Result: TokenRow,
     execute: (hash) =>
-      sql`UPDATE machine_tokens SET last_used_at=unixepoch('subsec')*1000 WHERE token_hash=${hash} RETURNING id, token_hash, machine_name, grant_json, access_expires_at`,
+      sql`UPDATE machine_tokens SET last_used_at=unixepoch('subsec')*1000 WHERE token_hash=${hash} RETURNING ${tokenColumns}`,
   });
   const refusedExpiry = SqlSchema.findAll({
     Request: Schema.String,
@@ -205,7 +211,7 @@ export const machineOperations = Effect.gen(function* () {
     Request: Schema.Void,
     Result: MachineRow,
     execute: () =>
-      sql`SELECT id, machine_name, grant_json, created_at, last_used_at, access_expires_at FROM machine_tokens ORDER BY created_at, id`,
+      sql`SELECT ${machineColumns} FROM machine_tokens ORDER BY created_at, id`,
   });
   const lookup = (code: string) =>
     findCode(code).pipe(
@@ -232,6 +238,18 @@ export const machineOperations = Effect.gen(function* () {
       }
       return row;
     });
+  const authenticate = (authorization: string) =>
+    authenticated(authorization).pipe(
+      Effect.flatMap((row) =>
+        identity(row).pipe(
+          Effect.map((result) => ({
+            ...result,
+            id: row.id,
+            grantJson: row.grant_json,
+          })),
+        ),
+      ),
+    );
   const handle = (
     code: string,
     status: 'approved' | 'denied',
@@ -323,7 +341,7 @@ export const machineOperations = Effect.gen(function* () {
           .batch([
             sql<
               typeof TokenRow.Type
-            >`INSERT INTO machine_tokens(token_hash, machine_name, grant_json, created_at, id, access_expires_at) SELECT ${tokenHash}, machine_name, grant_json, ${Date.now()}, ${crypto.randomUUID()}, access_expires_at FROM authorizations WHERE device_hash=${deviceHash} AND status='approved' AND expires_at>unixepoch('subsec')*1000 RETURNING id, token_hash, machine_name, grant_json, access_expires_at`,
+            >`INSERT INTO machine_tokens(token_hash, machine_name, grant_json, created_at, id, access_expires_at) SELECT ${tokenHash}, machine_name, grant_json, ${Date.now()}, ${crypto.randomUUID()}, access_expires_at FROM authorizations WHERE device_hash=${deviceHash} AND status='approved' AND expires_at>unixepoch('subsec')*1000 RETURNING ${tokenColumns}`,
             sql`DELETE FROM authorizations WHERE device_hash=${deviceHash} AND EXISTS (SELECT 1 FROM machine_tokens WHERE token_hash=${tokenHash})`,
           ])
           .pipe(unavailable);
@@ -361,8 +379,8 @@ export const machineOperations = Effect.gen(function* () {
         // share one atomic boundary, including retries after a committed save.
         const [updated, remaining] = yield* sql
           .batch([
-            sql`UPDATE machine_tokens SET grant_json=${nextJson} WHERE id=${id} AND (grant_json=${priorJson} OR grant_json=${nextJson}) AND ${selectedBucketsExist(sql, selectedJson)} RETURNING id, machine_name, grant_json, created_at, last_used_at, access_expires_at`,
-            sql`SELECT id, machine_name, grant_json, created_at, last_used_at, access_expires_at, ${selectedBucketsExist(sql, selectedJson)} AS selected_exist FROM machine_tokens WHERE id=${id}`,
+            sql`UPDATE machine_tokens SET grant_json=${nextJson} WHERE id=${id} AND (grant_json=${priorJson} OR grant_json=${nextJson}) AND ${selectedBucketsExist(sql, selectedJson)} RETURNING ${machineColumns}`,
+            sql`SELECT ${machineColumns}, ${selectedBucketsExist(sql, selectedJson)} AS selected_exist FROM machine_tokens WHERE id=${id}`,
           ])
           .pipe(unavailable);
         return yield* savedGrant(updated, remaining);
@@ -374,20 +392,15 @@ export const machineOperations = Effect.gen(function* () {
           .batch([sql`DELETE FROM machine_tokens WHERE id=${id}`])
           .pipe(unavailable);
       }),
-    forAudit: (authorization: string) =>
-      authenticated(authorization).pipe(
-        Effect.flatMap((row) =>
-          identity(row).pipe(
-            Effect.map((result) => ({
-              ...result,
-              id: row.id,
-              grantJson: row.grant_json,
-            })),
-          ),
-        ),
-      ),
+    authenticate,
     whoami: (authorization: string) =>
-      authenticated(authorization).pipe(Effect.flatMap(identity)),
+      authenticate(authorization).pipe(
+        Effect.map(({ machine, grant, expiresAt }) => ({
+          machine,
+          grant,
+          expiresAt,
+        })),
+      ),
     logout: (authorization: string) =>
       authenticated(authorization).pipe(
         Effect.flatMap((row) =>
