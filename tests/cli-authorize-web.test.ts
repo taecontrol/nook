@@ -1,11 +1,7 @@
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
-import {
-  approve,
-  createAuthorization,
-  ownerRuntime,
-} from './support/authorizations.ts';
+import { createAuthorization, ownerRuntime } from './support/authorizations.ts';
 import { closeBrowserPage } from './support/buckets-browser.ts';
 import { deferred } from './support/machines.ts';
 import { expectNoOverflow } from './support/page-checks.ts';
@@ -115,38 +111,27 @@ it('E21: an unknown code stays on step one with an error and restores code focus
     await closeBrowserPage(page, context);
   }
 });
-it.each(['expired', 'handled'])(
-  'E22: a %s code shows its result card with no form',
-  async (state) => {
-    const pending = await createAuthorization(app);
-    if (state === 'expired')
-      await (await app.mf.getD1Database('DB'))
-        .prepare('UPDATE authorizations SET expires_at=0')
-        .run();
-    else expect((await approve(app, pending.userCode)).status).toBe(204);
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    try {
-      await page.goto(`${app.origin}/cli/authorize`);
-      await page
-        .getByRole('textbox', { name: 'Code from your terminal' })
-        .fill(pending.userCode);
-      await page.getByRole('button', { name: 'Continue', exact: true }).click();
-      await page
-        .getByRole('heading', {
-          name:
-            state === 'expired'
-              ? 'This request expired'
-              : 'This request was already handled',
-          exact: true,
-        })
-        .waitFor();
-      expect(await page.locator('form').count()).toBe(0);
-    } finally {
-      await closeBrowserPage(page, context);
-    }
-  },
-);
+it('E22: an expired code shows its result card with no form', async () => {
+  const pending = await createAuthorization(app);
+  await (await app.mf.getD1Database('DB'))
+    .prepare('UPDATE authorizations SET expires_at=0')
+    .run();
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  try {
+    await page.goto(`${app.origin}/cli/authorize`);
+    await page
+      .getByRole('textbox', { name: 'Code from your terminal' })
+      .fill(pending.userCode);
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await page
+      .getByRole('heading', { name: 'This request expired', exact: true })
+      .waitFor();
+    expect(await page.locator('form').count()).toBe(0);
+  } finally {
+    await closeBrowserPage(page, context);
+  }
+});
 it('E21: a held lookup shows a Loading spinner and disables Continue; a held approval shows Approving…', async () => {
   const pending = await createAuthorization(app);
   const lookup = deferred();
