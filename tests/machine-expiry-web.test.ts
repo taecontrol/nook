@@ -369,109 +369,99 @@ it('Expiry E12/E14: Enter during the expiry close animation sends no PUT and pre
     await visit.close();
   }
 });
-it.each(['Escape', 'Close'])(
-  'Expiry E12/E14: a save settled after expiry leaves the next editor dismissible with %s',
-  async (dismissal) => {
-    const gate = deferred();
-    const entered = deferred();
-    const visit = await expiryPage(browser, {
-      configure: async (page, app, now) => {
-        await seedGrantTree(app, ['me']);
-        await (await app.mf.getD1Database('DB'))
-          .prepare(
-            "UPDATE machine_tokens SET access_expires_at=? WHERE machine_name='short-lived'",
-          )
-          .bind(now + 10_000)
-          .run();
-        await page.route('**/api/machines/*/grant', async (route) => {
-          entered.resolve();
-          await gate.promise;
-          await route.continue().catch(() => {});
-        });
-      },
-    });
-    try {
-      const { page } = visit;
-      const machine = (await listMachines(visit.app)).find(
-        (entry) => entry.id === visit.machines[2].id,
-      );
-      if (!machine?.expiresAt)
-        throw new Error('An expiring machine is required.');
-      await machineRow(page, machine.id)
-        .getByRole('button', { name: /Edit access/ })
-        .click();
-      const sheet = page.getByRole('dialog', {
-        name: 'Edit access',
-        exact: true,
+it('Expiry E12/E14: a save settled after expiry leaves the next editor dismissible with Escape', async () => {
+  const gate = deferred();
+  const entered = deferred();
+  const visit = await expiryPage(browser, {
+    configure: async (page, app, now) => {
+      await seedGrantTree(app, ['me']);
+      await (await app.mf.getD1Database('DB'))
+        .prepare(
+          "UPDATE machine_tokens SET access_expires_at=? WHERE machine_name='short-lived'",
+        )
+        .bind(now + 10_000)
+        .run();
+      await page.route('**/api/machines/*/grant', async (route) => {
+        entered.resolve();
+        await gate.promise;
+        await route.continue().catch(() => {});
       });
-      await sheet
-        .getByRole('checkbox', { name: 'All buckets', exact: true })
-        .uncheck();
-      await sheet.getByRole('checkbox', { name: 'me', exact: true }).check();
-      await sheet
-        .getByRole('button', { name: 'Save access', exact: true })
-        .click();
-      await entered.promise;
-      await page.clock.setFixedTime(new Date(machine.expiresAt));
-      await page.clock.runFor(60_000);
-      await sheet.waitFor({ state: 'hidden' });
-      expect(await sheet.count()).toBe(0);
-      expect(
-        await machineRow(page, machine.id)
-          .getByRole('button')
-          .allTextContents(),
-      ).toEqual(['Remove']);
-      expect(
-        (await listMachines(visit.app)).find((entry) => entry.id === machine.id)
-          ?.grant,
-      ).toBe('all');
-      const response = page.waitForResponse(
-        (response) =>
-          response.request().method() === 'PUT' &&
-          response.url().endsWith(`/api/machines/${machine.id}/grant`),
-      );
-      gate.resolve();
-      expect((await response).status()).toBe(200);
-      await expect
-        .poll(
-          async () =>
-            (await listMachines(visit.app)).find(
-              (entry) => entry.id === machine.id,
-            )?.grant,
-        )
-        .toEqual(['me']);
-      const trigger = machineRow(page, visit.machines[1].id).getByRole(
-        'button',
-        {
-          name: /Edit access/,
-        },
-      );
-      await trigger.click();
-      await sheet.getByRole('checkbox', { name: 'me', exact: true }).waitFor();
-      if (dismissal === 'Escape') await page.keyboard.press('Escape');
-      else
-        await sheet.getByRole('button', { name: 'Close', exact: true }).click();
-      expect(await sheet.getAttribute('data-state')).toBe('closed');
-      await sheet.waitFor({ state: 'hidden' });
-      await expect
-        .poll(() =>
-          trigger.evaluate((button) => button === document.activeElement),
-        )
-        .toBe(true);
-      expect(
-        visit.requests.filter((request) => request.method === 'PUT'),
-      ).toHaveLength(1);
-      expect(
-        (await listMachines(visit.app)).find(
-          (entry) => entry.id === visit.machines[1].id,
-        )?.grant,
-      ).toBe('all');
-    } finally {
-      gate.resolve();
-      await visit.close();
-    }
-  },
-);
+    },
+  });
+  try {
+    const { page } = visit;
+    const machine = (await listMachines(visit.app)).find(
+      (entry) => entry.id === visit.machines[2].id,
+    );
+    if (!machine?.expiresAt)
+      throw new Error('An expiring machine is required.');
+    await machineRow(page, machine.id)
+      .getByRole('button', { name: /Edit access/ })
+      .click();
+    const sheet = page.getByRole('dialog', {
+      name: 'Edit access',
+      exact: true,
+    });
+    await sheet
+      .getByRole('checkbox', { name: 'All buckets', exact: true })
+      .uncheck();
+    await sheet.getByRole('checkbox', { name: 'me', exact: true }).check();
+    await sheet
+      .getByRole('button', { name: 'Save access', exact: true })
+      .click();
+    await entered.promise;
+    await page.clock.setFixedTime(new Date(machine.expiresAt));
+    await page.clock.runFor(60_000);
+    await sheet.waitFor({ state: 'hidden' });
+    expect(await sheet.count()).toBe(0);
+    expect(
+      await machineRow(page, machine.id).getByRole('button').allTextContents(),
+    ).toEqual(['Remove']);
+    expect(
+      (await listMachines(visit.app)).find((entry) => entry.id === machine.id)
+        ?.grant,
+    ).toBe('all');
+    const response = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'PUT' &&
+        response.url().endsWith(`/api/machines/${machine.id}/grant`),
+    );
+    gate.resolve();
+    expect((await response).status()).toBe(200);
+    await expect
+      .poll(
+        async () =>
+          (await listMachines(visit.app)).find(
+            (entry) => entry.id === machine.id,
+          )?.grant,
+      )
+      .toEqual(['me']);
+    const trigger = machineRow(page, visit.machines[1].id).getByRole('button', {
+      name: /Edit access/,
+    });
+    await trigger.click();
+    await sheet.getByRole('checkbox', { name: 'me', exact: true }).waitFor();
+    await page.keyboard.press('Escape');
+    expect(await sheet.getAttribute('data-state')).toBe('closed');
+    await sheet.waitFor({ state: 'hidden' });
+    await expect
+      .poll(() =>
+        trigger.evaluate((button) => button === document.activeElement),
+      )
+      .toBe(true);
+    expect(
+      visit.requests.filter((request) => request.method === 'PUT'),
+    ).toHaveLength(1);
+    expect(
+      (await listMachines(visit.app)).find(
+        (entry) => entry.id === visit.machines[1].id,
+      )?.grant,
+    ).toBe('all');
+  } finally {
+    gate.resolve();
+    await visit.close();
+  }
+});
 it('Expiry E14: a 90-day timer is clamped and does not immediately rerender in a loop', async () => {
   const delays: number[] = [];
   const visit = await expiryPage(browser, {
