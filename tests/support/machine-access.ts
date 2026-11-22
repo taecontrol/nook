@@ -22,7 +22,7 @@ export function saveAccess(
   );
 }
 
-export const accessMachines = [
+const accessMachines = [
   ...manyMachines.slice(0, 5),
   {
     name: 'thinkpad-x1',
@@ -35,7 +35,7 @@ export const accessMachines = [
     lastUsedAt: '2026-10-05T13:00:00.000Z',
   },
 ];
-export const accessGrants: BucketGrant[] = [
+const accessGrants: BucketGrant[] = [
   ['work/acme'],
   'all',
   ['personal/finances'],
@@ -45,7 +45,7 @@ export const accessGrants: BucketGrant[] = [
   ['personal/health', 'work/acme/api', 'work/acme/web'],
 ];
 
-export async function seedAccess(app: TestRuntime) {
+async function seedAccess(app: TestRuntime) {
   await seedGrantTree(app, [
     ...grantTree,
     'work/beta',
