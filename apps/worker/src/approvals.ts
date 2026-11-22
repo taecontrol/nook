@@ -6,6 +6,7 @@ import {
   type AskFirstMark,
   type RunSecrets,
   rememberDuration,
+  WholeInstallationGrant,
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
@@ -234,6 +235,7 @@ export const ownerApprovals = Effect.gen(function* () {
     sql`SELECT * FROM approval_requests WHERE id=${id}`;
   const readView = (id: string) =>
     Effect.gen(function* () {
+      yield* WholeInstallationGrant;
       const [rows, clock] = yield* sql
         .batch([getRows(id), clockRead(sql)])
         .pipe(unavailable);
@@ -245,6 +247,7 @@ export const ownerApprovals = Effect.gen(function* () {
     get: readView,
     list: () =>
       Effect.gen(function* () {
+        yield* WholeInstallationGrant;
         const [pending, remembered, clock] = yield* sql
           .batch([
             sql`SELECT * FROM approval_requests WHERE status='pending' AND expires_at>${now(sql)} ORDER BY requested_at,id`,
@@ -263,6 +266,7 @@ export const ownerApprovals = Effect.gen(function* () {
       }),
     decide: (id: string, choice: OwnerChoice, facts: OwnerFacts) =>
       Effect.gen(function* () {
+        yield* WholeInstallationGrant;
         const remember = choice.kind === 'approve' ? choice.remember : null;
         const window = remember ? rememberDuration[remember] : null;
         const [updated, , rows, clock] = yield* sql

@@ -1,9 +1,10 @@
-import { Schema } from 'effect';
+import { Context, Schema } from 'effect';
 import {
   HttpApi,
   HttpApiEndpoint,
   HttpApiError,
   HttpApiGroup,
+  HttpApiMiddleware,
 } from 'effect/http-api';
 import {
   ApprovalAlreadyHandled,
@@ -90,6 +91,36 @@ export * from './run.ts';
 export * from './vault.ts';
 export const Owner = Schema.Struct({ email: Schema.String });
 export type Owner = typeof Owner.Type;
+export class WholeInstallationGrant extends Context.Service<
+  WholeInstallationGrant,
+  { readonly grant: 'all' }
+>()('nook/WholeInstallationGrant') {}
+
+/**
+ * Guard whole-installation owner operations with `wholeInstallationGroup(...)`
+ * or `endpoint.middleware(RequireWholeInstallation)` (applied after `.add()`,
+ * because `HttpApiGroup.middleware` only wraps endpoints already in the group),
+ * and yield `WholeInstallationGrant` in the corresponding store method.
+ */
+export class RequireWholeInstallation extends HttpApiMiddleware.Service<
+  RequireWholeInstallation,
+  { provides: WholeInstallationGrant }
+>()('nook/RequireWholeInstallation', {
+  error: HttpApiError.Forbidden,
+}) {}
+
+function wholeInstallationGroup<
+  const Id extends string,
+  const Endpoints extends readonly [
+    HttpApiEndpoint.Constraint,
+    ...HttpApiEndpoint.Constraint[],
+  ],
+>(id: Id, ...endpoints: Endpoints) {
+  return HttpApiGroup.make(id)
+    .add(...endpoints)
+    .middleware(RequireWholeInstallation);
+}
+
 const errors = [
   HttpApiError.Unauthorized,
   HttpApiError.Forbidden,
@@ -97,68 +128,58 @@ const errors = [
 ];
 export const Api = HttpApi.make('nook')
   .add(
-    HttpApiGroup.make('askFirst')
-      .add(
-        HttpApiEndpoint.get('list', '/api/ask-first', {
-          success: AskFirstList,
-          error: errors,
-        }),
-      )
-      .add(
-        HttpApiEndpoint.put('put', '/api/ask-first/:kind/:path', {
-          params: AskFirstMark,
-          success: Schema.Void.annotate({ httpApiStatus: 204 }),
-          error: [...errors, InvalidBucketPath, InvalidSecret],
-        }),
-      )
-      .add(
-        HttpApiEndpoint.delete('remove', '/api/ask-first/:kind/:path', {
-          params: AskFirstMark,
-          success: Schema.Void.annotate({ httpApiStatus: 204 }),
-          error: [...errors, InvalidBucketPath, InvalidSecret],
-        }),
-      ),
+    wholeInstallationGroup(
+      'askFirst',
+      HttpApiEndpoint.get('list', '/api/ask-first', {
+        success: AskFirstList,
+        error: errors,
+      }),
+      HttpApiEndpoint.put('put', '/api/ask-first/:kind/:path', {
+        params: AskFirstMark,
+        success: Schema.Void.annotate({ httpApiStatus: 204 }),
+        error: [...errors, InvalidBucketPath, InvalidSecret],
+      }),
+      HttpApiEndpoint.delete('remove', '/api/ask-first/:kind/:path', {
+        params: AskFirstMark,
+        success: Schema.Void.annotate({ httpApiStatus: 204 }),
+        error: [...errors, InvalidBucketPath, InvalidSecret],
+      }),
+    ),
   )
   .add(
-    HttpApiGroup.make('approvals')
-      .add(
-        HttpApiEndpoint.get('list', '/api/approvals', {
-          success: ApprovalList,
-          error: errors,
-        }),
-      )
-      .add(
-        HttpApiEndpoint.get('get', '/api/approvals/:id', {
-          params: Schema.Struct({ id: Schema.String }),
-          success: ApprovalView,
-          error: [...errors, HttpApiError.NotFound],
-        }),
-      )
-      .add(
-        HttpApiEndpoint.post('approve', '/api/approvals/:id/approve', {
-          params: Schema.Struct({ id: Schema.String }),
-          payload: Schema.Struct({ remember: Remember }),
-          success: ApprovalView,
-          error: [
-            ...errors,
-            HttpApiError.NotFound,
-            Expired,
-            ApprovalAlreadyHandled,
-          ],
-        }),
-      )
-      .add(
-        HttpApiEndpoint.post('deny', '/api/approvals/:id/deny', {
-          params: Schema.Struct({ id: Schema.String }),
-          success: ApprovalView,
-          error: [
-            ...errors,
-            HttpApiError.NotFound,
-            Expired,
-            ApprovalAlreadyHandled,
-          ],
-        }),
-      ),
+    wholeInstallationGroup(
+      'approvals',
+      HttpApiEndpoint.get('list', '/api/approvals', {
+        success: ApprovalList,
+        error: errors,
+      }),
+      HttpApiEndpoint.get('get', '/api/approvals/:id', {
+        params: Schema.Struct({ id: Schema.String }),
+        success: ApprovalView,
+        error: [...errors, HttpApiError.NotFound],
+      }),
+      HttpApiEndpoint.post('approve', '/api/approvals/:id/approve', {
+        params: Schema.Struct({ id: Schema.String }),
+        payload: Schema.Struct({ remember: Remember }),
+        success: ApprovalView,
+        error: [
+          ...errors,
+          HttpApiError.NotFound,
+          Expired,
+          ApprovalAlreadyHandled,
+        ],
+      }),
+      HttpApiEndpoint.post('deny', '/api/approvals/:id/deny', {
+        params: Schema.Struct({ id: Schema.String }),
+        success: ApprovalView,
+        error: [
+          ...errors,
+          HttpApiError.NotFound,
+          Expired,
+          ApprovalAlreadyHandled,
+        ],
+      }),
+    ),
   )
   .add(
     HttpApiGroup.make('memories')
@@ -226,7 +247,8 @@ export const Api = HttpApi.make('nook')
       ),
   )
   .add(
-    HttpApiGroup.make('audit').add(
+    wholeInstallationGroup(
+      'audit',
       HttpApiEndpoint.get('list', '/api/audit', {
         query: AuditFilters,
         success: AuditPage,
@@ -293,7 +315,7 @@ export const Api = HttpApi.make('nook')
         HttpApiEndpoint.get('list', '/api/secrets', {
           success: Schema.Struct({ secrets: Schema.Array(OwnerSecret) }),
           error: errors,
-        }),
+        }).middleware(RequireWholeInstallation),
       )
       .add(
         HttpApiEndpoint.post('create', '/api/secrets', {
@@ -340,35 +362,31 @@ export const Api = HttpApi.make('nook')
       ),
   )
   .add(
-    HttpApiGroup.make('machines')
-      .add(
-        HttpApiEndpoint.get('list', '/api/machines', {
-          success: Schema.Struct({ machines: Schema.Array(Machine) }),
-          error: errors,
+    wholeInstallationGroup(
+      'machines',
+      HttpApiEndpoint.get('list', '/api/machines', {
+        success: Schema.Struct({ machines: Schema.Array(Machine) }),
+        error: errors,
+      }),
+      HttpApiEndpoint.put('saveGrant', '/api/machines/:id/grant', {
+        params: Schema.Struct({ id: Schema.String }),
+        payload: Schema.Struct({
+          grant: Schema.Unknown,
+          previous: Schema.Unknown,
         }),
-      )
-      .add(
-        HttpApiEndpoint.put('saveGrant', '/api/machines/:id/grant', {
-          params: Schema.Struct({ id: Schema.String }),
-          payload: Schema.Struct({
-            grant: Schema.Unknown,
-            previous: Schema.Unknown,
-          }),
-          success: Machine,
-          error: [
-            ...errors,
-            InvalidBucketGrant,
-            GrantBucketNotFound,
-            MachineAccessChanged,
-            HttpApiError.NotFound,
-          ],
-        }),
-      )
-      .add(
-        HttpApiEndpoint.delete('revoke', '/api/machines/:id', {
-          params: Schema.Struct({ id: Schema.String }),
-          success: Schema.Void.annotate({ httpApiStatus: 204 }),
-          error: errors,
-        }),
-      ),
+        success: Machine,
+        error: [
+          ...errors,
+          InvalidBucketGrant,
+          GrantBucketNotFound,
+          MachineAccessChanged,
+          HttpApiError.NotFound,
+        ],
+      }),
+      HttpApiEndpoint.delete('revoke', '/api/machines/:id', {
+        params: Schema.Struct({ id: Schema.String }),
+        success: Schema.Void.annotate({ httpApiStatus: 204 }),
+        error: errors,
+      }),
+    ),
   );

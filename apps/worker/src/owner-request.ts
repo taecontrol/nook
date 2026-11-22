@@ -1,5 +1,9 @@
-import type { BucketGrant } from '@nook/contract';
-import { Effect } from 'effect';
+import {
+  type BucketGrant,
+  RequireWholeInstallation,
+  WholeInstallationGrant,
+} from '@nook/contract';
+import { Effect, Layer } from 'effect';
 import { HttpApiError } from 'effect/http-api';
 
 export type OwnerFacts = { ip: string | null; country: string | null };
@@ -11,7 +15,12 @@ export function ownerFacts(request: Request): OwnerFacts {
   };
 }
 
-export const requireOwner = (
-  grant: BucketGrant,
-): Effect.Effect<void, HttpApiError.Forbidden> =>
-  grant === 'all' ? Effect.void : Effect.fail(new HttpApiError.Forbidden());
+export function wholeInstallationGuard(grant: BucketGrant) {
+  return Layer.succeed(RequireWholeInstallation, (httpEffect) =>
+    grant === 'all'
+      ? Effect.provideService(httpEffect, WholeInstallationGrant, {
+          grant: 'all',
+        })
+      : Effect.fail(new HttpApiError.Forbidden()),
+  );
+}
