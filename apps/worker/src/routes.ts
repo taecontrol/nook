@@ -1,4 +1,4 @@
-import { Api, MachineApi } from '@nook/contract';
+import { Api, MachineApi, RequireWholeInstallation } from '@nook/contract';
 import { SchemaAST } from 'effect';
 import {
   HttpApi,
@@ -37,7 +37,14 @@ function requiresToken(endpoint: HttpApiEndpoint.Top) {
   );
 }
 
+function requiresWholeInstallation(endpoint: HttpApiEndpoint.Top) {
+  return endpoint.middlewares.has(RequireWholeInstallation);
+}
+
 export const ownerRoutes = endpoints(Api).map(route);
+export const wholeInstallationRoutes = endpoints(Api)
+  .filter(requiresWholeInstallation)
+  .map(route);
 export const tokenRoutes = endpoints(MachineApi)
   .filter(requiresToken)
   .map(route);

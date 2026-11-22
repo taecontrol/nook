@@ -19,11 +19,12 @@ import {
   splitSecretPath,
   validateBucketPath,
   validateSecretPath,
+  WholeInstallationGrant,
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
 import type { Fragment } from 'effect/sql/Statement';
 import { unavailable } from './http-errors.ts';
-import { type OwnerFacts, requireOwner } from './owner-request.ts';
+import type { OwnerFacts } from './owner-request.ts';
 
 export type AuditMachine = { id: string; machine: string; grant: BucketGrant };
 const Facts = Schema.Struct({
@@ -339,9 +340,9 @@ export const auditStore = Effect.gen(function* () {
         )
         .pipe(unavailable, Effect.asVoid);
     },
-    list: (grant: BucketGrant, input: AuditFilters) =>
+    list: (input: AuditFilters) =>
       Effect.gen(function* () {
-        yield* requireOwner(grant);
+        yield* WholeInstallationGrant;
         const { bucket, secret, session, cursor } = yield* filters(input);
         const boundary = cursor
           ? sql`(at < ${cursor.at} OR (at = ${cursor.at} AND id < ${cursor.id}))`

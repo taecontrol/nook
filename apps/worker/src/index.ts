@@ -38,7 +38,7 @@ import { memoryStore } from './memory.ts';
 import { memoryFiles } from './memory-files.ts';
 import { memoryIndex } from './memory-index.ts';
 import { memorySync } from './memory-sync.ts';
-import { ownerFacts, requireOwner } from './owner-request.ts';
+import { ownerFacts, wholeInstallationGuard } from './owner-request.ts';
 import {
   fileRouterMaxParamLength,
   matches,
@@ -109,11 +109,11 @@ export function handlerForPrincipal(
     Effect.gen(function* () {
       const store = yield* machineOperations;
       return handlers
-        .handle('list', () => store.list(grant))
+        .handle('list', () => store.list())
         .handle('saveGrant', ({ params, payload }) =>
-          store.saveGrant(grant, params.id, payload.grant, payload.previous),
+          store.saveGrant(params.id, payload.grant, payload.previous),
         )
-        .handle('revoke', ({ params }) => store.revoke(grant, params.id));
+        .handle('revoke', ({ params }) => store.revoke(params.id));
     }),
   ).pipe(Layer.provide(D1Client.layer({ db })));
   const vault = HttpApiBuilder.group(Api, 'vault', (handlers) =>
@@ -142,54 +142,36 @@ export function handlerForPrincipal(
   const audit = HttpApiBuilder.group(Api, 'audit', (handlers) =>
     Effect.gen(function* () {
       const store = yield* auditStore;
-      return handlers.handle('list', ({ query }) => store.list(grant, query));
+      return handlers.handle('list', ({ query }) => store.list(query));
     }),
   ).pipe(Layer.provide(D1Client.layer({ db })));
   const askFirst = HttpApiBuilder.group(Api, 'askFirst', (handlers) =>
     Effect.gen(function* () {
       const store = yield* askFirstStore;
       return handlers
-        .handle('list', () =>
-          requireOwner(grant).pipe(Effect.andThen(store.list())),
-        )
-        .handle('put', ({ params }) =>
-          requireOwner(grant).pipe(Effect.andThen(store.put(params))),
-        )
-        .handle('remove', ({ params }) =>
-          requireOwner(grant).pipe(Effect.andThen(store.remove(params))),
-        );
+        .handle('list', () => store.list())
+        .handle('put', ({ params }) => store.put(params))
+        .handle('remove', ({ params }) => store.remove(params));
     }),
   ).pipe(Layer.provide(D1Client.layer({ db })));
   const approvals = HttpApiBuilder.group(Api, 'approvals', (handlers) =>
     Effect.gen(function* () {
       const store = yield* ownerApprovals;
       return handlers
-        .handle('list', () =>
-          requireOwner(grant).pipe(Effect.andThen(store.list())),
-        )
-        .handle('get', ({ params }) =>
-          requireOwner(grant).pipe(Effect.andThen(store.get(params.id))),
-        )
+        .handle('list', () => store.list())
+        .handle('get', ({ params }) => store.get(params.id))
         .handle('approve', ({ params, payload, request }) =>
-          requireOwner(grant).pipe(
-            Effect.andThen(
-              store.decide(
-                params.id,
-                { kind: 'approve', remember: payload.remember },
-                ownerFacts(request.source as Request),
-              ),
-            ),
+          store.decide(
+            params.id,
+            { kind: 'approve', remember: payload.remember },
+            ownerFacts(request.source as Request),
           ),
         )
         .handle('deny', ({ params, request }) =>
-          requireOwner(grant).pipe(
-            Effect.andThen(
-              store.decide(
-                params.id,
-                { kind: 'deny' },
-                ownerFacts(request.source as Request),
-              ),
-            ),
+          store.decide(
+            params.id,
+            { kind: 'deny' },
+            ownerFacts(request.source as Request),
           ),
         );
     }),
@@ -205,6 +187,7 @@ export function handlerForPrincipal(
       askFirst,
       approvals,
     ]),
+    Layer.provide(wholeInstallationGuard(grant)),
     Layer.provide(HttpServer.layerServices),
   );
   const apiHandler = HttpRouter.toWebHandler(routes, {

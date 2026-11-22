@@ -21,13 +21,13 @@ import {
   PollExpired,
   PollInvalid,
   PollPending,
+  WholeInstallationGrant,
 } from '@nook/contract';
 import { Effect, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
 import { SqlSchema } from 'effect/sql';
 import { sha256 } from './digest.ts';
 import { unavailable } from './http-errors.ts';
-import { requireOwner } from './owner-request.ts';
 
 const RequestRow = Schema.Struct({
   device_hash: Schema.String,
@@ -345,22 +345,17 @@ export const machineOperations = Effect.gen(function* () {
         const { machine, grant } = yield* identity(inserted[0]);
         return { token, machine, grant };
       }),
-    list: (grant: BucketGrant) =>
+    list: () =>
       Effect.gen(function* () {
-        yield* requireOwner(grant);
+        yield* WholeInstallationGrant;
         const rows = yield* listRows().pipe(unavailable);
         return {
           machines: rows.map(machine),
         };
       }),
-    saveGrant: (
-      caller: BucketGrant,
-      id: string,
-      grant: unknown,
-      previous: unknown,
-    ) =>
+    saveGrant: (id: string, grant: unknown, previous: unknown) =>
       Effect.gen(function* () {
-        yield* requireOwner(caller);
+        yield* WholeInstallationGrant;
         const next = yield* decodeGrant(grant);
         const prior = yield* decodeGrant(previous);
         const nextJson = JSON.stringify(normalizeGrant(next));
@@ -376,9 +371,9 @@ export const machineOperations = Effect.gen(function* () {
           .pipe(unavailable);
         return yield* savedGrant(updated, remaining);
       }),
-    revoke: (grant: BucketGrant, id: string) =>
+    revoke: (id: string) =>
       Effect.gen(function* () {
-        yield* requireOwner(grant);
+        yield* WholeInstallationGrant;
         yield* sql
           .batch([sql`DELETE FROM machine_tokens WHERE id=${id}`])
           .pipe(unavailable);

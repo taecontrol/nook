@@ -19,13 +19,14 @@ import {
   validateSecretValue,
   validateWorkingDirectory,
   visiblePaths,
+  WholeInstallationGrant,
 } from '@nook/contract';
 import { Effect, Redacted, Schema } from 'effect';
 import { SqlSchema } from 'effect/sql';
 import { type AuditMachine, auditStore, claimColumns } from './audit.ts';
 import { authorizeBucket, bucketExists, bucketNotFound } from './buckets.ts';
 import { unavailable } from './http-errors.ts';
-import { type OwnerFacts, requireOwner } from './owner-request.ts';
+import type { OwnerFacts } from './owner-request.ts';
 import { open, parseKeyring, seal } from './vault-keyring.ts';
 
 const Row = Schema.Struct({
@@ -238,7 +239,7 @@ export function ownerVault(binding = '', grant: BucketGrant = 'all') {
         }),
       list: (bucket: string) => read(grant, bucket),
       listAll: () =>
-        requireOwner(grant).pipe(
+        WholeInstallationGrant.pipe(
           Effect.andThen(() =>
             listRows().pipe(
               unavailable,

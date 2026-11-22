@@ -5,6 +5,7 @@ import {
   InvalidSecret,
   validateBucketPath,
   validateSecretPath,
+  WholeInstallationGrant,
 } from '@nook/contract';
 import { Effect } from 'effect';
 import { unavailable } from './http-errors.ts';
@@ -35,18 +36,23 @@ export const askFirstStore = Effect.gen(function* () {
   const sql = yield* D1Client.D1Client;
   return {
     list: () =>
-      sql<{
-        kind: 'bucket' | 'secret';
-        path: string;
-        exists: number;
-      }>`SELECT kind,path,CASE WHEN kind='bucket' THEN EXISTS(SELECT 1 FROM buckets WHERE buckets.path=a.path) ELSE EXISTS(SELECT 1 FROM secrets WHERE bucket || '/' || name=a.path) END AS "exists" FROM ask_first_marks a ORDER BY kind,path`.pipe(
-        unavailable,
-        Effect.map((rows) => ({
-          marks: rows.map((r) => ({ ...r, exists: !!r.exists })),
-        })),
+      WholeInstallationGrant.pipe(
+        Effect.andThen(
+          sql<{
+            kind: 'bucket' | 'secret';
+            path: string;
+            exists: number;
+          }>`SELECT kind,path,CASE WHEN kind='bucket' THEN EXISTS(SELECT 1 FROM buckets WHERE buckets.path=a.path) ELSE EXISTS(SELECT 1 FROM secrets WHERE bucket || '/' || name=a.path) END AS "exists" FROM ask_first_marks a ORDER BY kind,path`.pipe(
+            unavailable,
+            Effect.map((rows) => ({
+              marks: rows.map((r) => ({ ...r, exists: !!r.exists })),
+            })),
+          ),
+        ),
       ),
     put: (mark: AskFirstMark) =>
-      validateMark(mark).pipe(
+      WholeInstallationGrant.pipe(
+        Effect.andThen(validateMark(mark)),
         Effect.andThen(
           sql`INSERT OR IGNORE INTO ask_first_marks(kind,path) VALUES (${mark.kind},${mark.path})`.pipe(
             unavailable,
@@ -55,7 +61,8 @@ export const askFirstStore = Effect.gen(function* () {
         Effect.asVoid,
       ),
     remove: (mark: AskFirstMark) =>
-      validateMark(mark).pipe(
+      WholeInstallationGrant.pipe(
+        Effect.andThen(validateMark(mark)),
         Effect.andThen(
           sql`DELETE FROM ask_first_marks WHERE kind=${mark.kind} AND path=${mark.path}`.pipe(
             unavailable,
