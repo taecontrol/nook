@@ -25,6 +25,7 @@ import {
 import { Effect, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
 import { SqlSchema } from 'effect/sql';
+import { sha256 } from './digest.ts';
 import { unavailable } from './http-errors.ts';
 import { requireOwner } from './owner-request.ts';
 
@@ -136,16 +137,6 @@ function userCode() {
   }
   return formatUserCode(result);
 }
-export function hashCode(value: string) {
-  return Effect.promise(async () =>
-    Array.from(
-      new Uint8Array(
-        await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)),
-      ),
-      (byte) => byte.toString(16).padStart(2, '0'),
-    ).join(''),
-  );
-}
 function requirePending(
   row: RequestRow | undefined,
 ): Effect.Effect<RequestRow, NoMatchingRequest | Expired | AlreadyHandled> {
@@ -224,7 +215,7 @@ export const machineOperations = Effect.gen(function* () {
         authorization,
       )?.[1];
       if (!token) return yield* Effect.fail(new MachineUnauthorized({}));
-      const hash = yield* hashCode(token);
+      const hash = yield* Effect.promise(() => sha256(token));
       const [row] = yield* authenticateToken(hash).pipe(unavailable);
       if (!row) {
         const [expired] = yield* refusedExpiry(hash).pipe(unavailable);
@@ -283,7 +274,7 @@ export const machineOperations = Effect.gen(function* () {
       Effect.gen(function* () {
         const now = Date.now();
         const deviceCode = randomCode();
-        const hash = yield* hashCode(deviceCode);
+        const hash = yield* Effect.promise(() => sha256(deviceCode));
         const code = userCode();
         const [, inserted] = yield* sql
           .batch([
@@ -332,11 +323,11 @@ export const machineOperations = Effect.gen(function* () {
       ),
     poll: (deviceCode: string) =>
       Effect.gen(function* () {
-        const deviceHash = yield* hashCode(deviceCode);
+        const deviceHash = yield* Effect.promise(() => sha256(deviceCode));
         const [row] = yield* findDevice(deviceHash).pipe(unavailable);
         yield* pollState(row);
         const token = `nook_${randomCode()}`;
-        const tokenHash = yield* hashCode(token);
+        const tokenHash = yield* Effect.promise(() => sha256(token));
         const [inserted] = yield* sql
           .batch([
             sql<
