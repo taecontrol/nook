@@ -83,6 +83,7 @@ it('Change rechecks a request resolved in another session', async () => {
         { timeout: 5000 },
       )
       .toBe(1);
+    expect(await page.locator('form').count()).toBe(0);
     await expectFits(page);
   } finally {
     await close();

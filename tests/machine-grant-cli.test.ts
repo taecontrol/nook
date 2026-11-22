@@ -9,12 +9,7 @@ import {
   privateKeyring,
   readUserCode,
 } from './support/cli.ts';
-import {
-  approveGrant,
-  issueGrant,
-  machineMcp,
-  seedGrantTree,
-} from './support/grants.ts';
+import { approveGrant, machineMcp, seedGrantTree } from './support/grants.ts';
 import { saveAccess } from './support/machine-access.ts';
 import { machineProxy } from './support/machine-proxy.ts';
 import { expectPrivate, listMachines } from './support/machines.ts';
@@ -45,52 +40,37 @@ async function login(grant: BucketGrant) {
     ),
   ).toBe(true);
 }
-it('E19/E22: mcp-header emits exactly one JSON line from the private keyring, makes no server request and creates no plaintext file', async () => {
+it('E19/E22: mcp-header emits exactly one JSON line from the private keyring, makes zero HTTP requests and creates no plaintext file', async () => {
   await login(['me', 'work']);
   const token = await keyring.lookup(app.origin);
-  expect((await listMachines(app))[0].lastUsedAt).toBeNull();
-  const result = await keyring.start(['mcp-header']).done;
-  expect(result.status).toBe(0);
-  expect(result.stderr === '', 'Header diagnostics are empty').toBe(true);
-  expect(
-    result.stdout ===
-      `${JSON.stringify({ Authorization: `Bearer ${token}` })}\n`,
-    'Only one headers JSON line is emitted',
-  ).toBe(true);
-  expect((await listMachines(app))[0].lastUsedAt).toBeNull();
-  const headers = JSON.parse(result.stdout) as Record<string, string>;
-  expect(
-    (await machineMcp(app, undefined, '2026-07-28', headers).listTools()).tools,
-  ).toHaveLength(10);
-  expect(
-    await filesContain(keyring.home, token),
-    'No token is written under temporary HOME',
-  ).toBe(false);
-  await writeFile(
-    keyring.config,
-    JSON.stringify({ url: 'http://127.0.0.1:1' }),
-  );
-  expect(await keyring.store('http://127.0.0.1:1', token)).toBe(0);
-  const offline = await keyring.start(['mcp-header']).done;
-  expect(offline.status).toBe(0);
-  expect(
-    offline.stdout === result.stdout,
-    'Headers work without contacting the installation',
-  ).toBe(true);
-});
-it('E19: mcp-header makes zero HTTP requests, including unauthenticated requests whose errors could be ignored', async () => {
+  // Point the CLI at a counting proxy so even ignored unauthenticated
+  // requests would be observed.
   let requests = 0;
   const proxy = await machineProxy(app, () => {
     requests++;
     return undefined;
   });
   try {
-    const { token } = await issueGrant(app, ['work']);
-    expect(await keyring.store(proxy.origin, token)).toBe(0);
-    await mkdir(dirname(keyring.config), { recursive: true });
     await writeFile(keyring.config, JSON.stringify({ url: proxy.origin }));
-    expect((await keyring.start(['mcp-header']).done).status).toBe(0);
+    expect(await keyring.store(proxy.origin, token)).toBe(0);
+    const result = await keyring.start(['mcp-header']).done;
+    expect(result.status).toBe(0);
+    expect(result.stderr === '', 'Header diagnostics are empty').toBe(true);
+    expect(
+      result.stdout ===
+        `${JSON.stringify({ Authorization: `Bearer ${token}` })}\n`,
+      'Only one headers JSON line is emitted',
+    ).toBe(true);
     expect(requests).toBe(0);
+    const headers = JSON.parse(result.stdout) as Record<string, string>;
+    expect(
+      (await machineMcp(app, undefined, '2026-07-28', headers).listTools())
+        .tools,
+    ).toHaveLength(10);
+    expect(
+      await filesContain(keyring.home, token),
+      'No token is written under temporary HOME',
+    ).toBe(false);
   } finally {
     await proxy.close();
   }

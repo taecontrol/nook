@@ -62,6 +62,8 @@ export class InvalidBucketGrant extends Schema.Error<InvalidBucketGrant>(
   { _tag: Schema.tag('InvalidBucketGrant'), message: Schema.String },
   { httpApiStatus: 400 },
 ) {}
+export const grantBucketNotFoundMessage =
+  'Some selected buckets no longer exist. Choose again.';
 export class GrantBucketNotFound extends Schema.Error<GrantBucketNotFound>(
   'nook/GrantBucketNotFound',
 )(

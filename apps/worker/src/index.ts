@@ -226,40 +226,31 @@ export function handlerForPrincipal(
         ).fetch(request)
       : apiHandler(request);
 }
-let cached:
-  | {
-      email: string;
-      db: D1Database;
-      grant: BucketGrant;
-      vaultKey: string;
-      bindings: MemoryBindings;
-      handler: ReturnType<typeof handlerForPrincipal>;
-    }
-  | undefined;
-function handlerFor(
-  email: string,
-  db: D1Database,
-  grant: BucketGrant,
-  vaultKey = '',
-  bindings: MemoryBindings = {},
+function singleEntryCache<Keys extends readonly unknown[], Value>(
+  create: (keys: Keys, bindings: MemoryBindings) => Value,
+  scope: Parameters<typeof sameBindings>[2] = 'all',
 ) {
-  if (
-    cached?.email !== email ||
-    cached.db !== db ||
-    cached.grant !== grant ||
-    cached.vaultKey !== vaultKey ||
-    !sameBindings(cached.bindings, bindings)
-  )
-    cached = {
-      email,
-      db,
-      grant,
-      vaultKey,
-      bindings,
-      handler: handlerForPrincipal(email, db, grant, vaultKey, bindings),
-    };
-  return cached.handler;
+  let cached:
+    | { keys: Keys; bindings: MemoryBindings; value: Value }
+    | undefined;
+  return (keys: Keys, bindings: MemoryBindings = {}) => {
+    const previous = cached;
+    if (
+      previous &&
+      keys.every((key, index) => key === previous.keys[index]) &&
+      sameBindings(previous.bindings, bindings, scope)
+    )
+      return previous.value;
+    cached = { keys, bindings, value: create(keys, bindings) };
+    return cached.value;
+  };
 }
+const handlerFor = singleEntryCache(
+  (
+    [email, db, grant, vaultKey]: [string, D1Database, BucketGrant, string],
+    bindings,
+  ) => handlerForPrincipal(email, db, grant, vaultKey, bindings),
+);
 function foreignOrigin(request: Request, url: URL) {
   const origin = request.headers.get('Origin');
   return (
@@ -272,37 +263,18 @@ function foreignOrigin(request: Request, url: URL) {
 function knownRoute(path: string, method: string) {
   return path === '/mcp' || matches(ownerRoutes, method, path);
 }
-let machineRoutes:
-  | {
-      db: D1Database;
-      origin: string;
-      vaultKey: string;
-      files: FileBindings;
-      machine: ReturnType<typeof machineHandler>;
-      owner: ReturnType<typeof authorizationHandler>;
-    }
-  | undefined;
-function routesFor(
-  db: D1Database,
-  origin: string,
-  vaultKey = '',
-  files: FileBindings = {},
-) {
-  if (
-    machineRoutes?.db !== db ||
-    machineRoutes.origin !== origin ||
-    machineRoutes.vaultKey !== vaultKey ||
-    !sameBindings(machineRoutes.files, files, 'files')
-  )
-    machineRoutes = {
-      db,
-      origin,
-      vaultKey,
-      files,
-      machine: machineHandler(db, origin, vaultKey, files),
-      owner: authorizationHandler(db),
-    };
-  return machineRoutes;
+const routesFor = singleEntryCache(
+  ([db, origin, vaultKey]: [D1Database, string, string], files) => ({
+    machine: machineHandler(db, origin, vaultKey, files),
+    owner: authorizationHandler(db),
+  }),
+  'files',
+);
+function authFailure(status: 401 | 403) {
+  return Response.json(
+    { _tag: status === 401 ? 'Unauthorized' : 'Forbidden' },
+    { status },
+  );
 }
 function invalidCreation(message = 'Invalid secret creation request.') {
   return Response.json({ _tag: 'InvalidSecret', message }, { status: 400 });
@@ -342,7 +314,7 @@ async function machineApiResponse(
   const checked = creation ? await checkedCreation(request) : request;
   if (checked instanceof Response) return checked;
   return sanitized(
-    routesFor(db, url.origin, vaultKey, files).machine(checked),
+    routesFor([db, url.origin, vaultKey], files).machine(checked),
     creation,
   );
 }
@@ -355,8 +327,7 @@ async function machineRequest(
   ctx?: Pick<ExecutionContext, 'waitUntil'>,
 ) {
   if (url.pathname === '/api/machine/mcp') {
-    if (foreignOrigin(request, url))
-      return Response.json({ _tag: 'Forbidden' }, { status: 403 });
+    if (foreignOrigin(request, url)) return authFailure(403);
     return machineMcpHandler(db, request, {
       index: memoryIndex(bindings),
       waitUntil: ctx?.waitUntil.bind(ctx),
@@ -367,9 +338,8 @@ async function machineRequest(
     matches(tokenRoutes, request.method, url.pathname) &&
     !request.headers.has('Authorization')
   )
-    return Response.json({ _tag: 'Unauthorized' }, { status: 401 });
-  if (foreignOrigin(request, url))
-    return Response.json({ _tag: 'Forbidden' }, { status: 403 });
+    return authFailure(401);
+  if (foreignOrigin(request, url)) return authFailure(403);
   const response = await machineApiResponse(
     request,
     url,
@@ -398,23 +368,16 @@ async function ownerRequest(
         path: url.pathname,
       }),
     );
-    return Response.json(
-      { _tag: status === 401 ? 'Unauthorized' : 'Forbidden' },
-      { status },
-    );
+    return authFailure(status);
   }
-  if (foreignOrigin(request, url))
-    return Response.json({ _tag: 'Forbidden' }, { status: 403 });
+  if (foreignOrigin(request, url)) return authFailure(403);
   if (url.pathname.startsWith('/api/authorizations/'))
-    return sanitized(routesFor(env.DB, url.origin).owner(request));
+    return sanitized(routesFor([env.DB, url.origin, '']).owner(request));
   if (!knownRoute(url.pathname, request.method))
     return Response.json({ error: 'Not found' }, { status: 404 });
   const response = await sanitized(
     handlerFor(
-      identity.email,
-      env.DB,
-      identity.grant,
-      env.VAULT_KEY,
+      [identity.email, env.DB, identity.grant, env.VAULT_KEY ?? ''],
       env,
     )(request, ctx),
   );

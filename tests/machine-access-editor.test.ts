@@ -26,52 +26,6 @@ async function bounds(locator: Locator) {
   return box;
 }
 
-it('E17: keyboard focus intent preloads the checked editor without a pointer hover', async () => {
-  const visit = await accessPage(browser);
-  try {
-    const button = machineRow(visit.page, visit.machines[0].id).getByRole(
-      'button',
-      { name: /Edit access/ },
-    );
-    await button.waitFor();
-    await visit.page.waitForLoadState('networkidle');
-    expect(
-      visit.requests.filter((request) => request.path === '/api/buckets'),
-    ).toEqual([]);
-    expect(
-      visit.requests.filter((request) =>
-        /machine-access-sheet.*\.js$/.test(request.path),
-      ),
-    ).toEqual([]);
-    const responses = Promise.all([
-      visit.page.waitForResponse(
-        (response) => new URL(response.url()).pathname === '/api/buckets',
-      ),
-      visit.page.waitForResponse((response) =>
-        /machine-access-sheet.*\.js$/.test(new URL(response.url()).pathname),
-      ),
-    ]);
-    await button.focus();
-    expect((await responses).map((response) => response.status())).toEqual([
-      200, 200,
-    ]);
-    const count = visit.requests.length;
-    const sheet = await editAccess(visit.page, visit.machines[0]);
-    expect(
-      await sheet
-        .getByRole('checkbox', { name: 'work/acme', exact: true })
-        .isChecked(),
-    ).toBe(true);
-    expect(
-      visit.requests
-        .slice(count)
-        .filter((request) => request.path === '/api/buckets'),
-    ).toEqual([]);
-  } finally {
-    await visit.close();
-  }
-});
-
 it('E11/E16: phone machine actions stack vertically before opening the editor', async () => {
   const visit = await accessPage(browser, {
     viewport: { width: 390, height: 844 },

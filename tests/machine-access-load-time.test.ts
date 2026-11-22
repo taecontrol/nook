@@ -303,11 +303,14 @@ it('#100: a wait that times out while the measurement is pending fails with page
       await preload.promise;
       await route.abort().catch(() => {});
     });
+    // Long enough that the measurement is still pending when the wait times
+    // out, short enough that closing the page does not wait out the default.
     measurement = measureScreen(
       page,
       app.origin,
       '',
       'machineAccessNavigation',
+      { preloadTimeout: 5_000 },
     );
     void measurement.catch(() => {});
     const failure = await whileMeasuring(page, measurement, async () => {

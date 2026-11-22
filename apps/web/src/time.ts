@@ -3,6 +3,13 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 export const DAY = 24 * HOUR;
 
+export function timeoutDelay(delay: number) {
+  // Timers overflow at signed 32-bit milliseconds and fire immediately, which
+  // would expire a fresh request when the browser clock is far behind. Stay
+  // below that limit.
+  return Math.min(2 ** 31 - 2, Math.max(0, delay));
+}
+
 const dateFormat = new Intl.DateTimeFormat('en-US', {
   month: 'short',
   day: 'numeric',

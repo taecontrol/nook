@@ -334,7 +334,8 @@ it('malformed and overlong payloads return a fixed error without echoing a crede
     ['/api/machine/token', { deviceCode: { value: issued.token } }],
     [
       `/api/authorizations/${issued.userCode}/approve`,
-      { machineName: { value: issued.token } },
+      // A complete payload apart from the name, so only the name fails.
+      { machineName: { value: issued.token }, grant: 'all' },
     ],
   ] as const) {
     const response = await jsonRequest(app, path, payload);

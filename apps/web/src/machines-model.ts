@@ -63,7 +63,7 @@ export function approvedText(machine: Machine, now: number) {
   return `Approved ${recentTime(machine.approvedAt, now)}`;
 }
 
-export function expiryText(machine: Machine, now: number) {
+function expiryText(machine: Machine, now: number) {
   if (machine.expiresAt === null) return 'No expiration';
   return Date.parse(machine.expiresAt) - now < DAY
     ? `Expires ${untilText(machine.expiresAt, now)}`

@@ -281,47 +281,7 @@ it('E13/E14: missing, malformed, unknown, revoked, Access and synthetic-owner cr
   ).toBe(401);
   expect(await paths()).toEqual(before);
 });
-it('E15: all machine MCP methods reject foreign Origin before authentication or tools, accepting absent or own Origin', async () => {
-  const { token } = await issueGrant(app);
-  const before = await paths();
-  for (const origin of [undefined, app.origin])
-    expect(
-      (
-        await machineMcp(
-          app,
-          token,
-          '2026-07-28',
-          origin ? { Origin: origin } : {},
-        ).listTools()
-      ).tools,
-    ).toHaveLength(10);
-  for (const method of ['POST', 'GET', 'DELETE']) {
-    const response = await fetch(`${app.origin}/api/machine/mcp`, {
-      method,
-      headers: {
-        Origin: 'https://foreign.test',
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      ...(method === 'POST'
-        ? {
-            body: JSON.stringify({
-              jsonrpc: '2.0',
-              id: 1,
-              method: 'tools/call',
-              params: {
-                name: 'create_bucket',
-                arguments: { path: 'personal/attack' },
-              },
-            }),
-          }
-        : {}),
-    });
-    expect(response.status).toBe(403);
-  }
-  expect(await paths()).toEqual(before);
-});
-it('E15: foreign Origin runs no authentication statement for valid, unknown or absent credentials', async () => {
+it('E15: foreign Origin runs no authentication statement or tool for valid, unknown or absent credentials, while own Origin is accepted', async () => {
   const labels: string[] = [];
   const measured = await ownerRuntime(
     await checkpointRuntime(async (label) => {
@@ -355,6 +315,13 @@ it('E15: foreign Origin runs no authentication statement for valid, unknown or a
         expect((await listMachines(measured))[0].lastUsedAt).toBeNull();
       }
     }
+    expect(
+      (
+        await machineMcp(measured, token, '2026-07-28', {
+          Origin: measured.origin,
+        }).listTools()
+      ).tools,
+    ).toHaveLength(10);
   } finally {
     await measured.close();
   }

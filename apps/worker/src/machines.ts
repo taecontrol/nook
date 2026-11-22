@@ -7,6 +7,7 @@ import {
   Expired,
   formatUserCode,
   GrantBucketNotFound,
+  grantBucketNotFoundMessage,
   InvalidBucketGrant,
   InvalidMachineName,
   MachineAccessChanged,
@@ -24,6 +25,7 @@ import {
 import { Effect, Schema } from 'effect';
 import { HttpApiError } from 'effect/http-api';
 import { SqlSchema } from 'effect/sql';
+import { sha256 } from './digest.ts';
 import { unavailable } from './http-errors.ts';
 import { requireOwner } from './owner-request.ts';
 
@@ -85,6 +87,9 @@ function decodeGrant(value: unknown) {
     ),
   );
 }
+function selectedBucketsExist(sql: D1Client.D1Client, json: string) {
+  return sql`(${json}='"all"' OR NOT EXISTS (SELECT 1 FROM json_each(${json}) root WHERE NOT EXISTS (SELECT 1 FROM buckets WHERE path=root.value)))`;
+}
 function savedGrant(
   updated: readonly unknown[],
   remaining: readonly unknown[],
@@ -104,7 +109,7 @@ function savedGrant(
     if (!current.selected_exist)
       return yield* Effect.fail(
         new GrantBucketNotFound({
-          message: 'Some selected buckets no longer exist. Choose again.',
+          message: grantBucketNotFoundMessage,
         }),
       );
     return yield* Effect.fail(
@@ -112,7 +117,7 @@ function savedGrant(
     );
   });
 }
-export function randomCode() {
+function randomCode() {
   return btoa(
     String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))),
   )
@@ -131,16 +136,6 @@ function userCode() {
     }
   }
   return formatUserCode(result);
-}
-export function hashCode(value: string) {
-  return Effect.promise(async () =>
-    Array.from(
-      new Uint8Array(
-        await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)),
-      ),
-      (byte) => byte.toString(16).padStart(2, '0'),
-    ).join(''),
-  );
 }
 function requirePending(
   row: RequestRow | undefined,
@@ -173,6 +168,12 @@ function identity(row: typeof TokenRow.Type) {
 }
 export const machineOperations = Effect.gen(function* () {
   const sql = yield* D1Client.D1Client;
+  const tokenColumns = sql.csv(
+    Object.keys(TokenRow.fields).map((column) => sql`${sql(column)}`),
+  );
+  const machineColumns = sql.csv(
+    Object.keys(MachineRow.fields).map((column) => sql`${sql(column)}`),
+  );
   const findCode = SqlSchema.findAll({
     Request: Schema.String,
     Result: RequestRow,
@@ -189,7 +190,7 @@ export const machineOperations = Effect.gen(function* () {
     Request: Schema.String,
     Result: TokenRow,
     execute: (hash) =>
-      sql`UPDATE machine_tokens SET last_used_at=unixepoch('subsec')*1000 WHERE token_hash=${hash} RETURNING id, token_hash, machine_name, grant_json, access_expires_at`,
+      sql`UPDATE machine_tokens SET last_used_at=unixepoch('subsec')*1000 WHERE token_hash=${hash} RETURNING ${tokenColumns}`,
   });
   const refusedExpiry = SqlSchema.findAll({
     Request: Schema.String,
@@ -201,7 +202,7 @@ export const machineOperations = Effect.gen(function* () {
     Request: Schema.Void,
     Result: MachineRow,
     execute: () =>
-      sql`SELECT id, machine_name, grant_json, created_at, last_used_at, access_expires_at FROM machine_tokens ORDER BY created_at, id`,
+      sql`SELECT ${machineColumns} FROM machine_tokens ORDER BY created_at, id`,
   });
   const lookup = (code: string) =>
     findCode(code).pipe(
@@ -214,7 +215,7 @@ export const machineOperations = Effect.gen(function* () {
         authorization,
       )?.[1];
       if (!token) return yield* Effect.fail(new MachineUnauthorized({}));
-      const hash = yield* hashCode(token);
+      const hash = yield* Effect.promise(() => sha256(token));
       const [row] = yield* authenticateToken(hash).pipe(unavailable);
       if (!row) {
         const [expired] = yield* refusedExpiry(hash).pipe(unavailable);
@@ -228,6 +229,18 @@ export const machineOperations = Effect.gen(function* () {
       }
       return row;
     });
+  const authenticate = (authorization: string) =>
+    authenticated(authorization).pipe(
+      Effect.flatMap((row) =>
+        identity(row).pipe(
+          Effect.map((result) => ({
+            ...result,
+            id: row.id,
+            grantJson: row.grant_json,
+          })),
+        ),
+      ),
+    );
   const handle = (
     code: string,
     status: 'approved' | 'denied',
@@ -243,7 +256,7 @@ export const machineOperations = Effect.gen(function* () {
       // Validate existence at the same atomic boundary that records the decision.
       const [updated, remaining] = yield* sql
         .batch([
-          sql`UPDATE authorizations SET status=${status}, machine_name=${name}, grant_json=${grantJson}, access_expires_at=CASE WHEN ${duration} IS NULL THEN NULL ELSE CAST(unixepoch('subsec')*1000 AS INTEGER)+${duration} END WHERE device_hash=${row.device_hash} AND status='pending' AND expires_at>unixepoch('subsec')*1000 AND (${chosenJson}='"all"' OR NOT EXISTS (SELECT 1 FROM json_each(${chosenJson}) root WHERE NOT EXISTS (SELECT 1 FROM buckets WHERE path=root.value))) RETURNING device_hash`,
+          sql`UPDATE authorizations SET status=${status}, machine_name=${name}, grant_json=${grantJson}, access_expires_at=CASE WHEN ${duration} IS NULL THEN NULL ELSE CAST(unixepoch('subsec')*1000 AS INTEGER)+${duration} END WHERE device_hash=${row.device_hash} AND status='pending' AND expires_at>unixepoch('subsec')*1000 AND ${selectedBucketsExist(sql, chosenJson)} RETURNING device_hash`,
           sql<RequestRow>`SELECT * FROM authorizations WHERE device_hash=${row.device_hash}`,
         ])
         .pipe(unavailable);
@@ -251,7 +264,7 @@ export const machineOperations = Effect.gen(function* () {
         yield* requirePending(remaining[0]);
         return yield* Effect.fail(
           new GrantBucketNotFound({
-            message: 'Some selected buckets no longer exist. Choose again.',
+            message: grantBucketNotFoundMessage,
           }),
         );
       }
@@ -261,7 +274,7 @@ export const machineOperations = Effect.gen(function* () {
       Effect.gen(function* () {
         const now = Date.now();
         const deviceCode = randomCode();
-        const hash = yield* hashCode(deviceCode);
+        const hash = yield* Effect.promise(() => sha256(deviceCode));
         const code = userCode();
         const [, inserted] = yield* sql
           .batch([
@@ -310,16 +323,16 @@ export const machineOperations = Effect.gen(function* () {
       ),
     poll: (deviceCode: string) =>
       Effect.gen(function* () {
-        const deviceHash = yield* hashCode(deviceCode);
+        const deviceHash = yield* Effect.promise(() => sha256(deviceCode));
         const [row] = yield* findDevice(deviceHash).pipe(unavailable);
         yield* pollState(row);
         const token = `nook_${randomCode()}`;
-        const tokenHash = yield* hashCode(token);
+        const tokenHash = yield* Effect.promise(() => sha256(token));
         const [inserted] = yield* sql
           .batch([
             sql<
               typeof TokenRow.Type
-            >`INSERT INTO machine_tokens(token_hash, machine_name, grant_json, created_at, id, access_expires_at) SELECT ${tokenHash}, machine_name, grant_json, ${Date.now()}, ${crypto.randomUUID()}, access_expires_at FROM authorizations WHERE device_hash=${deviceHash} AND status='approved' AND expires_at>unixepoch('subsec')*1000 RETURNING id, token_hash, machine_name, grant_json, access_expires_at`,
+            >`INSERT INTO machine_tokens(token_hash, machine_name, grant_json, created_at, id, access_expires_at) SELECT ${tokenHash}, machine_name, grant_json, ${Date.now()}, ${crypto.randomUUID()}, access_expires_at FROM authorizations WHERE device_hash=${deviceHash} AND status='approved' AND expires_at>unixepoch('subsec')*1000 RETURNING ${tokenColumns}`,
             sql`DELETE FROM authorizations WHERE device_hash=${deviceHash} AND EXISTS (SELECT 1 FROM machine_tokens WHERE token_hash=${tokenHash})`,
           ])
           .pipe(unavailable);
@@ -357,8 +370,8 @@ export const machineOperations = Effect.gen(function* () {
         // share one atomic boundary, including retries after a committed save.
         const [updated, remaining] = yield* sql
           .batch([
-            sql`UPDATE machine_tokens SET grant_json=${nextJson} WHERE id=${id} AND (grant_json=${priorJson} OR grant_json=${nextJson}) AND (${selectedJson}='"all"' OR NOT EXISTS (SELECT 1 FROM json_each(${selectedJson}) root WHERE NOT EXISTS (SELECT 1 FROM buckets WHERE path=root.value))) RETURNING id, machine_name, grant_json, created_at, last_used_at, access_expires_at`,
-            sql`SELECT id, machine_name, grant_json, created_at, last_used_at, access_expires_at, (${selectedJson}='"all"' OR NOT EXISTS (SELECT 1 FROM json_each(${selectedJson}) root WHERE NOT EXISTS (SELECT 1 FROM buckets WHERE path=root.value))) AS selected_exist FROM machine_tokens WHERE id=${id}`,
+            sql`UPDATE machine_tokens SET grant_json=${nextJson} WHERE id=${id} AND (grant_json=${priorJson} OR grant_json=${nextJson}) AND ${selectedBucketsExist(sql, selectedJson)} RETURNING ${machineColumns}`,
+            sql`SELECT ${machineColumns}, ${selectedBucketsExist(sql, selectedJson)} AS selected_exist FROM machine_tokens WHERE id=${id}`,
           ])
           .pipe(unavailable);
         return yield* savedGrant(updated, remaining);
@@ -370,20 +383,15 @@ export const machineOperations = Effect.gen(function* () {
           .batch([sql`DELETE FROM machine_tokens WHERE id=${id}`])
           .pipe(unavailable);
       }),
-    forAudit: (authorization: string) =>
-      authenticated(authorization).pipe(
-        Effect.flatMap((row) =>
-          identity(row).pipe(
-            Effect.map((result) => ({
-              ...result,
-              id: row.id,
-              grantJson: row.grant_json,
-            })),
-          ),
-        ),
-      ),
+    authenticate,
     whoami: (authorization: string) =>
-      authenticated(authorization).pipe(Effect.flatMap(identity)),
+      authenticate(authorization).pipe(
+        Effect.map(({ machine, grant, expiresAt }) => ({
+          machine,
+          grant,
+          expiresAt,
+        })),
+      ),
     logout: (authorization: string) =>
       authenticated(authorization).pipe(
         Effect.flatMap((row) =>

@@ -257,6 +257,11 @@ it.each(
       await bucketCheck(page, 'me').waitFor();
       expect(await bucketCheck(page, 'me').isChecked()).toBe(true);
       expect(await bucketCheck(page, 'All buckets').isChecked()).toBe(false);
+      // The request event is asynchronous, so check again after later round trips.
+      expect(
+        approvals,
+        'Enter while buckets were unready sent nothing',
+      ).toEqual([]);
     } finally {
       release();
       await close();
@@ -320,38 +325,6 @@ it.each(viewports)(
     }
   },
 );
-it('E5: a deleted choice leaves approval pending and asks the owner to choose again from a refreshed tree', async () => {
-  const { page, app, reveal, approvals, close } = await grantPage(browser);
-  try {
-    await reveal();
-    await selectDeep(page);
-    await (await app.mf.getD1Database('DB'))
-      .prepare("DELETE FROM buckets WHERE path LIKE 'work/acme%'")
-      .run();
-    await page.getByRole('button', { name: 'Approve', exact: true }).click();
-    await page.getByText(/selected buckets.*choose again/i).waitFor();
-    await expect.poll(() => bucketCheck(page, 'work/acme').count()).toBe(0);
-    expect(
-      (
-        await (
-          await app.mf.getD1Database('DB')
-        )
-          .prepare('SELECT status FROM authorizations')
-          .first()
-      )?.status,
-    ).toBe('pending');
-    await bucketCheck(page, 'work').check();
-    await page.getByRole('button', { name: 'Approve', exact: true }).click();
-    await page.getByRole('heading', { name: 'Machine approved' }).waitFor();
-    expect(approvals.at(-1)).toEqual({
-      machineName: 'omarchy',
-      lifetime: '30d',
-      grant: ['work'],
-    });
-  } finally {
-    await close();
-  }
-});
 it('E16/E17/E31: Machines shows grants and MCP last use, wraps long roots on a phone, and revocation denies the next call', async () => {
   const { page, app, close } = await grantPage(browser, {
     viewport: { width: 390, height: 844 },

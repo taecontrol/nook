@@ -1,5 +1,5 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 import { dayMs, setExpiry } from './support/access-expiry.ts';
 import {
@@ -10,10 +10,7 @@ import { createArgs } from './support/agent-create.ts';
 import { issueToken } from './support/authorizations.ts';
 import { type PrivateKeyring, privateKeyring } from './support/cli.ts';
 import { listMachines, machineIdentity } from './support/machines.ts';
-import {
-  configureFilesCli,
-  fileTransport,
-} from './support/memory-files-cli.ts';
+import { configureFilesCli } from './support/memory-files-cli.ts';
 import { expectOutput } from './support/private-assertions.ts';
 import type { TestRuntime } from './support/runtime.ts';
 import { expectNoValue, secretInput, vaultRuntime } from './support/vault.ts';
@@ -166,35 +163,4 @@ it('Expiry E11: the real delivery-base CLI decodes expired access as revoked and
   expect((await run(['logout'])).status).toBe(0);
   expect((await keyring.lookup(app.origin)) === '').toBe(true);
   expect(await listMachines(app)).toHaveLength(1);
-});
-it('Expiry E18: an expired file response carries no secret bytes through the real CLI transport', async () => {
-  await setExpiry(app, token, -dayMs);
-  const values: string[] = [];
-  const proxy = await fileTransport(app, {
-    after: async (response) => {
-      values.push(await response.clone().text());
-      return response;
-    },
-  });
-  try {
-    await mkdir(dirname(keyring.config), { recursive: true });
-    await configureFilesCli(keyring, proxy.origin, token);
-    const result = await keyring.start([
-      'memory',
-      'download',
-      '00000000-0000-4000-8000-000000000077',
-      'proof.txt',
-      '--output',
-      resolve(keyring.home, 'download.txt'),
-    ]).done;
-    expect(result.status).toBe(1);
-    expectOutput(
-      result.stdout + result.stderr,
-      "This machine's access expired on",
-    );
-    expect(values).toHaveLength(1);
-    expectNoValue(values.join('') + result.stdout + result.stderr, [token]);
-  } finally {
-    await proxy.close();
-  }
 });

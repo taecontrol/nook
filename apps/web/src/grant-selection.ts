@@ -1,5 +1,6 @@
 import {
   type BucketGrant,
+  grantBucketNotFoundMessage,
   normalizeGrant,
   RESERVED_BUCKET,
 } from '@nook/contract';
@@ -64,7 +65,7 @@ export function useGrantSelection(initial: BucketGrant = [RESERVED_BUCKET]) {
       change([RESERVED_BUCKET]);
     },
     missing: async () => {
-      setError('Some selected buckets no longer exist. Choose again.');
+      setError(grantBucketNotFoundMessage);
       await refresh();
     },
   };

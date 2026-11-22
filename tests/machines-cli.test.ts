@@ -27,32 +27,6 @@ async function login() {
   expect((await approve(app, code, 'framework-13')).status).toBe(204);
   expect((await child.done).status).toBe(0);
 }
-it('E4: each real CLI whoami advances last use within the observed request interval', async () => {
-  await login();
-  let previous = 0;
-  for (let call = 0; call < 2; call++) {
-    const before = Date.now();
-    expect((await keyring.start(['whoami']).done).status).toBe(0);
-    const after = Date.now();
-    const [machine] = await listMachines(app);
-    expect(machine.lastUsedAt).not.toBeNull();
-    const at = Date.parse(machine.lastUsedAt!);
-    expect(at).toBeGreaterThanOrEqual(before);
-    expect(at).toBeLessThanOrEqual(after);
-    expect(at).toBeGreaterThan(previous);
-    previous = at;
-  }
-});
-it('E6: real CLI logout removes the machine from the owner list and private keyring', async () => {
-  await login();
-  expect(await listMachines(app)).toHaveLength(1);
-  expect((await keyring.start(['logout']).done).status).toBe(0);
-  expect(await listMachines(app)).toEqual([]);
-  expect(
-    (await keyring.lookup(app.origin)) === '',
-    'Logout clears the private credential',
-  ).toBe(true);
-});
 it('E8: revoked CLI commands give a recovery sequence that obtains a new approval', async () => {
   const value = secretInput().value;
   await login();

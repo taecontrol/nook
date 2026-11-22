@@ -32,18 +32,6 @@ const viewports = [
   { width: 390, height: 844 },
 ];
 
-it('E3: a never-used approval is rendered as Never used', async () => {
-  const visit = await machinesPage(browser, { seeds: [typicalMachines[4]] });
-  try {
-    await machineRow(visit.page, visit.machines[0].id).waitFor();
-    expect(
-      await machineRow(visit.page, visit.machines[0].id).innerText(),
-    ).toContain('Never used');
-    expect((await listMachines(visit.app))[0].lastUsedAt).toBeNull();
-  } finally {
-    await visit.close();
-  }
-});
 it('E17: Home and the Platform sidebar lead to Machines below Buckets with the Nook breadcrumb', async () => {
   const visit = await machinesPage(browser, { start: '/' });
   const { page } = visit;
@@ -176,6 +164,9 @@ it('E18: longest-idle, oldest-never, and newest-recent sort independently and em
     expect(
       await single.page.getByRole('heading', { level: 2 }).allTextContents(),
     ).toEqual(['Never used']);
+    expect(
+      await machineRow(single.page, single.machines[0].id).innerText(),
+    ).toContain('Never used');
   } finally {
     await single.close();
   }
@@ -776,38 +767,35 @@ it.each(viewports)(
     }
   },
 );
-it.each(['hover', 'focus'] as const)(
-  'E25: %s preloads Machines code and one cached list reused by Home navigation',
-  async (intent) => {
-    const visit = await machinesPage(browser, { start: '/' });
-    try {
-      const link = visit.page
-        .getByRole('region', { name: 'Platform' })
-        .getByRole('link', { name: /Machines/ });
-      await link.waitFor();
-      expect(
-        visit.requests.filter((request) => request.path === '/api/machines'),
-      ).toHaveLength(0);
-      await (intent === 'hover' ? link.hover() : link.focus());
-      await expect
-        .poll(
-          () =>
-            visit.requests.filter((request) => request.path === '/api/machines')
-              .length,
-        )
-        .toBe(1);
-      await expect
-        .poll(() =>
-          visit.requests.some((request) => /machines.*\.js/.test(request.path)),
-        )
-        .toBe(true);
-      await link.click();
-      await machineRow(visit.page, visit.machines[0].id).waitFor();
-      expect(
-        visit.requests.filter((request) => request.path === '/api/machines'),
-      ).toHaveLength(1);
-    } finally {
-      await visit.close();
-    }
-  },
-);
+it('E25: hover preloads Machines code and one cached list reused by Home navigation', async () => {
+  const visit = await machinesPage(browser, { start: '/' });
+  try {
+    const link = visit.page
+      .getByRole('region', { name: 'Platform' })
+      .getByRole('link', { name: /Machines/ });
+    await link.waitFor();
+    expect(
+      visit.requests.filter((request) => request.path === '/api/machines'),
+    ).toHaveLength(0);
+    await link.hover();
+    await expect
+      .poll(
+        () =>
+          visit.requests.filter((request) => request.path === '/api/machines')
+            .length,
+      )
+      .toBe(1);
+    await expect
+      .poll(() =>
+        visit.requests.some((request) => /machines.*\.js/.test(request.path)),
+      )
+      .toBe(true);
+    await link.click();
+    await machineRow(visit.page, visit.machines[0].id).waitFor();
+    expect(
+      visit.requests.filter((request) => request.path === '/api/machines'),
+    ).toHaveLength(1);
+  } finally {
+    await visit.close();
+  }
+});

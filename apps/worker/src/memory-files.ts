@@ -21,6 +21,7 @@ import { Effect } from 'effect';
 import { HttpApiError } from 'effect/http-api';
 import type { Fragment } from 'effect/sql/Statement';
 import { type FileActor, fileAuditInsert } from './audit.ts';
+import { sha256 } from './digest.ts';
 import { type FileBindings, fileNow, fileObjects } from './file-objects.ts';
 import { unavailable } from './http-errors.ts';
 import { bucketFor, memoryNotFound } from './memory-access.ts';
@@ -270,15 +271,7 @@ export const memoryFiles = (grant: BucketGrant, bindings: FileBindings = {}) =>
           const startedAt = fileNow(bindings);
           yield* validUpload(input);
           const bucket = yield* authorize(input.id, true);
-          const hash = yield* Effect.promise(async () => {
-            const digest = await crypto.subtle.digest(
-              'SHA-256',
-              input.bytes as Uint8Array<ArrayBuffer>,
-            );
-            return Array.from(new Uint8Array(digest), (b) =>
-              b.toString(16).padStart(2, '0'),
-            ).join('');
-          });
+          const hash = yield* Effect.promise(() => sha256(input.bytes));
           const pre = (yield* state(input.id, bucket, input.name).pipe(
             unavailable,
           ))[0];

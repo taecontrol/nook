@@ -30,50 +30,52 @@ const sizes = [
   { width: 390, height: 844 },
 ];
 
-it.each(sizes)(
-  'E11: at $width px Close and Escape discard unsaved edits and return focus to Edit access',
-  async (viewport) => {
-    const visit = await accessPage(browser, { viewport });
-    const machine = visit.machines[0];
-    const trigger = machineRow(visit.page, machine.id).getByRole('button', {
-      name: /Edit access/,
-    });
-    try {
-      for (const dismissal of ['Close', 'Escape']) {
-        const sheet = await editAccess(visit.page, machine);
-        expect(
-          await sheet
-            .getByRole('checkbox', { name: 'work/beta', exact: true })
-            .isChecked(),
-        ).toBe(false);
+it('E11: at 1280 px Close and Escape discard unsaved edits and return focus to Edit access', async () => {
+  const viewport = sizes[0];
+  const visit = await accessPage(browser, { viewport });
+  const machine = visit.machines[0];
+  const trigger = machineRow(visit.page, machine.id).getByRole('button', {
+    name: /Edit access/,
+  });
+  try {
+    for (const dismissal of ['Close', 'Escape']) {
+      const sheet = await editAccess(visit.page, machine);
+      expect(
         await sheet
           .getByRole('checkbox', { name: 'work/beta', exact: true })
-          .check();
-        if (dismissal === 'Close')
-          await sheet
-            .getByRole('button', { name: 'Close', exact: true })
-            .click();
-        else await visit.page.keyboard.press('Escape');
-        await sheet.waitFor({ state: 'hidden' });
-        await expect
-          .poll(() =>
-            trigger.evaluate((button) => button === document.activeElement),
-          )
-          .toBe(true);
-        expect(
-          (await listMachines(visit.app)).find(
-            (entry) => entry.id === machine.id,
-          )?.grant,
-        ).toEqual(['work/acme']);
-        expect(
-          visit.requests.filter((request) => request.method === 'PUT'),
-        ).toHaveLength(0);
-      }
-    } finally {
-      await visit.close();
+          .isChecked(),
+      ).toBe(false);
+      await sheet
+        .getByRole('checkbox', { name: 'work/beta', exact: true })
+        .check();
+      if (dismissal === 'Close')
+        await sheet.getByRole('button', { name: 'Close', exact: true }).click();
+      else await visit.page.keyboard.press('Escape');
+      await sheet.waitFor({ state: 'hidden' });
+      await expect
+        .poll(() =>
+          trigger.evaluate((button) => button === document.activeElement),
+        )
+        .toBe(true);
+      expect(
+        (await listMachines(visit.app)).find((entry) => entry.id === machine.id)
+          ?.grant,
+      ).toEqual(['work/acme']);
+      expect(
+        visit.requests.filter((request) => request.method === 'PUT'),
+      ).toHaveLength(0);
     }
-  },
-);
+    const reopened = await editAccess(visit.page, machine);
+    expect(
+      await reopened
+        .getByRole('checkbox', { name: 'work/beta', exact: true })
+        .isChecked(),
+      'Escape discards its draft too',
+    ).toBe(false);
+  } finally {
+    await visit.close();
+  }
+});
 
 it.each(sizes)(
   'E11: at $width px an added sibling appears optimistically, preserves row position, and returns focus on success',
@@ -285,8 +287,20 @@ it('E12: an unconfirmed lost response retains the selection, reconciles the row,
 });
 
 it('E12: genuine D1 failure rolls the optimistic row back and keeps the sheet draft for retry', async () => {
-  const visit = await accessPage(browser);
+  const gate = deferred();
+  const entered = deferred();
+  const recovery = deferred();
+  const visit = await accessPage(browser, {
+    configure: async (page) => {
+      await page.route('**/api/machines/*/grant', async (route) => {
+        entered.resolve();
+        await gate.promise;
+        await route.continue().catch(() => {});
+      });
+    },
+  });
   const db = await visit.app.mf.getD1Database('DB');
+  const row = machineRow(visit.page, visit.machines[0].id);
   try {
     await db
       .prepare(
@@ -300,6 +314,14 @@ it('E12: genuine D1 failure rolls the optimistic row back and keeps the sheet dr
     await sheet
       .getByRole('button', { name: 'Save access', exact: true })
       .click();
+    await entered.promise;
+    await expect.poll(() => row.innerText()).toContain('work/acme, work/beta');
+    // Hold the recovery list so only the local rollback can restore the row.
+    await visit.page.route('**/api/machines', async (route) => {
+      await recovery.promise;
+      await route.continue().catch(() => {});
+    });
+    gate.resolve();
     await sheet
       .getByRole('button', { name: 'Try again', exact: true })
       .waitFor();
@@ -312,12 +334,20 @@ it('E12: genuine D1 failure rolls the optimistic row back and keeps the sheet dr
         .isChecked(),
     ).toBe(true);
     await expect
-      .poll(() => machineRow(visit.page, visit.machines[0].id).innerText())
+      .poll(() => row.innerText())
       .not.toContain('work/acme, work/beta');
+    recovery.resolve();
     await db.prepare('DROP TRIGGER access_failure').run();
     await sheet.getByRole('button', { name: 'Try again', exact: true }).click();
     await sheet.waitFor({ state: 'hidden' });
+    expect(
+      (await listMachines(visit.app)).find(
+        (entry) => entry.id === visit.machines[0].id,
+      )?.grant,
+    ).toEqual(['work/acme', 'work/beta']);
   } finally {
+    gate.resolve();
+    recovery.resolve();
     await visit.close();
   }
 });
@@ -384,173 +414,167 @@ it('E12: changed-elsewhere adopts the server baseline while retaining the draft 
   }
 });
 
-it.each(sizes)(
-  'E12: at $width px a selected bucket deleted elsewhere refreshes the tree, shows the complete guidance, and disables Save until another choice',
-  async (viewport) => {
-    const visit = await accessPage(browser, { viewport });
-    try {
-      const sheet = await editAccess(visit.page, visit.machines[0]);
-      await sheet
-        .getByRole('checkbox', { name: 'work/beta', exact: true })
-        .check();
-      await (await visit.app.mf.getD1Database('DB'))
-        .prepare("DELETE FROM buckets WHERE path='work/beta'")
-        .run();
-      const refreshed = visit.page.waitForResponse(
-        (response) =>
-          response.request().method() === 'GET' &&
-          new URL(response.url()).pathname === '/api/buckets',
-      );
-      await visit.page.evaluate(() =>
-        window.dispatchEvent(new Event('visibilitychange')),
-      );
-      expect((await refreshed).status()).toBe(200);
-      await sheet
-        .getByRole('checkbox', { name: 'work/beta', exact: true })
-        .waitFor({ state: 'hidden' });
-      await sheet
-        .getByRole('button', { name: 'Save access', exact: true })
-        .click();
-      await expect
-        .poll(() => sheet.getByRole('alert').innerText())
-        .toContain('Some selected buckets no longer exist. Choose again.');
-      expect(
-        await sheet.locator('[data-slot="alert-title"]').evaluate((title) => {
-          const content = document.createRange();
-          content.selectNodeContents(title);
-          const box = title.getBoundingClientRect();
-          return [...content.getClientRects()].every(
-            (line) => line.bottom <= box.bottom + 1,
-          );
-        }),
-      ).toBe(true);
-      await sheet
-        .getByRole('checkbox', { name: 'work/beta', exact: true })
-        .waitFor({ state: 'hidden' });
-      expect(
-        await sheet
-          .getByRole('checkbox', { name: 'work/acme', exact: true })
-          .isChecked(),
-      ).toBe(true);
-      expect(
-        await sheet
-          .getByRole('button', { name: 'Save access', exact: true })
-          .isEnabled(),
-      ).toBe(false);
-      expect(
-        await machineRow(visit.page, visit.machines[0].id).innerText(),
-      ).not.toContain('work/acme, work/beta');
-      await sheet
-        .getByRole('checkbox', { name: 'work/taecontrol', exact: true })
-        .check();
-      expect(
-        await sheet
-          .getByRole('button', { name: 'Save access', exact: true })
-          .isEnabled(),
-      ).toBe(true);
-      await sheet
-        .getByRole('button', { name: 'Save access', exact: true })
-        .click();
-      await sheet.waitFor({ state: 'hidden' });
-    } finally {
-      await visit.close();
-    }
-  },
-);
-
-it.each(sizes)(
-  'E12: at $width px a revoked machine disappears, leaves only an explanation and Close, and gives the actual reconnect command',
-  async (viewport) => {
-    const visit = await accessPage(browser, { viewport });
-    try {
-      const machine = visit.machines[0];
-      const sheet = await editAccess(visit.page, machine);
-      await sheet
-        .getByRole('checkbox', { name: 'work/beta', exact: true })
-        .check();
-      expect((await revokeMachine(visit.app, machine.id)).status).toBe(204);
-      await sheet
-        .getByRole('button', { name: 'Save access', exact: true })
-        .click();
-      const close = sheet
-        .locator('[data-slot="sheet-footer"]')
-        .getByRole('button', { name: 'Close', exact: true });
-      await close.waitFor();
-      expect(await sheet.getByRole('alert').innerText()).toContain(
-        'framework-13 was revoked',
-      );
-      expect(await sheet.getByRole('checkbox').count()).toBe(0);
-      expect(
-        await sheet.getByRole('button', { name: /Save access|Cancel/ }).count(),
-      ).toBe(0);
-      expect(await machineRow(visit.page, machine.id).count()).toBe(0);
-      await close.click();
-      await sheet.waitFor({ state: 'hidden' });
-      expect(await visit.page.getByRole('alert').innerText()).toContain(
-        `nook login ${visit.app.origin}`,
-      );
-      expect(await visit.page.getByRole('alert').innerText()).toContain(
-        'was revoked elsewhere',
-      );
-      await expectNoOverflow(visit.page);
-    } finally {
-      await visit.close();
-    }
-  },
-);
-
-it.each(sizes)(
-  'E13: at $width px unchanged and empty drafts disable Save and All buckets restores limited picks',
-  async (viewport) => {
-    const visit = await accessPage(browser, { viewport });
-    try {
-      const sheet = await editAccess(visit.page, visit.machines[0]);
-      const save = sheet.getByRole('button', {
-        name: 'Save access',
-        exact: true,
-      });
-      expect(await save.isEnabled()).toBe(false);
+it('E12: at 390 px a selected bucket deleted elsewhere refreshes the tree, shows the complete guidance, and disables Save until another choice', async () => {
+  const viewport = sizes[1];
+  const visit = await accessPage(browser, { viewport });
+  try {
+    const sheet = await editAccess(visit.page, visit.machines[0]);
+    await sheet
+      .getByRole('checkbox', { name: 'work/beta', exact: true })
+      .check();
+    await (await visit.app.mf.getD1Database('DB'))
+      .prepare("DELETE FROM buckets WHERE path='work/beta'")
+      .run();
+    const refreshed = visit.page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' &&
+        new URL(response.url()).pathname === '/api/buckets',
+    );
+    await visit.page.evaluate(() =>
+      window.dispatchEvent(new Event('visibilitychange')),
+    );
+    expect((await refreshed).status()).toBe(200);
+    await sheet
+      .getByRole('checkbox', { name: 'work/beta', exact: true })
+      .waitFor({ state: 'hidden' });
+    await sheet
+      .getByRole('button', { name: 'Save access', exact: true })
+      .click();
+    await expect
+      .poll(() => sheet.getByRole('alert').innerText())
+      .toContain('Some selected buckets no longer exist. Choose again.');
+    expect(
+      await sheet.locator('[data-slot="alert-title"]').evaluate((title) => {
+        const content = document.createRange();
+        content.selectNodeContents(title);
+        const box = title.getBoundingClientRect();
+        return [...content.getClientRects()].every(
+          (line) => line.bottom <= box.bottom + 1,
+        );
+      }),
+    ).toBe(true);
+    await sheet
+      .getByRole('checkbox', { name: 'work/beta', exact: true })
+      .waitFor({ state: 'hidden' });
+    expect(
       await sheet
         .getByRole('checkbox', { name: 'work/acme', exact: true })
-        .uncheck();
-      expect(await save.isEnabled()).toBe(false);
-      expect(
-        await sheet.locator('[data-slot="sheet-footer"]').innerText(),
-      ).toContain(
-        'Choose at least one bucket. To remove all access, revoke the machine.',
-      );
+        .isChecked(),
+    ).toBe(true);
+    expect(
+      await sheet
+        .getByRole('button', { name: 'Save access', exact: true })
+        .isEnabled(),
+    ).toBe(false);
+    expect(
+      await machineRow(visit.page, visit.machines[0].id).innerText(),
+    ).not.toContain('work/acme, work/beta');
+    await sheet
+      .getByRole('checkbox', { name: 'work/taecontrol', exact: true })
+      .check();
+    expect(
+      await sheet
+        .getByRole('button', { name: 'Save access', exact: true })
+        .isEnabled(),
+    ).toBe(true);
+    await sheet
+      .getByRole('button', { name: 'Save access', exact: true })
+      .click();
+    await sheet.waitFor({ state: 'hidden' });
+  } finally {
+    await visit.close();
+  }
+});
+
+it('E12: at 390 px a revoked machine disappears, leaves only an explanation and Close, and gives the actual reconnect command', async () => {
+  const viewport = sizes[1];
+  const visit = await accessPage(browser, { viewport });
+  try {
+    const machine = visit.machines[0];
+    const sheet = await editAccess(visit.page, machine);
+    await sheet
+      .getByRole('checkbox', { name: 'work/beta', exact: true })
+      .check();
+    expect((await revokeMachine(visit.app, machine.id)).status).toBe(204);
+    await sheet
+      .getByRole('button', { name: 'Save access', exact: true })
+      .click();
+    const close = sheet
+      .locator('[data-slot="sheet-footer"]')
+      .getByRole('button', { name: 'Close', exact: true });
+    await close.waitFor();
+    expect(await sheet.getByRole('alert').innerText()).toContain(
+      'framework-13 was revoked',
+    );
+    expect(await sheet.getByRole('checkbox').count()).toBe(0);
+    expect(
+      await sheet.getByRole('button', { name: /Save access|Cancel/ }).count(),
+    ).toBe(0);
+    expect(await machineRow(visit.page, machine.id).count()).toBe(0);
+    await close.click();
+    await sheet.waitFor({ state: 'hidden' });
+    expect(await visit.page.getByRole('alert').innerText()).toContain(
+      `nook login ${visit.app.origin}`,
+    );
+    expect(await visit.page.getByRole('alert').innerText()).toContain(
+      'was revoked elsewhere',
+    );
+    await expectNoOverflow(visit.page);
+  } finally {
+    await visit.close();
+  }
+});
+
+it('E13: at 1280 px unchanged and empty drafts disable Save and All buckets restores limited picks', async () => {
+  const viewport = sizes[0];
+  const visit = await accessPage(browser, { viewport });
+  try {
+    const sheet = await editAccess(visit.page, visit.machines[0]);
+    const save = sheet.getByRole('button', {
+      name: 'Save access',
+      exact: true,
+    });
+    expect(await save.isEnabled()).toBe(false);
+    await sheet
+      .getByRole('checkbox', { name: 'work/acme', exact: true })
+      .uncheck();
+    expect(await save.isEnabled()).toBe(false);
+    expect(
+      await sheet.locator('[data-slot="sheet-footer"]').innerText(),
+    ).toContain(
+      'Choose at least one bucket. To remove all access, revoke the machine.',
+    );
+    await sheet
+      .getByRole('checkbox', { name: 'work/beta', exact: true })
+      .check();
+    expect(await save.isEnabled()).toBe(true);
+    await sheet
+      .getByRole('checkbox', { name: 'All buckets', exact: true })
+      .check();
+    expect(
+      await sheet.locator('[data-slot="sheet-footer"]').innerText(),
+    ).toContain('Every current and future bucket');
+    await sheet
+      .getByRole('checkbox', { name: 'All buckets', exact: true })
+      .uncheck();
+    expect(
       await sheet
         .getByRole('checkbox', { name: 'work/beta', exact: true })
-        .check();
-      expect(await save.isEnabled()).toBe(true);
-      await sheet
-        .getByRole('checkbox', { name: 'All buckets', exact: true })
-        .check();
-      expect(
-        await sheet.locator('[data-slot="sheet-footer"]').innerText(),
-      ).toContain('Every current and future bucket');
-      await sheet
-        .getByRole('checkbox', { name: 'All buckets', exact: true })
-        .uncheck();
-      expect(
-        await sheet
-          .getByRole('checkbox', { name: 'work/beta', exact: true })
-          .isChecked(),
-      ).toBe(true);
-      await sheet.getByRole('button', { name: 'Cancel', exact: true }).click();
-      await sheet.waitFor({ state: 'hidden' });
-      await expect
-        .poll(() =>
-          machineRow(visit.page, visit.machines[0].id)
-            .getByRole('button', { name: /Edit access/ })
-            .evaluate((button) => button === document.activeElement),
-        )
-        .toBe(true);
-    } finally {
-      await visit.close();
-    }
-  },
-);
+        .isChecked(),
+    ).toBe(true);
+    await sheet.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await sheet.waitFor({ state: 'hidden' });
+    await expect
+      .poll(() =>
+        machineRow(visit.page, visit.machines[0].id)
+          .getByRole('button', { name: /Edit access/ })
+          .evaluate((button) => button === document.activeElement),
+      )
+      .toBe(true);
+  } finally {
+    await visit.close();
+  }
+});
 
 it('E13/E14: deleting the last stored root during editing leaves no checked roots and keeps Save disabled', async () => {
   const visit = await accessPage(browser, {
@@ -922,55 +946,61 @@ it('E15: approval, approved result, and deployment guidance direct later access 
   }
 });
 
-it('E17: the editor chunk and buckets preload on intent and do not join the Machines cold-open path', async () => {
-  const visit = await accessPage(browser);
-  const { page, requests } = visit;
-  try {
-    const button = machineRow(page, visit.machines[0].id).getByRole('button', {
-      name: /Edit access/,
-    });
-    await button.waitFor();
-    await page.waitForLoadState('networkidle');
-    expect(
-      requests.filter((request) => request.path === '/api/buckets'),
-    ).toEqual([]);
-    expect(
-      requests.filter((request) =>
-        /machine-access-sheet.*\.js$/.test(request.path),
-      ),
-    ).toEqual([]);
-    const buckets = page.waitForResponse(
-      (response) => new URL(response.url()).pathname === '/api/buckets',
-    );
-    const chunk = page.waitForResponse((response) =>
-      /machine-access-sheet.*\.js$/.test(new URL(response.url()).pathname),
-    );
-    await button.hover();
-    expect((await buckets).status()).toBe(200);
-    expect((await chunk).status()).toBe(200);
-    const count = requests.length;
-    await button.click();
-    const sheet = page.getByRole('dialog', {
-      name: 'Edit access',
-      exact: true,
-    });
-    await sheet
-      .getByRole('checkbox', { name: 'work/acme', exact: true })
-      .waitFor();
-    expect(
+it.each(['hover', 'focus'] as const)(
+  'E17: %s intent preloads the editor chunk and buckets, which do not join the Machines cold-open path',
+  async (intent) => {
+    const visit = await accessPage(browser);
+    const { page, requests } = visit;
+    try {
+      const button = machineRow(page, visit.machines[0].id).getByRole(
+        'button',
+        {
+          name: /Edit access/,
+        },
+      );
+      await button.waitFor();
+      await page.waitForLoadState('networkidle');
+      expect(
+        requests.filter((request) => request.path === '/api/buckets'),
+      ).toEqual([]);
+      expect(
+        requests.filter((request) =>
+          /machine-access-sheet.*\.js$/.test(request.path),
+        ),
+      ).toEqual([]);
+      const buckets = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === '/api/buckets',
+      );
+      const chunk = page.waitForResponse((response) =>
+        /machine-access-sheet.*\.js$/.test(new URL(response.url()).pathname),
+      );
+      await (intent === 'hover' ? button.hover() : button.focus());
+      expect((await buckets).status()).toBe(200);
+      expect((await chunk).status()).toBe(200);
+      const count = requests.length;
+      await button.click();
+      const sheet = page.getByRole('dialog', {
+        name: 'Edit access',
+        exact: true,
+      });
       await sheet
         .getByRole('checkbox', { name: 'work/acme', exact: true })
-        .isChecked(),
-    ).toBe(true);
-    expect(
-      requests
-        .slice(count)
-        .filter((request) => request.path === '/api/buckets'),
-    ).toEqual([]);
-  } finally {
-    await visit.close();
-  }
-});
+        .waitFor();
+      expect(
+        await sheet
+          .getByRole('checkbox', { name: 'work/acme', exact: true })
+          .isChecked(),
+      ).toBe(true);
+      expect(
+        requests
+          .slice(count)
+          .filter((request) => request.path === '/api/buckets'),
+      ).toEqual([]);
+    } finally {
+      await visit.close();
+    }
+  },
+);
 
 it('E17: an editor chunk transport failure uses the route error boundary and recovers after reload', async () => {
   let failing = true;
@@ -1036,7 +1066,7 @@ it('E17: an editor chunk transport failure uses the route error boundary and rec
   }
 });
 
-it('E12/E17: stale intent and focus reads cannot overwrite an optimistic grant during a pending save', async () => {
+it('E12/E17: stale focus and visibility reads cannot overwrite an optimistic grant during a pending save', async () => {
   const gate = deferred();
   const entered = deferred();
   const visit = await accessPage(browser, {

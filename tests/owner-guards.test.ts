@@ -23,6 +23,12 @@ it('whole-installation owner guards return the same Forbidden body before D1', a
       ['/api/machines', 'GET'],
       ['/api/machines/missing', 'DELETE'],
       ['/api/machines/missing/grant', 'PUT', { grant: 'all', previous: 'all' }],
+      // A caller whose grant covers the previous grant still cannot widen it.
+      [
+        '/api/machines/missing/grant',
+        'PUT',
+        { grant: 'all', previous: ['me'] },
+      ],
       ['/api/audit', 'GET'],
       ['/api/secrets', 'GET'],
     ] as const) {

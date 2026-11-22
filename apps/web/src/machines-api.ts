@@ -95,7 +95,7 @@ export function useMachines() {
   };
 }
 
-export type AccessSave = { machine: Machine; grant: BucketGrant };
+type AccessSave = { machine: Machine; grant: BucketGrant };
 export function useSaveAccess() {
   const queries = useQueryClient();
   const busy = gate.useBusy();
