@@ -2,7 +2,6 @@ import type { ApprovalExpired } from '@nook/contract';
 
 export class CliFailure extends Error {}
 export class NotLoggedIn extends CliFailure {}
-/** The system error code of a caught value, such as ENOENT, if it has one. */
 export function errorCode(error: unknown) {
   return error instanceof Error &&
     'code' in error &&
@@ -27,7 +26,6 @@ export function accessDateTime(iso: string) {
     minute: '2-digit',
   }).format(new Date(iso));
 }
-/** Relative access lifetime in minutes, hours or days. Never zero minutes. */
 export function untilText(iso: string, now: number) {
   const remaining = Date.parse(iso) - now;
   const minutes = Math.max(1, Math.ceil(remaining / 60_000));

@@ -26,7 +26,6 @@ async function packageVersion() {
     .version;
 }
 
-// Builds the CLI bundle into a Node single executable at <directory>/nook.
 export async function buildExecutable(directory: string) {
   const main = resolve(directory, 'cli.mjs');
   const output = resolve(directory, 'nook');

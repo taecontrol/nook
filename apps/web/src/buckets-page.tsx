@@ -234,7 +234,6 @@ function useBucketsPage() {
 
   const { plan, ghosts, existingMatch, previewPath } = previewState(feedback);
 
-  // Preview and reveal open the branches on the way to the path.
   const collapse = useCollapsed([previewPath, highlighted?.path]);
   const { setCollapsed } = collapse;
 

@@ -11,7 +11,6 @@ const elapsed = (from: number, to: number) => `${Math.round(to - from)} ms`;
 
 // Issue #97: under CI load, connectOverCDP can attach before Chromium creates
 // any target, and the startup tab arrives a few hundred milliseconds later.
-// Wait for it within a bound; past that, fail with what Chromium reports.
 async function startupPage(
   browser: Browser,
   context: BrowserContext,

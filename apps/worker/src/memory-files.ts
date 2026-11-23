@@ -35,7 +35,6 @@ type FileRow = {
   size: number;
   sha256: string;
 };
-// A left join returns a complete file row or nulls for every file column.
 type FileState = {
   id: string | null;
   usage: number;
@@ -253,8 +252,6 @@ export const memoryFiles = (grant: BucketGrant, bindings: FileBindings = {}) =>
       previous: FileState | undefined,
     ) =>
       Effect.gen(function* () {
-        // A thrown/ambiguous batch never reaches cleanup. After a committed
-        // upsert, the previous key is unreferenced and can never be reused.
         if (previous?.object_key) yield* remove([previous.object_key]);
         return attached(
           id,
@@ -294,8 +291,6 @@ export const memoryFiles = (grant: BucketGrant, bindings: FileBindings = {}) =>
           const machine =
             actor.principal.kind === 'machine' ? actor.principal : null;
           const usage = bucketUsage(sql, bucket, input);
-          // Both writes use all four guards against the same D1 snapshot. Only
-          // D1's clock decides whether this never-reused key can still publish.
           const publishable = sql`m.id=${input.id} AND m.bucket=${bucket} AND COALESCE(f.sha256,'')<>${hash} AND ${usage}+${file.size}<=${fileLimits.bucketBytes} AND unixepoch('subsec')*1000-${startedAt}<${publishWindowMs}`;
           const from = sql`FROM memories m LEFT JOIN memory_files f ON f.memory_id=m.id AND f.name=${input.name} WHERE ${publishable}`;
           // The guarded audit INSERT is a batch-local receipt of all four

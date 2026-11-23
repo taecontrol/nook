@@ -319,7 +319,6 @@ it('E6: every C0/C1 control byte in a name, including an encoded slash, is Inval
         'InvalidFile',
       );
     } catch (error) {
-      // CI diagnostic: print before the shard can exhaust its job deadline.
       console.error(
         `E6 control U+${code.toString(16).padStart(4, '0')}`,
         error,

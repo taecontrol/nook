@@ -33,8 +33,6 @@ export async function refusedVerification(
   const observations = resolve(home, 'observations');
   await writeFile(observations, '');
   const preload = resolve(home, 'observe.mjs');
-  // Keep the real platform and entrypoint. Observe and block side effects even
-  // before the refusal exists, redirecting owner discovery to synthetic HOME.
   await writeFile(
     preload,
     `

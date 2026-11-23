@@ -4,17 +4,11 @@ export type Command = readonly string[];
 
 /** The processes a deployment starts, so tests can replace Cloudflare and git. */
 export interface Shell {
-  /** Runs a command with its output shown to the person and reports success. */
   show(command: Command): boolean;
-  /**
-   * Runs a command and returns its standard output, or undefined when it fails.
-   * Its errors are shown to the person unless `quiet` is set.
-   */
   read(command: Command, quiet?: boolean): string | undefined;
   wait(milliseconds: number): Promise<void>;
 }
 
-/** The Cloudflare resources the Worker binds, by the names in wrangler.jsonc. */
 export interface Resources {
   readonly database: string;
   readonly bucket: string;
@@ -86,7 +80,6 @@ function checkHostname(hostname: string | undefined): string {
   return hostname;
 }
 
-/** Deploy ships only what main on origin holds, with nothing local mixed in. */
 function requireMain(shell: Shell) {
   const status = ['git', 'status', '--porcelain', '--untracked-files=all'];
   if (read(shell, status).trim())
@@ -201,12 +194,6 @@ function secretNotice(shell: Shell): string | undefined {
   return `Missing Worker secrets: ${missing.join(', ')}. See ${secretsGuide}.`;
 }
 
-/**
- * Deploys main on origin to the hostname: installs its locked dependencies,
- * builds, creates missing storage,
- * migrates D1 before the new Worker runs, waits for the Vectorize metadata
- * index, then deploys. Returns a notice about missing Worker secrets.
- */
 export async function deploy(
   hostname: string | undefined,
   shell: Shell,

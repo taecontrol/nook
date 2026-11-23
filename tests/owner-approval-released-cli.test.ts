@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { dirname, resolve } from 'node:path';
+import { text } from 'node:stream/consumers';
 import { build } from 'esbuild';
 import { expect, it } from 'vitest';
 import { testEnvironment } from '../scripts/lib/test-environment.ts';
@@ -101,9 +102,7 @@ it.each([false, true])(
     let calls = 0;
     const path = 'work/acme/KEY';
     const server = createServer(async (request, response) => {
-      for await (const _chunk of request) {
-        /* Drain the request before responding. */
-      }
+      await text(request);
       const pending = afterPending && ++calls === 1;
       response.writeHead(pending ? 200 : 410, {
         'Content-Type': 'application/json',

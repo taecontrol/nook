@@ -24,7 +24,6 @@ export async function approvalFixture(
   onCheckpoint?: (label: string) => Promise<boolean>,
   clock?: { now: number },
 ) {
-  // Reuse the existing test-only SQLite clock decorator over the built Worker.
   const app = await runFixture(
     'all',
     onCheckpoint,

@@ -1,7 +1,3 @@
-// Refresh scripts/lib/test-timings.json from green Verify runs:
-//   node scripts/test-timings.ts <run-id> [<run-id> ...]
-// Reads each run's Linux and macOS test job logs with the GitHub CLI and
-// records every current suite's median seconds per platform.
 import { execFileSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 

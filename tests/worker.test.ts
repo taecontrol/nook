@@ -209,7 +209,6 @@ describe('E1 / installation E5: Access identity through HTTP to the built Worker
         status: 403,
       },
     );
-    // Keep unconsumed denial output pending across E7's log-buffer reset.
     for (const stream of app.workerStdio) stream.pause();
     expect(body).not.toContain('@');
     expect(body).not.toContain(access.OWNER_EMAIL);

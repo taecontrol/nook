@@ -38,8 +38,6 @@ async function fixture() {
     },
   };
 }
-// The phone page never scrolls sideways and the brand keeps room for its
-// focus ring.
 async function expectFits(page: Page) {
   await expectNoOverflow(page);
   const brand = await page

@@ -8,7 +8,6 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 
-/** The owner pages the sidebar, breadcrumb and home screen lead to. */
 export const destinations: readonly {
   group: 'Platform' | 'Tools';
   to: '/buckets' | '/machines' | '/approvals' | '/audit' | '/memory' | '/vault';

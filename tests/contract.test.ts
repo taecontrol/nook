@@ -58,7 +58,6 @@ it('E13: the real QueryClient reuses the derived identity request on subsequent 
     response.writeHead(owner.status, { 'Content-Type': 'application/json' });
     response.end(await owner.text());
   });
-  // The proxy holds its port continuously and forwards to the real Worker.
   await new Promise<void>((accept) => proxy.listen(0, '127.0.0.1', accept));
   const origin = `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`;
   vi.stubGlobal('location', new URL(origin));

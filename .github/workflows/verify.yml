@@ -27,6 +27,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm verify:style
       - run: pnpm verify:ui
+      - run: pnpm verify:comments
       - run: pnpm verify:types
       - run: pnpm verify:complexity
       - run: pnpm verify:migrations

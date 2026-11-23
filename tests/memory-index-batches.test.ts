@@ -95,7 +95,6 @@ function failures() {
     .filter((line) => line.includes('memory-sync-failed'))
     .map((line) => JSON.parse(line.slice(line.indexOf('{'))));
 }
-// Workerd may flush a line after the scheduled handler resolves.
 async function noFailures() {
   await new Promise((resolve) => setTimeout(resolve, 100));
   return failures();

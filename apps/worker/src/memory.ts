@@ -597,7 +597,6 @@ export const memoryStore = (
               hash: row.content_hash,
             })),
           );
-          // Vectorize filtering is an optimization. Only current, scoped D1 rows reach the caller.
           const [rawMeaning, currentKeyword] = yield* sql
             .batch([
               sql`SELECT ${searchColumns}, json_extract(hit.value, '$.rank') AS meaning_rank FROM json_each(${hits}) hit JOIN memories m ON m.id=json_extract(hit.value, '$.id') JOIN memory_versions v ON v.memory_id=m.id AND v.version=m.current_version WHERE m.content_hash=json_extract(hit.value, '$.contentHash') AND ${sql.in('m.bucket', paths)} AND ${tagged}`,

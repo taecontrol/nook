@@ -168,7 +168,6 @@ it('E14: a machine cannot list session activity', async () => {
     { ...access, VAULT_KEY: app.key },
     { outboundService: issuer.outboundService },
   );
-  // Preserve the existing Access-auth behavior for a bearer on an owner route.
   expect(
     (
       await fetch(`${app.origin}/api/audit?session=${codexSession}`, {

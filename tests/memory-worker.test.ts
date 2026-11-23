@@ -360,7 +360,6 @@ it('E20/E33: restricted handlers forbid sibling lists and mask detail; the owner
     new Request(`http://nook.test/api/memories/${memoryId(2)}`),
   );
   expect(allowed.status).toBe(200);
-  // Remove only the local owner bypass: a valid Nook bearer cannot stand in for Access.
   const machine = await seedMemoryMachine(app);
   await app.setBindings({});
   try {

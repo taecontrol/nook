@@ -192,7 +192,6 @@ export function handlerForPrincipal(
   );
   const apiHandler = HttpRouter.toWebHandler(routes, {
     disableLogger: true,
-    // The router checks decoded params: six 32-character segments plus the name.
     routerConfig: {
       maxParamLength: Math.max(
         fileRouterMaxParamLength,

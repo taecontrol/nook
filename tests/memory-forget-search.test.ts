@@ -97,9 +97,8 @@ it('E2/E13/E24: lingering meaning hits are invisible; bounded delete is confirme
   app.services.resetCalls();
   await sweep(at + 5 * 60_000);
   expect(app.services.deletions).toEqual([[id]]);
-  // One select for removals + existing repair/inspection calls; sweep itself is bounded.
   expect(app.services.inspections).toEqual([[id]]);
-  expect(app.services.d1Trips).toBe(5); // three memory-index reads plus file cursor read/persist
+  expect(app.services.d1Trips).toBe(5);
   expect(await removalRows(app)).toHaveLength(1);
   app.services.advance();
   await sweep(at + 29 * 60_000);
@@ -108,7 +107,7 @@ it('E2/E13/E24: lingering meaning hits are invisible; bounded delete is confirme
   app.services.resetCalls();
   await sweep(at + 30 * 60_000);
   expect(app.services.deletions).toEqual([]);
-  expect(app.services.d1Trips).toBe(6); // settled vector delete plus the two file sweep trips
+  expect(app.services.d1Trips).toBe(6);
   expect(await removalRows(app)).toEqual([]);
   expect(app.services.getByIds([id])).toEqual([]);
 });

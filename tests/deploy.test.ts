@@ -82,7 +82,6 @@ const metadataList = wrangler(
   '--json',
 );
 
-/** Wraps each label and value the way Wrangler colors labelled listings. */
 const paint = (colored: boolean | undefined, text: string) =>
   colored
     ? text.replace(
@@ -91,7 +90,6 @@ const paint = (colored: boolean | undefined, text: string) =>
       )
     : text;
 
-/** A Cloudflare account and git checkout that answer like Wrangler and git. */
 function fake(account: Account) {
   const calls: { command: string[]; quiet?: boolean }[] = [];
   let enqueued = false;

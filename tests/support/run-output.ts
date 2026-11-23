@@ -3,7 +3,6 @@ import { once } from 'node:events';
 import { closeSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-// Keep binary streams and shared file descriptors intact inside the sandbox.
 const [mode, entry, ...args] = process.argv.slice(2);
 const home = process.env.HOME;
 if (!home) throw new Error('The output fixture requires a private HOME.');

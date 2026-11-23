@@ -36,8 +36,6 @@ export const fileSweep = (bindings: FileBindings) =>
         unavailable,
       );
       const live = new Set(referenced.map((row) => row.object_key));
-      // Uploads older than grace cannot publish: D1 enforces the shorter window,
-      // and no other operation can reuse any of these keys.
       yield* objects.remove(keys.filter((key) => !live.has(key)));
     }
     yield* sql`INSERT INTO file_sweep(id,cursor,swept_at) VALUES(1,${page.success.cursor},${new Date(now).toISOString()}) ON CONFLICT(id) DO UPDATE SET cursor=excluded.cursor,swept_at=excluded.swept_at`.pipe(

@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "jsPlugins": ["./scripts/lint/no-comments.ts"],
+  "categories": { "correctness": "off" },
+  "rules": {
+    "nook/no-comments": [
+      "error",
+      {
+        "baseline": "scripts/lint/comment-baseline.json",
+        "baseRef": "origin/main"
+      }
+    ]
+  }
+}

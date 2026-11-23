@@ -17,8 +17,6 @@ const io = vi.hoisted(() => ({
 }));
 vi.mock('node:fs', async (original) => ({
   ...(await original<typeof import('node:fs')>()),
-  // Retain the previous stream seam so the token regression also runs
-  // against that relay and fails on leaked bytes, rather than test setup.
   fstatSync: () => ({ isFIFO: () => false, isSocket: () => false }),
   createWriteStream: () =>
     new Writable({

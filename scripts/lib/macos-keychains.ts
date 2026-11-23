@@ -30,7 +30,6 @@ function observe(home: string, args: string[]) {
   });
 }
 
-// Only these three read-only commands may run with the real owner's HOME.
 export async function observeKeychains(
   home: string,
 ): Promise<KeychainObservation> {

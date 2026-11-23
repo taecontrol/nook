@@ -36,6 +36,7 @@ export async function sourceIdentity(): Promise<SourceIdentity> {
     'README.md',
     '.gitignore',
     '.oxlintrc.json',
+    '.oxlintrc.comments.json',
     'package.json',
     'pnpm-lock.yaml',
     'pnpm-workspace.yaml',

@@ -74,7 +74,6 @@ it('a pending search debounce preserves a later navigation while Vault loads', a
     await page.getByRole('link', { name: 'Vault', exact: true }).click();
     await vaultRequested;
     await expect.poll(() => new URL(page.url()).pathname).toBe('/vault');
-    // Memory is still mounted while the real Vault chunk is held.
     expect(
       await page.getByRole('article', { name: 'Memory detail' }).count(),
     ).toBe(1);

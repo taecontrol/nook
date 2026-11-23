@@ -141,7 +141,6 @@ it.each(viewports)(
       const { page } = visit;
       await openFiles(page);
       await waitFileRows(page, icons.length);
-      // Each media type shows its kind of file icon.
       for (const [name, , icon] of icons)
         expect(
           await filesSheet(page)
@@ -155,7 +154,6 @@ it.each(viewports)(
         .getByRole('button', { name: /^Download / });
       await last.scrollIntoViewIfNeeded();
       expect(await last.isVisible()).toBe(true);
-      // Scrolled into view, the button is on screen and receives the click.
       expect(
         await last.evaluate((el) => {
           const box = el.getBoundingClientRect();

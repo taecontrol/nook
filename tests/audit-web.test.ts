@@ -932,7 +932,6 @@ it.each(viewports)(
       );
       expect(await row.innerText()).toContain('Nook doesn’t verify it.');
       expect(await row.innerText()).toContain(thread);
-      // Wait for actual prefetch completion after pointer intent, before timing click → paint.
       const link = row.getByRole('link', {
         name: 'Activity in this session',
         exact: true,
@@ -944,9 +943,6 @@ it.each(viewports)(
       );
       await link.hover();
       await prefetched;
-      // Same clock as the load-time gate (scripts/load-time-browser.ts): from the
-      // page's click event to two frames after the filtered list is in the DOM.
-      // Timestamps live on window because this suite's browser records no marks.
       type Clock = Window & { sessionClock?: { start?: number; end?: number } };
       await page.evaluate(() => {
         const clock: { start?: number; end?: number } = {};

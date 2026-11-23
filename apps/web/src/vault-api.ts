@@ -26,7 +26,6 @@ const secretsOptions = queryOptions({
   structuralSharing: false,
 });
 const writeKey = ['vault', 'write'] as const;
-// Vault keeps its observer enabled so successful-list revisions can reconcile writes.
 export const vaultGate = createWriteGate(writeKey, { disableWhileBusy: false });
 export type SecretWrite = {
   op: WriteOp;
@@ -116,7 +115,6 @@ function negativeReply(
       secret: null,
       message: `${write.secret.path} is no longer stored.`,
     };
-  // A definitive retry cannot settle an earlier attempt that lost its answer.
   if (ambiguous)
     throw new ApiError(
       error.status,

@@ -13,10 +13,6 @@ import {
 } from '@/components/ui/empty';
 import { Spinner } from '@/components/ui/spinner';
 
-/**
- * A failed load: an Alert above data that is still shown, or an Empty state
- * in its place when nothing has loaded yet.
- */
 export function LoadFailure({
   title,
   description,
@@ -74,7 +70,6 @@ export function LoadFailure({
   );
 }
 
-/** The result of an owner action, kept until the owner dismisses it. */
 export function DismissibleAlert({
   destructive = false,
   icon,

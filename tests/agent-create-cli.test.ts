@@ -293,7 +293,6 @@ it('E6/E7: create refuses paths outside the grant or bucket without storing or a
   expect(await secretRows(app)).toEqual([]);
   expect(await auditRows(app)).toEqual([]);
 });
-// Every row fails before keyring or HTTP, so one fixture serves the table.
 it('E8: invalid CLI input fails before keyring or HTTP', async () => {
   const samples: { input?: string; args?: string[]; message: string }[] = [
     { input: '', message: 'Enter a value.' },

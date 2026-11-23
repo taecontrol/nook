@@ -610,7 +610,6 @@ it('E12/E13: three retryable failures leave one key unconfirmed, continue others
       3,
     );
     expect(await auditRows(app)).toHaveLength(2);
-    // The rerun reaches the Worker through a fresh, fault-free origin.
     const healthy = await proxy();
     try {
       const rerun = await importFile();
@@ -653,7 +652,6 @@ it.each(['SIGINT', 'SIGTERM'] as const)(
       const result = record(await command.done);
       expect(result.status).toBe(signal === 'SIGINT' ? 130 : 143);
       held.resolve();
-      // The rerun reaches the Worker through a fresh, fault-free origin.
       const healthy = await proxy();
       try {
         const rerun = await importFile();

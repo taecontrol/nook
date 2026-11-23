@@ -29,7 +29,6 @@ export function writeMemory(
   );
 }
 
-// Other memories remain readable while this id is being forgotten.
 export function canLoadMemory(queries: QueryClient, id: string) {
   if (!id) return false;
   const writing = queries

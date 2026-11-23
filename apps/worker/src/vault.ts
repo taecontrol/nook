@@ -178,7 +178,6 @@ function createStore(binding: string, grant: BucketGrant) {
       });
   });
 }
-// This face deliberately has no value read, replace, or remove capability.
 export function machineVault(grant: BucketGrant, binding = '') {
   return Effect.gen(function* () {
     const list = yield* readStore;

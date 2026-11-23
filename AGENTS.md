@@ -32,6 +32,10 @@ in configuration, never in code.
 - The web app must feel instant. Preload routes and data on intent, cache
   queries, apply predictable writes optimistically, and stay within the load-time budgets: a cold open shows its first screen within 1 s on a 4G phone network, and navigation after intent within 100 ms.
 - The CLI keeps its token in the operating system keyring, never in a file.
+- Code carries no comments. Put a decision in an ADR, a workaround in an
+  issue, and every other why in a name, a type, or a test.
+  `pnpm verify:comments` holds the comments that remain to a baseline that
+  only shrinks; `/delete-comment` shrinks it.
 - Tests and local runs never read or write the owner's real home, keyring, session bus, or browser profile; host-touching tests use allowlisted environments and temporary directories, and the host-resource check fails the run if anything changes.
 
 ## Interface

@@ -1,7 +1,6 @@
 import { RESERVED_BUCKET } from '@nook/contract';
 import type { ReactNode } from 'react';
 
-/** The agents that find what is stored in `bucket`. */
 export function agentsIn(
   bucket: string,
   hasChildren: boolean,

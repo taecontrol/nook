@@ -26,8 +26,6 @@ const settleSheet = (page: Page) =>
       el.getAnimations().map((animation) => animation.finished.catch(() => {})),
     ),
   );
-// Neither the page nor the open sheet, down to its scrolled rows, reaches
-// past the viewport.
 const expectSheetFits = async (page: Page) => {
   await expectNoOverflow(page);
   await expectWithinViewport(sheet(page));

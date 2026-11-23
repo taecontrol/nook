@@ -197,7 +197,6 @@ it.each([
       const field = valueField(page);
       await field.waitFor();
       expect((await field.inputValue()) === value).toBe(true);
-      // Let the open animation settle before measuring the dialog.
       await dialog.evaluate((element) =>
         Promise.all(
           element
@@ -600,7 +599,6 @@ it.each([
         (await privateClientState(page, [revealValue])).absentFromDom,
       ).toBe(true);
       expect(await storageHasValue(page, revealValue)).toBe(false);
-      // A persistent failure gets exactly one new request only when explicitly retried.
       await dialog
         .getByRole('button', { name: 'Try again', exact: true })
         .click();

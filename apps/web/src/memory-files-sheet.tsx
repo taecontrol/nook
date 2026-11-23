@@ -263,7 +263,6 @@ export function FilesSheet({
 }: {
   model: MemoryPageModel;
   memory: OwnerMemory;
-  /** The Files button that opened the sheet; focus goes back to it on close. */
   returnFocus: RefObject<HTMLElement | null>;
 }) {
   const { files } = memory;

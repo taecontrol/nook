@@ -84,8 +84,6 @@ it('E1/E2/E3/E7: approvals issued by the previous Worker after migration remain 
     const hashes = tokens.map((token) =>
       createHash('sha256').update(token).digest('hex'),
     );
-    // Deploy applies migrations before replacing the Worker. Its old writer
-    // continues to issue approvals using only these four columns in that gap.
     await db.batch(
       hashes.map((hash) =>
         db

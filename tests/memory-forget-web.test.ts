@@ -38,7 +38,6 @@ const viewports = [
   { width: 1440, height: 900 },
   { width: 390, height: 844 },
 ];
-// After a pane forget, focus moves to the neighbor row the pane now shows.
 const neighborFocused = (page: Page) =>
   expect
     .poll(() =>

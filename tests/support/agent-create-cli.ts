@@ -11,7 +11,6 @@ import { vaultRuntime } from './vault.ts';
 export let app: Awaited<ReturnType<typeof vaultRuntime>>;
 export let keyring: Awaited<ReturnType<typeof privateKeyring>>;
 export let token: string;
-// Each test gets a fresh Worker, D1 and keyring configured for work/acme.
 export function setupAgentCreateCli() {
   beforeEach(async () => {
     app = await vaultRuntime();

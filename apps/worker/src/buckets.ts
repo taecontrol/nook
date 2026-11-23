@@ -82,7 +82,6 @@ export const bucketOperations = Effect.gen(function* () {
           return yield* Effect.fail(
             new ReservedBucket({ message: 'The me bucket cannot be deleted.' }),
           );
-        // The guarded delete and its failure classification share one atomic batch.
         const [removed, remaining] = yield* sql
           .batch([
             sql`DELETE FROM buckets WHERE path = ${path} AND NOT EXISTS (SELECT 1 FROM buckets child WHERE substr(child.path, 1, length(${path}) + 1) = ${`${path}/`}) AND NOT EXISTS (SELECT 1 FROM secrets WHERE bucket = ${path}) AND NOT EXISTS (SELECT 1 FROM memories WHERE bucket = ${path}) RETURNING path`,

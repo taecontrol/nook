@@ -7,7 +7,6 @@ export async function browserEnvironment() {
   return {
     home,
     options: {
-      // Pin the browser's local time so dates render the same on every host.
       env: testEnvironment(home, { TZ: 'UTC' }),
       // Host extensions installed system-wide (such as
       // /usr/share/chromium/extensions) must not open tabs in a test browser.

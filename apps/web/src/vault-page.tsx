@@ -77,8 +77,6 @@ const RevealDialog = lazy(loadRevealDialog);
 const loadImportSheet = () => import('./vault-import-sheet');
 const VaultImportSheet = lazy(loadImportSheet);
 
-/* ---------- secret rows ---------- */
-
 function SecretMenu({
   secret,
   busy,
@@ -248,8 +246,6 @@ function SecretsSkeleton() {
   );
 }
 
-/* ---------- inherited secrets ---------- */
-
 function Inherited({
   bucket,
   secrets,
@@ -324,8 +320,6 @@ function Inherited({
     </section>
   );
 }
-
-/* ---------- empty and failure states ---------- */
 
 function SecretsLoadFailure({
   page,
@@ -447,8 +441,6 @@ function UnknownBucket({ bucket }: { bucket: string }) {
     </div>
   );
 }
-
-/* ---------- page ---------- */
 
 function DeleteConfirmation({
   secret,

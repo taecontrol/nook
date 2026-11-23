@@ -9,7 +9,6 @@ import { FetchHttpClient, type HttpClient, HttpClientError } from 'effect/http';
 import { HttpApiClient } from 'effect/http-api';
 
 export class ApiError extends Error {
-  /** The message is one the contract lets the owner read. */
   readonly hasPublicMessage: boolean;
   constructor(
     readonly status: number,
@@ -55,7 +54,6 @@ function apiRunner<Client>(
           const status = statusOf(error, tag);
           return new ApiError(
             status,
-            // Failed delivery or decoding and storage errors can follow commit.
             status !== 401 &&
               status !== 403 &&
               (HttpClientError.isHttpClientError(error) ||
