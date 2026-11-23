@@ -14,7 +14,7 @@
     "verify": "node scripts/verify.ts",
     "verify:style": "biome check .",
     "verify:ui": "oxlint -c .oxlintrc.json apps/web/src",
-    "verify:comments": "oxlint -c .oxlintrc.comments.json .",
+    "verify:comments": "oxlint --format default -c .oxlintrc.comments.json .",
     "verify:types": "tsc --noEmit",
     "verify:complexity": "node scripts/complexity.ts",
     "test": "node scripts/test.ts",
