@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -22,15 +22,6 @@ async function lint(
   current = published,
 ) {
   const directory = await mkdtemp(resolve(tmpdir(), 'nook-comment-lint-'));
-  const git = (...args: string[]) =>
-    execFileSync(
-      'git',
-      ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args],
-      {
-        cwd: directory,
-        stdio: 'ignore',
-      },
-    );
   try {
     await writeFile(
       resolve(directory, 'oxlintrc.json'),
@@ -40,18 +31,12 @@ async function lint(
         rules: {
           'nook/no-comments': [
             'error',
-            { baseline: 'baseline.json', baseRef: 'HEAD' },
+            { baseline: 'baseline.json', base: 'base.json' },
           ],
         },
       }),
     );
-    git('init', '--quiet');
-    await writeFile(
-      resolve(directory, 'baseline.json'),
-      JSON.stringify(published),
-    );
-    git('add', 'baseline.json');
-    git('commit', '--quiet', '-m', 'baseline');
+    await writeFile(resolve(directory, 'base.json'), JSON.stringify(published));
     await writeFile(
       resolve(directory, 'baseline.json'),
       JSON.stringify(current),
@@ -100,7 +85,7 @@ it('bans comments in new code and ratchets each baselined file down to its curre
   ]);
 });
 
-it('allows no more than the base branch baseline and reports entries for deleted files', async () => {
+it("allows no more than the base branch's baseline and reports entries for deleted files", async () => {
   const result = await lint(
     {
       'raised.ts': '// one\n// two\nexport const raised = 1;\n',

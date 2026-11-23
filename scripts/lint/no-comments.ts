@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 
@@ -14,7 +13,7 @@ interface Comment {
 
 interface Options {
   baseline: string;
-  baseRef: string;
+  base: string;
 }
 
 interface Context {
@@ -38,27 +37,10 @@ const fileStart = {
   end: { line: 1, column: 0 },
 };
 
-function git(cwd: string, args: string[]) {
-  return execFileSync('git', args, {
-    cwd,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-}
-
-function published({ baseline, baseRef }: Options, cwd: string) {
-  try {
-    git(cwd, ['rev-parse', '--verify', baseRef]);
-  } catch (error) {
-    throw new Error(
-      `The comment ratchet compares against ${baseRef}; fetch the base branch first. ${String(error)}`,
-    );
-  }
-  try {
-    return JSON.parse(git(cwd, ['show', `${baseRef}:${baseline}`])) as Counts;
-  } catch {
-    return undefined;
-  }
+function published({ base }: Options, cwd: string) {
+  const path = resolve(cwd, base);
+  if (!existsSync(path)) return undefined;
+  return (JSON.parse(readFileSync(path, 'utf8')) as Counts | null) ?? undefined;
 }
 
 function load(options: Options, cwd: string): Ratchet {
@@ -109,7 +91,7 @@ function check(context: Context) {
     for (const comment of comments)
       context.report({
         loc: comment.loc,
-        message: `Comments are banned: ${file} has ${comments.length} and the ratchet allows ${allowed}, the lower of its entries in ${context.options[0].baseline} here and on ${context.options[0].baseRef}. Delete the comment, move its decision into an ADR, or file an issue for the workaround it excuses.`,
+        message: `Comments are banned: ${file} has ${comments.length} and the ratchet allows ${allowed}, the lower of its entries in ${context.options[0].baseline} and in ${context.options[0].base}, the base branch's copy. Delete the comment, move its decision into an ADR, or file an issue for the workaround it excuses.`,
       });
   } else if (comments.length < (ratchet.current[file] ?? 0)) {
     context.report({
@@ -129,9 +111,9 @@ export default {
             type: 'object',
             properties: {
               baseline: { type: 'string' },
-              baseRef: { type: 'string' },
+              base: { type: 'string' },
             },
-            required: ['baseline', 'baseRef'],
+            required: ['baseline', 'base'],
             additionalProperties: false,
           },
         ],

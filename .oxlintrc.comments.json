@@ -7,7 +7,7 @@
       "error",
       {
         "baseline": "scripts/lint/comment-baseline.json",
-        "baseRef": "origin/main"
+        "base": ".local/comment-baseline-base.json"
       }
     ]
   }
