@@ -42,16 +42,16 @@ function git(cwd: string, args: string[]) {
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
 
 function published({ baseline, baseRef }: Options, cwd: string) {
   try {
     git(cwd, ['rev-parse', '--verify', baseRef]);
-  } catch {
+  } catch (error) {
     throw new Error(
-      `The comment ratchet compares against ${baseRef}; fetch the base branch first.`,
+      `The comment ratchet compares against ${baseRef}; fetch the base branch first. ${String(error)}`,
     );
   }
   try {
