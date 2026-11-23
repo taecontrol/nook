@@ -68,8 +68,6 @@ type Skipped = Run['skipped'][number];
 type Step = 'paste' | 'review' | 'run';
 const NAME_MAX = secretLimits.name;
 
-/* ---------- shared pieces ---------- */
-
 function UnreadLines({ lines }: { lines: readonly number[] }) {
   if (lines.length === 0) return null;
   const list =
@@ -90,8 +88,6 @@ function UnreadLines({ lines }: { lines: readonly number[] }) {
     </section>
   );
 }
-
-/* ---------- step 1: paste ---------- */
 
 function PasteStep({
   text,
@@ -146,8 +142,6 @@ function PasteStep({
     </FieldGroup>
   );
 }
-
-/* ---------- step 2: review ---------- */
 
 type Reason = { text: React.ReactNode; tone: 'error' | 'muted' | 'ok' };
 function invalidNameReason(row: Row): Reason {
@@ -423,8 +417,6 @@ function ReviewStep({
   );
 }
 
-/* ---------- creating and results ---------- */
-
 const outcomeLabel: Record<Outcome, string> = {
   queued: 'Waiting',
   creating: 'Creating…',
@@ -576,8 +568,6 @@ function RunStep({ run }: { run: Run }) {
     </>
   );
 }
-
-/* ---------- the sheet ---------- */
 
 type ImportSheetProps = {
   open: boolean;

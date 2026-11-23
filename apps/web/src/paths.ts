@@ -22,9 +22,7 @@ export function nameOf(path: string): string {
 
 export type CreatePlan = {
   path: string;
-  /** Paths that do not exist yet, top level first; empty when the path exists. */
   missing: string[];
-  /** Deepest existing ancestor, where the new buckets land. */
   landsIn: string | null;
 };
 

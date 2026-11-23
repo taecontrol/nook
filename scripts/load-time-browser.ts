@@ -279,7 +279,6 @@ async function approvalNavigation(page: Page, origin: string, code: string) {
       ).duration,
   );
 }
-// Measurement scripts wait this long for intent preloading to go quiet.
 const intentPreloadTimeout = 15_000;
 export type MeasureOptions = { preloadTimeout?: number; approvalId?: string };
 

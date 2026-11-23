@@ -20,7 +20,6 @@ function resolveFocusTarget(target: FocusTarget) {
   return element?.isConnected ? element : null;
 }
 
-/** Returns focus to whatever opened a dialog, or to `fallback` once it is gone. */
 export function useReturnFocus(fallback: () => HTMLElement | null) {
   const trigger = useRef<FocusTarget>(null);
   return {
@@ -40,7 +39,6 @@ export function useReturnFocus(fallback: () => HTMLElement | null) {
   };
 }
 
-/** The item a confirmation dialog asks about, from the trigger that opened it. */
 export function useConfirmTarget<T>(fallback: () => HTMLElement | null) {
   const [target, setTarget] = useState<T | null>(null);
   const shown = useLastValue(target);
@@ -55,7 +53,6 @@ export function useConfirmTarget<T>(fallback: () => HTMLElement | null) {
       setTarget(value);
     },
     close: (next?: () => HTMLElement | null) => {
-      // A no-argument UI callback can still forward its click event at runtime.
       if (typeof next === 'function') after.current = next;
       setTarget(null);
     },

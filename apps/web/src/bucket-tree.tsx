@@ -23,7 +23,6 @@ export type BucketNode = {
   children: BucketNode[];
 };
 
-/** Nests buckets (and preview ghosts) by path, siblings sorted by name. */
 export function buildBucketTree(
   buckets: readonly Bucket[],
   ghosts: string[],
@@ -58,14 +57,12 @@ export function buildBucketTree(
   return roots;
 }
 
-/** Buckets that contain other buckets. */
 export function parentBuckets(paths: readonly string[]) {
   return new Set(
     paths.filter((path) => paths.some((other) => other.startsWith(`${path}/`))),
   );
 }
 
-/** Collapsed branches, except those on the way to a revealed path. */
 export function useCollapsed(reveal: readonly (string | null | undefined)[]) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const revealed = reveal.filter((path): path is string => !!path).join('\n');
@@ -90,7 +87,6 @@ export function useCollapsed(reveal: readonly (string | null | undefined)[]) {
 }
 
 const levels = ['one', 'two', 'three', 'four', 'five'];
-/** One vertical guide per ancestor level. */
 export function Guides({
   depth,
   className = 'w-5 sm:w-6',
@@ -109,7 +105,6 @@ export function Guides({
   ));
 }
 
-/** Expands or collapses a branch; a leaf shows a dot. */
 export function BranchToggle({
   node,
   open,
@@ -160,7 +155,6 @@ function TreeBranch({ node, ...props }: BranchProps & { node: BucketNode }) {
     </li>
   );
 }
-/** Nested collapsible list items; `row` draws each bucket. */
 export function TreeBranches({
   nodes,
   ...props
@@ -293,7 +287,6 @@ export function BucketTree({
       ),
     [buckets],
   );
-  // The way to the selected bucket always stays open.
   const { visible, toggle } = useCollapsed([selected]);
   const state: TreeState = {
     marked,

@@ -10,6 +10,7 @@ it('E16: verify runs every accepted gate in order', () => {
   expect(verificationStages).toEqual([
     'verify:style',
     'verify:ui',
+    'verify:comments',
     'verify:types',
     'verify:complexity',
     'verify:migrations',

@@ -169,8 +169,6 @@ export function memoryIndex(env: SearchBindings = {}) {
               batch.map(async (row, i) => ({
                 id: row.id,
                 values: [...data[i]],
-                // Inspection compares the producing model: a marker cannot
-                // tell a late write from another deployment's model apart.
                 metadata: {
                   bucket: await vectorBucket(row.bucket),
                   contentHash: row.content_hash,

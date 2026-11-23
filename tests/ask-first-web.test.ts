@@ -330,7 +330,6 @@ it('E37: rapid toggles stay optimistic, serialize writes per path and preserve t
       message: 'The secret Ask first switch supports consecutive intents',
     })
     .toBe(1);
-  // Retain a genuine pre-write list and release it while PUT is still held.
   const readGate = deferred();
   const readStarted = deferred();
   await page.route('**/api/ask-first', async (route) => {
@@ -483,8 +482,6 @@ it('E38: a changed bucket read refreshes cached orphan warnings without an Ask-f
     .filter({ hasText: /^Buckets$/ })
     .click();
   await page.getByRole('textbox', { name: 'New bucket path' }).waitFor();
-  // A different client removes the bucket. Only a normal bucket read in this
-  // browser learns that it changed; no local write callback runs at all.
   expect(
     (
       await jsonRequest(
@@ -568,7 +565,6 @@ it.each(['create', 'delete'] as const)(
           .click();
       }
       await write.started;
-      // Remount Vault while the optimistic bucket list is still uncommitted.
       await page.getByRole('link', { name: 'Vault', exact: true }).click();
       await page.locator('[data-path="work/acme"] a').click();
       await secretSwitch().waitFor();

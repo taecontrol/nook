@@ -1,4 +1,3 @@
-// Shared, fixed product truth for the memory-history prototype. Do not edit per candidate.
 // Versions are listed oldest first here; the stub serves them newest first.
 type Principal =
   | { kind: 'owner' }
@@ -250,7 +249,6 @@ export const buckets = [
   'personal',
 ];
 
-// Each scenario: a starting URL and how the history request behaves.
 export const scenarios = {
   typical: {
     label: 'Typical (4 versions, tags-only change)',

@@ -295,7 +295,6 @@ it.each([
       if (status === 401) {
         await app.setBindings({ LOCAL_ORIGIN: app.origin });
       } else {
-        // Authenticate a genuine synthetic Access identity that is not the owner.
         const issuer = await accessFixture();
         await app.setBindings(access, {
           outboundService: issuer.outboundService,

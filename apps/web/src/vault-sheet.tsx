@@ -259,7 +259,6 @@ export function SecretSheet({
   sheet: SheetState | null;
   buckets: readonly string[];
   parents: Set<string>;
-  /** The stored secret a replace draft targets. */
   replacing: Secret | null;
   onChange: (sheet: SheetState) => void;
   onClose: () => void;

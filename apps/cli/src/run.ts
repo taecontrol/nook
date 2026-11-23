@@ -31,7 +31,6 @@ function runFailure(error: RequestFailure) {
       'SecretNotFound',
       'SecretKeyUnavailable',
       'VaultNotConfigured',
-      // A resumed run that differs from the one that asked is refused by name.
       'InvalidRun',
     ].includes(error.server.tag) &&
     error.publicMessage

@@ -10,7 +10,6 @@ import {
   median,
 } from '../scripts/lib/load-time.ts';
 
-// Every measured screen, the label its failure names, and its fixed budget.
 const screens = [
   ['ownerApproval', 'Cold open /approvals/:id', 1000],
   ['approvalsNavigation', 'Intent navigation /approvals', 100],

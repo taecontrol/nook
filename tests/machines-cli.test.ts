@@ -63,7 +63,6 @@ it('E8: revoked CLI commands give a recovery sequence that obtains a new approva
   }
   expect((await keyring.lookup(app.origin)) === token).toBe(true);
 
-  // Execute the two commands in the printed sequence, approving the new login.
   expect((await keyring.start(['logout']).done).status).toBe(0);
   expect((await keyring.lookup(app.origin)) === '').toBe(true);
   await login();

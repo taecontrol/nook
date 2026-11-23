@@ -55,7 +55,6 @@ function usageLines(node: Usage): string[] {
     ? [node]
     : Object.values(node).flatMap(usageLines);
 }
-// Prints the usage of the command that failed, or of every command below it.
 function usageOf(commandPath: readonly string[]) {
   let node = usage;
   for (const name of commandPath.slice(1))
@@ -136,7 +135,6 @@ export async function execute(
             { bucket: Argument.String('bucket') },
             ({ bucket }) => vaultList(host, bucket, write),
           ),
-          // Help has always listed import before create; usage lists create first.
           ...grammarCommands
             .toReversed()
             .map(({ path, grammar, description }) =>

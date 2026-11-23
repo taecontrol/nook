@@ -253,7 +253,6 @@ export const machineOperations = Effect.gen(function* () {
       const grantJson = JSON.stringify(normalizeGrant(grant));
       const chosenJson = JSON.stringify(grant);
       const duration = accessLifetimeMs[lifetime ?? 'never'];
-      // Validate existence at the same atomic boundary that records the decision.
       const [updated, remaining] = yield* sql
         .batch([
           sql`UPDATE authorizations SET status=${status}, machine_name=${name}, grant_json=${grantJson}, access_expires_at=CASE WHEN ${duration} IS NULL THEN NULL ELSE CAST(unixepoch('subsec')*1000 AS INTEGER)+${duration} END WHERE device_hash=${row.device_hash} AND status='pending' AND expires_at>unixepoch('subsec')*1000 AND ${selectedBucketsExist(sql, chosenJson)} RETURNING device_hash`,

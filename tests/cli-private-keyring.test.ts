@@ -95,7 +95,6 @@ it('the CLI, private bus, host, daemon, and shims never inherit owner environmen
     }
     expect(names.includes('gnome-keyring-d')).toBe(true);
     expect(names.includes('dbus-daemon')).toBe(true);
-    // A shim receives the same fresh environment as the CLI.
     await writeFile(
       resolve(fixture.shim, 'secret-tool'),
       '#!/bin/sh\nif [ -z "$NOOK_LEAK_SENTINEL" ]; then echo isolated; else echo leaked; fi > "$HOME/shim-environment"\nexec /usr/bin/secret-tool "$@"\n',
@@ -107,7 +106,6 @@ it('the CLI, private bus, host, daemon, and shims never inherit owner environmen
         await readFile(resolve(fixture.home, 'shim-environment'), 'utf8')
       ).trim(),
     ).toBe('isolated');
-    // A child cannot be pointed back at another session bus either.
     expect(() =>
       fixture.start(['--help'], {
         DBUS_SESSION_BUS_ADDRESS: 'unix:path=/tmp/nook-nonexistent-test-bus',

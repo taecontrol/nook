@@ -2,7 +2,6 @@ import fs, { closeSync, readFileSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { resolve } from 'node:path';
 
-// Observe real reads, writes and closes inside the private fixture.
 const home = new URL(import.meta.url).searchParams.get('home');
 if (!home) throw new Error('The lifecycle observer requires a private HOME.');
 const events = resolve(home, 'lifecycle-events');

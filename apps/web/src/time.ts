@@ -27,7 +27,6 @@ const clockFormat = new Intl.DateTimeFormat('en-GB', {
   minute: '2-digit',
 });
 
-/** "11:42", in the browser's time zone. */
 export function formatTime(at: string | number) {
   return clockFormat.format(new Date(at));
 }
@@ -36,17 +35,14 @@ function count(amount: number, unit: string) {
   return `${amount} ${unit}${amount === 1 ? '' : 's'}`;
 }
 
-/** "Oct 11, 2026" */
 export function formatDate(iso: string) {
   return dateFormat.format(new Date(iso));
 }
 
-/** "Oct 11, 2026, 3:04 PM" */
 export function formatDateTime(iso: string) {
   return dateTimeFormat.format(new Date(iso));
 }
 
-/** "just now", "5 minutes ago", "3 hours ago", "52 days ago" */
 export function timeAgo(iso: string, now = Date.now()) {
   const minutes = Math.max(0, Math.floor((now - Date.parse(iso)) / MINUTE));
   if (minutes < 1) return 'just now';
@@ -56,18 +52,15 @@ export function timeAgo(iso: string, now = Date.now()) {
   return `${count(Math.floor(hours / 24), 'day')} ago`;
 }
 
-/** Relative within a day, then the date. */
 export function recentTime(iso: string, now = Date.now()) {
   return now - Date.parse(iso) < DAY ? timeAgo(iso, now) : formatDate(iso);
 }
 
-/** "in 5 minutes", never less than a minute. */
 export function timeUntil(iso: string, now = Date.now()) {
   const minutes = Math.max(1, Math.ceil((Date.parse(iso) - now) / MINUTE));
   return `in ${count(minutes, 'minute')}`;
 }
 
-/** Relative access lifetime in minutes, hours or days. Never zero minutes. */
 export function untilText(iso: string, now: number) {
   const remaining = Date.parse(iso) - now;
   const minutes = Math.max(1, Math.ceil(remaining / MINUTE));

@@ -18,7 +18,6 @@ export function tagChanges(
   };
 }
 
-/** What this version changed, derived from the version before it. */
 export function changeSummary(
   version: MemoryVersion,
   previous?: MemoryVersion,

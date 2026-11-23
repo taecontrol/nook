@@ -329,7 +329,6 @@ it('E18: scheduled vector inspection converges without search within ceil(N/50) 
     new Set(seeds.map((m) => m.id)),
   );
   expect(app.services.inspections.every((ids) => ids.length <= 50)).toBe(true);
-  // Next marker repair may write at most 50 and each AI chunk at most 32.
   app.services.resetCalls();
   await app.scheduled(new Date('2030-01-01T00:10:00Z'));
   expect(

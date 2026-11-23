@@ -86,10 +86,6 @@ function forwarder(
       ),
     );
     if (after !== undefined) {
-      // Remove the token transparently: a value can span it. Flush a tail
-      // only if it began before the token. Never read ahead: an idle writer
-      // can block forever. A writer paused mid-value here whose rest is not
-      // in this read is the accepted best-effort gap at the flush boundary.
       if (masking.pendingBytes > after.length) await written(masking.end());
       markFlushed();
     }
@@ -97,11 +93,6 @@ function forwarder(
   async function followWriters() {
     const bytes = Buffer.alloc(64 * 1024);
     try {
-      // One blocking read per FIFO, from the start: kqueue cannot reliably
-      // signal either data from a blocked large FIFO write or FIFO EOF.
-      // Each fs.write finishes before the next read, so EPIPE closes the
-      // reader immediately. No output fd uses kqueue, including named FIFOs.
-      // At most two operations occupy libuv's four pool threads.
       while (!stopped) {
         const size = await readBlocking(bytes);
         if (stopped) return;
@@ -146,8 +137,6 @@ export async function relayMain() {
         if (!control.destroyed) control.write('flushed\n');
       });
     }
-    // Lost control sends no implicit flush: blocking reads keep masking until
-    // all writers close, and EOF releases the remaining token/value prefixes.
   } catch {
     failure();
     for (const stream of streams) stream.stop();

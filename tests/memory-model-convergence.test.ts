@@ -336,8 +336,6 @@ it('E18: mid-deploy, the previous Worker keeps model-carrying vectors, and its m
   app.services.advance();
   app.services.resetCalls();
 
-  // The previous Worker still inspects: it repairs the missing vector but
-  // keeps the vector that carries the model it does not know about.
   await runPrevious(Date.UTC(2030, 0, 1, 0, 0));
   expect(app.services.inspections.flat()).toEqual(
     expect.arrayContaining([kept.id, lost.id]),

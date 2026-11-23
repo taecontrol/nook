@@ -6,6 +6,7 @@ Run `pnpm verify` on Linux from the repository root with the pinned Node and pnp
 | --- | --- |
 | `pnpm verify:style` | Biome formatting, recommended lint rules, and import order. |
 | `pnpm verify:ui` | The web app composes shadcn/ui with theme tokens, static known classes, and the approved component composition rules. |
+| `pnpm verify:comments` | No TypeScript or JavaScript file has more comments than the lower of its entries in `scripts/lint/comment-baseline.json` here and on `origin/main`; a file with fewer fails until its entry is lowered, an entry for a deleted file fails, and a lint disable directive fails, so the baseline only shrinks. |
 | `pnpm verify:types` | TypeScript checks the app, contract, tooling, and tests. |
 | `pnpm verify:complexity` | Classic cyclomatic complexity is at most eight for each authored function. |
 | `pnpm verify:migrations` | D1 migrations replay on an empty, already-migrated, and populated previous schema; drift, edited published migrations, and explicit transactions fail. |

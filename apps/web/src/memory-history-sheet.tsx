@@ -434,7 +434,6 @@ export function HistorySheet({
 }: {
   model: MemoryPageModel;
   memory: OwnerMemory;
-  /** The History button that opened the sheet; focus goes back to it on close. */
   returnFocus: RefObject<HTMLElement | null>;
 }) {
   const { memory, history } = useMemoryHistory(detail);

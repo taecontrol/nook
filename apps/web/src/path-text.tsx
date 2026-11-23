@@ -19,7 +19,6 @@ export function SlashPath({ children }: { children: string }) {
   );
 }
 
-/** A bucket or secret path, in mono. */
 export function Path({
   children,
   className,
@@ -32,7 +31,6 @@ export function Path({
   );
 }
 
-/** "work, team and me", each path in mono. */
 export function PathList({
   paths,
   className,

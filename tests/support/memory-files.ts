@@ -11,7 +11,6 @@ import {
 } from './memory.ts';
 import type { TestRuntime } from './runtime.ts';
 
-// Local contract shapes keep acceptance tests compilable before implementation.
 export type MemoryFile = {
   name: string;
   mediaType: string;
@@ -145,7 +144,6 @@ export async function fileObjects(app: TestRuntime) {
   return objects;
 }
 // Reuse a running Worker only in suites without schema or checkpoint changes.
-// Every example starts with fresh file/memory state and new machine tokens.
 export async function clearFileState(app: TestRuntime) {
   const db = await app.mf.getD1Database('DB');
   await db.batch(
@@ -181,8 +179,6 @@ export function expectAuditFacts(
   facts: Record<string, unknown>,
 ) {
   expect(entry).toMatchObject({ outcome: facts.outcome, bucket: facts.bucket });
-  // Public field nesting is not fixed by the accepted spec; every stated fact
-  // must nevertheless reach the owner, while D1 column assertions pin storage.
   const values = (value: unknown): unknown[] =>
     value && typeof value === 'object'
       ? Object.values(value).flatMap(values)
@@ -225,7 +221,6 @@ export async function seedFile(
     client_version: client.version,
     attached_at: options.attachedAt ?? '2026-10-22T14:00:00.000Z',
   };
-  // Missing schema is an intended red, never silently install feature tables here.
   await (await app.mf.getD1Database('DB'))
     .prepare(
       'INSERT INTO memory_files(memory_id,name,object_key,media_type,size,sha256,principal,machine_id,machine_name,client_name,client_version,attached_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',

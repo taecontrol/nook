@@ -48,7 +48,6 @@ function rememberedFor(sql: D1Client.D1Client) {
   return sql`status='approved' AND remember<>'once' AND valid_until>${now(sql)}`;
 }
 // A retry stays bound to its original payload even after its last mark is removed.
-// Read the attempt, clock and remembered approvals in the ciphertext/marks batch.
 export function runApprovalReads(
   sql: D1Client.D1Client,
   machineId: string,

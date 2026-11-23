@@ -1,6 +1,5 @@
 import { Schema } from 'effect';
 
-// Reported by the caller's environment, never verified or used for authorization.
 export const AgentSessionClaim = Schema.Struct({
   agent: Schema.String,
   session: Schema.String,

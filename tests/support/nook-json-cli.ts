@@ -98,7 +98,6 @@ export async function beforeAccess(args: string[], message: string) {
   expect(checkpoints).toEqual([]);
   expect(await auditPaths()).toEqual([]);
 }
-// Each test gets a fresh Worker, D1, keyring and project directory.
 export function setupNookJsonCli() {
   beforeEach(async () => {
     checkpoints = [];

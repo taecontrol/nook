@@ -31,7 +31,6 @@ const resumed = (attempt: string, script?: string) => [
   attempt,
   ...args(script).slice(1),
 ];
-// The first run creates the request and returns; only its --approval run waits.
 async function askOwner(script?: string) {
   const asked = await keyring.start(args(script), session).done;
   const id = /\/approvals\/([0-9a-f-]+)/.exec(asked.stderr)?.[1] ?? '';

@@ -73,8 +73,6 @@ export async function importPage(
   });
   try {
     if (!traffic) throw new Error('Import request recorder did not start.');
-    // This must pass before looking for the missing import UI: build, migration,
-    // encryption, owner authentication and the metadata query all work.
     await secretRow(visit.page, `${importBucket}/SENTRY_DSN`).waitFor();
     await secretRow(visit.page, `${importBucket}/STRIPE_SECRET_KEY`).waitFor();
     expect(

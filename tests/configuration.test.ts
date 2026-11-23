@@ -64,6 +64,7 @@ it('E17/#33 E21: PR CI requires static checks, ten Linux shards, macOS CLI and t
   ).toEqual([
     'pnpm verify:style',
     'pnpm verify:ui',
+    'pnpm verify:comments',
     'pnpm verify:types',
     'pnpm verify:complexity',
     'pnpm verify:migrations',
@@ -97,7 +98,6 @@ it('E17/#33 E21: PR CI requires static checks, ten Linux shards, macOS CLI and t
         `pnpm test:coverage --macos-cli=${expression('matrix.shard')}/2`,
     ),
   ).toBe(true);
-  // Each suite runs in exactly one macOS shard.
   expect(new Set(macosCliSuites).size).toBe(macosCliSuites.length);
   expect(macosCliGroups.every((group) => group.length > 0)).toBe(true);
   expect(macosCliSuites).toEqual(

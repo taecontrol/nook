@@ -78,7 +78,6 @@ it.each(matrix)(
         await field.press('Enter');
       };
       if (state === 'no-results') {
-        // An empty/not-yet-visible meaning index is a legitimate derived state.
         app.services.clear();
         await search('kubernetes helm chart');
         await page.getByText('No memories found', { exact: true }).waitFor();

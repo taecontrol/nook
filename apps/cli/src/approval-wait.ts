@@ -35,8 +35,6 @@ export function approvalFailure(error: RequestFailure) {
       return error;
   }
 }
-// A run that carries a finished attempt's --approval can never be delivered,
-// so the hint names the flag to drop.
 const askAgain = 'Run again without --approval to ask again.';
 function expired() {
   return new ApprovalStopped(`The approval request expired. ${askAgain}`, 75);
@@ -61,9 +59,6 @@ function announce(approval: ApprovalPending['approval'], io: WaitIo) {
     `${approval.paths.join(', ')} needs the owner's approval.\nAsk the owner to open ${approval.url}\nWaiting (${timeLeft(approval.expiresIn)} left)…`,
   );
 }
-// An agent sees a command's output only when the command ends, so the run
-// that creates the request returns at once: the agent can tell the owner, and
-// the run it starts next waits for the decision under the same attempt.
 function askOwner(approval: ApprovalPending['approval'], attemptId: string) {
   return new ApprovalStopped(
     `${approval.paths.join(', ')} needs the owner's approval. Nothing ran yet.\nTell the owner now to open ${approval.url}\nThen run the same command again with --approval ${attemptId} after "nook run". That run waits for the owner's decision (${timeLeft(approval.expiresIn)} left).`,

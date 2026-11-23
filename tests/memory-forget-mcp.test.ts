@@ -246,7 +246,6 @@ describe.each(['owner', 'machine'] as const)('Forget #13: %s', (endpoint) => {
         changedForget(3, 2),
       );
       const after = await forgetSnapshot(app);
-      // The accepted batch always compacts FTS, including a guarded no-op.
       expect(after.heads).toEqual(before.heads);
       expect(after.versions).toEqual(before.versions);
       expect(after.removals).toEqual(before.removals);
@@ -327,7 +326,6 @@ describe.each(['owner', 'machine'] as const)('Forget #13: %s', (endpoint) => {
     });
     it('E10/E12: insert/delete aborts and missing migration preserve all canonical and index bytes', async () => {
       const db = await app.mf.getD1Database('DB');
-      // Before implementation this fails at the missing tool, never at fixture setup.
       expect(
         (await client.listTools()).tools.some((t) => t.name === 'forget'),
       ).toBe(true);

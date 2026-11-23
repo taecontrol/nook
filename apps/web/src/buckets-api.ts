@@ -108,7 +108,6 @@ export function preloadBuckets(queryClient: QueryClient) {
 }
 
 export async function refreshBucketList(queryClient: QueryClient) {
-  // Pending writes own the cached outline until their recovery read.
   if (gate.isWriting(queryClient))
     return queryClient.getQueryData(bucketsOptions.queryKey) ?? [];
   return queryClient.fetchQuery({ ...bucketsOptions, staleTime: 0 });
@@ -121,7 +120,6 @@ export function useBucketList() {
 
 export function useBuckets() {
   const queryClient = useQueryClient();
-  // The native mutation cache retains the operation across route unmounts.
   const { writes, busy, write } = gate.useWrites<BucketWrite>((mutation) => ({
     id: mutation.mutationId,
     operation: mutation.options.mutationKey?.[2] as BucketWrite['operation'],
