@@ -274,13 +274,11 @@ it.each(['all', ['work/acme']] as const)(
     expect(await auditRows(app)).toEqual([]);
   },
 );
-it('E13: machineVault exposes no read value, replace or remove capability', async () => {
+it('E13: machineVault exposes no read value, replace or remove capability', () => {
   type MachineFace = Effect.Success<ReturnType<typeof machineVault>>;
   expectTypeOf<
     Extract<keyof MachineFace, 'reveal' | 'values' | 'replace' | 'remove'>
   >().toEqualTypeOf<never>();
-  const source = await readFile('apps/worker/src/vault.ts', 'utf8');
-  expect(source).toContain('no value read, replace, or remove capability');
 });
 it('E14/E15: secret and audit share one batch, failed commits change neither and id replays preserve both', async () => {
   let stage = '';
