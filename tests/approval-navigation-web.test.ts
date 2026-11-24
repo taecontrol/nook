@@ -2,8 +2,12 @@ import type { Browser } from 'playwright';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';
 import { launchTestBrowser } from '../scripts/lib/test-browser.ts';
 import { acmePath, runFixture } from './support/audit.ts';
-import { filesRuntime } from './support/memory-files-runtime.ts';
-import { pending, setMark, view } from './support/owner-approval.ts';
+import {
+  approvalClock,
+  pending,
+  setMark,
+  view,
+} from './support/owner-approval.ts';
 import {
   approvalBrowserPage,
   approvalNow,
@@ -15,7 +19,7 @@ import {
 
 let browser: Browser;
 let closeBrowser: () => Promise<void>;
-let clock: Awaited<ReturnType<typeof filesRuntime>>;
+let clock: Awaited<ReturnType<typeof approvalClock>>;
 let app: Awaited<ReturnType<typeof runFixture>>;
 let ui: Awaited<ReturnType<typeof approvalBrowserPage>>;
 beforeAll(async () => {
@@ -23,7 +27,7 @@ beforeAll(async () => {
 });
 afterAll(() => closeBrowser());
 beforeEach(async () => {
-  clock = await filesRuntime({ now: approvalNow.getTime() });
+  clock = await approvalClock(approvalNow.getTime());
   app = await runFixture('all', undefined, clock);
   await setMark(app);
   ui = await approvalBrowserPage(browser);
@@ -39,10 +43,12 @@ afterEach(async () => {
 it.each(['expired', 'network'] as const)(
   'E31/E33/E43: history navigation to another pending approval clears %s decision feedback',
   async (failure) => {
+    clock.setTime(approvalNow.getTime() - 1000);
     const a = await pending(app, app.token, undefined, {
       secrets: [acmePath],
       purpose: 'Request A',
     });
+    clock.setTime(approvalNow.getTime());
     const b = await pending(app, app.token, undefined, {
       secrets: [acmePath],
       purpose: 'Request B',

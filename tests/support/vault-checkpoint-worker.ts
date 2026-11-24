@@ -2,7 +2,13 @@ import type {
   D1Database,
   D1PreparedStatement,
 } from '@cloudflare/workers-types';
+import { clockDatabase } from './d1-clock.ts';
 
+async function clock() {
+  return (await (
+    await fetch('https://nook-vault-checkpoints.invalid/clock')
+  ).json()) as number;
+}
 async function checkpoint(stage: string) {
   const result = await fetch(`https://nook-vault-checkpoints.invalid/${stage}`);
   if (!result.ok) throw new Error('Synthetic D1 failure');
@@ -63,6 +69,7 @@ export function vaultCheckpointWorker(
     failBatchStatement?: number;
     failBatchSize?: number;
     omitIp?: boolean;
+    now?: number;
   } = {},
 ) {
   return {
@@ -96,7 +103,7 @@ export function vaultCheckpointWorker(
       return worker.fetch(request, {
         ...env,
         DB: checkpointDatabase(
-          env.DB,
+          options.now === undefined ? env.DB : clockDatabase(env.DB, clock),
           options.observeStatements ?? false,
           options.observeBatchSize ?? false,
           options.failBatchStatement,
