@@ -65,6 +65,8 @@ it.each([
   'SELECT unixepoch /* seconds */ ()',
   "SELECT datetime((123000/1000.0),'unixepoch')",
   'SELECT unixepoch(',
+  'SELECT "current_timestamp"()',
+  "SELECT strftime(replace(mask, ')', suffix)) FROM t",
 ])('the controlled clock rejects an uncontrolled time read: %s', (query) => {
   expect(() => clockedQuery(query, 0)).toThrow(query);
 });

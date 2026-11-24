@@ -23,6 +23,10 @@ const timeFunctions: Record<string, number[]> = {
 };
 const nowAliases = ['now', 'subsec', 'subsecond'];
 
+function isMark(next: Token | undefined, text: string) {
+  return next?.kind === 'other' && next.text === text;
+}
+
 function token(text: string, start: number): Token | undefined {
   if (/^(?:\s|--|\/\*)/.test(text)) return undefined;
   const end = start + text.length;
@@ -50,10 +54,10 @@ function isClock(tokens: Token[], at: number) {
   return (
     name?.kind === 'name' &&
     name.text === 'unixepoch' &&
-    open?.text === '(' &&
+    isMark(open, '(') &&
     mode?.kind === 'string' &&
     mode.text === 'subsec' &&
-    close?.text === ')'
+    isMark(close, ')')
   );
 }
 
@@ -72,9 +76,9 @@ function callArguments(tokens: Token[], open: number) {
   const args: Token[][] = [[]];
   let depth = 0;
   for (const next of tokens.slice(open + 1)) {
-    if (next.text === '(') depth++;
-    if (next.text === ')' && depth-- === 0) return args;
-    if (next.text === ',' && depth === 0) args.push([]);
+    if (isMark(next, '(')) depth++;
+    if (isMark(next, ')') && depth-- === 0) return args;
+    if (isMark(next, ',') && depth === 0) args.push([]);
     else args[args.length - 1].push(next);
   }
   return undefined;
@@ -85,7 +89,7 @@ function isColumn(tokens: Token[]) {
     tokens.length % 2 === 1 &&
     tokens.every((next, at) =>
       at % 2 === 1
-        ? next.text === '.'
+        ? isMark(next, '.')
         : next.kind === 'name' ||
           (next.kind === 'quoted' && !nowAliases.includes(next.text)),
     )
@@ -102,7 +106,7 @@ function isFixedTime(time: Token[] | undefined) {
 function readsUncontrolledTime(tokens: Token[], at: number) {
   const current = tokens[at];
   if (
-    current.kind === 'name' &&
+    (current.kind === 'name' || current.kind === 'quoted') &&
     /^current_(?:date|time|timestamp)$/.test(current.text)
   )
     return true;
@@ -115,7 +119,7 @@ function readsUncontrolledTime(tokens: Token[], at: number) {
     current.kind === 'name' || current.kind === 'quoted'
       ? timeFunctions[current.text]
       : undefined;
-  if (!timeValues || tokens[at + 1]?.text !== '(') return false;
+  if (!timeValues || !isMark(tokens[at + 1], '(')) return false;
   const args = callArguments(tokens, at + 1);
   return !args || !timeValues.every((index) => isFixedTime(args[index]));
 }
