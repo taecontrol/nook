@@ -351,7 +351,7 @@ Linux cannot reproduce every macOS scheduling behavior.
 | E17 | “Masking E17”: a single 1 MiB `writeFileSync` includes the value at the end; the reader's exit-time snapshot already contains all bytes with that value masked. After spawn (which can reset inherited stdio flags), the fixture uses Node's stdout handle to set the description shared with the relay to O_NONBLOCK, then releases the child through a FIFO. The paused reader resumes only after a real fs.write EAGAIN. Both output pipes close and the lifecycle observer records the relay's natural exit. A full named-FIFO destination also forces EAGAIN before its reader drains in small chunks; all output must arrive complete and masked. |
 | E18 | “Masking E18”: private missing-interpreter spawn failures preserve exit 127 and the diagnostic, with and without opt-out; masked failures write one token per distinct FIFO, close output and exit the relay. Incomplete value responses exercise the same finalizer after values were sent; lost responses close the relay without tokens before delivery. Signal cases also flush an incomplete value prefix and observe relay exit. Lost relay delivery and the relay's fixed protocol-failure diagnostic exclude values. |
 | E19 | “Masking E19”: a Node preload refuses only relay startup, either synchronously or through a real failed spawn; the value-request observer and Audit both remain empty and no child starts. An unusable FIFO directory proves the same private, unaudited refusal. |
-| E20 | “Masking E20”: a preload observes the real relay's argv and environment; the injected child checks both, including values already in its parent's environment and the flush token, without printing a value. The test requires the FIFO Socket guard in argv and the exact production environment: empty, or only the coverage path. Coverage runs also require separate relay execution counters. The SEA round trip exercises the same-executable entry point. |
+| E20 | “Masking E20”: a preload observes the real relay's argv and environment; the injected child checks both, including values already in its parent's environment and the flush token, without printing a value. The test requires the FIFO Socket guard in argv and an empty production environment; in coverage runs the instrumented entry adds only the relay coverage path, and the test also requires separate relay execution counters. The SEA round trip exercises the same-executable entry point. |
 
 The relay receives values and a per-run flush token together over fd 3, never
 through arguments or environment. The token is `NUL + nook-flush: + 64 lowercase
@@ -414,10 +414,12 @@ is silent; control EOF resolves the wait if the relay is gone. Before values
 were sent, it closes writers and control without sending tokens. If run dies
 without sending its token, control EOF does not flush: the detached relay keeps
 masking until every FIFO reaches EOF. Lifecycle checks use output bytes, FIFO
-messages and process events, with no sleeps or per-test time budgets. Its
-explicit environment contains only the optional `NOOK_CLI_COVERAGE` exit-hook
-path with a distinct `-relay.json` filename, so relay counters cannot overwrite
-the parent's evidence.
+messages and process events, with no sleeps or per-test time budgets. The CLI
+starts the relay with an empty environment. In coverage runs, the instrumented
+CLI entry that `scripts/test-build.ts` writes wraps `child_process.spawn` and
+adds only the `NOOK_CLI_COVERAGE` exit-hook path, with a distinct `-relay.json`
+filename, to the relay's launch, so relay counters cannot overwrite the parent's
+evidence and the shipped CLI carries no coverage branch.
 
 `run-masker.test.ts` bounds complete-match `Buffer.indexOf` calls by matches
 plus values, with one repeated 8-byte value, 19 absent extensions and a 64 KiB
