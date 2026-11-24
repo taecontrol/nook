@@ -3,22 +3,136 @@ import type {
   D1PreparedStatement,
 } from '@cloudflare/workers-types';
 
-const controlledTime = /unixepoch\('subsec'\)/g;
-const timeValue = String.raw`(?:\(\d+(?:\.\d+)?\/1000\.0\)|(?!(?:now|subsec|subsecond)\b)[a-z_][\w.]*|"(?!(?:now|subsec|subsecond)")[a-z_]\w*")`;
-const fixedTimeCall = new RegExp(
-  String.raw`\b(?:(?:date|time|datetime|julianday|unixepoch)\s*\(|strftime\s*\(\s*(?:'[^']*'|"[^"]*")\s*,)\s*${timeValue}\s*[,)]`,
-  'gi',
-);
-const timeRead =
-  /\b(?:date|time|datetime|julianday|unixepoch|strftime|timediff)\s*\(|\bcurrent_(?:date|time|timestamp)\b|["']\s*now\s*["']/i;
+type Token = {
+  kind: 'clock' | 'name' | 'quoted' | 'string' | 'other';
+  text: string;
+  start: number;
+  end: number;
+};
+
+const lexeme =
+  /\s+|--[^\n]*|\/\*[\s\S]*?(?:\*\/|$)|'(?:[^']|'')*'|"(?:[^"]|"")*"|`(?:[^`]|``)*`|\[[^\]]*\]|\?\d*|[:@$]\w+|\.?\d[\w.]*|[a-z_\u0080-￿][\w$\u0080-￿]*|[\s\S]/giy;
+const timeFunctions: Record<string, number[]> = {
+  date: [0],
+  time: [0],
+  datetime: [0],
+  julianday: [0],
+  unixepoch: [0],
+  strftime: [1],
+  timediff: [0, 1],
+};
+const nowAliases = ['now', 'subsec', 'subsecond'];
+
+function token(text: string, start: number): Token | undefined {
+  if (/^(?:\s|--|\/\*)/.test(text)) return undefined;
+  const end = start + text.length;
+  const inner = text.slice(1, -1).toLowerCase();
+  if (text[0] === "'") return { kind: 'string', text: inner, start, end };
+  if ('"`['.includes(text[0]))
+    return { kind: 'quoted', text: inner, start, end };
+  if (/^[a-z_\u0080-￿]/i.test(text))
+    return { kind: 'name', text: text.toLowerCase(), start, end };
+  return { kind: 'other', text, start, end };
+}
+
+function tokenize(query: string) {
+  const tokens: Token[] = [];
+  lexeme.lastIndex = 0;
+  for (let match = lexeme.exec(query); match; match = lexeme.exec(query)) {
+    const next = token(match[0], match.index);
+    if (next) tokens.push(next);
+  }
+  return tokens;
+}
+
+function isClock(tokens: Token[], at: number) {
+  const [name, open, mode, close] = tokens.slice(at, at + 4);
+  return (
+    name?.kind === 'name' &&
+    name.text === 'unixepoch' &&
+    open?.text === '(' &&
+    mode?.kind === 'string' &&
+    mode.text === 'subsec' &&
+    close?.text === ')'
+  );
+}
+
+function withClocks(tokens: Token[]) {
+  const result: Token[] = [];
+  for (let at = 0; at < tokens.length; at++) {
+    if (isClock(tokens, at)) {
+      result.push({ ...tokens[at], kind: 'clock', end: tokens[at + 3].end });
+      at += 3;
+    } else result.push(tokens[at]);
+  }
+  return result;
+}
+
+function callArguments(tokens: Token[], open: number) {
+  const args: Token[][] = [[]];
+  let depth = 0;
+  for (const next of tokens.slice(open + 1)) {
+    if (next.text === '(') depth++;
+    if (next.text === ')' && depth-- === 0) return args;
+    if (next.text === ',' && depth === 0) args.push([]);
+    else args[args.length - 1].push(next);
+  }
+  return undefined;
+}
+
+function isColumn(tokens: Token[]) {
+  return (
+    tokens.length % 2 === 1 &&
+    tokens.every((next, at) =>
+      at % 2 === 1
+        ? next.text === '.'
+        : next.kind === 'name' ||
+          (next.kind === 'quoted' && !nowAliases.includes(next.text)),
+    )
+  );
+}
+
+function isFixedTime(time: Token[] | undefined) {
+  return (
+    time !== undefined &&
+    ((time.length === 1 && time[0].kind === 'clock') || isColumn(time))
+  );
+}
+
+function readsUncontrolledTime(tokens: Token[], at: number) {
+  const current = tokens[at];
+  if (
+    current.kind === 'name' &&
+    /^current_(?:date|time|timestamp)$/.test(current.text)
+  )
+    return true;
+  if (
+    (current.kind === 'string' || current.kind === 'quoted') &&
+    current.text === 'now'
+  )
+    return true;
+  const timeValues =
+    current.kind === 'name' || current.kind === 'quoted'
+      ? timeFunctions[current.text]
+      : undefined;
+  if (!timeValues || tokens[at + 1]?.text !== '(') return false;
+  const args = callArguments(tokens, at + 1);
+  return !args || !timeValues.every((index) => isFixedTime(args[index]));
+}
 
 export function clockedQuery(query: string, now: number) {
-  const clocked = query.replace(controlledTime, `(${now}/1000.0)`);
-  if (timeRead.test(clocked.replace(fixedTimeCall, '')))
+  const tokens = withClocks(tokenize(query));
+  if (tokens.some((_, at) => readsUncontrolledTime(tokens, at)))
     throw new Error(
-      `This query reads SQLite time in a form the test clock does not control; read the current time as unixepoch('subsec'): ${query}`,
+      `This query reads SQLite time in a form the test clock does not control; read the current time as unixepoch('subsec') or apply time functions to columns: ${query}`,
     );
-  return clocked;
+  return tokens
+    .filter((next) => next.kind === 'clock')
+    .reduceRight(
+      (clocked, clock) =>
+        `${clocked.slice(0, clock.start)}(${now}/1000.0)${clocked.slice(clock.end)}`,
+      query,
+    );
 }
 
 export function clockDatabase(

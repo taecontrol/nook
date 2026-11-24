@@ -51,8 +51,6 @@ it.each([
   "SELECT datetime('subsec')",
   "SELECT julianday('now')",
   "SELECT strftime('%s')",
-  "SELECT UNIXEPOCH('subsec')",
-  "SELECT unixepoch( 'subsec' )",
   "SELECT unixepoch(('subsec'))",
   'SELECT strftime("%s")',
   'SELECT datetime("now")',
@@ -61,6 +59,12 @@ it.each([
   "SELECT strftime('%s', ?)",
   "SELECT timediff(at, 'now') FROM t",
   'SELECT datetime(max(a, b)) FROM t',
+  'SELECT unixepoch(CURRENT_TIMESTAMP)',
+  "SELECT strftime('%Y-%m-%d',CURRENT_DATE)",
+  'SELECT "unixepoch"()',
+  'SELECT unixepoch /* seconds */ ()',
+  "SELECT datetime((123000/1000.0),'unixepoch')",
+  'SELECT unixepoch(',
 ])('the controlled clock rejects an uncontrolled time read: %s', (query) => {
   expect(() => clockedQuery(query, 0)).toThrow(query);
 });
@@ -78,9 +82,23 @@ it.each([
     "SELECT strftime('%Y-%m-%dT%H:%M:%fZ',unixepoch('subsec'),'unixepoch')",
     "SELECT strftime('%Y-%m-%dT%H:%M:%fZ',(1762252920123/1000.0),'unixepoch')",
   ],
+  [
+    'SELECT strftime(?, t."updated_at"), timediff(updated_at, before_at) FROM t',
+    'SELECT strftime(?, t."updated_at"), timediff(updated_at, before_at) FROM t',
+  ],
+  [
+    "SELECT UNIXEPOCH( 'SUBSEC' ), unixepoch /* now */ ('subsec')",
+    'SELECT (1762252920123/1000.0), (1762252920123/1000.0)',
+  ],
 ])(
   'the controlled clock substitutes its time and runs fixed time arithmetic: %s',
   (query, clocked) => {
     expect(clockedQuery(query, 1_762_252_920_123)).toBe(clocked);
   },
 );
+
+it('the controlled clock substitutes a time before 1970', () => {
+  expect(clockedQuery("SELECT unixepoch('subsec')", -1)).toBe(
+    'SELECT (-1/1000.0)',
+  );
+});
