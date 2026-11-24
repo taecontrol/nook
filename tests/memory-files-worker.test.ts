@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { request } from 'node:http';
+import type { FileAttached, FileAuditEntry } from '@nook/contract';
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 import { access, accessFixture } from './support/access.ts';
 import { auditRows } from './support/audit.ts';
@@ -14,7 +15,6 @@ import {
   clearFileState,
   digest,
   downloadFile,
-  expectAuditFacts,
   expectHttpError,
   fileBucket,
   fileMachine,
@@ -65,14 +65,15 @@ it('E1: attach returns exact metadata, preserves the text head and records authe
     sha256: digest(bytes),
     outcome: 'created',
     replacedSha256: null,
-  });
+  } satisfies FileAttached);
   expect(
     await db
       .prepare('SELECT * FROM memories WHERE id=?')
       .bind(fileMemory)
       .first(),
   ).toEqual(before);
-  expect(await auditRows(app)).toEqual([
+  const audit = await auditRows(app);
+  expect(audit).toEqual([
     expect.objectContaining({
       outcome: 'file_attached',
       bucket: fileBucket,
@@ -88,17 +89,23 @@ it('E1: attach returns exact metadata, preserves the text head and records authe
     }),
   ]);
   expect(await fileObjects(app)).toHaveLength(1);
-  expectAuditFacts((await fileSnapshot(app)).publicAudit[0], {
-    outcome: 'file_attached',
-    bucket: fileBucket,
-    memoryId: fileMemory,
-    name: pdfName,
-    size: bytes.length,
-    sha256: digest(bytes),
-    machineId: machine.id,
-    machineName: 'LG16',
-    client: 'nook-acceptance',
-  });
+  expect((await fileSnapshot(app)).publicAudit).toEqual([
+    {
+      id: String(audit[0]?.id),
+      at: String(audit[0]?.at),
+      outcome: 'file_attached',
+      bucket: fileBucket,
+      memoryId: fileMemory,
+      name: pdfName,
+      size: bytes.length,
+      sha256: digest(bytes),
+      replacedSha256: null,
+      principal: { kind: 'machine', id: machine.id, name: 'LG16' },
+      client: { name: 'nook-acceptance', version: '1.0' },
+      ip: null,
+      country: null,
+    } satisfies FileAuditEntry,
+  ]);
 });
 it('E2: a lost-response retry is unchanged with no audit, object or provenance write', async () => {
   const initial = await attachFile(app, machine.token);

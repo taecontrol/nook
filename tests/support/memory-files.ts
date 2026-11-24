@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { MemoryClient, Principal } from '@nook/contract';
+import type { FileAttached, MemoryClient, Principal } from '@nook/contract';
 import { expect } from 'vitest';
 import { auditRows } from './audit.ts';
 import { seedGrantTree } from './grants.ts';
@@ -11,18 +11,6 @@ import {
 } from './memory.ts';
 import type { TestRuntime } from './runtime.ts';
 
-export type MemoryFile = {
-  name: string;
-  mediaType: string;
-  size: number;
-  sha256: string;
-};
-export type AttachedFile = MemoryFile & {
-  id: string;
-  bucket: string;
-  outcome: 'created' | 'unchanged' | 'replaced';
-  replacedSha256: string | null;
-};
 export type FileRow = {
   memory_id: string;
   name: string;
@@ -111,7 +99,7 @@ export async function attachFile(
     response.status,
     'The built Worker implements the file upload route',
   ).toBe(200);
-  return (await response.json()) as AttachedFile;
+  return (await response.json()) as FileAttached;
 }
 export function downloadFile(
   app: TestRuntime,
@@ -173,18 +161,6 @@ export async function fileSnapshot(
     audit: await auditRows(app),
     publicAudit: (await response.json()).entries as Record<string, unknown>[],
   };
-}
-export function expectAuditFacts(
-  entry: unknown,
-  facts: Record<string, unknown>,
-) {
-  expect(entry).toMatchObject({ outcome: facts.outcome, bucket: facts.bucket });
-  const values = (value: unknown): unknown[] =>
-    value && typeof value === 'object'
-      ? Object.values(value).flatMap(values)
-      : [value];
-  for (const value of Object.values(facts))
-    expect(values(entry)).toContain(value);
 }
 export async function seedFile(
   app: TestRuntime,
