@@ -51,8 +51,9 @@ export async function webPending(
     ...overrides,
   };
   app.setTime(approvalNow.getTime() - 78_000);
-  const request = await pending(app, app.token, attemptId, input);
-  app.setTime(approvalNow.getTime());
+  const request = await pending(app, app.token, attemptId, input).finally(() =>
+    app.setTime(approvalNow.getTime()),
+  );
   expect(
     new URL(request.url).origin,
     'The CLI link targets this fixture Worker',

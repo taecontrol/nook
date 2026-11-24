@@ -50,6 +50,10 @@ export async function vaultCheckpoints(
     return {
       ...app,
       setTime(value: number) {
+        if (options.now === undefined)
+          throw new Error(
+            'This runtime has no test clock; create it with now.',
+          );
         now = value;
       },
       async close() {

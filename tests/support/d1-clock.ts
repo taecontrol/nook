@@ -4,18 +4,19 @@ import type {
 } from '@cloudflare/workers-types';
 
 const controlledTime = /unixepoch\('subsec'\)/g;
-const uncontrolledTime = [
-  /["']now["']/i,
-  /\bcurrent_(?:date|time|timestamp)\b/i,
-  /\b(?:date|time|datetime|julianday|unixepoch|timediff)\s*\(\s*(?:\)|["'])/i,
-  /\bstrftime\s*\(\s*'[^']*'\s*(?:\)|,\s*["'])/i,
-];
+const timeValue = String.raw`(?:\(\d+(?:\.\d+)?\/1000\.0\)|(?!(?:now|subsec|subsecond)\b)[a-z_][\w.]*|"(?!(?:now|subsec|subsecond)")[a-z_]\w*")`;
+const fixedTimeCall = new RegExp(
+  String.raw`\b(?:(?:date|time|datetime|julianday|unixepoch)\s*\(|strftime\s*\(\s*(?:'[^']*'|"[^"]*")\s*,)\s*${timeValue}\s*[,)]`,
+  'gi',
+);
+const timeRead =
+  /\b(?:date|time|datetime|julianday|unixepoch|strftime|timediff)\s*\(|\bcurrent_(?:date|time|timestamp)\b|["']\s*now\s*["']/i;
 
 export function clockedQuery(query: string, now: number) {
   const clocked = query.replace(controlledTime, `(${now}/1000.0)`);
-  if (uncontrolledTime.some((spelling) => spelling.test(clocked)))
+  if (timeRead.test(clocked.replace(fixedTimeCall, '')))
     throw new Error(
-      `This query reads SQLite time in a spelling the test clock does not control; read it as unixepoch('subsec'): ${query}`,
+      `This query reads SQLite time in a form the test clock does not control; read the current time as unixepoch('subsec'): ${query}`,
     );
   return clocked;
 }

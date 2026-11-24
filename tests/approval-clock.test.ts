@@ -53,17 +53,34 @@ it.each([
   "SELECT strftime('%s')",
   "SELECT UNIXEPOCH('subsec')",
   "SELECT unixepoch( 'subsec' )",
+  "SELECT unixepoch(('subsec'))",
+  'SELECT strftime("%s")',
+  'SELECT datetime("now")',
+  'SELECT datetime("subsec")',
+  'SELECT datetime(?)',
+  "SELECT strftime('%s', ?)",
+  "SELECT timediff(at, 'now') FROM t",
+  'SELECT datetime(max(a, b)) FROM t',
 ])('the controlled clock rejects an uncontrolled time read: %s', (query) => {
   expect(() => clockedQuery(query, 0)).toThrow(query);
 });
 
-it('the controlled clock substitutes its time and leaves column arithmetic alone', () => {
-  expect(
-    clockedQuery(
-      "UPDATE t SET at=strftime('%Y-%m-%dT%H:%M:%fZ', at, '+0.001 seconds'), seen=unixepoch('subsec')*1000 WHERE due>unixepoch('subsec')",
-      1_762_252_920_123,
-    ),
-  ).toBe(
+it.each([
+  [
+    "UPDATE t SET at=strftime('%Y-%m-%dT%H:%M:%fZ', at, '+0.001 seconds'), seen=unixepoch('subsec')*1000 WHERE due>unixepoch('subsec')",
     "UPDATE t SET at=strftime('%Y-%m-%dT%H:%M:%fZ', at, '+0.001 seconds'), seen=(1762252920123/1000.0)*1000 WHERE due>(1762252920123/1000.0)",
-  );
-});
+  ],
+  [
+    `SELECT strftime('%Y-%m-%dT%H:%M:%fZ', "updated_at", '+0.001 seconds'), date(a.at) FROM t a`,
+    `SELECT strftime('%Y-%m-%dT%H:%M:%fZ', "updated_at", '+0.001 seconds'), date(a.at) FROM t a`,
+  ],
+  [
+    "SELECT strftime('%Y-%m-%dT%H:%M:%fZ',unixepoch('subsec'),'unixepoch')",
+    "SELECT strftime('%Y-%m-%dT%H:%M:%fZ',(1762252920123/1000.0),'unixepoch')",
+  ],
+])(
+  'the controlled clock substitutes its time and runs fixed time arithmetic: %s',
+  (query, clocked) => {
+    expect(clockedQuery(query, 1_762_252_920_123)).toBe(clocked);
+  },
+);
