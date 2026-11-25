@@ -79,7 +79,7 @@ export class SearchStandIns {
   failInspection = false;
   failDelete = false;
   deletions: string[][] = [];
-  d1Trips = 0;
+  d1TripTables: string[][] = [];
   missing = new Set<string>();
   indexes = new Set(['bucket']);
   private written = new Map<string, LocalVector & { indexed: Set<string> }>();
@@ -96,7 +96,13 @@ export class SearchStandIns {
     this.upserts = [];
     this.inspections = [];
     this.deletions = [];
-    this.d1Trips = 0;
+    this.d1TripTables = [];
+  }
+  get d1Trips() {
+    return this.d1TripTables.length;
+  }
+  d1TripsOn(table: string) {
+    return this.d1TripTables.filter((tables) => tables.includes(table)).length;
   }
   clear() {
     this.written.clear();
@@ -180,11 +186,11 @@ export class SearchStandIns {
   async fetch(request: Request) {
     try {
       const path = new URL(request.url).pathname;
+      const args = (await request.json()) as unknown[];
       if (path === '/d1') {
-        this.d1Trips++;
+        this.d1TripTables.push(args as string[]);
         return new Response('ok');
       }
-      const args = (await request.json()) as unknown[];
       if (path === '/run')
         return Response.json(
           this.run(
