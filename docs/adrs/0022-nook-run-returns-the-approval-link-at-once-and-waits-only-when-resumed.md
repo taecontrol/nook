@@ -21,7 +21,7 @@ The server does not change. It already answers a repeated request under one atte
 
 Every caller gets the same two steps, including a person at a terminal. The CLI does not guess whether an agent is reading its output.
 
-Messages for an expired, withdrawn, or changed request now say `Run again without --approval to ask again.`, because a finished attempt can never be delivered.
+Messages for an expired, withdrawn, or changed request now say `Run again without --approval to ask again.`, because only a new request can get a new decision from the owner. The old attempt is not dead in every case: unless it was denied or withdrawn, it may still receive its values under the same attempt id and payload once none of its secrets is covered any more or a remembered approval covers the ones that still are, as the [control flow of `values`](../design/owner-approval.md#control-flow-of-values) decides. A plain run receives them in those cases too, so the advice holds.
 
 ## Consequences
 
