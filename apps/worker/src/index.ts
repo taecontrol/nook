@@ -4,12 +4,7 @@ import type {
   ScheduledController,
 } from '@cloudflare/workers-types';
 import { D1Client } from '@effect/sql-d1';
-import {
-  Api,
-  type BucketGrant,
-  badRequestTags,
-  secretLimits,
-} from '@nook/contract';
+import { Api, type BucketGrant, badRequestTags } from '@nook/contract';
 import { Effect, Layer } from 'effect';
 import { HttpRouter, HttpServer, HttpServerRequest } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
@@ -40,7 +35,7 @@ import { memoryIndex } from './memory-index.ts';
 import { memorySync } from './memory-sync.ts';
 import { ownerFacts, wholeInstallationGuard } from './owner-request.ts';
 import {
-  fileRouterMaxParamLength,
+  contractValidatesParams,
   matches,
   ownerRoutes,
   revealRoute,
@@ -192,12 +187,7 @@ export function handlerForPrincipal(
   );
   const apiHandler = HttpRouter.toWebHandler(routes, {
     disableLogger: true,
-    routerConfig: {
-      maxParamLength: Math.max(
-        fileRouterMaxParamLength,
-        6 * (32 + 1) + secretLimits.name,
-      ),
-    },
+    routerConfig: contractValidatesParams,
   }).handler;
   return (request: Request, ctx?: Pick<ExecutionContext, 'waitUntil'>) =>
     new URL(request.url).pathname === '/mcp'

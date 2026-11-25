@@ -17,7 +17,7 @@ import { unavailable as storageUnavailable } from './http-errors.ts';
 import { machineOperations } from './machines.ts';
 import { mcpHandler } from './mcp.ts';
 import { memoryFiles } from './memory-files.ts';
-import { fileRouterMaxParamLength } from './routes.ts';
+import { contractValidatesParams } from './routes.ts';
 import { runSecrets } from './run-secrets.ts';
 import { machineVault } from './vault.ts';
 
@@ -153,7 +153,7 @@ export function machineHandler(
   );
   return HttpRouter.toWebHandler(routes, {
     disableLogger: true,
-    routerConfig: { maxParamLength: fileRouterMaxParamLength },
+    routerConfig: contractValidatesParams,
   }).handler;
 }
 export function authorizationHandler(db: D1Database) {
