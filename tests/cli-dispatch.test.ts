@@ -64,3 +64,14 @@ it.each(['create', 'import', 'list'])(
     ).toBe('');
   },
 );
+
+it('vault help lists its subcommands in the order of the vault usage', async () => {
+  const result = await keyring.start(['vault', '--help']).done;
+  const subcommands = result.stdout
+    .split('SUBCOMMANDS\n')[1]
+    ?.split('\n')
+    .map((line) => line.trim().split(/\s+/)[0])
+    .filter(Boolean);
+  expect(result.status).toBe(0);
+  expect(subcommands).toEqual(['check', 'list', 'create', 'import']);
+});
