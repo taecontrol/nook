@@ -3,9 +3,9 @@ import { expect } from 'vitest';
 import { acmePath, fetchValues, runFixture } from './audit.ts';
 import { jsonRequest } from './authorizations.ts';
 import { seedGrantTree } from './grants.ts';
-import { filesRuntime } from './memory-files-runtime.ts';
 import type { TestRuntime } from './runtime.ts';
 import { createSecret, secretInput } from './vault.ts';
+import { vaultCheckpoints } from './vault-checkpoints.ts';
 
 export const stripe = 'work/acme/STRIPE_KEY';
 export const database = 'work/acme/prod/DATABASE_URL';
@@ -20,15 +20,14 @@ export type Pending = {
     interval: number;
   };
 };
+export function approvalClock(now: number) {
+  return vaultCheckpoints(async () => true, undefined, false, { now });
+}
 export async function approvalFixture(
   onCheckpoint?: (label: string) => Promise<boolean>,
-  clock?: { now: number },
+  clock?: Awaited<ReturnType<typeof approvalClock>>,
 ) {
-  const app = await runFixture(
-    'all',
-    onCheckpoint,
-    clock ? await filesRuntime(clock) : undefined,
-  );
+  const app = await runFixture('all', onCheckpoint, clock);
   await seedGrantTree(app, ['work/acme/prod', 'work/acme2', 'me/nook']);
   for (const path of [stripe, database, cloudflare, 'work/acme2/TOKEN']) {
     const at = path.lastIndexOf('/');

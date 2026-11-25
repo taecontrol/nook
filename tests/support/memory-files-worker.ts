@@ -1,10 +1,10 @@
 import type {
   D1Database,
-  D1PreparedStatement,
   ExecutionContext,
   R2Bucket,
   ScheduledController,
 } from '@cloudflare/workers-types';
+import { clockDatabase } from './d1-clock.ts';
 import { checkpointDatabase } from './vault-checkpoint-worker.ts';
 
 type Env = { DB: D1Database; FILES: R2Bucket };
@@ -20,61 +20,6 @@ async function clock() {
   return (await (
     await fetch('https://nook-files-checkpoints.invalid/clock')
   ).json()) as number;
-}
-// Only the test wrapper substitutes SQLite wall time. Real SQL still executes
-// against D1, including all guards, transactions, constraints and RETURNING.
-function clockDatabase(db: D1Database, batchClockStepMs: number): D1Database {
-  const statements = new WeakMap<
-    D1PreparedStatement,
-    { query: string; values: unknown[] }
-  >();
-  function native(query: string, values: unknown[], now: number) {
-    return db
-      .prepare(query.replace(/unixepoch\('subsec'\)/g, `(${now}/1000.0)`))
-      .bind(...values);
-  }
-  function prepare(query: string, values: unknown[] = []): D1PreparedStatement {
-    const statement: D1PreparedStatement = {
-      bind: (...next) => prepare(query, next),
-      all: async <T>() => native(query, values, await clock()).all<T>(),
-      first: async <T>(column?: string) => {
-        const statement = native(query, values, await clock());
-        return column === undefined
-          ? statement.first<T>()
-          : statement.first<T>(column);
-      },
-      run: async <T>() => native(query, values, await clock()).run<T>(),
-      raw: (async (options?: { columnNames?: boolean }) => {
-        const statement = native(query, values, await clock());
-        return options?.columnNames
-          ? statement.raw({ columnNames: true })
-          : statement.raw();
-      }) as D1PreparedStatement['raw'],
-    };
-    statements.set(statement, { query, values });
-    return statement;
-  }
-  return {
-    prepare,
-    async batch<T>(input: D1PreparedStatement[]) {
-      const now = await clock();
-      return db.batch<T>(
-        input.map((statement, index) => {
-          const source = statements.get(statement);
-          return source
-            ? native(
-                source.query,
-                source.values,
-                now + index * batchClockStepMs,
-              )
-            : statement;
-        }),
-      );
-    },
-    exec: db.exec.bind(db),
-    dump: db.dump.bind(db),
-    withSession: db.withSession.bind(db),
-  };
 }
 function objects(bucket: R2Bucket): R2Bucket {
   return new Proxy(bucket, {
@@ -131,7 +76,11 @@ async function environment(env: Env, batchClockStepMs: number) {
   const now = await clock();
   return {
     ...env,
-    DB: checkpointDatabase(clockDatabase(env.DB, batchClockStepMs), true, true),
+    DB: checkpointDatabase(
+      clockDatabase(env.DB, clock, batchClockStepMs),
+      true,
+      true,
+    ),
     FILES: objects(env.FILES),
     // Expected production seam: a synchronous clock, supplied only by tests.
     // Production defaults to Date.now; the seam must also reach Cron's sweep.

@@ -14,10 +14,12 @@ export async function vaultCheckpoints(
     failBatchStatement?: number;
     failBatchSize?: number;
     omitIp?: boolean;
+    now?: number;
   } = {},
 ) {
   await mkdir('.local', { recursive: true });
   const directory = await mkdtemp(resolve('.local', 'vault-checkpoints-'));
+  let now = options.now;
   try {
     await cp(resolve(testBuild, 'assets'), resolve(directory, 'assets'), {
       recursive: true,
@@ -37,15 +39,23 @@ export async function vaultCheckpoints(
     });
     const app = await vaultRuntime({
       directory,
-      outboundService: async (request) =>
-        new Response('synthetic checkpoint', {
-          status: (await onCheckpoint(new URL(request.url).pathname))
-            ? 200
-            : 503,
-        }),
+      outboundService: async (request) => {
+        const label = new URL(request.url).pathname;
+        if (label === '/clock' && now !== undefined) return Response.json(now);
+        return new Response('synthetic checkpoint', {
+          status: (await onCheckpoint(label)) ? 200 : 503,
+        });
+      },
     });
     return {
       ...app,
+      setTime(value: number) {
+        if (options.now === undefined)
+          throw new Error(
+            'This runtime has no test clock; create it with now.',
+          );
+        now = value;
+      },
       async close() {
         try {
           await app.close();

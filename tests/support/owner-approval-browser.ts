@@ -5,7 +5,7 @@ import type { Browser, Locator, Page } from 'playwright';
 import { expect } from 'vitest';
 import { closeBrowserPage } from './buckets-browser.ts';
 import {
-  age,
+  approvalClock,
   approvalFixture,
   pending,
   stripe,
@@ -24,16 +24,17 @@ export const session = {
 };
 export const approvalScope =
   'Any later run on omarchy uses this secret without asking until 11:42, whichever agent runs it. Other secrets still ask.';
-export type ApprovalApp = Awaited<ReturnType<typeof approvalFixture>>;
+export type ApprovalApp = Awaited<ReturnType<typeof approvalWebApp>>;
 
 export async function approvalWebApp() {
-  const app = await approvalFixture(undefined, { now: approvalNow.getTime() });
+  const clock = await approvalClock(approvalNow.getTime());
+  const app = await approvalFixture(undefined, clock);
   const db = await app.mf.getD1Database('DB');
   await db
     .prepare('UPDATE machine_tokens SET machine_name=? WHERE id=?')
     .bind('omarchy', app.machine.id)
     .run();
-  return app;
+  return { ...app, setTime: clock.setTime };
 }
 
 export async function webPending(
@@ -49,21 +50,17 @@ export async function webPending(
     agentSession: session,
     ...overrides,
   };
-  const request = await pending(app, app.token, attemptId, input);
+  app.setTime(approvalNow.getTime() - 78_000);
+  const request = await pending(app, app.token, attemptId, input).finally(() =>
+    app.setTime(approvalNow.getTime()),
+  );
   expect(
     new URL(request.url).origin,
     'The CLI link targets this fixture Worker',
   ).toBe(app.origin);
-  // Defaults are SQLite wall time; move the actual row, never fabricate a view.
-  await age(
-    app,
-    request.id,
-    'expires_at',
-    Date.parse(request.expiresAt) - approvalNow.getTime() - 522_000,
-  );
   await (await app.mf.getD1Database('DB'))
-    .prepare('UPDATE approval_requests SET requested_at=?,client=? WHERE id=?')
-    .bind(approvalNow.getTime() - 78_000, 'nook 0.3.2 · linux-x64', request.id)
+    .prepare('UPDATE approval_requests SET client=? WHERE id=?')
+    .bind('nook 0.3.2 · linux-x64', request.id)
     .run();
   expect(
     await view(app, request.id),

@@ -261,7 +261,7 @@ export function requestApprovalEventInsert(
     country: null,
   },
 ) {
-  return sql`INSERT INTO audit_entries(id,at,outcome,path,bucket,purpose,machine_id,machine_name,working_directory,executable,run_id,approval_id,approval_remember,ip,country) SELECT ${randomId(sql)},strftime('%Y-%m-%dT%H:%M:%fZ','now'),${outcome},p.value,${pathBucket(sql)},a.purpose,a.machine_id,a.machine_name,a.working_directory,a.executable,a.id,a.id,a.remember,${facts.ip},${facts.country} FROM approval_requests a,json_each(a.covered_json) p WHERE a.id=${id} AND (${guard})`;
+  return sql`INSERT INTO audit_entries(id,at,outcome,path,bucket,purpose,machine_id,machine_name,working_directory,executable,run_id,approval_id,approval_remember,ip,country) SELECT ${randomId(sql)},strftime('%Y-%m-%dT%H:%M:%fZ',unixepoch('subsec'),'unixepoch'),${outcome},p.value,${pathBucket(sql)},a.purpose,a.machine_id,a.machine_name,a.working_directory,a.executable,a.id,a.id,a.remember,${facts.ip},${facts.country} FROM approval_requests a,json_each(a.covered_json) p WHERE a.id=${id} AND (${guard})`;
 }
 
 function encodeCursor(row: { at: string; id: string }) {
