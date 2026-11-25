@@ -514,6 +514,7 @@ it('E17: invalid reveal paths fail before every statement and audit', async () =
       ['work/acme/not-valid', 'InvalidSecret'],
       ['work/acme/', 'InvalidSecret'],
       ['work//acme/STRIPE_KEY', 'InvalidBucketPath'],
+      [`work/acme/${'W'.repeat(800)}`, 'InvalidSecret'],
     ]) {
       labels.length = 0;
       const response = await revealSecret(measured, path);

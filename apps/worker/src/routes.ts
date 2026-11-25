@@ -8,7 +8,9 @@ import {
 
 export type Route = { readonly method: string; readonly path: string };
 
-export const fileRouterMaxParamLength = 800;
+export const contractValidatesParams = {
+  maxParamLength: Number.POSITIVE_INFINITY,
+};
 
 function endpoints<Id extends string, Groups extends HttpApiGroup.Constraint>(
   api: HttpApi.HttpApi<Id, Groups>,

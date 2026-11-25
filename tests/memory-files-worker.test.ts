@@ -337,7 +337,7 @@ it('E14: downloads allow canRead ancestors and me, and mask unreadable memories 
   }
   const before = await auditRows(app);
   const other = await fileMachine(app, ['personal'], 'other');
-  for (const id of [fileMemory, randomUUID()])
+  for (const id of [fileMemory, randomUUID(), 'm'.repeat(801)])
     await expectHttpError(
       await downloadFile(app, other.token, id),
       404,
