@@ -1,6 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Browser, Page, Request } from 'playwright';
 import { memoryId } from '../tests/fixtures/memories.ts';
+import { timedUse } from '../tests/support/audit.ts';
 import type { Measurements } from './lib/load-time.ts';
 import { startPhoneNetwork } from './lib/phone-network.ts';
 
@@ -19,6 +20,7 @@ export async function phonePage(browser: Browser, kind: string) {
         'machineAccessNavigation',
         'audit',
         'auditNavigation',
+        'auditSessionNavigation',
         'memory',
         'memoryNavigation',
         'memoryReader',
@@ -327,6 +329,7 @@ async function settleNetworkAfter<T>(
     clearTimeout(timeoutTimer);
   }
 }
+type ShownScreen = { selector: string; count?: number; param?: string };
 async function navigate(
   page: Page,
   origin: string,
@@ -335,12 +338,26 @@ async function navigate(
     | 'machines'
     | 'vault'
     | 'audit'
+    | 'auditSession'
     | 'memory'
     | 'memoryReader'
     | 'approvals',
   preloadTimeout: number,
 ) {
   const link = await settleNetworkAfter(page, preloadTimeout, async () => {
+    if (kind === 'auditSession') {
+      await page.goto(`${origin}/audit`);
+      const entry = page
+        .locator('[data-entry]')
+        .filter({ hasText: timedUse.purpose });
+      await entry.getByRole('button', { name: /^Show details/ }).click();
+      const link = entry.getByRole('link', {
+        name: 'Activity in this session',
+        exact: true,
+      });
+      await link.hover();
+      return link;
+    }
     if (kind === 'memoryReader') {
       await page.goto(`${origin}/memory?bucket=work/acme`);
       const link = page.locator(`[data-memory-row="${memoryId(100)}"]`);
@@ -376,14 +393,22 @@ async function navigate(
     return link;
   });
   await page.evaluate(
-    (selector) => {
+    ({ selector, count, param }) => {
       document.addEventListener(
         'click',
         () => performance.mark('nook-navigation-start'),
         { once: true, capture: true },
       );
+      const shown = () => {
+        const found = document.querySelectorAll(selector).length;
+        return (
+          (count === undefined ? found > 0 : found === count) &&
+          (param === undefined ||
+            new URLSearchParams(location.search).has(param))
+        );
+      };
       const observer = new MutationObserver(() => {
-        if (!document.querySelector(selector)) return;
+        if (!shown()) return;
         observer.disconnect();
         requestAnimationFrame(() =>
           requestAnimationFrame(() => performance.mark('nook-navigation-end')),
@@ -391,16 +416,21 @@ async function navigate(
       });
       observer.observe(document, { childList: true, subtree: true });
     },
-    {
-      buckets: '[aria-label="All buckets"] [data-path]',
-      vault: '[data-secret="me/GITHUB_TOKEN"]',
-      machines: '[data-machine]',
-      audit: '[data-entry]',
-      approvals: '[data-approval] a[href^="/approvals/"]',
-      memory: '[aria-label="Memory buckets"] [data-path="me"]',
-      memoryReader:
-        '[data-memory-reading] [data-memory-files][aria-label="Files, 1"]',
-    }[kind],
+    (
+      {
+        buckets: { selector: '[aria-label="All buckets"] [data-path]' },
+        vault: { selector: '[data-secret="me/GITHUB_TOKEN"]' },
+        machines: { selector: '[data-machine]' },
+        audit: { selector: '[data-entry]' },
+        auditSession: { selector: '[data-entry]', count: 1, param: 'session' },
+        approvals: { selector: '[data-approval] a[href^="/approvals/"]' },
+        memory: { selector: '[aria-label="Memory buckets"] [data-path="me"]' },
+        memoryReader: {
+          selector:
+            '[data-memory-reading] [data-memory-files][aria-label="Files, 1"]',
+        },
+      } satisfies Record<typeof kind, ShownScreen>
+    )[kind],
   );
   await link.click();
   await page.waitForFunction(
@@ -489,6 +519,7 @@ export async function measureScreen(
     machinesNavigation: 'machines',
     vaultNavigation: 'vault',
     auditNavigation: 'audit',
+    auditSessionNavigation: 'auditSession',
     memoryNavigation: 'memory',
     memoryReaderNavigation: 'memoryReader',
   } as const;

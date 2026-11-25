@@ -25,6 +25,7 @@ const screens = [
   ['machinesNavigation', 'Intent navigation /machines', 100],
   ['vaultNavigation', 'Intent navigation /vault', 100],
   ['auditNavigation', 'Intent navigation /audit', 100],
+  ['auditSessionNavigation', 'Intent navigation /audit session', 100],
   ['memoryNavigation', 'Intent navigation /memory', 100],
   ['memoryReaderNavigation', 'Intent navigation /memory with files', 100],
   ['approvalNavigation', 'Loaded approval tree', 100],
@@ -96,9 +97,9 @@ it.each(screens)(
   'an over-budget %s median fails for its own timing',
   (key, label, budget) => {
     // Two fast samples must not hide an over-budget median.
-    const over = [0, budget + 1, 0, budget + 1, budget + 1];
+    const over = [0, budget + 0.1, 0, budget + 0.1, budget + 0.1];
     expect(() => assertLoadTimes({ ...atLimit, [key]: over })).toThrow(
-      `${label} median ${(budget + 1).toFixed(1)} ms exceeds ${budget} ms.`,
+      `${label} median ${(budget + 0.1).toFixed(1)} ms exceeds ${budget} ms.`,
     );
   },
 );

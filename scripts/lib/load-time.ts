@@ -28,6 +28,7 @@ export type Measurements = {
   vaultNavigation: number[];
   audit: number[];
   auditNavigation: number[];
+  auditSessionNavigation: number[];
   memory: number[];
   memoryNavigation: number[];
   memoryReader: number[];
@@ -82,6 +83,11 @@ export function assertLoadTimes(measured: Measurements) {
       'Intent navigation /audit',
       loadTimeBudgets.navigationMs,
     ],
+    [
+      'auditSessionNavigation',
+      'Intent navigation /audit session',
+      loadTimeBudgets.navigationMs,
+    ],
     ['vault', 'Cold open /vault', loadTimeBudgets.coldOpenMs],
     [
       'vaultNavigation',
@@ -123,6 +129,7 @@ export function formatMeasurements(measured: Measurements) {
         machineAccessNavigation: median(measured.machineAccessNavigation),
         audit: median(measured.audit),
         auditNavigation: median(measured.auditNavigation),
+        auditSessionNavigation: median(measured.auditSessionNavigation),
         vault: median(measured.vault),
         vaultNavigation: median(measured.vaultNavigation),
         memory: median(measured.memory),
