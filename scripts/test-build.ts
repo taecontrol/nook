@@ -52,7 +52,7 @@ export async function buildTest() {
     const cliEntry = resolve(directory, 'cli-entry.js');
     await writeFile(
       cliEntry,
-      `import { writeFileSync } from 'node:fs'; process.once('exit', () => writeFileSync(process.env.NOOK_CLI_COVERAGE, JSON.stringify({ seam: 'cli', loaded: globalThis.__authoredModules__ ?? {}, counters: globalThis.__coverage__ ?? {} }))); await import(${JSON.stringify(resolve('apps/cli/src/index.ts'))});`,
+      `import children from 'node:child_process'; import { writeFileSync } from 'node:fs'; import { syncBuiltinESMExports } from 'node:module'; const spawn = children.spawn; const relayCoverage = process.env.NOOK_CLI_COVERAGE?.replace(/\\.json$/, '-relay.json'); children.spawn = (file, args, options) => spawn(file, args, relayCoverage && args.includes('--nook-output-relay') ? { ...options, env: { ...options.env, NOOK_CLI_COVERAGE: relayCoverage } } : options); syncBuiltinESMExports(); process.once('exit',() => writeFileSync(process.env.NOOK_CLI_COVERAGE, JSON.stringify({ seam: 'cli', loaded: globalThis.__authoredModules__ ?? {}, counters: globalThis.__coverage__ ?? {} }))); await import(${JSON.stringify(resolve('apps/cli/src/index.ts'))});`,
     );
     await build({
       entryPoints: [cliEntry],

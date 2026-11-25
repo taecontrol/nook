@@ -44,14 +44,6 @@ function replies(control: Duplex) {
       }),
   };
 }
-function relayEnvironment() {
-  // The executable and bundle paths are explicit; the relay needs no caller
-  // environment (which can already contain values from an outer nook run).
-  const coverage = process.env.NOOK_CLI_COVERAGE;
-  return coverage
-    ? { NOOK_CLI_COVERAGE: coverage.replace(/\.json$/, '-relay.json') }
-    : {};
-}
 async function writeTokens(plan: MaskedPlan, token: Buffer) {
   for (const { tokenWrite } of plan.relay) {
     try {
@@ -77,7 +69,7 @@ async function launch(plan: MaskedPlan) {
   ];
   const child = spawn(process.execPath, args, {
     detached: true,
-    env: relayEnvironment(),
+    env: {},
     // fd 3 is control; each remaining fd is the sole blocking FIFO reader.
     stdio: ['ignore', 1, 2, 'pipe', ...plan.relay.map(({ read }) => read)],
   });
