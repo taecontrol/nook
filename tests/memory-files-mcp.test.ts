@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import type { FileAttached, MemoryFile } from '@nook/contract';
 import { Log, LogLevel } from 'miniflare';
 import {
   afterAll,
@@ -29,7 +30,6 @@ import {
   typicalMemories,
 } from './support/memory.ts';
 import {
-  type AttachedFile,
   attachFile,
   clearFileState,
   downloadFile,
@@ -39,7 +39,6 @@ import {
   fileObjects,
   fileRows,
   fileSnapshot,
-  type MemoryFile,
   pdfName,
   seedFile,
   seedFileMemory,
@@ -456,7 +455,7 @@ describe.each(['owner', 'machine'] as const)(
             JSON.stringify(await search()),
           );
           const keyring = await privateKeyring();
-          let replacement: AttachedFile;
+          let replacement: FileAttached;
           try {
             await configureFilesCli(keyring, app.origin, machine.token);
             const input = resolve(keyring.home, 'input');
@@ -472,7 +471,9 @@ describe.each(['owner', 'machine'] as const)(
             outputs.push(retry.stdout, retry.stderr);
             check();
             expect(retry.status).toBe(0);
-            expect(JSON.parse(retry.stdout).outcome).toBe('unchanged');
+            expect((JSON.parse(retry.stdout) as FileAttached).outcome).toBe(
+              'unchanged',
+            );
             const result = await keyring.start([
               'memory',
               'download',
@@ -493,7 +494,7 @@ describe.each(['owner', 'machine'] as const)(
             outputs.push(replaced.stdout, replaced.stderr);
             check();
             expect(replaced.status).toBe(0);
-            replacement = JSON.parse(replaced.stdout) as AttachedFile;
+            replacement = JSON.parse(replaced.stdout) as FileAttached;
             expect(replacement.outcome).toBe('replaced');
             transitions++;
           } finally {

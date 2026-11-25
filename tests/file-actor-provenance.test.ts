@@ -1,3 +1,4 @@
+import type { FileAttached } from '@nook/contract';
 import { afterEach, expect, it } from 'vitest';
 import { auditRows } from './support/audit.ts';
 import { memoryClient } from './support/memory.ts';
@@ -38,7 +39,7 @@ it.each([
       body: Buffer.from('actor provenance fixture'),
     });
     expect(upload.status).toBe(200);
-    const stored = (await upload.json()) as { sha256: string };
+    const stored = (await upload.json()) as FileAttached;
     const downloaded = await fetch(app.origin + filePath(), {
       headers: {
         Authorization: `Bearer ${machine.token}`,
