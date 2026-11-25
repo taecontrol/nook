@@ -1,6 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
-import type { Readable } from 'node:stream';
 import { isDeepStrictEqual } from 'node:util';
 import { decodeJwt, generateKeyPair } from 'jose';
 import { Log, LogLevel } from 'miniflare';
@@ -18,7 +17,6 @@ async function loggedRuntime(options: Parameters<typeof runtime>[0] = {}) {
   const app = await runtime({ ...options, bindings });
   const logs: string[] = [];
   const workerLogs: string[] = [];
-  const workerStdio: Readable[] = [];
   class AuthLog extends Log {
     override log(message: string) {
       logs.push(message);
@@ -27,7 +25,6 @@ async function loggedRuntime(options: Parameters<typeof runtime>[0] = {}) {
   await app.setBindings(bindings, {
     log: new AuthLog(LogLevel.VERBOSE),
     handleRuntimeStdio(stdout, stderr) {
-      workerStdio.splice(0, workerStdio.length, stdout, stderr);
       for (const stream of [stdout, stderr])
         stream.on('data', (chunk) => {
           logs.push(chunk.toString());
@@ -35,17 +32,34 @@ async function loggedRuntime(options: Parameters<typeof runtime>[0] = {}) {
         });
     },
   });
-  return { ...app, logs, workerLogs, workerStdio };
+  return { ...app, logs, workerLogs };
 }
 
-// Stdout chunks can split a line, and workerd may flush it after the response.
-async function completeWorkerOutput(target: { workerLogs: string[] }) {
+async function markerLine(target: { origin: string; workerLogs: string[] }) {
+  const path = `/api/${randomUUID()}`;
+  await (await fetch(`${target.origin}${path}`)).text();
   for (let attempt = 0; attempt < 500; attempt += 1) {
     const output = target.workerLogs.join('');
-    if (output.trim() && output.endsWith('\n')) return output;
+    const marker = output.indexOf(`"path":"${path}"`);
+    const end = output.indexOf('\n', marker);
+    if (marker !== -1 && end !== -1)
+      return { start: output.lastIndexOf('\n', marker) + 1, end: end + 1 };
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  return target.workerLogs.join('');
+  throw new Error(`Worker output never showed the marker request ${path}`);
+}
+
+async function workerOutputOf<T>(
+  target: { origin: string; workerLogs: string[] },
+  send: () => Promise<T>,
+) {
+  const before = await markerLine(target);
+  const result = await send();
+  const after = await markerLine(target);
+  return {
+    result,
+    output: target.workerLogs.join('').slice(before.end, after.start),
+  };
 }
 
 function rejectionLines(logs: string[]) {
@@ -73,17 +87,17 @@ async function expectRejection(
 ) {
   const query = `private-query=${randomUUID()}`;
   target.logs.length = 0;
-  target.workerLogs.length = 0;
-  const response = await fetch(`${target.origin}${path}?${query}`, {
-    method,
-    headers: token ? { 'Cf-Access-Jwt-Assertion': token } : {},
-  });
+  const { result: response, output } = await workerOutputOf(target, () =>
+    fetch(`${target.origin}${path}?${query}`, {
+      method,
+      headers: token ? { 'Cf-Access-Jwt-Assertion': token } : {},
+    }),
+  );
   expect(response.status).toBe(status);
   const body = await response.text();
   expect(body).toBe(
     status === 401 ? '{"_tag":"Unauthorized"}' : '{"_tag":"Forbidden"}',
   );
-  const output = await completeWorkerOutput(target);
   let claims: Record<string, unknown> = {};
   try {
     if (token) claims = decodeJwt(token);
@@ -209,18 +223,18 @@ describe('E1 / installation E5: Access identity through HTTP to the built Worker
         status: 403,
       },
     );
-    for (const stream of app.workerStdio) stream.pause();
     expect(body).not.toContain('@');
     expect(body).not.toContain(access.OWNER_EMAIL);
     expect(body).not.toContain(other);
   });
   it('E7: returns exactly the verified owner email without a rejection log', async () => {
-    app.logs.length = 0;
-    for (const stream of app.workerStdio) stream.resume();
-    const response = await request('/api/whoami', await issuer.assertion());
+    const assertion = await issuer.assertion();
+    const { result: response, output } = await workerOutputOf(app, () =>
+      request('/api/whoami', assertion),
+    );
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ email: access.OWNER_EMAIL });
-    expect(rejectionLines(app.logs).length).toBe(0);
+    expect(rejectionLines([output]).length).toBe(0);
   });
   it('returns the contract denial tags over the real Worker HTTP boundary', async () => {
     const unauthorized = await request('/api/whoami');
