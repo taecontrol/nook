@@ -250,14 +250,25 @@ it('E6: 255 UTF-8 bytes, byte-exact Unicode names and empty files round trip', a
   }
   expect(await fileRows(app)).toHaveLength(names.length);
 });
+const controlCodes = [
+  ...Array.from({ length: 32 }, (_, i) => i),
+  ...Array.from({ length: 33 }, (_, i) => i + 127),
+];
 it.each([
-  `${'a'.repeat(252)}.pdf`,
-  `${'界'.repeat(90)}.pdf`,
-  `${'a'.repeat(1000)}.pdf`,
-  'a\\b.pdf',
+  ...[
+    `${'a'.repeat(252)}.pdf`,
+    `${'界'.repeat(90)}.pdf`,
+    `${'a'.repeat(1000)}.pdf`,
+    'a\\b.pdf',
+    'encoded/slash.pdf',
+  ].map((name) => [JSON.stringify(name), name]),
+  ...controlCodes.map((code) => [
+    `"control-\\u${code.toString(16).padStart(4, '0')}.pdf"`,
+    `control-${String.fromCharCode(code)}.pdf`,
+  ]),
 ])(
-  'E6: the HTTP boundary refuses invalid name %j with InvalidFile and stores nothing',
-  async (name) => {
+  'E6: the HTTP boundary refuses invalid name %s with InvalidFile and stores nothing',
+  async (_shown, name) => {
     // The name gate rejects before reading a body; keep this input path-only.
     await expectHttpError(
       await putFile(app, machine.token, { name, bytes: Buffer.alloc(0) }),
@@ -308,40 +319,6 @@ it('E6: a percent-encoded lone surrogate is refused as InvalidFile and stores no
     400,
     'InvalidFile',
   );
-  expect(await fileObjects(app)).toEqual([]);
-  expect(await auditRows(app)).toEqual([]);
-});
-it('E6: every C0/C1 control byte in a name, including an encoded slash, is InvalidFile without stored state', async () => {
-  for (const code of [
-    ...Array.from({ length: 32 }, (_, i) => i),
-    ...Array.from({ length: 33 }, (_, i) => i + 127),
-  ]) {
-    try {
-      await expectHttpError(
-        await putFile(app, machine.token, {
-          name: `control-${String.fromCharCode(code)}.pdf`,
-          bytes: Buffer.alloc(0),
-        }),
-        400,
-        'InvalidFile',
-      );
-    } catch (error) {
-      console.error(
-        `E6 control U+${code.toString(16).padStart(4, '0')}`,
-        error,
-      );
-      throw error;
-    }
-  }
-  await expectHttpError(
-    await putFile(app, machine.token, {
-      name: 'encoded/slash.pdf',
-      bytes: Buffer.alloc(0),
-    }),
-    400,
-    'InvalidFile',
-  );
-  expect(await fileRows(app)).toEqual([]);
   expect(await fileObjects(app)).toEqual([]);
   expect(await auditRows(app)).toEqual([]);
 });

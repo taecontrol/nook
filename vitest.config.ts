@@ -39,7 +39,10 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 60_000,
     maxWorkers: 3,
-    setupFiles: ['tests/coverage-setup.ts'],
+    setupFiles: [
+      'tests/coverage-setup.ts',
+      'tests/support/immediate-failures.ts',
+    ],
     globalSetup: ['scripts/lib/host-isolation.ts'],
     expect: { poll: { timeout: 5_000 } },
     sequence: { sequencer: TimedSequencer },
