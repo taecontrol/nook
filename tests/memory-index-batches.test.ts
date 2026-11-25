@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { vectorizeIdLimits } from '../scripts/search-stand-ins.ts';
 import {
@@ -11,11 +11,11 @@ import { forgetMemory, removalRows } from './support/memory-forget.ts';
 import { type SearchRuntime, searchRuntime } from './support/search.ts';
 
 let app: SearchRuntime;
-let workerLogs: string[];
+let workerStderr: string[];
 let embeddingFailure: string;
 beforeEach(async () => {
   app = await searchRuntime();
-  workerLogs = [];
+  workerStderr = [];
   embeddingFailure = 'Synthetic embedding failure.';
   await app.setBindings(
     {
@@ -40,8 +40,8 @@ beforeEach(async () => {
         return Response.json({ data, shape: [data.length, 1024] });
       },
       handleRuntimeStdio(stdout, stderr) {
-        for (const stream of [stdout, stderr])
-          stream.on('data', (chunk) => workerLogs.push(chunk.toString()));
+        stdout.resume();
+        stderr.on('data', (chunk) => workerStderr.push(chunk.toString()));
       },
     },
   );
@@ -86,17 +86,23 @@ function vectors(ids: string[]) {
     );
   return found;
 }
-// Only complete lines: stdio chunks can split one.
+function completeLines() {
+  return workerStderr.join('').split(/\r?\n/).slice(0, -1);
+}
 function failures() {
-  return workerLogs
-    .join('')
-    .split(/\r?\n/)
-    .slice(0, -1)
+  return completeLines()
     .filter((line) => line.includes('memory-sync-failed'))
     .map((line) => JSON.parse(line.slice(line.indexOf('{'))));
 }
-async function noFailures() {
-  await new Promise((resolve) => setTimeout(resolve, 100));
+async function failuresSoFar() {
+  const marker = `stderr-marker-${randomUUID()}`;
+  const response = await fetch(
+    `${app.origin}/api/__test/stderr-marker?marker=${marker}`,
+  );
+  expect(response.status).toBe(204);
+  await expect
+    .poll(() => completeLines().some((line) => line.endsWith(marker)))
+    .toBe(true);
   return failures();
 }
 
@@ -130,7 +136,7 @@ it('#95: a model-less corpus larger than one Vectorize get is re-embedded within
     .bind(model)
     .all<{ n: number }>();
   expect(results[0].n).toBe(72);
-  expect(await noFailures()).toEqual([]);
+  expect(await failuresSoFar()).toEqual([]);
 });
 
 it('#95: a sweep of more removals than one Vectorize get deletes every lingering vector', async () => {
@@ -148,7 +154,7 @@ it('#95: a sweep of more removals than one Vectorize get deletes every lingering
   expect(vectors(ids)).toEqual([]);
   await app.scheduled(new Date(forgottenAt + 35 * 60_000));
   expect(await removalRows(app)).toEqual([]);
-  expect(await noFailures()).toEqual([]);
+  expect(await failuresSoFar()).toEqual([]);
 });
 
 it.each([

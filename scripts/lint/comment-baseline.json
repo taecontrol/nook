@@ -166,7 +166,7 @@
   "tests/memory-history-cache-race.test.ts": 1,
   "tests/memory-history-web.test.ts": 2,
   "tests/memory-history-write-gate-web.test.ts": 3,
-  "tests/memory-index-batches.test.ts": 6,
+  "tests/memory-index-batches.test.ts": 5,
   "tests/memory-model-convergence.test.ts": 12,
   "tests/memory-owner-regressions-web.test.ts": 2,
   "tests/memory-pagination-cache-race.test.ts": 2,
