@@ -1,4 +1,4 @@
-import { acmePath, fetchValues } from '../tests/support/audit.ts';
+import { acmePath, fetchValues, timedUse } from '../tests/support/audit.ts';
 import { createAuthorization } from '../tests/support/authorizations.ts';
 import { issueGrant, seedGrantTree } from '../tests/support/grants.ts';
 import {
@@ -33,7 +33,7 @@ try {
   // The additional reader measurements open this memory with real file metadata (E29).
   await seedFile(app, { id: memoryId(100) });
   const { token } = await issueGrant(app);
-  const used = await fetchValues(app, token, { secrets: [acmePath] });
+  const used = await fetchValues(app, token, timedUse);
   if (used.status !== 200)
     throw new Error('The Audit timing fixture requires a genuine use.');
   await used.body?.cancel();
@@ -71,6 +71,7 @@ try {
       vaultNavigation: [],
       audit: [],
       auditNavigation: [],
+      auditSessionNavigation: [],
       memory: [],
       memoryNavigation: [],
       memoryReader: [],
@@ -92,6 +93,7 @@ try {
       'vaultNavigation',
       'audit',
       'auditNavigation',
+      'auditSessionNavigation',
       'memory',
       'memoryNavigation',
       'memoryReader',

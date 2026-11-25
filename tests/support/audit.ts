@@ -39,6 +39,12 @@ export function fetchValues(
     ...headers,
   });
 }
+export const timedSession = '0199f3c2-7a10-7d4e-9b1a-3f2e8c1d0a11';
+export const timedUse = {
+  secrets: [acmePath],
+  purpose: 'work inside the timed session',
+  agentSession: { agent: 'codex', session: timedSession },
+};
 export async function auditRows(app: TestRuntime) {
   const db = await app.mf.getD1Database('DB');
   if (
