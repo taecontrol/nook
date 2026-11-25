@@ -445,6 +445,34 @@ it('E25: removing the last mark delivers and settles the waiting request as no l
   expect(await (await ask(app, app.token, id)).json()).toHaveProperty('values');
   expect(await view(app, first.id)).toMatchObject({ state: 'settled' });
 });
+it.each(['removed mark', 'remembered approval'] as const)(
+  'E25: an expired attempt still delivers its unchanged payload after a %s',
+  async (route) => {
+    await setMark(app);
+    const id = randomUUID();
+    const first = await pending(app, app.token, id);
+    await age(app, first.id, 'expires_at', 600_001);
+    const refused = await ask(app, app.token, id);
+    expect(refused.status).toBe(410);
+    expect(await refused.json()).toEqual({
+      _tag: 'ApprovalExpired',
+      reason: 'expired',
+    });
+    if (route === 'removed mark')
+      expect((await mark(app, 'work', 'bucket', 'DELETE')).status).toBe(204);
+    else {
+      const other = await pending(app, app.token);
+      expect((await decide(app, other.id, '1h')).status).toBe(200);
+    }
+    const retried = await ask(app, app.token, id);
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toHaveProperty('values');
+    expect(await view(app, first.id)).toMatchObject({ state: 'settled' });
+    expect(
+      (await auditRows(app)).filter((r) => r.outcome === 'delivered'),
+    ).toHaveLength(1);
+  },
+);
 it.each([
   ['once', false],
   ['1h', false],
