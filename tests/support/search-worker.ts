@@ -87,8 +87,14 @@ export function searchWorker(worker: {
     },
   });
   return {
-    fetch: (request: Request, env: { DB: D1Database }, ctx: ExecutionContext) =>
-      worker.fetch(request, bindings(env), ctx),
+    fetch(request: Request, env: { DB: D1Database }, ctx: ExecutionContext) {
+      const url = new URL(request.url);
+      if (url.pathname === '/api/__test/stderr-marker') {
+        console.error(url.searchParams.get('marker'));
+        return new Response(null, { status: 204 });
+      }
+      return worker.fetch(request, bindings(env), ctx);
+    },
     scheduled: (
       controller: ScheduledController,
       env: { DB: D1Database },
