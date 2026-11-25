@@ -175,7 +175,7 @@
   "tests/memory-search-mcp.test.ts": 2,
   "tests/memory-search-navigation-web.test.ts": 1,
   "tests/memory-search-snippet.test.ts": 1,
-  "tests/memory-search-sync.test.ts": 3,
+  "tests/memory-search-sync.test.ts": 2,
   "tests/memory-search-web.test.ts": 3,
   "tests/memory-storage-bounds.test.ts": 4,
   "tests/memory-update-mcp.test.ts": 1,
