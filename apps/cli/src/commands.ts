@@ -135,13 +135,11 @@ export async function execute(
             { bucket: Argument.String('bucket') },
             ({ bucket }) => vaultList(host, bucket, write),
           ),
-          ...grammarCommands
-            .toReversed()
-            .map(({ path, grammar, description }) =>
-              Command.make(path[1], declaration(grammar)).pipe(
-                Command.withDescription(description),
-              ),
+          ...grammarCommands.map(({ path, grammar, description }) =>
+            Command.make(path[1], declaration(grammar)).pipe(
+              Command.withDescription(description),
             ),
+          ),
         ]),
       ),
       Command.make('memory').pipe(
