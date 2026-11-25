@@ -253,7 +253,7 @@
   "tests/vault-web-manual-refresh.test.ts": 2,
   "tests/vault-web.test.ts": 1,
   "tests/web.test.ts": 2,
-  "tests/worker.test.ts": 3,
+  "tests/worker.test.ts": 2,
   "tests/write-outcomes-web.test.ts": 5,
   "vite.config.ts": 4,
   "vitest.captures.config.ts": 2,
