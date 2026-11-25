@@ -206,7 +206,7 @@ export function useMemoryForget({
     const focusTarget = () =>
       (neighbor ? shownElement(memoryRowSelector(neighbor)) : null) ??
       shownElement('[data-memory-list-heading]');
-    confirmation.close(focusTarget);
+    confirmation.closeAndFocus(focusTarget);
     if (wasOpen) select(desktop ? neighbor : undefined);
     const { result } = submit(subject, {
       neighbor,
