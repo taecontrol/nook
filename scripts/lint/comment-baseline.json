@@ -13,7 +13,7 @@
   "apps/cli/src/output-plan.ts": 6,
   "apps/cli/src/process-signal.ts": 4,
   "apps/cli/src/project-secrets.ts": 1,
-  "apps/cli/src/relay-client.ts": 9,
+  "apps/cli/src/relay-client.ts": 7,
   "apps/cli/src/relay.ts": 7,
   "apps/cli/src/run-command.ts": 1,
   "apps/cli/src/run.ts": 2,

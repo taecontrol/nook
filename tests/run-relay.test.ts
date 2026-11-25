@@ -1,4 +1,4 @@
-import { Duplex, Writable } from 'node:stream';
+import { Duplex } from 'node:stream';
 import { expect, it, vi } from 'vitest';
 import { relayMain } from '../apps/cli/src/relay.ts';
 
@@ -17,14 +17,6 @@ const io = vi.hoisted(() => ({
 }));
 vi.mock('node:fs', async (original) => ({
   ...(await original<typeof import('node:fs')>()),
-  fstatSync: () => ({ isFIFO: () => false, isSocket: () => false }),
-  createWriteStream: () =>
-    new Writable({
-      write(bytes, _encoding, done) {
-        io.output.push(Buffer.from(bytes));
-        done();
-      },
-    }),
   closeSync: (fd: number) => {
     io.closedFds.push(fd);
     io.closed();
