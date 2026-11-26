@@ -2,7 +2,7 @@ import { NodeServices } from '@effect/platform-node';
 import { Effect, Option } from 'effect';
 import { Argument, CliError, Command, Flag } from 'effect/cli';
 import cliPackage from '../package.json' with { type: 'json' };
-import { declaration } from './arguments.ts';
+import { declaration, parseCommandArguments } from './arguments.ts';
 import { CliFailure } from './errors.ts';
 import { hostFor } from './host.ts';
 import { memoryAttach, memoryDownload } from './memory-files.ts';
@@ -72,10 +72,8 @@ function missingVaultBucket(args: readonly string[]) {
   return args[0] === 'vault' && args[1] === 'list' && args.length === 2;
 }
 function grammarCommand(args: readonly string[]) {
-  return grammarCommands.find(
-    ({ path }) =>
-      path.every((name, index) => args[index] === name) &&
-      args[path.length] !== '--help',
+  return grammarCommands.find(({ path }) =>
+    path.every((name, index) => args[index] === name),
   );
 }
 
@@ -181,18 +179,22 @@ export async function execute(
     ]),
   );
   const parsedCommand = grammarCommand(args);
+  const runCommand = Command.runWith(command, {
+    version: cliPackage.version,
+    renderErrors: false,
+  });
   return runInterruptible(
-    (parsedCommand
-      ? parsedCommand.handler(
-          host,
-          args.slice(parsedCommand.path.length),
-          write,
-        )
-      : Command.runWith(command, {
-          version: cliPackage.version,
-          renderErrors: false,
-        })(args)
-    ).pipe(
+    Effect.gen(function* () {
+      if (!parsedCommand) return yield* runCommand(args);
+      const remaining = args.slice(parsedCommand.path.length);
+      const parsed = yield* parseCommandArguments(
+        parsedCommand.grammar,
+        remaining,
+      );
+      if (typeof parsed === 'string')
+        return yield* runCommand([...parsedCommand.path, parsed]);
+      return yield* parsedCommand.handler(host, remaining, write);
+    }).pipe(
       Effect.provide(NodeServices.layer),
       Effect.as(0),
       Effect.catch((error) => {

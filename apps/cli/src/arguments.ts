@@ -23,6 +23,7 @@ const flag: Record<Occurrence, (name: string) => Param.AnyFlag> = {
   repeated: (name) => Flag.String(name).pipe(Flag.atLeast(0)),
   boolean: (name) => Flag.Boolean(name),
 };
+const readOnlyActions = new Set(['--help', '-h', '--version', '-v']);
 // The same grammar as an effect/cli declaration, so help describes it.
 export function declaration(grammar: Grammar) {
   const params: Record<string, Param.Any> = {};
@@ -38,11 +39,16 @@ export function declaration(grammar: Grammar) {
 function usageFailure(grammar: Grammar) {
   return new CliFailure(`Usage: ${grammar.usage}`);
 }
-function occurrence(grammar: Grammar, flag: string) {
+function occurrence(
+  grammar: Grammar,
+  flag: string,
+  flags: Map<string, string[]>,
+) {
   const name = flag.slice(2);
-  return flag.startsWith('--') && Object.hasOwn(grammar.flags, name)
-    ? grammar.flags[name]
-    : undefined;
+  if (!flag.startsWith('--') || !Object.hasOwn(grammar.flags, name))
+    return undefined;
+  const occurs = grammar.flags[name];
+  return flags.has(name) && occurs !== 'repeated' ? undefined : occurs;
 }
 function requireFlags(grammar: Grammar, flags: Map<string, string[]>) {
   return Effect.gen(function* () {
@@ -55,30 +61,44 @@ function readFlags(grammar: Grammar, pairs: readonly string[]) {
   return Effect.gen(function* () {
     const flags = new Map<string, string[]>();
     for (let index = 0; index < pairs.length; index++) {
+      if (readOnlyActions.has(pairs[index])) return pairs[index];
       const name = pairs[index].slice(2);
-      const occurs = occurrence(grammar, pairs[index]);
+      const occurs = occurrence(grammar, pairs[index], flags);
       const values = flags.get(name) ?? [];
-      if (!occurs || (values.length && occurs !== 'repeated'))
-        return yield* Effect.fail(usageFailure(grammar));
+      if (!occurs) return yield* Effect.fail(usageFailure(grammar));
       const value = occurs === 'boolean' ? '' : pairs[++index];
       if (value === undefined) return yield* Effect.fail(usageFailure(grammar));
       flags.set(name, [...values, value]);
     }
-    yield* requireFlags(grammar, flags);
     return flags;
+  });
+}
+export function parseCommandArguments(
+  grammar: Grammar,
+  args: readonly string[],
+) {
+  return Effect.gen(function* () {
+    if (readOnlyActions.has(args[0])) return args[0];
+    const end = grammar.rest ? args.indexOf('--') : args.length;
+    const count = grammar.positional.length;
+    const positional = args.slice(0, count);
+    const flags = yield* readFlags(grammar, args.slice(count, end));
+    if (typeof flags === 'string') return flags;
+    if (end < count || end === args.length - 1 || positional.some((v) => !v))
+      return yield* Effect.fail(usageFailure(grammar));
+    yield* requireFlags(grammar, flags);
+    return {
+      positional,
+      flags,
+      rest: args.slice(end + 1),
+    };
   });
 }
 export function parseArguments(grammar: Grammar, args: readonly string[]) {
   return Effect.gen(function* () {
-    const end = grammar.rest ? args.indexOf('--') : args.length;
-    const count = grammar.positional.length;
-    const positional = args.slice(0, count);
-    if (end < count || end === args.length - 1 || positional.some((v) => !v))
+    const parsed = yield* parseCommandArguments(grammar, args);
+    if (typeof parsed === 'string')
       return yield* Effect.fail(usageFailure(grammar));
-    return {
-      positional,
-      flags: yield* readFlags(grammar, args.slice(count, end)),
-      rest: args.slice(end + 1),
-    };
+    return parsed;
   });
 }
