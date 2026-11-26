@@ -8,7 +8,27 @@ import {
 } from '../apps/worker/src/routes.ts';
 import { MachineApi } from '../packages/contract/src/index.ts';
 import { access, accessFixture } from './support/access.ts';
+import { machineCreate, machineCreateInput } from './support/agent-create.ts';
+import {
+  auditRows,
+  fetchValues,
+  runFixture,
+  runInput,
+} from './support/audit.ts';
+import { jsonRequest } from './support/authorizations.ts';
+import {
+  attachFile,
+  downloadFile,
+  seedFileMemory,
+} from './support/memory-files.ts';
 import { runtime, type TestRuntime } from './support/runtime.ts';
+import {
+  createSecret,
+  expectNoValue,
+  secretInput,
+  secretRows,
+  vaultRuntime,
+} from './support/vault.ts';
 
 let issuer: Awaited<ReturnType<typeof accessFixture>>;
 let app: TestRuntime;
@@ -27,6 +47,23 @@ const listed = (routes: readonly Route[]) =>
   routes.map(({ method, path }) => `${method} ${path}`);
 const concrete = (path: string) => path.replace(/:[^/]+/g, 'x');
 const notFound = '{"error":"Not found"}';
+const machineRoutes = Object.values(MachineApi.groups).flatMap((group) =>
+  Object.values(group.endpoints),
+);
+function machineAliases(path: string) {
+  const segments = path.split('/');
+  const fixed = segments.findLastIndex((segment) => !segment.startsWith(':'));
+  const segment = segments[fixed];
+  return [
+    `${path}/`,
+    segments.with(fixed, segment.toUpperCase()).join('/'),
+    path.replace('/machine/', '/machine//'),
+    segments.with(fixed, `${segment};alias`).join('/'),
+    segments
+      .with(fixed, `%${segment.charCodeAt(0).toString(16)}${segment.slice(1)}`)
+      .join('/'),
+  ].map(concrete);
+}
 
 // A new endpoint changes these lists, so its gate and token check get review.
 it('derives the owner gate and the machine token check from the contract', () => {
@@ -69,16 +106,10 @@ it('derives the owner gate and the machine token check from the contract', () =>
     'DELETE /api/machine/approvals/:id',
     'DELETE /api/machine/token',
   ]);
-  const machineRoutes = listed(
-    Object.values(MachineApi.groups).flatMap((group) =>
-      Object.values(group.endpoints),
-    ),
-  );
   const token = listed(tokenRoutes);
-  expect(machineRoutes.filter((entry) => !token.includes(entry))).toEqual([
-    'POST /api/machine/authorizations',
-    'POST /api/machine/token',
-  ]);
+  expect(
+    listed(machineRoutes).filter((entry) => !token.includes(entry)),
+  ).toEqual(['POST /api/machine/authorizations', 'POST /api/machine/token']);
   expect(listed([revealRoute])).toEqual(['POST /api/secrets/:path/reveal']);
 });
 
@@ -186,5 +217,128 @@ it('answers every token endpoint without Authorization with 401 before routing',
   ] as const) {
     const response = await fetch(`${app.origin}${path}`, { method });
     expect(response.status, `${method} ${path}`).toBe(status);
+  }
+});
+
+it.each(
+  [...machineRoutes, { method: 'POST', path: '/api/machine/mcp' }].flatMap(
+    ({ method, path }) =>
+      machineAliases(path).map((alias) => [method, alias] as const),
+  ),
+)('rejects the machine alias %s %s with an empty 404', async (method, path) => {
+  const response = await fetch(`${app.origin}${path}`, {
+    method,
+    headers: { Connection: 'close' },
+  });
+  expect(response.status).toBe(404);
+  expect(await response.text()).toBe('');
+});
+
+it('checks foreign Origin before rejecting an unknown machine route', async () => {
+  const response = await fetch(`${app.origin}/api/machine/unknown`, {
+    method: 'POST',
+    headers: { Origin: 'https://foreign.test' },
+  });
+  expect(response.status).toBe(403);
+  expect(await response.json()).toEqual({ _tag: 'Forbidden' });
+});
+
+it('rejects aliases with a valid token without delivering values, writing secrets or auditing', async () => {
+  const fixture = await runFixture();
+  try {
+    const headers = { Authorization: `Bearer ${fixture.token}` };
+    const beforeSecrets = JSON.stringify(await secretRows(fixture));
+    const beforeAudit = JSON.stringify(await auditRows(fixture));
+    const creationPaths = machineAliases('/api/machine/secrets');
+    for (const [index, path] of machineAliases(
+      '/api/machine/secrets/values',
+    ).entries()) {
+      const values = await jsonRequest(fixture, path, runInput(), headers);
+      const text = await values.text();
+      expect
+        .soft(
+          {
+            status: values.status,
+            empty: text.length === 0,
+            valueCount: text ? (JSON.parse(text).values?.length ?? 0) : 0,
+          },
+          path,
+        )
+        .toEqual({ status: 404, empty: true, valueCount: 0 });
+      const creation = await jsonRequest(
+        fixture,
+        creationPaths[index],
+        machineCreateInput({ name: `ROUTE_TOKEN_${index}` }),
+        headers,
+      );
+      expect.soft(creation.status, creationPaths[index]).toBe(404);
+      await creation.body?.cancel();
+    }
+    expect
+      .soft(JSON.stringify(await secretRows(fixture)) === beforeSecrets)
+      .toBe(true);
+    expect
+      .soft(JSON.stringify(await auditRows(fixture)) === beforeAudit)
+      .toBe(true);
+  } finally {
+    await fixture.close();
+  }
+});
+
+it('keeps canonical secret delivery and creation inside the machine grant', async () => {
+  const fixture = await runFixture();
+  try {
+    const outside = secretInput({ bucket: 'personal', name: 'OUTSIDE_TOKEN' });
+    expect((await createSecret(fixture, outside)).status).toBe(201);
+    const before = JSON.stringify(await secretRows(fixture));
+    const denied = await fetchValues(fixture, fixture.token, {
+      secrets: ['personal/OUTSIDE_TOKEN'],
+    });
+    expect(denied.status).toBe(403);
+    const text = await denied.text();
+    expectNoValue(text, [outside.value, fixture.input.value, fixture.token]);
+    expect(JSON.parse(text)).toEqual({
+      _tag: 'SecretsForbidden',
+      paths: ['personal/OUTSIDE_TOKEN'],
+    });
+    const audit = JSON.stringify(await auditRows(fixture));
+    expect(
+      (
+        await machineCreate(
+          fixture,
+          fixture.token,
+          machineCreateInput({ bucket: 'personal' }),
+        )
+      ).status,
+    ).toBe(403);
+    expect(JSON.stringify(await secretRows(fixture)) === before).toBe(true);
+    expect(JSON.stringify(await auditRows(fixture)) === audit).toBe(true);
+  } finally {
+    await fixture.close();
+  }
+});
+
+it('preserves encoded file parameters with percent, semicolon, Unicode and case', async () => {
+  const fixture = await vaultRuntime({ r2Buckets: ['FILES'] });
+  try {
+    const machine = await seedFileMemory(fixture);
+    const name = 'Probe;%Ñ.TXT';
+    const bytes = Buffer.from('encoded parameter attachment');
+    expect(
+      await attachFile(fixture, machine.token, { name, bytes }),
+    ).toMatchObject({
+      name,
+      outcome: 'created',
+    });
+    const response = await downloadFile(
+      fixture,
+      machine.token,
+      undefined,
+      name,
+    );
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
+  } finally {
+    await fixture.close();
   }
 });
