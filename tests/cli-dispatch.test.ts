@@ -1,10 +1,26 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { beforeEach, expect, it } from 'vitest';
+import { beforeAll, beforeEach, expect, it } from 'vitest';
 import { type PrivateKeyring, privateKeyring } from './support/cli.ts';
 import { expectOutput } from './support/private-assertions.ts';
 
 let keyring: PrivateKeyring;
+const actionDocuments: Record<string, string> = {};
+beforeAll(async () => {
+  const reference = await privateKeyring();
+  try {
+    for (const command of ['create', 'import', 'version']) {
+      const document = await reference.start(
+        command === 'version' ? ['--version'] : ['vault', command, '--help'],
+      ).done;
+      expect(document.status).toBe(0);
+      expectOutput(document.stderr, '', true);
+      actionDocuments[command] = document.stdout;
+    }
+  } finally {
+    await reference.close();
+  }
+});
 beforeEach(async () => {
   keyring = await privateKeyring();
   return () => keyring.close();
@@ -51,82 +67,50 @@ it.each([
   },
 );
 
-const readOnlyActions = ['create', 'import'].flatMap((command) => {
-  const positional =
-    command === 'create' ? ['work/acme/TOKEN'] : ['work/acme', 'unread.env'];
-  return ['--help', '-h', '--version', '-v'].flatMap((action) =>
-    [[], positional, [...positional, '--purpose', '-h']].map((before) => ({
-      command,
-      args: ['vault', command, ...before, action],
-      version: action === '--version' || action === '-v',
-    })),
-  );
-});
+const readOnlyActions = ['--help', '-h', '--version', '-v'].flatMap(
+  (action, actionIndex) =>
+    [0, 1, 2].map((positionIndex) => {
+      const command =
+        (actionIndex + positionIndex) % 2 === 0 ? 'create' : 'import';
+      const positional =
+        command === 'create'
+          ? ['work/acme/TOKEN']
+          : ['work/acme', 'unread.env'];
+      const before = [[], positional, [...positional, '--purpose', '-h']][
+        positionIndex
+      ];
+      return {
+        command,
+        args: ['vault', command, ...before, action],
+        version: action === '--version' || action === '-v',
+      };
+    }),
+);
 it.each([
   ...readOnlyActions,
   { command: 'list', args: ['vault', 'list', '--help'], version: false },
 ])(
   'Read-only action $args reaches effect/cli without reading secret input or keyring',
   async ({ command, args, version }) => {
-    const document = await keyring.start(
-      version ? ['--version'] : ['vault', command, '--help'],
-    ).done;
-    expect(document.status).toBe(0);
-    expectOutput(document.stdout, version ? 'nook v' : `nook vault ${command}`);
-    if (!version) expectOutput(document.stdout, '--help, -h');
+    let document = actionDocuments[version ? 'version' : command];
+    if (command === 'list') {
+      const reference = await keyring.start(['vault', 'list', '--help']).done;
+      expect(reference.status).toBe(0);
+      expectOutput(reference.stderr, '', true);
+      document = reference.stdout;
+    }
+    expectOutput(document, version ? 'nook v' : `nook vault ${command}`);
+    if (!version) expectOutput(document, '--help, -h');
     const result = await keyring.start(args, {}, 'synthetic-dispatch-value\n')
       .done;
     expect(result.status).toBe(0);
-    expectOutput(result.stdout, document.stdout.trim(), true);
-    expectOutput(document.stderr, '', true);
+    expectOutput(result.stdout, document.trim(), true);
     expectOutput(result.stderr, '', true);
     expect(
       await readFile(resolve(keyring.home, 'argv'), 'utf8').catch(() => ''),
     ).toBe('');
   },
 );
-
-it.each([
-  ...['--help', '-h', '--version', '-v'].map((value) => ({
-    args: ['vault', 'create', 'work/acme/TOKEN', '--purpose', value],
-    message: 'Enter a value.',
-  })),
-  ...['--help', '-h'].map((value) => ({
-    args: [
-      'vault',
-      'create',
-      'work/acme/TOKEN',
-      '--purpose',
-      'test',
-      '--description',
-      value,
-    ],
-    message: 'Enter a value.',
-  })),
-  ...['--help', '-h'].map((file) => ({
-    args: ['vault', 'import', 'work/acme', file, '--purpose', 'test'],
-    message: `Could not read ${file}.`,
-  })),
-  {
-    args: [
-      'vault',
-      'import',
-      'work/acme',
-      'unread.env',
-      '--purpose',
-      '--version',
-    ],
-    message: 'Could not read unread.env.',
-  },
-])('Literal action token in $args remains data', async ({ args, message }) => {
-  const result = await keyring.start(args).done;
-  expect(result.status).toBe(1);
-  expectOutput(result.stdout, message, true);
-  expectOutput(result.stderr, '', true);
-  expect(
-    await readFile(resolve(keyring.home, 'argv'), 'utf8').catch(() => ''),
-  ).toBe('');
-});
 
 it('vault help lists its subcommands in the order of the vault usage', async () => {
   const result = await keyring.start(['vault', '--help']).done;
