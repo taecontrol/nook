@@ -8,7 +8,11 @@ import {
 } from '../apps/worker/src/routes.ts';
 import { MachineApi } from '../packages/contract/src/index.ts';
 import { access, accessFixture } from './support/access.ts';
+import { machineCreateInput } from './support/agent-create.ts';
+import { auditRows, runFixture, runInput } from './support/audit.ts';
+import { jsonRequest } from './support/authorizations.ts';
 import { runtime, type TestRuntime } from './support/runtime.ts';
+import { secretRows } from './support/vault.ts';
 
 let issuer: Awaited<ReturnType<typeof accessFixture>>;
 let app: TestRuntime;
@@ -27,6 +31,25 @@ const listed = (routes: readonly Route[]) =>
   routes.map(({ method, path }) => `${method} ${path}`);
 const concrete = (path: string) => path.replace(/:[^/]+/g, 'x');
 const notFound = '{"error":"Not found"}';
+const machineRoutes = Object.values(MachineApi.groups).flatMap((group) =>
+  Object.values(group.endpoints),
+);
+function machineAliases(path: string) {
+  const segments = path.split('/');
+  const fixed = segments.findLastIndex((segment) => !segment.startsWith(':'));
+  const segment = segments[fixed];
+  return [
+    `${path}/`,
+    segments.with(fixed, segment.toUpperCase()).join('/'),
+    path.replace('/machine/', '/machine//'),
+    ...(fixed === segments.length - 1
+      ? [segments.with(fixed, `${segment};alias`).join('/')]
+      : []),
+    segments
+      .with(fixed, `%${segment.charCodeAt(0).toString(16)}${segment.slice(1)}`)
+      .join('/'),
+  ].map(concrete);
+}
 
 // A new endpoint changes these lists, so its gate and token check get review.
 it('derives the owner gate and the machine token check from the contract', () => {
@@ -69,16 +92,10 @@ it('derives the owner gate and the machine token check from the contract', () =>
     'DELETE /api/machine/approvals/:id',
     'DELETE /api/machine/token',
   ]);
-  const machineRoutes = listed(
-    Object.values(MachineApi.groups).flatMap((group) =>
-      Object.values(group.endpoints),
-    ),
-  );
   const token = listed(tokenRoutes);
-  expect(machineRoutes.filter((entry) => !token.includes(entry))).toEqual([
-    'POST /api/machine/authorizations',
-    'POST /api/machine/token',
-  ]);
+  expect(
+    listed(machineRoutes).filter((entry) => !token.includes(entry)),
+  ).toEqual(['POST /api/machine/authorizations', 'POST /api/machine/token']);
   expect(listed([revealRoute])).toEqual(['POST /api/secrets/:path/reveal']);
 });
 
@@ -186,5 +203,60 @@ it('answers every token endpoint without Authorization with 401 before routing',
   ] as const) {
     const response = await fetch(`${app.origin}${path}`, { method });
     expect(response.status, `${method} ${path}`).toBe(status);
+  }
+});
+
+it.each(
+  machineRoutes.flatMap(({ method, path }) =>
+    machineAliases(path).map((alias) => [method, alias] as const),
+  ),
+)('rejects the machine alias %s %s with an empty 404', async (method, path) => {
+  const response = await fetch(`${app.origin}${path}`, {
+    method,
+    headers: { Connection: 'close' },
+  });
+  expect(response.status).toBe(404);
+  expect(await response.text()).toBe('');
+});
+
+it('rejects aliases with a valid token without delivering values, writing secrets or auditing', async () => {
+  const fixture = await runFixture();
+  try {
+    const headers = { Authorization: `Bearer ${fixture.token}` };
+    const beforeSecrets = JSON.stringify(await secretRows(fixture));
+    const beforeAudit = JSON.stringify(await auditRows(fixture));
+    const creationPaths = machineAliases('/api/machine/secrets');
+    for (const [index, path] of machineAliases(
+      '/api/machine/secrets/values',
+    ).entries()) {
+      const values = await jsonRequest(fixture, path, runInput(), headers);
+      const text = await values.text();
+      expect
+        .soft(
+          {
+            status: values.status,
+            empty: text.length === 0,
+            valueCount: text ? (JSON.parse(text).values?.length ?? 0) : 0,
+          },
+          path,
+        )
+        .toEqual({ status: 404, empty: true, valueCount: 0 });
+      const creation = await jsonRequest(
+        fixture,
+        creationPaths[index],
+        machineCreateInput({ name: `ROUTE_TOKEN_${index}` }),
+        headers,
+      );
+      expect.soft(creation.status, creationPaths[index]).toBe(404);
+      await creation.body?.cancel();
+    }
+    expect
+      .soft(JSON.stringify(await secretRows(fixture)) === beforeSecrets)
+      .toBe(true);
+    expect
+      .soft(JSON.stringify(await auditRows(fixture)) === beforeAudit)
+      .toBe(true);
+  } finally {
+    await fixture.close();
   }
 });

@@ -236,6 +236,7 @@ it('E6: 255 UTF-8 bytes, byte-exact Unicode names and empty files round trip', a
     'Guide.pdf',
     'guide.pdf',
     'empty.bin',
+    'Probe;%Ñ.TXT',
   ];
   expect(Buffer.byteLength(names[0])).toBe(255);
   for (const name of names) {

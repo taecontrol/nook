@@ -45,9 +45,9 @@ export const ownerRoutes = endpoints(Api).map(route);
 export const wholeInstallationRoutes = endpoints(Api)
   .filter(requiresWholeInstallation)
   .map(route);
-export const tokenRoutes = endpoints(MachineApi)
-  .filter(requiresToken)
-  .map(route);
+const machineEndpoints = endpoints(MachineApi);
+export const machineRoutes = machineEndpoints.map(route);
+export const tokenRoutes = machineEndpoints.filter(requiresToken).map(route);
 export const revealRoute = route(Api.groups.vault.endpoints.reveal);
 export const fileRoutes = [
   route(Api.groups.memories.endpoints.downloadFile),

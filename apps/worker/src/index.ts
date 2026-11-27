@@ -36,6 +36,7 @@ import { memorySync } from './memory-sync.ts';
 import { ownerFacts, wholeInstallationGuard } from './owner-request.ts';
 import {
   contractValidatesParams,
+  machineRoutes,
   matches,
   ownerRoutes,
   revealRoute,
@@ -312,6 +313,8 @@ async function machineRequest(
   )
     return authFailure(401);
   if (foreignOrigin(request, url)) return authFailure(403);
+  if (!matches(machineRoutes, request.method, url.pathname))
+    return new Response(null, { status: 404 });
   const response = await machineApiResponse(
     request,
     url,
